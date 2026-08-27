@@ -1,0 +1,20 @@
+{
+  "pdf": "/path/to/Zotero/storage/ATTACHKEY/paper.pdf",
+  "item_key": "ITEMKEY1",
+  "attachment_key": "ATTACHKEY",
+  "note_html": "reading_note.html",
+  "note_title_prefix": "Full title of the paper",
+  "out_dir": "out",
+  "preview_pages": [1, 4],
+  "author": "",
+  "highlights": [
+    {"page": 1, "core": true,  "text": "the first enumerated contribution, copied verbatim from the PDF text",
+     "comment": "translation of the sentence into the user's language"},
+    {"page": 5, "core": false, "text": "all models are given the same fine-tuning budget regardless of dataset size",
+     "comment": "translation"}
+  ],
+  "summaries": [
+    {"page": 1, "anchor": "a unique phrase inside the paragraph", "text": "one or two complete sentences placed in the margin beside the paragraph"},
+    {"page": 8, "anchor": "another unique phrase", "text": "a reaction, a question, or a cross-reference, written as a sentence rather than in label-colon form"}
+  ]
+}

@@ -1,0 +1,21 @@
+# Changelog
+
+## 0.1.0 (unreleased)
+
+Initial public version.
+
+- `scholium` command-line interface: highlights and underlines with comments and named colour
+  levels, margin text annotations with automatic layout, and an optional child note. The PDF file is
+  only read.
+- `scholium profile --from-library`: derives the user's annotation habits (colours, annotation types,
+  comment length and style, density, notes) from the annotations in their own library and writes a
+  profile draft to be completed by the agent together with the user.
+- Backends: the official local API of Zotero 10 and later (no plugin required), the
+  `scholium-bridge` plugin for Zotero 7 to 9, and a Run-JavaScript file as a last resort.
+- Repeated runs replace only annotations tagged `zotero-scholium` (or with identical content).
+  Existing notes are never deleted; a new version receives a versioned title.
+- Claude Code skill `skill/zotero-scholium`, including a Chinese writing-style guide.
+- Margin layout reads the attachment's existing annotations first and never covers them; a
+  translation-fidelity check reports comments that go beyond the highlighted span.
+- `scholium-bridge` plugin 0.3.1: data-only local endpoints protected by a token, tag support,
+  opt-in cleanup of external annotations; `list` returns positions and tags.

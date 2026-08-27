@@ -1,0 +1,30 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  xpi:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: build scholium-bridge.xpi
+        run: |
+          cd plugin/scholium-bridge
+          zip -r ../scholium-bridge.xpi manifest.json bootstrap.js
+      - name: write update.json for Zotero's plugin updater
+        run: |
+          VERSION=$(python -c "import json;print(json.load(open('plugin/scholium-bridge/manifest.json'))['version'])")
+          cat > plugin/update.json <<EOF
+          {"addons": {"scholium-bridge@zotero-scholium": {"updates": [{"version": "$VERSION",
+            "update_link": "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/scholium-bridge.xpi",
+            "applications": {"zotero": {"strict_min_version": "6.999"}}}]}}}
+          EOF
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            plugin/scholium-bridge.xpi
+            plugin/update.json
