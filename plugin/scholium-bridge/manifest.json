@@ -3,12 +3,12 @@
   "name": "Scholium Bridge",
   "version": "0.3.1",
   "description": "Token-protected local HTTP endpoints through which a script can create highlight and text annotations and child notes in Zotero 7 to 9. Not required on Zotero 10 or later, which provides an official write API. Accepts data only; no code is executed.",
-  "homepage_url": "https://github.com/<your-github-user>/zotero-scholium",
+  "homepage_url": "https://github.com/weilr/zotero-scholium",
   "author": "zotero-scholium contributors",
   "applications": {
     "zotero": {
       "id": "scholium-bridge@zotero-scholium",
-      "update_url": "https://github.com/<your-github-user>/zotero-scholium/releases/latest/download/update.json",
+      "update_url": "https://github.com/weilr/zotero-scholium/releases/latest/download/update.json",
       "strict_min_version": "6.999",
       "strict_max_version": "9999.*"
     }

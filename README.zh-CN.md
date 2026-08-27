@@ -4,7 +4,7 @@
 
 **将阅读结果写回 Zotero，生成原生、可编辑的注释。**
 
-[![CI](https://github.com/<your-github-user>/zotero-scholium/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-github-user>/zotero-scholium/actions/workflows/ci.yml)
+[![CI](https://github.com/weilr/zotero-scholium/actions/workflows/ci.yml/badge.svg)](https://github.com/weilr/zotero-scholium/actions/workflows/ci.yml)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 [![Zotero 7–10](https://img.shields.io/badge/zotero-7%20%7C%208%20%7C%209%20%7C%2010-cc2936.svg)](https://www.zotero.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
