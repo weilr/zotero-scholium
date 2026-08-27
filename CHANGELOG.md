@@ -14,8 +14,20 @@ Initial public version.
   `scholium-bridge` plugin for Zotero 7 to 9, and a Run-JavaScript file as a last resort.
 - Repeated runs replace only annotations tagged `zotero-scholium` (or with identical content).
   Existing notes are never deleted; a new version receives a versioned title.
-- Claude Code skill `skill/zotero-scholium`, including a Chinese writing-style guide.
+- Claude Code skill `skills/zotero-scholium`, including a Chinese writing-style guide.
 - Margin layout reads the attachment's existing annotations first and never covers them; a
   translation-fidelity check reports comments that go beyond the highlighted span.
+- Margin layout also keeps clear of the page's figures (images and vector drawings), and the text
+  column edges are estimated over the whole document, so a page with few full-width lines (an
+  indented abstract, a figure beside the text) no longer pushes margin notes into the text column;
+  a paragraph at the very bottom or top of a page no longer pushes its note into the footer or header.
+- `cleanup: false` keeps every existing annotation on the attachment, the tool's own included, and
+  only adds new ones (all three backends); the tool's earlier margin notes then count as obstacles
+  for the layout.
+- The translation-fidelity check expands ligatures (ﬁ, ﬂ, ...) before comparing terms.
 - `scholium-bridge` plugin 0.3.1: data-only local endpoints protected by a token, tag support,
   opt-in cleanup of external annotations; `list` returns positions and tags.
+- The skill lives in `skills/zotero-scholium/` and is installable with `npx skills add
+  weilr/zotero-scholium` (Claude Code, Codex, and other agents) or as a Claude Code plugin through the
+  `.claude-plugin` manifests; the `SKILL.md` front matter is quoted so that strict YAML parsers accept it,
+  and CI checks it.

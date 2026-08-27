@@ -56,13 +56,21 @@ note with the same title prefix exists, the new note receives a versioned title
 ## Margin layout
 
 The edges of the text body are estimated from the words on the page (2nd and 98th percentiles of the
-word x-coordinates, excluding the header and footer). Two-column pages are detected by counting the
+word x-coordinates, excluding the header and footer) and widened to the document-level extents (10th
+and 90th percentiles of the per-page estimates over a sample of pages), so that a page with few
+full-width lines, such as a first page with an indented abstract or a figure beside the text, does not
+place its margin boxes inside the text column. Two-column pages are detected by counting the
 words that cross the page centre. A summary is placed beside the first line of its anchor phrase: on
 the paragraph's own side in two-column layouts, otherwise in the wider margin. Boxes on the same side
-are shifted downward to avoid overlap and moved upward if they would extend into the footer.
+are shifted downward to avoid overlap and moved upward if they would extend into the footer; a box is
+first clamped between the footer line (28 pt) and the header line (page height minus 20 pt).
 
 Before layout the tool reads the attachment's existing annotations (through whichever backend is
 available) and treats the rectangles of text, note, image and ink annotations that are not its own as
-occupied intervals of the margin they intrude into. New boxes are placed below such an interval, or
-above it when the footer leaves no room; a box for which neither direction has space keeps its requested
-position and is reported in `layout_warnings`. `--ignore-existing` skips this step.
+occupied intervals of the margin they intrude into (with `cleanup: false` the tool's own earlier
+annotations remain in Zotero and are treated the same way). Images and vector drawings of the page,
+obtained from PyMuPDF (`get_image_info`, `cluster_drawings`) and filtered to exclude thin rules and
+page-sized frames, are added as obstacles. New boxes are placed below such an interval, or above it
+when the footer leaves no room; a box for which neither direction has space keeps its requested
+position and is reported in `layout_warnings`. `--ignore-existing` skips reading the existing
+annotations; figures are always considered.
