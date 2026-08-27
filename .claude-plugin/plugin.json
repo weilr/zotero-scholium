@@ -1,0 +1,10 @@
+{
+  "name": "zotero-scholium",
+  "version": "0.1.0",
+  "description": "Annotate papers in Zotero with native highlights, translation comments, margin notes, and reading notes.",
+  "author": { "name": "weilr" },
+  "homepage": "https://github.com/weilr/zotero-scholium",
+  "repository": "https://github.com/weilr/zotero-scholium",
+  "license": "MIT",
+  "keywords": ["zotero", "annotations", "pdf", "research"]
+}

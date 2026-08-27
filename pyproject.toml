@@ -20,7 +20,7 @@ classifiers = [
 dependencies = ["pymupdf>=1.24"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "pyyaml>=6"]
 
 [project.scripts]
 scholium = "zotero_scholium.cli:main"
@@ -34,3 +34,4 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]

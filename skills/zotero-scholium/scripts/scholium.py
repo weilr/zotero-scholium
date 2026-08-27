@@ -44,6 +44,7 @@ DEFAULTS = {
     "note_html": None,
     "note_replace": False,      # Destructive: deletes existing child notes whose title starts with note_title_prefix.
                                 # By default existing notes are preserved and a new note receives a versioned title.
+    "cleanup": True,            # False: keep every existing annotation on the attachment (the tool's own included); only add
     "cleanup_external": False,  # bridge backend only: additionally delete annotations Zotero imported from the PDF file
 }
 
@@ -67,7 +68,7 @@ def norm_str(s):
 class PageIndex:
     """Word-level index of one page together with an approximate model of its column geometry."""
 
-    def __init__(self, page):
+    def __init__(self, page, doc_bounds=None):
         self.page = page
         self.W, self.H = page.rect.width, page.rect.height
         self.words = page.get_text("words")  # x0, y0, x1, y1, word, block, line, wordno
@@ -80,6 +81,11 @@ class PageIndex:
         xs1 = sorted(w[2] for w in body) or [self.W - 50.0]
         self.body_x0 = xs0[len(xs0) // 50]            # robust minimum (2nd percentile)
         self.body_x1 = xs1[-max(1, len(xs1) // 50)]   # robust maximum (98th percentile)
+        if doc_bounds:
+            # a page with few full-width lines (indented abstract, figure beside the text) underestimates its own
+            # column width; the document-level extents keep margin boxes out of the text column
+            self.body_x0 = min(self.body_x0, doc_bounds[0])
+            self.body_x1 = max(self.body_x1, doc_bounds[1])
         mid = self.W / 2
         crossing = sum(1 for w in body if w[0] < mid - 6 and w[2] > mid + 6)
         self.two_col = crossing < max(3, len(body) * 0.02)
@@ -110,6 +116,51 @@ class PageIndex:
         return min(self.W - 4 - 30, self.body_x1 + 4), self.W - 4
 
 
+def column_bounds(doc, sample=60):
+    """Document-level extents (x0, x1) of the text columns: the 10th/90th percentiles, over up to `sample`
+    pages, of each page's own robust extents. None when no page has enough text."""
+    xs0, xs1 = [], []
+    n = len(doc)
+    for i in range(0, n, max(1, n // sample)):
+        page = doc[i]
+        H = page.rect.height
+        body = [w for w in page.get_text("words") if len(w[4]) > 1 and w[1] > 40 and w[3] < H - 30]
+        if len(body) < 50:
+            continue
+        a = sorted(w[0] for w in body); b = sorted(w[2] for w in body)
+        xs0.append(a[len(a) // 50]); xs1.append(b[-max(1, len(b) // 50)])
+    if not xs0:
+        return None
+    xs0.sort(); xs1.sort()
+    return xs0[len(xs0) // 10], xs1[max(0, len(xs1) - 1 - len(xs1) // 10)]
+
+
+def page_figure_rects(page, min_size=8.0):
+    """Rectangles (PDF user space, y upward) of the images and vector drawings on a page. Figures that reach into
+    the margins must not be covered by margin notes. Tiny drawings (rules, underlines) and page-sized frames
+    are ignored."""
+    W, H = page.rect.width, page.rect.height
+    rects = []
+    try:
+        rects.extend(pymupdf.Rect(info["bbox"]) for info in page.get_image_info())
+    except Exception:
+        pass
+    try:
+        rects.extend(page.cluster_drawings())
+    except Exception:
+        try:
+            rects.extend(pymupdf.Rect(d["rect"]) for d in page.get_drawings())
+        except Exception:
+            pass
+    out = []
+    for r in rects:
+        r = pymupdf.Rect(r) & page.rect
+        if r.is_empty or r.width < min_size or r.height < min_size or (r.width > 0.95 * W and r.height > 0.95 * H):
+            continue
+        out.append([float(r.x0), float(H - r.y1), float(r.x1), float(H - r.y0)])
+    return out
+
+
 def cw(c):  # estimated glyph width in em
     o = ord(c)
     if o < 128:
@@ -132,16 +183,17 @@ def wrap(text, width_pt, fs):
 OBSTACLE_TYPES = ("text", "note", "image", "ink")
 
 
-def existing_obstacles(listing):
+def existing_obstacles(listing, keep_own=False):
     """Rectangles (PDF user space, keyed by page index) occupied by annotations that do not belong to this tool.
 
     Highlights and underlines lie inside the text columns and are ignored. Text boxes, sticky notes, image
     areas and ink paths may occupy the margins and must not be covered by new margin notes. Annotations
-    carrying one of the tool's tags are skipped because a run replaces them.
+    carrying one of the tool's tags are skipped because a run replaces them, unless `keep_own` is set
+    (cleanup disabled): then they stay in Zotero and must be avoided like any other annotation.
     """
     obstacles = {}
     for a in (listing or {}).get("annotations", []):
-        if set(a.get("tags") or []) & OWN_TAGS or a.get("type") not in OBSTACLE_TYPES:
+        if (not keep_own and set(a.get("tags") or []) & OWN_TAGS) or a.get("type") not in OBSTACLE_TYPES:
             continue
         pos = parse_position(a.get("position"))
         page = pos.get("pageIndex")
@@ -170,7 +222,8 @@ def place_blocks(blocks, occupied, floor, ceiling, gap=3.0):
         return [iv for iv in occ if y_top - h < iv[1] + gap and y_top > iv[0] - gap]
 
     for b in sorted(blocks, key=lambda b: -b["y_top"]):
-        h, desired = b["h"], b["y_top"]
+        h = b["h"]
+        desired = min(max(b["y_top"], floor + h), ceiling)  # a paragraph near the page bottom must not push the box into the footer
         cand, ok = desired, False
         for _ in range(64):
             hit = hits(cand, h)
@@ -192,7 +245,7 @@ def place_blocks(blocks, occupied, floor, ceiling, gap=3.0):
                     break
         if not ok:
             cand = desired
-            b["layout_warning"] = "no free space in the margin beside this paragraph; the box may overlap an existing annotation"
+            b["layout_warning"] = "no free space in the margin beside this paragraph; the box may overlap an existing annotation or a figure"
         b["y_top"] = cand
         occ.append((cand - h, cand))
         occ.sort()
@@ -203,13 +256,14 @@ def build(cfg, obstacles=None):
     """Convert the configuration into annotation objects with PDF-space coordinates and render preview PNGs.
 
     `obstacles` maps a page index to rectangles already occupied by other annotations (see
-    existing_obstacles); margin boxes are laid out around them.
+    existing_obstacles); margin boxes are laid out around them and around the page's figures.
     """
     doc = pymupdf.open(cfg["pdf"])
+    bounds = column_bounds(doc)
     idx = {}
     def page_index(p):
         if p not in idx:
-            idx[p] = PageIndex(doc[p])
+            idx[p] = PageIndex(doc[p], bounds)
         return idx[p]
 
     fs = float(cfg["font_size"]); line_h = fs * 1.5
@@ -241,8 +295,9 @@ def build(cfg, obstacles=None):
         groups.setdefault((p, bx0, bx1), []).append({"y_top": pi.H - r.y0 + 1, "h": len(lines) * line_h + 6, "text": s["text"]})
     for (p, bx0, bx1), blocks in groups.items():
         pi = page_index(p)
-        # existing annotations that intrude into this margin become occupied intervals
-        occupied = [(r[1], r[3]) for r in (obstacles or {}).get(p, []) if r[0] < bx1 and r[2] > bx0]
+        # existing annotations and figures that intrude into this margin become occupied intervals
+        page_obstacles = list((obstacles or {}).get(p, [])) + page_figure_rects(doc[p])
+        occupied = [(r[1], r[3]) for r in page_obstacles if r[0] < bx1 and r[2] > bx0]
         place_blocks(blocks, occupied, floor=28.0, ceiling=pi.H - 20.0)
         for b in blocks:
             rect = [round(bx0, 2), round(b["y_top"] - b["h"], 2), round(bx1, 2), round(b["y_top"], 2)]
@@ -290,6 +345,7 @@ CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
 
 def _tokens(s):
     """Latin words (3+ characters) and numbers, lower-cased; hyphenation across lines is joined first."""
+    s = "".join(LIG.get(c, c) for c in s)  # expand ligatures so that "preﬁx" and "prefix" are the same term
     s = re.sub(r"(\w)-\s+(\w)", r"\1\2", s).lower()
     toks = set()
     for t in re.findall(r"[a-z0-9]+(?:\.[0-9]+)?", s):
@@ -494,8 +550,9 @@ def api_list(cfg, api):
 def api_apply(cfg, out, api):
     author = cfg["author"]
     mine_content = set(a["comment"] for a in out) | set(a["text"] for a in out if a.get("text"))
-    # (0) cleanup: only annotations carrying the tool's tag, the configured author name, or identical content
-    rows = api.children(cfg["attachment_key"], "annotation")
+    # (0) cleanup: only annotations carrying the tool's tag, the configured author name, or identical content;
+    #     skipped entirely with "cleanup": false
+    rows = api.children(cfg["attachment_key"], "annotation") if cfg.get("cleanup", True) else []
     to_delete, kept = [], 0
     for r in rows:
         d = r["data"]
@@ -600,7 +657,7 @@ def bridge_apply(cfg, out):
         if lst:
             html, prefix = version_note(html, prefix, [n["title"] for n in lst.get("notes", [])])
     payload = {"itemKey": cfg["item_key"], "attachmentKey": cfg["attachment_key"], "author": cfg["author"],
-               "cleanup": True, "cleanupExternal": bool(cfg.get("cleanup_external")), "tag": TAG, "legacyTags": sorted(LEGACY_TAGS), "annotations": out,
+               "cleanup": bool(cfg.get("cleanup", True)), "cleanupExternal": bool(cfg.get("cleanup_external")), "tag": TAG, "legacyTags": sorted(LEGACY_TAGS), "annotations": out,
                "note": {"html": html, "titlePrefix": prefix, "replace": bool(cfg.get("note_replace", False))} if html else None}
     s, h, t = http("POST", "/scholium-bridge/apply", payload, {"X-Annotate-Token": token}, timeout=180)
     res = json.loads(t) if s == 200 else {}
@@ -620,11 +677,12 @@ def render_js(cfg, out):
     return f"""// Usage: in Zotero, open Tools -> Developer -> Run JavaScript, enable "Run as async function",
 // paste the entire content of this file, and click Run.
 // Effect (all changes are made in the Zotero database; the PDF file is not modified):
-//   (0) delete annotations previously created by this tool on the attachment (tag "{TAG}", author "{cfg['author']}", or identical content);
+//   (0) {'delete annotations previously created by this tool on the attachment (tag "' + TAG + '", author "' + cfg['author'] + '", or identical content);' if cfg.get('cleanup', True) else 'keep every existing annotation (cleanup disabled);'}
 //   (1) {"create a child note (if a note with the same title exists, the new note receives a versioned title; no note is deleted);" if html else "(no child note in this run)"}
 //   (2) create {n_h} highlight/underline annotations and {n_t} margin text annotations.
 var ITEM_KEY = {json.dumps(cfg['item_key'])}, ATT_KEY = {json.dumps(cfg['attachment_key'])}, AUTHOR = {json.dumps(cfg['author'])}, TAG = {json.dumps(TAG)};
 var OWN_TAGS = {json.dumps(sorted(OWN_TAGS))};
+var CLEANUP = {json.dumps(bool(cfg.get('cleanup', True)))};
 var NOTE_HTML = {json.dumps(html, ensure_ascii=False)};
 var NOTE_TITLE_PREFIX = {json.dumps(title_prefix, ensure_ascii=False)};
 var ANNOTATIONS = {json.dumps(out, ensure_ascii=False)};
@@ -637,7 +695,7 @@ if (!att) throw new Error("attachment not found: " + ATT_KEY);
 
 var MINE = new Set(ANNOTATIONS.map(a => a.comment).concat(ANNOTATIONS.filter(a => a.text).map(a => a.text)));
 var removed = 0, kept = 0;
-for (let a of att.getAnnotations(true)) {{
+for (let a of (CLEANUP ? att.getAnnotations(true) : [])) {{
   let tags = a.getTags().map(t => t.tag);
   let mine = tags.some(t => OWN_TAGS.includes(t)) || (AUTHOR && a.annotationAuthorName === AUTHOR) ||
              MINE.has(a.annotationComment) || (a.annotationText && MINE.has(a.annotationText));
@@ -913,7 +971,7 @@ def main(argv=None):
         name, handle, why = pick_backend(args.backend if args.backend != "js" else "auto", cfg)
         listing = api_list(cfg, handle) if name == "api" else (bridge_list(cfg)[0] if name == "bridge" else None)
         if listing:
-            obstacles = existing_obstacles(listing)
+            obstacles = existing_obstacles(listing, keep_own=not cfg.get("cleanup", True))
             existing_info = {"annotations_in_zotero": len(listing["annotations"]),
                              "avoided_rects": sum(len(v) for v in obstacles.values())}
         else:

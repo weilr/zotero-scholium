@@ -1,6 +1,6 @@
 ---
 name: zotero-scholium
-description: Annotate a paper in the user's Zotero library with native Zotero annotations — highlights on key sentences whose comment is a translation (default colours: red = core, yellow = other), short summaries rendered as editable text in the page margins, and a reading note under the item. Everything is written into Zotero's database; the PDF file is never modified. Use this skill whenever the user asks to annotate, highlight, mark up, take notes on, translate key sentences of, or write margin notes or a reading note for a paper in Zotero, in any language, even if the word "Zotero" is not mentioned but the paper evidently comes from their Zotero library. Do not use it for a plain "summarize this paper" request whose result is not written back into Zotero.
+description: "Annotate a paper in the user's Zotero library with native Zotero annotations — highlights on key sentences whose comment is a translation (default colours: red = core, yellow = other), short summaries rendered as editable text in the page margins, and a reading note under the item. Everything is written into Zotero's database; the PDF file is never modified. Use this skill whenever the user asks to annotate, highlight, mark up, take notes on, translate key sentences of, or write margin notes or a reading note for a paper in Zotero, in any language, even if the word \"Zotero\" is not mentioned but the paper evidently comes from their Zotero library. Do not use it for a plain \"summarize this paper\" request whose result is not written back into Zotero."
 ---
 
 # Zotero paper annotation (native annotations and reading note)
@@ -25,10 +25,14 @@ Write comments, margin notes, and the reading note in the language the user uses
 | Backend | Zotero | Notes |
 |---|---|---|
 | `api`: official local API | 10 and later (preferred) | The first run opens an "Allow / Always Allow" dialog in Zotero; inform the user in advance. The key is stored under `%APPDATA%/zotero-scholium/` (or `~/.config/zotero-scholium/`). No plugin is required. |
-| `bridge`: bundled plugin | 7 to 9 | The local API is read-only before Zotero 10. Ask the user once to install `plugin/scholium-bridge.xpi` (Tools → Plugins → gear icon → Install Plugin From File). |
+| `bridge`: plugin | 7 to 9 | The local API is read-only before Zotero 10. Ask the user once to download `scholium-bridge.xpi` from the project's GitHub releases page (https://github.com/weilr/zotero-scholium/releases) and install it (Tools → Plugins → gear icon → Install Plugin From File). |
 | `js`: script file | fallback | `create_annotations.js`, to be executed in Tools → Developer → Run JavaScript. |
 
 Do not write to `zotero.sqlite` directly (the database is locked while Zotero is running), and do not attempt to obtain tokens from other plugins' endpoints.
+
+## Requirements
+
+`scripts/scholium.py` needs Python 3.9 or later and PyMuPDF (`import pymupdf`). If the import fails, ask the user to run `pip install pymupdf`; do not install packages on their behalf. Zotero must be running.
 
 ## Workflow
 
@@ -78,7 +82,7 @@ Write a JSON configuration (template: `examples/config.template.json`):
 ```bash
 python <skill dir>/scripts/scholium.py --config <config.json>
 ```
-The tool matches the phrases, measures the text columns, lays out the margin boxes (on the paragraph's own side in two-column papers, stacked without overlap and clear of the footer), writes `annotations.json` and the fallback `create_annotations.js`, renders `preview_p<N>.png`, and reports `missed`.
+The tool matches the phrases, measures the text columns, lays out the margin boxes (on the paragraph's own side in two-column papers, clear of figures, existing annotations, neighbouring boxes, the header, and the footer), writes `annotations.json` and the fallback `create_annotations.js`, renders `preview_p<N>.png`, and reports `missed`.
 
 - `missed` must be empty. Typical causes: the phrase spans a page break, contains a symbol, or a small-caps word is joined to its neighbour in the extraction (`MODELNAMEoutperforms`); choose a substring that avoids the problem.
 - Open a preview PNG and confirm that the highlights cover the intended sentences and that the margin boxes sit beside their paragraphs. The preview font spaces Latin letters irregularly; Zotero renders the text correctly.
@@ -108,14 +112,14 @@ The objective is output that reads as a researcher's own notes rather than gener
   Output only the translation.
   ```
 
-  The comment contains the translation only: no notes, no alternatives, no source text. Numbers and model names stay unchanged (unit conversion such as 500k to 50 万 is acceptable).
+  The comment contains the translation only: no notes, no alternatives, no source text. Numbers and model names stay unchanged (rewriting a number in the target language's own convention, such as 500k as a native numeral, is acceptable).
 - **Margin notes**: complete sentences; no `label: content` format; no arrows, circled numbers, or bracketed tags. Reactions ("larger than expected"), questions ("why only axis-aligned rotations?"), and cross-references ("inconsistent with the ablation on p. 8?") are appropriate. Leave a paragraph without a note rather than write filler. Usually 15–40 words.
 - **Reading note**: paragraphs rather than bullet lists with bold labels; concrete figures; first-person assessments and unresolved questions; limitations in the authors' words together with the reader's own; the full citation and code link at the end, without a sign-off line. Vary sentence length. Avoid stock phrases ("it is worth noting", "not only … but also", "marks a milestone"), em-dash asides, emoji, and aphoristic closing sentences.
 - Before applying, review every comment: label-colon notes, symbols, stock phrases, and the absence of any judgement of the reader's own are all defects to be corrected first.
 
 ## Configuration keys
 
-Required: `pdf`, `item_key`, `attachment_key`, `out_dir`. Content: `highlights[]`, `summaries[]`, `note_html`, `note_title_prefix`. Optional: `author` (default empty), `core_color`, `other_color`, `text_color`, `font_size` (8), `preview_pages`, `data_dir` (bridge backend), `cleanup_external` (bridge backend, default false), `note_replace` (keep `false`; it deletes every child note whose title starts with the prefix).
+Required: `pdf`, `item_key`, `attachment_key`, `out_dir`. Content: `highlights[]`, `summaries[]`, `note_html`, `note_title_prefix`. Optional: `author` (default empty), `core_color`, `other_color`, `text_color`, `font_size` (8), `preview_pages`, `data_dir` (bridge backend), `cleanup` (default true: remove the tool's own earlier annotations on the attachment before writing; set false when the user wants every existing annotation kept, and then do not highlight sentences the user already highlighted), `cleanup_external` (bridge backend, default false), `note_replace` (keep `false`; it deletes every child note whose title starts with the prefix).
 
 ## Known pitfalls
 

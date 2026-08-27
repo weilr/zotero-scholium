@@ -3,6 +3,6 @@ import pathlib, shutil
 
 root = pathlib.Path(__file__).resolve().parents[1]
 src = root / "src" / "zotero_scholium" / "cli.py"
-dst = root / "skill" / "zotero-scholium" / "scripts" / "scholium.py"
+dst = root / "skills" / "zotero-scholium" / "scripts" / "scholium.py"
 shutil.copyfile(src, dst)
 print("copied", src.relative_to(root), "->", dst.relative_to(root))

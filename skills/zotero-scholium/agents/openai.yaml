@@ -1,0 +1,6 @@
+interface:
+  display_name: "Zotero Scholium"
+  short_description: "Annotate papers in Zotero with native annotations"
+  default_prompt: "Annotate \"Attention Is All You Need\" in my Zotero library: highlight the key sentences with translations, add margin notes, and write a reading note."
+policy:
+  allow_implicit_invocation: true

@@ -1,5 +1,5 @@
 """Tests against a synthetic two-column PDF generated at run time (no third-party content)."""
-import json, os, pathlib
+import json, os
 import pymupdf
 import pytest
 
@@ -80,7 +80,7 @@ def test_build_produces_pdf_space_coords_and_no_hard_newlines(pdf_path, tmp_path
     assert len(texts) == 2 and all("\n" not in t["comment"] for t in texts)
     assert texts[0]["position"]["fontSize"] == cfg["font_size"]
     # the two left-margin boxes must not overlap
-    (a0, ay0, a1, ay1), (b0, by0, b1, by1) = texts[0]["position"]["rects"][0], texts[1]["position"]["rects"][0]
+    (_, ay0, _, ay1), (_, by0, _, by1) = texts[0]["position"]["rects"][0], texts[1]["position"]["rects"][0]
     assert ay0 >= by1 or by0 >= ay1
     assert os.path.exists(os.path.join(tmp_path, "preview_p1.png"))
     # the source PDF is unchanged
@@ -174,3 +174,84 @@ def test_margin_boxes_avoid_existing_annotations(pdf_path, tmp_path):
         {"type": "ink", "tags": [], "position": {"pageIndex": 1, "paths": [[10, 20, 30, 40, 12, 22]]}},
         {"type": "highlight", "tags": [], "position": '{"pageIndex": 0, "rects": [[9, 9, 9, 9]]}'}]}
     assert cli.existing_obstacles(listing) == {0: [[1.0, 2.0, 3.0, 4.0]], 1: [[10.0, 20.0, 30.0, 40.0]]}
+
+
+def test_own_annotations_become_obstacles_when_cleanup_is_disabled():
+    """With "cleanup": false the tool's earlier margin boxes remain in Zotero and must not be covered either."""
+    listing = {"annotations": [
+        {"type": "text", "tags": [cli.TAG], "position": {"pageIndex": 0, "rects": [[1, 2, 3, 4]]}},
+        {"type": "text", "tags": [], "position": {"pageIndex": 0, "rects": [[5, 6, 7, 8]]}}]}
+    assert cli.existing_obstacles(listing) == {0: [[5.0, 6.0, 7.0, 8.0]]}
+    assert cli.existing_obstacles(listing, keep_own=True) == {0: [[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]]}
+
+
+def test_tokens_expand_ligatures():
+    assert "prefix" in cli._tokens("preﬁx tuning is difﬁcult")
+    assert cli.check_translations([{"type": "highlight", "pageLabel": "1", "text": "preﬁx tuning is difﬁcult to optimize",
+                                    "comment": "prefix tuning 这种方法很难优化。"}]) == []
+
+
+def test_column_bounds_come_from_the_whole_document(tmp_path):
+    """Page 2 only has short lines; on its own it would place the right margin box inside the text column."""
+    p = tmp_path / "two_pages.pdf"
+    doc = pymupdf.open()
+    page1 = doc.new_page(width=612, height=792)
+    page1.insert_textbox(pymupdf.Rect(55, 72, 297, 700), LEFT * 3, fontsize=10, fontname="helv")
+    page1.insert_textbox(pymupdf.Rect(315, 72, 543, 700), RIGHT * 3, fontsize=10, fontname="helv")
+    page2 = doc.new_page(width=612, height=792)
+    page2.insert_textbox(pymupdf.Rect(55, 72, 297, 700), LEFT * 3, fontsize=10, fontname="helv")
+    page2.insert_textbox(pymupdf.Rect(315, 72, 430, 700), RIGHT * 3, fontsize=10, fontname="helv")  # narrow column
+    doc.save(str(p)); doc.close()
+    doc = pymupdf.open(str(p))
+    alone = cli.PageIndex(doc[1])
+    assert alone.body_x1 < 440, "per-page estimate underestimates the column"
+    bounds = cli.column_bounds(doc)
+    assert bounds and bounds[1] > 520
+    with_doc = cli.PageIndex(doc[1], bounds)
+    x0, _ = with_doc.margin_box(with_doc.line_rects(with_doc.match("Our work contributes"))[0])
+    assert x0 >= 520, "the right margin box stays outside the document's text column"
+
+
+def test_margin_boxes_avoid_figures(tmp_path):
+    p = tmp_path / "figure.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_textbox(pymupdf.Rect(55, 72, 297, 700), LEFT * 3, fontsize=10, fontname="helv")
+    page.insert_textbox(pymupdf.Rect(315, 72, 543, 700), RIGHT * 3, fontsize=10, fontname="helv")
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 8, 8), False); pix.clear_with(120)
+    page.insert_image(pymupdf.Rect(4, 60, 52, 200), pixmap=pix)          # an image in the left margin, beside the first lines
+    page.draw_rect(pymupdf.Rect(548, 60, 608, 200), fill=(0.6, 0.6, 0.6))  # a vector figure in the right margin
+    doc.save(str(p)); doc.close()
+    doc = pymupdf.open(str(p))
+    figs = cli.page_figure_rects(doc[0])
+    assert any(r[0] < 52 and r[3] > 792 - 200 for r in figs), "the image is an obstacle (PDF space, y upward)"
+    assert any(r[0] >= 540 for r in figs), "the drawing is an obstacle"
+    cfg = dict(cli.DEFAULTS)
+    cfg.update({"pdf": str(p), "item_key": "I", "attachment_key": "A", "out_dir": str(tmp_path), "preview_pages": [],
+                "summaries": [{"page": 1, "anchor": "Foundation models have transformed", "text": "left note"},
+                              {"page": 1, "anchor": "Our work contributes", "text": "right note"}]})
+    out, missed = cli.build(cfg)
+    assert missed == []
+    for a in out:
+        x0, y0, x1, y1 = a["position"]["rects"][0]
+        for fx0, fy0, fx1, fy1 in figs:
+            if fx0 < x1 and fx1 > x0:
+                assert y1 <= fy0 or y0 >= fy1, "margin note must not overlap a figure"
+        assert "layout_warning" not in a
+
+
+def test_place_blocks_keeps_boxes_out_of_footer_and_header():
+    low = [{"y_top": 40.0, "h": 60.0, "text": "paragraph at the page bottom"}]
+    cli.place_blocks(low, [], floor=28.0, ceiling=772.0)
+    assert low[0]["y_top"] - low[0]["h"] >= 28.0 and "layout_warning" not in low[0]
+    high = [{"y_top": 790.0, "h": 30.0, "text": "paragraph at the page top"}]
+    cli.place_blocks(high, [], floor=28.0, ceiling=772.0)
+    assert high[0]["y_top"] <= 772.0 and "layout_warning" not in high[0]
+
+
+def test_cleanup_false_is_honoured_by_the_js_backend():
+    cfg = dict(cli.DEFAULTS); cfg.update({"item_key": "I", "attachment_key": "A", "cleanup": False})
+    js = cli.render_js(cfg, [])
+    assert "var CLEANUP = false;" in js and "keep every existing annotation" in js
+    cfg["cleanup"] = True
+    assert "var CLEANUP = true;" in cli.render_js(cfg, [])
