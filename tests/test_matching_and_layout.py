@@ -55,6 +55,47 @@ def test_two_column_detection_and_margin_side(pdf_path):
     assert rx0 >= pi.body_x1 and rx1 <= pi.W, "right-column paragraph -> right margin"
 
 
+def test_text_line_rects_are_in_pdf_space_and_skip_rotated_words(tmp_path):
+    p = tmp_path / "stamp.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((100, 90), "A Title Line", fontsize=16)
+    page.insert_text((20, 400), "arXiv:1706.03762v7 [cs.CL] 2 Aug 2023", fontsize=9, rotate=90)  # vertical stamp in the left margin
+    page.insert_text((300, 770), "7", fontsize=9)  # page number
+    doc.save(str(p)); doc.close()
+    pi = cli.PageIndex(pymupdf.open(str(p))[0])
+    lines = pi.text_line_rects()
+    assert any(r[0] >= 100 and 695 <= r[1] < r[3] <= 725 for r in lines), "title line in PDF space (y upward)"
+    assert all(r[0] >= 50 for r in lines), "no word of the rotated stamp is a text line"
+    assert any(295 <= r[0] <= 305 and 15 <= r[1] < r[3] <= 32 for r in lines), "a single-character page number remains a line"
+
+
+def test_text_line_rects_keep_short_words_and_two_digit_numbers(tmp_path):
+    """Short words and a two-digit page number are ordinary text lines, not rotated stamps."""
+    pdf = _page_pdf(tmp_path / "short.pdf", lambda pg: (pg.insert_textbox(pymupdf.Rect(55, 72, 543, 600), LEFT * 4, fontsize=10, fontname="tiro"),
+                                                        pg.insert_text((100, 650), "if it of an", fontname="tiro"),
+                                                        pg.insert_text((300, 770), "12", fontsize=9, fontname="tiro")))
+    lines = cli.PageIndex(pymupdf.open(pdf)[0]).text_line_rects()
+    assert any(295 <= r[0] <= 305 and 15 <= r[1] < r[3] <= 32 for r in lines), "a two-digit page number is a text line"
+    assert any(95 <= r[0] <= 105 and 130 <= r[1] < r[3] <= 155 for r in lines), "a line of short words is a text line"
+    out, missed = cli.build(_band_cfg(pdf, tmp_path, place="bottom"))
+    assert missed == [] and len(out) == 1
+    a = out[0]
+    assert a["position"]["rects"][0][1] >= 792 - 770 + 2, "the band stays above the page number"
+    assert "layout_warning" not in a
+
+
+def test_margin_box_side_can_be_forced(pdf_path):
+    pi = cli.PageIndex(pymupdf.open(pdf_path)[0])
+    right_para = pi.line_rects(pi.match("Our work contributes"))[0]
+    auto = pi.margin_box(right_para)
+    assert auto[0] >= pi.body_x1, "two-column page: the paragraph's own (right) side"
+    assert pi.margin_box(right_para, "left")[1] <= pi.body_x0
+    assert pi.margin_box(right_para, "right") == auto
+    left_para = pi.line_rects(pi.match("Foundation models have transformed"))[0]
+    assert pi.margin_box(left_para, "right")[0] >= pi.body_x1
+
+
 def test_wrap_respects_width():
     lines = cli.wrap("这是一段用于测试换行的中文文本，应该被切成若干行。", 48, 8)
     assert all(sum(cli.cw(c) * 8 for c in ln) <= 48 + 8 for ln in lines)
@@ -276,3 +317,266 @@ def test_profile_lives_in_the_zotero_data_dir(tmp_path, monkeypatch):
     pdf = other / "storage" / "KEY" / "p.pdf"
     assert cli.zotero_data_dir({"pdf": str(pdf)}) == str(other)
 
+
+def _cfg(**over):
+    cfg = dict(cli.DEFAULTS); cfg.update(over); return cfg
+
+
+def test_normalise_summary_resolves_defaults_from_cfg():
+    sp = cli.normalise_summary({"page": 1, "anchor": "a phrase", "text": "note"}, _cfg(font_size=9, text_color="#123456"),
+                               [(612.0, 792.0)])
+    assert sp == {"page": 0, "text": "note", "place": "margin", "side": "auto", "kind": "text", "color": "#123456",
+                  "font_size": 9.0, "rect": None, "anchor": "a phrase"}
+    sp = cli.normalise_summary({"page": 1, "place": "top", "text": "band", "color": "#ff0000", "font_size": 10, "side": "left"},
+                               _cfg(margin_side="right", summary_kind="text"), [(612.0, 792.0)])
+    assert sp["place"] == "top" and sp["anchor"] is None and sp["side"] == "left" and sp["color"] == "#ff0000" and sp["font_size"] == 10.0
+    sp = cli.normalise_summary({"page": 1, "anchor": "x", "text": "t"}, _cfg(margin_side="right", summary_kind="note"), [(612.0, 792.0)])
+    assert sp["side"] == "right" and sp["kind"] == "note"
+    sp = cli.normalise_summary({"page": 1, "rect": [72, 40, 540, 100], "text": "box"}, _cfg(), [(612.0, 792.0)])
+    assert sp["rect"] == [72.0, 40.0, 540.0, 100.0] and sp["anchor"] is None
+
+
+@pytest.mark.parametrize("item, fragment", [
+    ({"page": 1, "text": "t"}, "anchor"),                                              # margin without anchor
+    ({"page": 1, "anchor": "a", "text": "t", "place": "side"}, "place"),
+    ({"page": 1, "anchor": "a", "text": "t", "side": "outer"}, "side"),
+    ({"page": 1, "anchor": "a", "text": "t", "kind": "sticky"}, "kind"),
+    ({"page": 1, "place": "top", "text": "t", "kind": "note"}, "anchor"),               # a sticky note needs an anchor
+    ({"page": 1, "anchor": "a", "text": "t", "color": "red"}, "color"),
+    ({"page": 1, "anchor": "a", "text": "t", "font_size": 60}, "font_size"),
+    ({"page": 1, "rect": [0, 0, 700, 50], "text": "t"}, "outside the page"),
+    ({"page": 1, "rect": [10, 10, 30, 50], "text": "t"}, "narrower"),
+    ({"page": 1, "rect": [10, 10, 300, 12], "text": "t"}, "shorter"),
+    ({"page": 1, "rect": [10, 10, 300], "text": "t"}, "rect"),
+    ({"page": 1, "rect": [10, 780, 300, 790], "text": "t", "kind": "note"}, "icon"),    # no room for the note icon
+    ({"page": 3, "anchor": "a", "text": "t"}, "outside the document"),
+    ({"page": 1, "anchor": "a", "text": "  "}, "text"),
+])
+def test_normalise_summary_rejects_invalid_items(item, fragment):
+    with pytest.raises(ValueError) as e:
+        cli.normalise_summary(item, _cfg(), [(612.0, 792.0)])
+    assert fragment in str(e.value)
+
+
+GOLDEN = os.path.join(os.path.dirname(__file__), "golden", "summaries_legacy.json")
+
+
+def test_legacy_configuration_output_is_unchanged(pdf_path, tmp_path):
+    """A configuration without the new fields must keep producing byte-identical annotations."""
+    cfg = _cfg(pdf=pdf_path, item_key="ITEM0000", attachment_key="ATTA0000", out_dir=str(tmp_path), preview_pages=[],
+               highlights=[{"page": 1, "core": True, "text": "patch jittering, a stabilization method", "comment": "translation"}],
+               summaries=[{"page": 1, "anchor": "Foundation models have transformed", "text": "summary one"},
+                          {"page": 1, "anchor": "Our work contributes", "text": "a note in the right margin"},
+                          {"page": 1, "anchor": "Data heterogeneity and unstable", "text": "summary two, placed below the first"}])
+    out, missed = cli.build(cfg)
+    assert missed == []
+    rendered = json.dumps(out, ensure_ascii=False, indent=1)
+    if not os.path.exists(GOLDEN):
+        if not os.environ.get("SCHOLIUM_WRITE_GOLDEN"):
+            pytest.fail("the golden file %s is missing; re-run with SCHOLIUM_WRITE_GOLDEN=1 to create it" % GOLDEN)
+        os.makedirs(os.path.dirname(GOLDEN), exist_ok=True)
+        open(GOLDEN, "w", encoding="utf8", newline="\n").write(rendered)
+        pytest.skip("golden file created; re-run to compare")
+    assert rendered == open(GOLDEN, encoding="utf8").read()
+
+
+def _page_pdf(path, draw):
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    draw(page)
+    doc.save(str(path)); doc.close()
+    return str(path)
+
+
+def _band_cfg(pdf, out_dir, **item):
+    entry = {"page": 1, "text": "A short summary of the paper written by the reader."}
+    entry.update(item)
+    return _cfg(pdf=pdf, item_key="I", attachment_key="A", out_dir=str(out_dir), preview_pages=[], summaries=[entry])
+
+
+def test_top_band_sits_above_the_title(tmp_path):
+    pdf = _page_pdf(tmp_path / "t.pdf", lambda pg: (pg.insert_text((100, 90), "A Title Line", fontsize=16),
+                                                   pg.insert_textbox(pymupdf.Rect(55, 120, 543, 700), LEFT * 4, fontsize=10, fontname="helv")))
+    out, missed = cli.build(_band_cfg(pdf, tmp_path, place="top"))
+    assert missed == [] and len(out) == 1
+    a = out[0]
+    x0, y0, x1, y1 = a["position"]["rects"][0]
+    assert a["type"] == "text" and y1 == 792 - cli.BAND_MARGIN and y0 >= 792 - 90, "band at the page top, above the title baseline"
+    assert x1 - x0 > 300, "band spans the text column"
+    assert a["sortIndex"] == "00000|000000|00006" and "layout_warning" not in a
+
+
+def test_top_band_settles_between_header_and_title(tmp_path):
+    pdf = _page_pdf(tmp_path / "h.pdf", lambda pg: (pg.insert_text((200, 30), "Published as a conference paper", fontsize=9),
+                                                   pg.insert_text((100, 100), "A Title Line", fontsize=16),
+                                                   pg.insert_textbox(pymupdf.Rect(55, 130, 543, 700), LEFT * 4, fontsize=10, fontname="helv")))
+    out, missed = cli.build(_band_cfg(pdf, tmp_path, place="top"))
+    a = out[0]; x0, y0, x1, y1 = a["position"]["rects"][0]
+    assert y1 <= 792 - 30 and y0 >= 792 - 100, "below the header line and above the title"
+    assert "layout_warning" not in a
+
+
+def test_top_band_that_does_not_fit_is_reported(tmp_path):
+    pdf = _page_pdf(tmp_path / "full.pdf", lambda pg: pg.insert_textbox(pymupdf.Rect(55, 8, 543, 780), LEFT * 12, fontsize=10, fontname="helv"))
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top"))
+    a = out[0]; _, y0, _, y1 = a["position"]["rects"][0]
+    assert "no free space at the top" in a["layout_warning"]
+    assert y1 == 792 - cli.BAND_MARGIN, "the band keeps its requested position"
+
+
+def test_bottom_band_sits_above_the_page_number(tmp_path):
+    pdf = _page_pdf(tmp_path / "b.pdf", lambda pg: (pg.insert_textbox(pymupdf.Rect(55, 72, 543, 600), LEFT * 4, fontsize=10, fontname="helv"),
+                                                   pg.insert_text((300, 770), "7", fontsize=9)))
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="bottom"))
+    a = out[0]; _, y0, _, y1 = a["position"]["rects"][0]
+    assert y0 >= 792 - 770 + 2, "above the page number line"
+    assert y1 <= 0.3 * 792 and "layout_warning" not in a
+
+
+def test_bottom_band_sits_above_the_footer_line(tmp_path):
+    """A footer line high enough to leave room beneath it must not attract the band into that strip."""
+    pdf = _page_pdf(tmp_path / "f.pdf", lambda pg: (pg.insert_textbox(pymupdf.Rect(55, 72, 543, 600), LEFT * 4, fontsize=10, fontname="helv"),
+                                                    pg.insert_text((100, 745), "Journal of Examples, 2026", fontsize=9)))
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="bottom"))
+    a = out[0]; _, y0, _, y1 = a["position"]["rects"][0]
+    assert y0 >= 792 - 745 + 1, "the band stays above the footer line"
+    assert y1 <= 0.3 * 792 and "layout_warning" not in a
+
+
+def _body_lines(pg, last_baseline):
+    """Draw explicit body lines from y = 100 down to `last_baseline` (drawing lines directly cannot overflow silently)."""
+    for y in range(100, last_baseline + 1, 12):
+        pg.insert_text((60, y), "a line of body text that runs across most of the column width", fontsize=10, fontname="helv")
+
+
+def test_bottom_band_between_body_and_page_number(tmp_path):
+    """Body text ending about 30 pt above the page number: the band goes into that gap, not under the number."""
+    pdf = _page_pdf(tmp_path / "g.pdf", lambda pg: (_body_lines(pg, 724), pg.insert_text((300, 770), "9", fontsize=9)))
+    pi = cli.PageIndex(pymupdf.open(pdf)[0])
+    body_bottom = min(r[1] for r in pi.text_line_rects() if r[1] > 40)
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="bottom", text="one line"))
+    a = out[0]; _, y0, _, y1 = a["position"]["rects"][0]
+    assert y0 >= 792 - 770 + 2 and y1 <= body_bottom, "between the page number and the last body line"
+    assert "layout_warning" not in a
+
+
+def test_bottom_band_falls_back_beneath_a_footer_when_the_gap_is_too_small(tmp_path):
+    """Body text running down to the footer line: the band is placed beneath the footer, not over the text."""
+    pdf = _page_pdf(tmp_path / "k.pdf", lambda pg: (_body_lines(pg, 736), pg.insert_text((100, 748), "Journal of Examples, 2026", fontsize=9)))
+    pi = cli.PageIndex(pymupdf.open(pdf)[0])
+    footer_bottom = min(r[1] for r in pi.text_line_rects())
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="bottom", text="one line"))
+    a = out[0]; _, y0, _, y1 = a["position"]["rects"][0]
+    assert cli.BAND_MARGIN <= y0 and y1 <= footer_bottom, "beneath the footer line, above the page edge"
+    assert "layout_warning" not in a
+
+
+def test_explicit_rect_is_converted_and_overlap_is_reported(tmp_path):
+    pdf = _page_pdf(tmp_path / "r.pdf", lambda pg: pg.insert_text((100, 90), "A Title Line", fontsize=16))
+    out, missed = cli.build(_band_cfg(pdf, tmp_path, rect=[72, 20, 540, 60]))
+    assert missed == [] and out[0]["position"]["rects"][0] == [72.0, 732.0, 540.0, 772.0] and "layout_warning" not in out[0]
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, rect=[72, 60, 540, 120]))  # covers the title
+    assert "explicit rectangle overlaps" in out[0]["layout_warning"]
+    out, missed = cli.build(_band_cfg(pdf, tmp_path, rect=[72, 700, 540, 900]))
+    assert out == [] and missed[0]["kind"] == "summary" and "outside the page" in missed[0]["reason"]
+
+
+def test_placed_boxes_become_obstacles_for_later_ones(tmp_path):
+    pdf = _page_pdf(tmp_path / "o.pdf", lambda pg: pg.insert_text((100, 200), "A Title Line", fontsize=16))
+    cfg = _band_cfg(pdf, tmp_path, rect=[72, 6, 540, 40])
+    cfg["summaries"].append({"page": 1, "place": "top", "text": "band placed after the explicit rectangle"})
+    out, missed = cli.build(cfg)
+    assert missed == [] and len(out) == 2
+    fixed, band = out[0]["position"]["rects"][0], out[1]["position"]["rects"][0]
+    assert band[3] <= fixed[1] and "layout_warning" not in out[1], "the band moved below the fixed box"
+
+
+def test_per_item_color_and_font_size(pdf_path, tmp_path):
+    cfg = _cfg(pdf=pdf_path, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[1],
+               summaries=[{"page": 1, "anchor": "Foundation models have transformed", "text": "the same text for both boxes here"},
+                          {"page": 1, "anchor": "Our work contributes", "text": "the same text for both boxes here",
+                           "color": "#aa0000", "font_size": 12}])
+    out, missed = cli.build(cfg)
+    assert missed == []
+    small, big = out
+    assert small["color"] == cfg["text_color"] and small["position"]["fontSize"] == 8.0
+    assert big["color"] == "#aa0000" and big["position"]["fontSize"] == 12.0
+    h = lambda a: a["position"]["rects"][0][3] - a["position"]["rects"][0][1]
+    assert h(big) > h(small), "wrapping and box height follow the item's font size"
+    assert os.path.exists(os.path.join(tmp_path, "preview_p1.png"))
+
+
+def test_side_override_and_global_margin_side(pdf_path, tmp_path):
+    base = dict(pdf=pdf_path, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[])
+    pi = cli.PageIndex(pymupdf.open(pdf_path)[0])
+    out, _ = cli.build(_cfg(margin_side="left", summaries=[{"page": 1, "anchor": "Our work contributes", "text": "forced left"}], **base))
+    assert out[0]["position"]["rects"][0][2] <= pi.body_x0
+    out, _ = cli.build(_cfg(margin_side="left", summaries=[{"page": 1, "anchor": "Our work contributes", "text": "item wins", "side": "right"}], **base))
+    assert out[0]["position"]["rects"][0][0] >= pi.body_x1
+
+
+def test_sticky_notes_hug_the_column_and_do_not_overlap(pdf_path, tmp_path):
+    cfg = _cfg(pdf=pdf_path, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[1], summary_kind="note",
+               summaries=[{"page": 1, "anchor": "Foundation models have transformed", "text": "first note"},
+                          {"page": 1, "anchor": "comparable impact", "text": "second note on the next line"}])
+    out, missed = cli.build(cfg)
+    assert missed == [] and [a["type"] for a in out] == ["note", "note"]
+    pi = cli.PageIndex(pymupdf.open(pdf_path)[0])
+    for a in out:
+        x0, y0, x1, y1 = a["position"]["rects"][0]
+        assert abs((x1 - x0) - cli.NOTE_ICON) < 0.01 and abs((y1 - y0) - cli.NOTE_ICON) < 0.01
+        assert x1 <= pi.body_x0 and x1 >= pi.body_x0 - 4 - 0.01, "icon beside the left text column"
+        assert "fontSize" not in a["position"] and "rotation" not in a["position"]
+    (_, ay0, _, ay1), (_, by0, _, by1) = out[0]["position"]["rects"][0], out[1]["position"]["rects"][0]
+    assert ay0 >= by1 or by0 >= ay1
+
+
+def test_render_js_embeds_bands_and_sticky_notes(pdf_path, tmp_path):
+    import re as _re
+    cfg = _cfg(pdf=pdf_path, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+               summaries=[{"page": 1, "place": "top", "text": "band"},
+                          {"page": 1, "anchor": "Our work contributes", "kind": "note", "text": "sticky"},
+                          {"page": 1, "anchor": "Foundation models have transformed", "text": "margin", "font_size": 10}])
+    out, missed = cli.build(cfg)
+    assert missed == []
+    js = cli.render_js(cfg, out)
+    embedded = json.loads(_re.search(r"var ANNOTATIONS = (.*?);\n", js).group(1))
+    assert [a["type"] for a in embedded] == ["text", "note", "text"]
+    assert embedded[1]["position"]["rects"][0][2] - embedded[1]["position"]["rects"][0][0] == pytest.approx(22.0)
+    assert "create 0 highlight/underline annotations and 3 margin text annotations" in js
+
+
+def _ann(kind, rect, font=None, color="#1a73e8"):
+    pos = {"pageIndex": 0, "rects": [rect]}
+    if font:
+        pos["fontSize"] = font
+    return {"annotationType": kind, "annotationColor": color, "annotationComment": "c", "annotationPosition": json.dumps(pos),
+            "parentItem": "ATT", "tags": []}
+
+
+def test_layout_habits_from_positions():
+    own = [_ann("text", [108, 726, 504, 786], 9), _ann("text", [108, 700, 504, 780], 9),      # page-top bands
+           _ann("text", [520, 400, 600, 440], 8), _ann("text", [520, 300, 600, 340], 8),        # right margin
+           _ann("note", [530, 200, 552, 222]), _ann("highlight", [100, 100, 300, 112])]
+    lay = cli.layout_habits(own)
+    assert lay == {"page_top_notes": 0.5, "margin_side": "right", "text_font_size_median": 9.0}
+    assert cli.layout_habits([]) == {"page_top_notes": 0.0, "margin_side": "mixed", "text_font_size_median": None}
+    own = [_ann("text", [108, 726, 504, 786], 9), _ann("text", [108, 700, 504, 780], 9),      # page-top bands
+           _ann("text", [20, 400, 60, 440], 8), _ann("text", [20, 300, 60, 340], 8),          # left margin
+           _ann("text", [20, 200, 60, 240], 8)]
+    lay = cli.layout_habits(own)
+    assert lay["margin_side"] == "left", "page-top bands span the column and do not vote on the margin side"
+    assert lay["page_top_notes"] == 0.4
+
+
+def test_profile_markdown_renders_layout_lines():
+    prof = {"annotations_analysed": 10, "annotated_papers": 2, "annotations_per_paper_median": 5, "language": "zh",
+            "types": {"highlight": 0.6, "text": 0.4}, "uses_margin_text": True, "uses_underline": False, "uses_sticky_notes": False,
+            "comment_rate": 0.5, "comment_len_median": 30,
+            "comment_style": {"label_colon_rate": 0.1, "list_rate": 0.0, "multiline_rate": 0.2},
+            "colors": [], "child_notes": {"count": 0, "long_notes": 0, "len_median": 0}, "levels": {},
+            "layout": {"page_top_notes": 0.5, "margin_side": "right", "text_font_size_median": 9.0}}
+    md = cli.profile_markdown(prof)
+    assert "page-top notes on 50%" in md and "margin side: right" in md and "9.0 pt" in md
+    assert "- page-top summary: ___" in md and "- margin side: ___" in md and "- sticky notes instead of margin text: ___" in md
+    assert "top of page 1" in cli.USER_RULES_TEMPLATE

@@ -74,3 +74,12 @@ page-sized frames, are added as obstacles. New boxes are placed below such an in
 when the footer leaves no room; a box for which neither direction has space keeps its requested
 position and is reported in `layout_warnings`. `--ignore-existing` skips reading the existing
 annotations; figures are always considered.
+
+A summary may also be placed as a band across the text column at the top or bottom of a page (`place`),
+at an explicit rectangle (`rect`), on a forced side (`side`), or as a sticky note (`kind`). Bands treat
+the page's text lines as obstacles in addition to figures and existing annotations, so a band at the
+top of page 1 settles into the gap between a header line and the title; a top band stays within the top
+30 % of the page and a bottom band within the bottom 30 % (between the text and the footer, or beneath the footer when that gap is too small), and a band that does not fit is reported
+rather than moved to the other end. Boxes are laid out in the order explicit rectangles, bands, margin
+boxes, each joining the obstacle set of the next group. Colour and font size can be set per summary;
+the defaults remain `text_color` and `font_size`.

@@ -119,6 +119,7 @@ Claude Code 插件方式则使用 `/plugin update zotero-scholium@zotero-scholiu
 
 - **原生注释。** 高亮、下划线与页边文字均为 Zotero 注释条目：可编辑、可检索、可同步。不改动 PDF 文件。
 - **页边批注自动布局。** 批注置于段落所在一侧的页边，自动避开图表、已有注释、相邻批注、页眉与页脚。
+- **可定制的位置与样式。** 首页顶部的论文总结、页底的一句评语、固定放在某一侧的批注、便签，或单条批注的颜色与字号；画像会学习这些习惯。
 - **稳健的原文匹配。** 词级匹配，忽略空白、连字符与连字。
 - **译文一致性检查。** 评论中出现而高亮原文中没有的术语或数字，在写入前以警告形式报告。
 - **画像学习。** `scholium profile --from-library` 从文库中已有的注释归纳用户自己的标注习惯；用户的明确规则始终优先。
@@ -180,12 +181,14 @@ pip install .                            # 提供 `scholium` 命令
 | `item_key`、`attachment_key` | 是 | 父条目与附件的 Zotero key |
 | `out_dir` | 是 | 生成文件的输出目录 |
 | `highlights[]` | | `page`（从 1 起）、`text`（逐字原文）、`comment`，以及 `level`、`color`、旧式布尔值 `core` 三者之一；可选 `type: "underline"` |
-| `summaries[]` | | `page`、`anchor`（定位段落的唯一短语）、`text`（不含硬换行） |
+| `summaries[]` | | `page`、`anchor`（定位段落的唯一短语）、`text`（不含硬换行）；可选 `place`（`"top"` 或 `"bottom"`：横跨正文栏、置于该页顶部或底部的文本框，无需 anchor）、`side`（`"left"`、`"right"`）、`color`、`font_size`、`kind: "note"`（便签） |
 | `levels` | | 命名颜色，例如 `{"claim": "#ff6666", "term": "#ffd400"}` |
 | `note_html`、`note_title_prefix` | | 子笔记的 HTML 文件；前缀用于识别已存在的同名笔记 |
 | `author` | | 阅读器中显示的注释作者名（默认为空） |
 | `core_color`、`other_color`、`text_color` | | 默认 `#ff6666`、`#ffd400`、`#1a73e8` |
 | `font_size` | | 页边文字字号，单位 pt（默认 8） |
+| `margin_side` | | `auto`（默认：段落所在一侧，或较宽的页边）、`left` 或 `right` |
+| `summary_kind` | | `text`（默认：可见的页边文字）或 `note`（便签） |
 | `preview_pages` | | 渲染为 PNG 预览的页码（默认 `[1]`） |
 | `data_dir` | | Zotero 数据目录（默认从 PDF 路径或 Zotero 首选项推断）；存放画像与 bridge 令牌 |
 | `cleanup` | | `true`（默认）：写入前删除本工具此前在该附件上创建的注释；`false`：保留全部已有注释，只新增 |

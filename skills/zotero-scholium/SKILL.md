@@ -11,10 +11,11 @@ description: "Annotate a paper in the user's Zotero library with native Zotero a
 |---|---|---|
 | Key-sentence highlights | native Zotero `highlight` annotations | The comment is a translation of the sentence into the user's language, not an interpretation. Default colour scheme: `#ff6666` (red) for *core* statements, i.e. the paper's enumerated contributions, headline quantitative results, and central claim (approximately 10–15 per paper); `#ffd400` (yellow) for *other* points, i.e. method details, experimental setup, limitations, and useful observations (approximately 20–30). Colours are not assigned by topic. |
 | Margin notes | native Zotero `text` annotations placed in the page margin beside the paragraph | Blue `#1a73e8`, 8 pt, without hard line breaks (Zotero wraps the text; the user must be able to edit it). At most one per paragraph, one or two sentences, written as a reader's own marginal remark. |
+| Page summary | native Zotero `text` annotation across the top of the first page (`place: "top"`) | Only when the profile or the user asks for it. Three or four sentences: what the paper does, the decisive number, the reader's own judgement; not a restatement of the abstract. Same colour as the margin notes; `font_size` 9. |
 | Reading note | child note (HTML) under the item | What a researcher records for later reference after reading: assessments, open questions, and specific figures, rather than a restatement of the abstract. |
 | The PDF file | unchanged | Annotations written into the file are displayed as locked and duplicated in Zotero, and the modified file is synchronised. |
 
-Sticky-note annotations (`note` type) are not used; the margin text must be visible on the page. Every annotation and note created by the skill carries the tag `zotero-scholium`, which allows a subsequent run to recognise its own output.
+Sticky-note annotations (`note` type) are used only when the profile shows that habit or the user asks for them (`summary_kind: "note"`); otherwise the margin text must be visible on the page. Every annotation and note created by the skill carries the tag `zotero-scholium`, which allows a subsequent run to recognise its own output.
 
 Write comments, margin notes, and the reading note in the language the user uses in the conversation. For Chinese, follow `references/style-zh.md`; it specifies the expected register in detail.
 
@@ -57,7 +58,7 @@ Procedure:
 - Every later correction by the user (for example, "do not use blue" or "comments should be translations") is added to the same section, so that the next paper starts from it.
 - A library with very few annotations provides no usable signal. In that case apply the defaults and state that this was done.
 
-Translate the profile into configuration values: `levels` (colour names to hex values), `type: "underline"` where the user underlines, `summaries` only if the user writes margin text, `note_html` only if the user keeps reading notes, and comment density and length as observed.
+Translate the profile into configuration values: `levels` (colour names to hex values), `type: "underline"` where the user underlines, `summaries` only if the user writes margin text, `note_html` only if the user keeps reading notes, comment density and length as observed, and, from the interpretation and the user's rules, `margin_side`, `summary_kind`, `font_size`, and a `place: "top"` summary on page 1 (see Customisation).
 
 ### 1. Locate the item, the attachment, and the PDF (read-only)
 
@@ -74,7 +75,7 @@ Prefer `storage/<KEY>/.zotero-ft-cache` (Zotero's own text extraction) or PyMuPD
 Write a JSON configuration (template: `examples/config.template.json`):
 
 - **highlights**: `page` (1-based), `text` (verbatim; may span lines, since matching ignores whitespace, hyphenation, and ligatures, so text may be pasted from the extraction; avoid mathematical symbols such as ≥ and ×), `core`, and `comment` (the translation). Mark as core: the contributions enumerated in the introduction, the main claim of the abstract, the first quantitative sentence of each results subsection, and the summary sentence of the conclusion. Each sentence is highlighted once; for a sentence that crosses a page break, use only the part on one page.
-- **summaries**: `page`, `anchor` (a unique phrase inside the paragraph, used to locate its first line), and `text`. At most one per paragraph; omit paragraphs for which there is nothing substantive to say.
+- **summaries**: `page`, `anchor` (a unique phrase inside the paragraph, used to locate its first line), and `text`. At most one per paragraph; omit paragraphs for which there is nothing substantive to say. Optional per item: `place` (`"top"` or `"bottom"`: a box across the text column at that end of the page, no anchor needed), `side` (`"left"` or `"right"`), `color`, `font_size`, and `kind: "note"` (a sticky note). See Customisation.
 - **note_html**: path of the reading note (template: `examples/reading_note.template.html`).
 
 ### 3. Generate and check (no writing yet)
@@ -88,6 +89,7 @@ The tool matches the phrases, measures the text columns, lays out the margin box
 - Open a preview PNG and confirm that the highlights cover the intended sentences and that the margin boxes sit beside their paragraphs. The preview font spaces Latin letters irregularly; Zotero renders the text correctly.
 - Review `translation_warnings` in the output. Each entry names a comment that contains terms or numbers absent from the highlighted text, or that is much longer or shorter than the span it translates. Correct the comment or extend the highlight until the list is empty; the only acceptable residue is a unit or format conversion.
 - Check `existing_annotations` in the output. When Zotero was reachable it reports how many existing annotations were read and how many rectangles were avoided; margin notes are then guaranteed not to cover the user's own annotations. If it reports `unavailable`, tell the user that existing annotations could not be taken into account. `layout_warnings` lists boxes for which the margin had no free space; move the summary to a neighbouring paragraph or drop it.
+- A band (`place: "top"` or `"bottom"`) appears in the preview across the text column, above the title, or between the text and the footer (beneath the footer when that gap is too small). A `layout_warning` for it means the page has no free space at that end: shorten the text or move it to the other end of the page.
 - Confirm that the checksum of the PDF has not changed.
 - Re-read every comment in `annotations.json` against the style checklist before applying.
 
@@ -99,6 +101,22 @@ python <skill dir>/scripts/scholium.py --config <config.json> --apply
 `backend` in the output identifies the channel used; `result` reports the numbers removed and created; `now_in_zotero` is a read-back. Ask the user to close and reopen the PDF. If `applied` is `false`, act on `apply_error` (install the plugin on Zotero 7–9, or fall back to executing the JavaScript file). `--list` reads back annotations and note titles at any time.
 
 Repeated runs are safe: only annotations tagged by the tool (or with identical content) are replaced; the user's own annotations remain; existing notes are never deleted (a new note receives a versioned title). Iterate by editing the configuration and re-applying; do not edit the generated JavaScript by hand.
+
+## Customisation
+
+The user states preferences in conversation or in the `## User's rules (always win)` section of the profile; the assistant translates them into configuration fields. Everything not listed here is content, not layout, and is handled by the profile and the writing rules.
+
+| Request or rule | Configuration |
+|---|---|
+| a summary at the top of page 1 | `{"page": 1, "place": "top", "font_size": 9, "text": "…"}` in `summaries` |
+| a remark at the bottom of page N | `{"page": N, "place": "bottom", "text": "…"}` |
+| a short summary at the start of each section | `anchor` = the section heading, default placement (no new field) |
+| notes on the left or right margin | `"margin_side": "left"` or `"right"` (per item: `side`) |
+| a larger or smaller font, another colour | `font_size`, `color` (global, or per item) |
+| sticky notes instead of margin text | `"summary_kind": "note"` (per item: `kind`) |
+| the summary in the reading note rather than on the page | `note_html` (no new field) |
+
+A top band is placed 6 pt below the page edge and moves down past a header line into the gap above the title; it stays within the top 30 % of the page. A bottom band goes between the last line of text and the footer, or beneath the footer when that gap is too small, and stays within the bottom 30 % of the page. Both avoid figures and existing annotations.
 
 ## Writing rules (any language)
 
@@ -119,7 +137,7 @@ The objective is output that reads as a researcher's own notes rather than gener
 
 ## Configuration keys
 
-Required: `pdf`, `item_key`, `attachment_key`, `out_dir`. Content: `highlights[]`, `summaries[]`, `note_html`, `note_title_prefix`. Optional: `author` (default empty), `core_color`, `other_color`, `text_color`, `font_size` (8), `preview_pages`, `data_dir` (bridge backend), `cleanup` (default true: remove the tool's own earlier annotations on the attachment before writing; set false when the user wants every existing annotation kept, and then do not highlight sentences the user already highlighted), `cleanup_external` (bridge backend, default false), `note_replace` (keep `false`; it deletes every child note whose title starts with the prefix).
+Required: `pdf`, `item_key`, `attachment_key`, `out_dir`. Content: `highlights[]`, `summaries[]`, `note_html`, `note_title_prefix`. Optional: `author` (default empty), `core_color`, `other_color`, `text_color`, `font_size` (8), `margin_side` (`auto`, `left`, `right`), `summary_kind` (`text`, `note`), `preview_pages`, `data_dir` (bridge backend), `cleanup` (default true: remove the tool's own earlier annotations on the attachment before writing; set false when the user wants every existing annotation kept, and then do not highlight sentences the user already highlighted), `cleanup_external` (bridge backend, default false), `note_replace` (keep `false`; it deletes every child note whose title starts with the prefix). Per `summaries[]` item: `place`, `side`, `color`, `font_size`, `kind`.
 
 ## Known pitfalls
 

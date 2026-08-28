@@ -36,3 +36,8 @@ Initial public version.
   weilr/zotero-scholium` (Claude Code, Codex, and other agents) or as a Claude Code plugin through the
   `.claude-plugin` manifests; the `SKILL.md` front matter is quoted so that strict YAML parsers accept it,
   and CI checks it.
+- Placement and style of margin notes can be customised: `place: "top"` or `"bottom"` lays a note across
+  the text column at that end of a page without an anchor (a summary at the top of page 1 is the main
+  use), `side` or `margin_side` chooses the margin, `kind` or `summary_kind` switches to sticky notes,
+  and `color` and `font_size` can be set per note. `profile --from-library` reports page-top notes, the
+  preferred side and the font size, and the skill maps such requests to configuration fields.

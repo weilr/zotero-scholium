@@ -39,6 +39,8 @@ DEFAULTS = {
     "other_color": "#ffd400",
     "text_color": "#1a73e8",
     "font_size": 8,
+    "margin_side": "auto",      # margin used for summaries: "auto" (paragraph's side / wider margin), "left", "right"
+    "summary_kind": "text",     # "text": visible margin text; "note": sticky notes (only when the user has that habit)
     "preview_pages": [1],
     "note_title": None,
     "note_title_prefix": None,
@@ -107,14 +109,35 @@ class PageIndex:
             lines[k] = lines[k] | r if k in lines else r
         return [lines[k] for k in sorted(lines)]
 
-    def margin_box(self, para_rect):
-        """(x0, x1) of the margin box beside a paragraph: its own side in two-column layouts, the wider margin otherwise."""
+    def text_line_rects(self):
+        """Rectangles (PDF space, y upward) of the page's horizontal text lines. Lines written in another
+        direction (vertical preprint stamps in the margin) are dropped."""
+        rects = []
+        for block in self.page.get_text("dict").get("blocks", []):
+            for line in block.get("lines", []):
+                dx, dy = line.get("dir", (1, 0))
+                if abs(dx - 1) > 0.01 or abs(dy) > 0.01:
+                    continue
+                x0, y0, x1, y1 = line["bbox"]
+                if x1 - x0 <= 0 or y1 - y0 <= 0 or not "".join(s.get("text", "") for s in line.get("spans", [])).strip():
+                    continue
+                rects.append([x0, self.H - y1, x1, self.H - y0])
+        return rects
+
+    def margin_box(self, para_rect, side="auto"):
+        """(x0, x1) of the margin box beside a paragraph. `auto`: its own side in two-column layouts, otherwise the
+        wider margin; `left` and `right` force the side."""
         left_w = self.body_x0 - 8
         right_w = self.W - self.body_x1 - 8
-        use_left = (para_rect.x0 < self.W / 2) if self.two_col else (left_w >= right_w)
+        if side == "left":
+            use_left = True
+        elif side == "right":
+            use_left = False
+        else:
+            use_left = (para_rect.x0 < self.W / 2) if self.two_col else (left_w >= right_w)
         if use_left:
-            return 4.0, max(4.0 + 30, self.body_x0 - 4)
-        return min(self.W - 4 - 30, self.body_x1 + 4), self.W - 4
+            return 4.0, max(4.0 + MIN_BOX_WIDTH, self.body_x0 - 4)
+        return min(self.W - 4 - MIN_BOX_WIDTH, self.body_x1 + 4), self.W - 4
 
 
 def column_bounds(doc, sample=60):
@@ -179,6 +202,75 @@ def wrap(text, width_pt, fs):
     if cur:
         lines.append(cur)
     return lines
+
+
+PLACES = ("margin", "top", "bottom")
+SIDES = ("auto", "left", "right")
+KINDS = ("text", "note")
+BAND_MARGIN = 6.0        # distance between a top/bottom band and the page edge (pt)
+NOTE_ICON = 22.0         # side of a sticky-note icon in the Zotero reader (pt)
+MIN_BOX_WIDTH = 30.0     # narrowest usable text box (pt)
+HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def normalise_summary(item, cfg, page_sizes):
+    """Resolve the defaults of one `summaries[]` entry and validate it.
+
+    Returns a dict with page (0-based), text, place, side, kind, color, font_size, rect (top-left origin, or None)
+    and anchor (or None). Raises ValueError with a reason suitable for the `missed` report.
+    """
+    if not isinstance(item, dict):
+        raise ValueError("a summary must be an object")
+    try:
+        page = int(item["page"]) - 1
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("a summary needs a 1-based page number")
+    if page < 0 or page >= len(page_sizes):
+        raise ValueError(f"page {page + 1} is outside the document ({len(page_sizes)} pages)")
+    text = str(item.get("text") or "").strip()
+    if not text:
+        raise ValueError("a summary needs text")
+    place = item.get("place", "margin")
+    if place not in PLACES:
+        raise ValueError(f"place must be one of {', '.join(PLACES)}")
+    side = item.get("side", cfg.get("margin_side", "auto"))
+    if side not in SIDES:
+        raise ValueError(f"side must be one of {', '.join(SIDES)}")
+    kind = item.get("kind", cfg.get("summary_kind", "text"))
+    if kind not in KINDS:
+        raise ValueError(f"kind must be one of {', '.join(KINDS)}")
+    color = str(item.get("color") or cfg.get("text_color") or DEFAULTS["text_color"])
+    if not HEX_COLOR_RE.match(color):
+        raise ValueError("color must be a #rrggbb value")
+    try:
+        font_size = float(item.get("font_size", cfg.get("font_size", DEFAULTS["font_size"])))
+    except (TypeError, ValueError):
+        raise ValueError("font_size must be a number")
+    if not 4 <= font_size <= 36:
+        raise ValueError("font_size must lie between 4 and 36")
+    rect = item.get("rect")
+    if rect is not None:
+        if not isinstance(rect, (list, tuple)) or len(rect) != 4:
+            raise ValueError("rect must be [x0, y0, x1, y1] in points from the top-left corner")
+        try:
+            rect = [float(v) for v in rect]
+        except (TypeError, ValueError):
+            raise ValueError("rect must contain four numbers")
+        x0, y0, x1, y1 = rect
+        W, H = page_sizes[page]
+        if x0 < 0 or y0 < 0 or x1 > W or y1 > H or x0 >= x1 or y0 >= y1:
+            raise ValueError("rect lies outside the page or is empty")
+        if x1 - x0 < MIN_BOX_WIDTH:
+            raise ValueError(f"rect is narrower than {MIN_BOX_WIDTH:.0f} pt")
+        if kind == "text" and y1 - y0 < font_size * 1.5 + 6:
+            raise ValueError("rect is shorter than one line of text")
+        if kind == "note" and (y0 + NOTE_ICON > H or x0 + NOTE_ICON > W):
+            raise ValueError("rect leaves no room for the sticky-note icon")
+    anchor = str(item.get("anchor") or "").strip() or None
+    if rect is None and (place == "margin" or kind == "note") and not anchor:
+        raise ValueError("anchor is required for margin placement and for sticky notes")
+    return {"page": page, "text": text, "place": place, "side": side, "kind": kind, "color": color,
+            "font_size": font_size, "rect": rect, "anchor": anchor}
 
 
 OBSTACLE_TYPES = ("text", "note", "image", "ink")
@@ -253,6 +345,92 @@ def place_blocks(blocks, occupied, floor, ceiling, gap=3.0):
     return blocks
 
 
+def _box_height(sp, width):
+    if sp["kind"] == "note":
+        return NOTE_ICON
+    return len(wrap(sp["text"], width - 3, sp["font_size"])) * sp["font_size"] * 1.5 + 6
+
+
+def _intersects(rect, rects):
+    return any(rect[0] < o[2] and rect[2] > o[0] and rect[1] < o[3] and rect[3] > o[1] for o in rects)
+
+
+def _summary_annotation(pi, sp, rect, warning=None):
+    p = pi.page.number
+    top = int(round(pi.H - rect[3]))
+    ann = {"type": sp["kind"], "color": sp["color"], "comment": sp["text"], "pageLabel": str(p + 1),
+           "sortIndex": f"{p:05d}|{0:06d}|{top:05d}",
+           "position": {"pageIndex": p, "rects": [[round(v, 2) for v in rect]]}}
+    if sp["kind"] == "text":
+        ann["position"]["fontSize"] = sp["font_size"]
+        ann["position"]["rotation"] = 0
+    if warning:
+        ann["layout_warning"] = warning
+    return ann
+
+
+def layout_page_summaries(pi, specs, page_obstacles, missed):
+    """Lay out one page's summaries and return their annotations.
+
+    Order: explicit rectangles (never moved; an overlap is only reported), then top/bottom bands across the text
+    column, then margin boxes and sticky notes beside their anchors. Every placed box joins the obstacle set of the
+    following groups. Bands avoid the page's text lines; margin boxes lie outside the text column by construction.
+    """
+    p = pi.page.number
+    anns, occupied = [], list(page_obstacles)
+    text_lines = pi.text_line_rects()
+    # 1. explicit rectangles (top-left origin in the configuration, PDF space here)
+    for sp in [s for s in specs if s["rect"]]:
+        x0, y0, x1, y1 = sp["rect"]
+        rect = [x0, pi.H - y1, x1, pi.H - y0]
+        if sp["kind"] == "note":
+            rect = [x0, pi.H - y0 - NOTE_ICON, x0 + NOTE_ICON, pi.H - y0]
+        warn = "explicit rectangle overlaps a text line, figure or annotation" if _intersects(rect, occupied + text_lines) else None
+        anns.append(_summary_annotation(pi, sp, rect, warn)); occupied.append(rect)
+    # 2. bands across the text column
+    bx0, bx1 = pi.body_x0, pi.body_x1
+    for sp in [s for s in specs if not s["rect"] and s["kind"] == "text" and s["place"] in ("top", "bottom")]:
+        h = _box_height(sp, bx1 - bx0)
+        occ = [(r[1], r[3]) for r in occupied + text_lines if r[0] < bx1 and r[2] > bx0]
+        if sp["place"] == "top":
+            blk = {"y_top": pi.H - BAND_MARGIN, "h": h}
+            place_blocks([blk], occ, floor=0.7 * pi.H, ceiling=pi.H - BAND_MARGIN)
+            warn = "no free space at the top of the page; shorten the text or use place: bottom"
+        else:
+            # the footer (page number, running line) is any text line inside the column within 8 % of the page bottom;
+            # the band goes between the text and the footer, or, when that gap is too small, beneath the footer
+            footer = [r for r in text_lines if r[0] < bx1 and r[2] > bx0 and r[3] < 0.08 * pi.H]
+            footer_top = max((r[3] for r in footer), default=0.0)
+            blk = {"y_top": max(BAND_MARGIN, footer_top + 3.0) + h, "h": h}
+            place_blocks([blk], occ + ([(0.0, footer_top)] if footer else []), floor=BAND_MARGIN, ceiling=0.3 * pi.H)
+            if blk.get("layout_warning") and footer:
+                below = {"y_top": BAND_MARGIN + h, "h": h}
+                place_blocks([below], occ, floor=BAND_MARGIN, ceiling=min(r[1] for r in footer) - 3.0)
+                if not below.get("layout_warning"):
+                    blk = below
+            warn = "no free space at the bottom of the page; shorten the text or use place: top"
+        rect = [bx0, blk["y_top"] - h, bx1, blk["y_top"]]
+        anns.append(_summary_annotation(pi, sp, rect, warn if blk.get("layout_warning") else None)); occupied.append(rect)
+    # 3. margin boxes and sticky notes beside their anchors (a sticky note ignores `place`)
+    groups = {}
+    for sp in [s for s in specs if not s["rect"] and (s["kind"] == "note" or s["place"] == "margin")]:
+        ws = pi.match(sp["anchor"])
+        if not ws:
+            missed.append({"kind": "summary", "page": p + 1, "anchor": sp["anchor"]}); continue
+        r = pi.line_rects(ws)[0]
+        mx0, mx1 = pi.margin_box(r, sp["side"])
+        if sp["kind"] == "note":  # the icon hugs the text column
+            mx0, mx1 = (mx1 - NOTE_ICON, mx1) if mx1 <= pi.body_x0 else (mx0, mx0 + NOTE_ICON)
+        groups.setdefault((mx0, mx1), []).append(({"y_top": pi.H - r.y0 + 1, "h": _box_height(sp, mx1 - mx0)}, sp))
+    for (mx0, mx1), items in groups.items():
+        occ = [(r[1], r[3]) for r in occupied if r[0] < mx1 and r[2] > mx0]
+        place_blocks([b for b, _ in items], occ, floor=28.0, ceiling=pi.H - 20.0)
+        for b, sp in items:
+            rect = [mx0, b["y_top"] - b["h"], mx1, b["y_top"]]
+            anns.append(_summary_annotation(pi, sp, rect, b.get("layout_warning"))); occupied.append(rect)
+    return anns
+
+
 def build(cfg, obstacles=None):
     """Convert the configuration into annotation objects with PDF-space coordinates and render preview PNGs.
 
@@ -267,7 +445,7 @@ def build(cfg, obstacles=None):
             idx[p] = PageIndex(doc[p], bounds)
         return idx[p]
 
-    fs = float(cfg["font_size"]); line_h = fs * 1.5
+    fs = float(cfg["font_size"])
     out, missed = [], []
     for h in cfg.get("highlights", []):
         p = int(h["page"]) - 1
@@ -283,32 +461,22 @@ def build(cfg, obstacles=None):
         out.append({"type": h.get("type", "highlight") if h.get("type") in ("highlight", "underline") else "highlight",
                     "color": color, "text": " ".join(w[4] for w in ws), "comment": h.get("comment", ""), "pageLabel": str(p + 1),
                     "sortIndex": f"{p:05d}|{0:06d}|{top:05d}", "position": {"pageIndex": p, "rects": rects}})
-    groups = {}
+    page_sizes = [(pg.rect.width, pg.rect.height) for pg in doc]
+    specs = []
     for s in cfg.get("summaries", []):
-        p = int(s["page"]) - 1
+        try:
+            specs.append(normalise_summary(s, cfg, page_sizes))
+        except ValueError as e:
+            item = s if isinstance(s, dict) else {}
+            missed.append({"kind": "summary", "page": item.get("page"), "anchor": item.get("anchor"), "reason": str(e)})
+    by_page = {}
+    for sp in specs:
+        by_page.setdefault(sp["page"], []).append(sp)
+    for p, page_specs in by_page.items():
         pi = page_index(p)
-        ws = pi.match(s["anchor"])
-        if not ws:
-            missed.append({"kind": "summary", "page": p + 1, "anchor": s["anchor"]}); continue
-        r = pi.line_rects(ws)[0]
-        bx0, bx1 = pi.margin_box(r)
-        lines = wrap(s["text"], (bx1 - bx0) - 3, fs)
-        groups.setdefault((p, bx0, bx1), []).append({"y_top": pi.H - r.y0 + 1, "h": len(lines) * line_h + 6, "text": s["text"]})
-    for (p, bx0, bx1), blocks in groups.items():
-        pi = page_index(p)
-        # existing annotations and figures that intrude into this margin become occupied intervals
+        # existing annotations and figures are occupied space for every summary on the page
         page_obstacles = list((obstacles or {}).get(p, [])) + page_figure_rects(doc[p])
-        occupied = [(r[1], r[3]) for r in page_obstacles if r[0] < bx1 and r[2] > bx0]
-        place_blocks(blocks, occupied, floor=28.0, ceiling=pi.H - 20.0)
-        for b in blocks:
-            rect = [round(bx0, 2), round(b["y_top"] - b["h"], 2), round(bx1, 2), round(b["y_top"], 2)]
-            top = int(round(pi.H - b["y_top"]))
-            ann = {"type": "text", "color": cfg["text_color"], "comment": b["text"], "pageLabel": str(p + 1),
-                   "sortIndex": f"{p:05d}|{0:06d}|{top:05d}",
-                   "position": {"pageIndex": p, "rects": [rect], "fontSize": fs, "rotation": 0}}
-            if b.get("layout_warning"):
-                ann["layout_warning"] = b["layout_warning"]
-            out.append(ann)
+        out.extend(layout_page_summaries(pi, page_specs, page_obstacles, missed))
     os.makedirs(cfg["out_dir"], exist_ok=True)
     for pg in cfg["preview_pages"]:
         p = int(pg) - 1
@@ -328,13 +496,17 @@ def build(cfg, obstacles=None):
                 for x0, y0, x1, y1 in a["position"]["rects"]:
                     shape.draw_line(pymupdf.Point(x0, H - y0 + 1), pymupdf.Point(x1, H - y0 + 1))
                 shape.finish(color=rgb, width=1.2)
+            elif a["type"] == "note":
+                x0, y0, x1, y1 = a["position"]["rects"][0]
+                shape.draw_rect(pymupdf.Rect(x0, H - y1, x1, H - y0)); shape.finish(color=rgb, fill=rgb, fill_opacity=0.6)
             else:
                 x0, y0, x1, y1 = a["position"]["rects"][0]
+                afs = float(a["position"].get("fontSize", fs)); aline_h = afs * 1.5
                 fr = pymupdf.Rect(x0, H - y1, x1, H - y0)
                 shape.draw_rect(fr); shape.finish(color=(0.8, 0.8, 0.9), width=0.3)
-                for i, ln in enumerate(wrap(a["comment"], (x1 - x0) - 3, fs)):
-                    shape.insert_text(pymupdf.Point(fr.x0 + 1.5, fr.y0 + (i + 1) * line_h), ln,
-                                      fontsize=fs, fontname="china-s", color=rgb)
+                for i, ln in enumerate(wrap(a["comment"], (x1 - x0) - 3, afs)):
+                    shape.insert_text(pymupdf.Point(fr.x0 + 1.5, fr.y0 + (i + 1) * aline_h), ln,
+                                      fontsize=afs, fontname="china-s", color=rgb)
         shape.commit()
         page.get_pixmap(dpi=90).save(os.path.join(cfg["out_dir"], f"preview_p{p + 1}.png"))
     doc.close()  # the document is never saved; the PDF file remains unchanged
@@ -816,6 +988,38 @@ def _median(xs):
     return xs[len(xs) // 2] if xs else 0
 
 
+def layout_habits(own):
+    """Placement habits of the user's text and sticky-note annotations, from their positions.
+
+    The local API reports no page sizes, so the top region is taken as y1 >= 670 pt (the top 15 % of a Letter page
+    and the top 20 % of an A4 page) and the page centre as x = 300 pt. A page-top note is a text annotation in that
+    region at least 250 pt wide. Annotations at least 250 pt wide are bands spanning the text column rather than
+    margin notes, so they do not vote on the preferred margin side.
+    """
+    texts, sides, sizes, top = 0, [], [], 0
+    for d in own:
+        kind = d.get("annotationType")
+        if kind not in ("text", "note"):
+            continue
+        pos = parse_position(d.get("annotationPosition"))
+        rects = [r for r in (pos.get("rects") or []) if len(r) == 4]
+        if not rects:
+            continue
+        x0, y0, x1, y1 = [float(v) for v in rects[0]]
+        if x1 - x0 < 250:
+            sides.append("left" if (x0 + x1) / 2 < 300 else "right")
+        if kind == "text":
+            texts += 1
+            if pos.get("fontSize"):
+                sizes.append(float(pos["fontSize"]))
+            if y1 >= 670 and x1 - x0 >= 250:
+                top += 1
+    left = sides.count("left") / max(1, len(sides))
+    side = "mixed" if len(sides) < 3 or 0.25 < left < 0.75 else ("left" if left >= 0.75 else "right")
+    return {"page_top_notes": round(top / max(1, texts), 2), "margin_side": side,
+            "text_font_size_median": _median(sizes) if sizes else None}
+
+
 def profile_from_library(exclude_author=""):
     """Read every annotation and child note made by the user (excluding those created by this tool) and summarise the habits."""
     s, h, t = http("GET", "/api/users/0/items?itemType=annotation&limit=100000", timeout=180)
@@ -883,6 +1087,7 @@ def profile_from_library(exclude_author=""):
         "annotated_papers": len(per_att),
         "child_notes": {"count": len(notes), "long_notes": len(long_notes), "len_median": _median([len(x) for x in notes])},
         "levels": {("level%d" % (i + 1)): c["color"] for i, c in enumerate(colors[:3])},
+        "layout": layout_habits(own),
     }
     return prof
 
@@ -909,11 +1114,19 @@ def profile_markdown(p):
     cn = p["child_notes"]
     L.append(f"- Child notes: {cn['count']} ({cn['long_notes']} longer than 300 characters); reading notes: "
              f"{'yes' if cn['long_notes'] >= 3 else 'not a habit'}")
+    lay = p.get("layout")
+    if lay:
+        size = f"{lay['text_font_size_median']} pt" if lay.get("text_font_size_median") else "unknown"
+        L.append(f"- Placement: page-top notes on {int(lay['page_top_notes'] * 100)}% of text annotations; margin side: {lay['margin_side']}; "
+                 f"text font size (median): {size}")
     L.append("\n## Interpretation (to be completed by the assistant from the statistics and confirmed by the user)\n")
     L.append("- colour meanings: " + ", ".join(f"`{c['color']}` = ___" for c in p["colors"]))
     L.append("- highlight comments contain: ___ (translation / why it matters / a question / nothing)")
     L.append("- colour levels to use for new annotations: " + ", ".join(f"{k} = `{v}` = ___" for k, v in p["levels"].items()))
     L.append(f"- margin text: {'yes' if p['uses_margin_text'] else 'no'}; voice: ___")
+    L.append("- page-top summary: ___ (yes / no; a text annotation across the top of page 1)")
+    L.append("- margin side: ___ (auto / left / right)")
+    L.append("- sticky notes instead of margin text: ___ (yes / no)")
     L.append(f"- reading note: {'yes' if cn['long_notes'] >= 3 else 'no'}; structure: ___")
     L.append("- tone: ___ (first person or impersonal; whether doubts are recorded; terse labels or full sentences)")
     return "\n".join(L) + "\n"
@@ -925,7 +1138,8 @@ USER_RULES_TEMPLATE = f"""{USER_RULES_MARK}
 Rules recorded in this section take precedence over the learned statistics above. Re-running
 `profile --from-library` regenerates the sections above and leaves this section unchanged.
 
-- (none yet; add rules here, e.g. "comments are translations", "two colours only: red = core, yellow = other")
+- (none yet; add rules here, e.g. "comments are translations", "two colours only: red = core, yellow = other",
+  "a three-sentence summary at the top of page 1 of every paper", "margin notes on the right, 9 pt")
 """
 
 
@@ -972,7 +1186,7 @@ def profile_main(argv):
         existing = ""
     open(md_path, "w", encoding="utf8").write(merge_profile_md(profile_markdown(prof), existing))
     report = {"written": [os.path.join(out, "profile.json"), md_path], "summary": {
-        k: prof[k] for k in ("annotations_analysed", "language", "types", "comment_rate", "comment_len_median", "comment_style", "levels", "child_notes")}}
+        k: prof[k] for k in ("annotations_analysed", "language", "types", "comment_rate", "comment_len_median", "comment_style", "levels", "child_notes", "layout")}}
     if migrated:
         report["migrated_from"] = migrated
     print(json.dumps(report, ensure_ascii=False, indent=1))
@@ -1055,7 +1269,8 @@ def main(argv=None):
     open(js_path, "w", encoding="utf8").write(render_js(cfg, out))
     by_type = collections.Counter(a["type"] for a in out)
     report = {"highlights": by_type.get("highlight", 0), "underlines": by_type.get("underline", 0),
-              "margin_texts": by_type.get("text", 0), "missed": missed, "translation_warnings": check_translations(out),
+              "margin_texts": by_type.get("text", 0), "sticky_notes": by_type.get("note", 0),
+              "missed": missed, "translation_warnings": check_translations(out),
               "layout_warnings": [{"page": a["pageLabel"], "text": a["comment"][:60], "reason": a["layout_warning"]} for a in out if a.get("layout_warning")],
               "existing_annotations": existing_info, "js": js_path,
               "previews": [os.path.join(cfg["out_dir"], f"preview_p{p}.png") for p in cfg["preview_pages"]]}

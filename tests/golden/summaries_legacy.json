@@ -1,0 +1,81 @@
+[
+ {
+  "type": "highlight",
+  "color": "#ff6666",
+  "text": "patch jittering, a stabilization method",
+  "comment": "translation",
+  "pageLabel": "1",
+  "sortIndex": "00000|000000|00087",
+  "position": {
+   "pageIndex": 0,
+   "rects": [
+    [
+     351.69,
+     691.49,
+     513.43,
+     705.23
+    ]
+   ]
+  }
+ },
+ {
+  "type": "text",
+  "color": "#1a73e8",
+  "comment": "summary one",
+  "pageLabel": "1",
+  "sortIndex": "00000|000000|00071",
+  "position": {
+   "pageIndex": 0,
+   "rects": [
+    [
+     4.0,
+     691.0,
+     51.0,
+     721.0
+    ]
+   ],
+   "fontSize": 8.0,
+   "rotation": 0
+  }
+ },
+ {
+  "type": "text",
+  "color": "#1a73e8",
+  "comment": "summary two, placed below the first",
+  "pageLabel": "1",
+  "sortIndex": "00000|000000|00115",
+  "position": {
+   "pageIndex": 0,
+   "rects": [
+    [
+     4.0,
+     622.69,
+     51.0,
+     676.69
+    ]
+   ],
+   "fontSize": 8.0,
+   "rotation": 0
+  }
+ },
+ {
+  "type": "text",
+  "color": "#1a73e8",
+  "comment": "a note in the right margin",
+  "pageLabel": "1",
+  "sortIndex": "00000|000000|00071",
+  "position": {
+   "pageIndex": 0,
+   "rects": [
+    [
+     540.74,
+     691.0,
+     608.0,
+     721.0
+    ]
+   ],
+   "fontSize": 8.0,
+   "rotation": 0
+  }
+ }
+]

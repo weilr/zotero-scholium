@@ -119,6 +119,7 @@ The verified JSON structure of annotation items, the authorisation flow of the l
 
 - **Native annotations.** Highlights, underlines, and margin text are Zotero annotation items: editable, searchable, and synchronised. The PDF file is never modified.
 - **Margin notes with automatic layout.** Placed beside the paragraph on its own side of the page, avoiding figures, existing annotations, neighbouring notes, the header, and the footer.
+- **Customisable placement.** A summary across the top of page 1, a remark at the bottom of a page, notes on a chosen side, sticky notes, or another colour and size for a single note; the profile learns these habits.
 - **Robust text matching.** Word-level matching that ignores whitespace, hyphenation, and ligatures.
 - **Translation fidelity check.** Comments that add terms or numbers absent from the highlighted span are reported before anything is written.
 - **Profile learning.** `scholium profile --from-library` derives the user's own annotation habits from the library; explicit user rules take precedence.
@@ -180,12 +181,14 @@ pip install .                            # provides the `scholium` command
 | `item_key`, `attachment_key` | yes | Zotero keys of the parent item and the attachment |
 | `out_dir` | yes | directory for generated files |
 | `highlights[]` | | `page` (1-based), `text` (verbatim), `comment`, and one of `level`, `color`, or the legacy boolean `core`; optional `type: "underline"` |
-| `summaries[]` | | `page`, `anchor` (a unique phrase locating the paragraph), `text` (without hard line breaks) |
+| `summaries[]` | | `page`, `anchor` (a unique phrase locating the paragraph), `text` (without hard line breaks); optional `place` (`"top"` or `"bottom"`: a box across the text column at that end of the page, no anchor needed), `side` (`"left"`, `"right"`), `color`, `font_size`, `kind: "note"` (sticky note) |
 | `levels` | | named colours, e.g. `{"claim": "#ff6666", "term": "#ffd400"}` |
 | `note_html`, `note_title_prefix` | | HTML file of the child note; the prefix identifies an existing note with the same title |
 | `author` | | `annotationAuthorName` shown in the reader (default: empty) |
 | `core_color`, `other_color`, `text_color` | | defaults `#ff6666`, `#ffd400`, `#1a73e8` |
 | `font_size` | | font size of margin text in points (default 8) |
+| `margin_side` | | `auto` (default: the paragraph's side, or the wider margin), `left`, or `right` |
+| `summary_kind` | | `text` (default: visible margin text) or `note` (sticky notes) |
 | `preview_pages` | | pages rendered as PNG previews (default `[1]`) |
 | `data_dir` | | Zotero data directory (inferred from the PDF path or Zotero's preferences by default); holds the profile and the bridge token |
 | `cleanup` | | `true` (default): before writing, remove the annotations this tool created earlier on the attachment; `false`: keep every existing annotation and only add new ones |

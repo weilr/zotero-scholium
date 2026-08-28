@@ -35,6 +35,12 @@
       "page": 8,
       "anchor": "another unique phrase",
       "text": "a reaction, a question, or a cross-reference, written as a sentence rather than in label-colon form"
+    },
+    {
+      "page": 1,
+      "place": "top",
+      "font_size": 9,
+      "text": "three or four sentences across the top of the first page: what the paper does, the decisive number, the reader's judgement (only when the profile or the user asks for a page summary)"
     }
   ]
 }
