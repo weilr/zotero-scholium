@@ -38,7 +38,7 @@ Do not write to `zotero.sqlite` directly (the database is locked while Zotero is
 
 ### 0. Determine the annotation profile
 
-Look for a profile at `%APPDATA%/zotero-scholium/profile.md` (or `~/.config/zotero-scholium/profile.md`).
+The profile lives in the Zotero data directory, at `<Zotero data dir>/zotero-scholium/profile.md`; run `python <skill dir>/scripts/scholium.py profile --path` to print the resolved location (it also reports a profile left at the pre-0.1.0 location in the user configuration directory, which the next `profile --from-library` migrates).
 
 Precedence, from lowest to highest:
 

@@ -187,7 +187,7 @@ pip install .                            # 提供 `scholium` 命令
 | `core_color`、`other_color`、`text_color` | | 默认 `#ff6666`、`#ffd400`、`#1a73e8` |
 | `font_size` | | 页边文字字号，单位 pt（默认 8） |
 | `preview_pages` | | 渲染为 PNG 预览的页码（默认 `[1]`） |
-| `data_dir` | | Zotero 数据目录（bridge 通道；默认从 PDF 路径推断） |
+| `data_dir` | | Zotero 数据目录（默认从 PDF 路径或 Zotero 首选项推断）；存放画像与 bridge 令牌 |
 | `cleanup` | | `true`（默认）：写入前删除本工具此前在该附件上创建的注释；`false`：保留全部已有注释，只新增 |
 | `cleanup_external` | | 仅 bridge 通道：同时清理从 PDF 文件导入的注释（默认 `false`） |
 | `note_replace` | | 创建新笔记前删除同前缀的已有子笔记（默认 `false`；破坏性选项） |
@@ -210,7 +210,7 @@ pip install .                            # 提供 `scholium` 命令
 scholium profile --from-library      # 只读；生成 profile.json 与 profile.md
 ```
 
-`profile.md` 在 Windows 上位于 `%APPDATA%/zotero-scholium/`，其他系统位于 `~/.config/zotero-scholium/`。文件包含三个部分，优先级依次升高：
+`profile.md` 保存在 Zotero 数据目录（即存放 `zotero.sqlite` 与 `storage/` 的目录）下的 `zotero-scholium/` 中，画像与它所描述的文库放在一起；`scholium profile --path` 可打印实际位置。数据目录依次取自 `--data-dir`、`ZOTERO_DATA_DIR`、PDF 路径或 Zotero 自身的首选项。文件包含三个部分，优先级依次升高：
 
 | 部分 | 内容 | 重新运行时 |
 |---|---|---|

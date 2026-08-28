@@ -187,7 +187,7 @@ pip install .                            # provides the `scholium` command
 | `core_color`, `other_color`, `text_color` | | defaults `#ff6666`, `#ffd400`, `#1a73e8` |
 | `font_size` | | font size of margin text in points (default 8) |
 | `preview_pages` | | pages rendered as PNG previews (default `[1]`) |
-| `data_dir` | | Zotero data directory (bridge backend; inferred from the PDF path by default) |
+| `data_dir` | | Zotero data directory (inferred from the PDF path or Zotero's preferences by default); holds the profile and the bridge token |
 | `cleanup` | | `true` (default): before writing, remove the annotations this tool created earlier on the attachment; `false`: keep every existing annotation and only add new ones |
 | `cleanup_external` | | bridge backend only: also remove annotations imported from the PDF file (default `false`) |
 | `note_replace` | | delete existing child notes with the same title prefix before creating the new one (default `false`; destructive) |
@@ -210,7 +210,7 @@ Annotation conventions differ between users: colours carry different meanings, s
 scholium profile --from-library      # read-only; writes profile.json and profile.md
 ```
 
-`profile.md` is written to `%APPDATA%/zotero-scholium/` on Windows and `~/.config/zotero-scholium/` elsewhere. It contains three sections with increasing precedence:
+`profile.md` is written to `zotero-scholium/` inside the Zotero data directory (the directory that holds `zotero.sqlite` and `storage/`), so the profile stays with the library it describes; `scholium profile --path` prints the resolved location. The data directory is taken from `--data-dir`, `ZOTERO_DATA_DIR`, the PDF path, or Zotero's own preferences. The file contains three sections with increasing precedence:
 
 | Section | Content | On re-run |
 |---|---|---|

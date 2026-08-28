@@ -255,3 +255,24 @@ def test_cleanup_false_is_honoured_by_the_js_backend():
     assert "var CLEANUP = false;" in js and "keep every existing annotation" in js
     cfg["cleanup"] = True
     assert "var CLEANUP = true;" in cli.render_js(cfg, [])
+
+
+def test_profile_lives_in_the_zotero_data_dir(tmp_path, monkeypatch):
+    data = tmp_path / "ZoteroData"; data.mkdir(); (data / "zotero.sqlite").write_bytes(b"")
+    profiles = tmp_path / "Profiles" / "abc.default"; profiles.mkdir(parents=True)
+    escaped = str(data).replace("\\", "\\\\")
+    (profiles / "prefs.js").write_text('user_pref("extensions.zotero.dataDir", "%s");\n' % escaped, encoding="utf8")
+    assert cli.zotero_prefs_data_dir([str(tmp_path / "Profiles")]) == str(data)
+    monkeypatch.delenv("ZOTERO_DATA_DIR", raising=False)
+    monkeypatch.setattr(cli, "zotero_prefs_data_dir", lambda profile_roots=None: str(data))
+    assert cli.zotero_data_dir() == str(data)
+    assert cli.profile_dir() == os.path.join(str(data), "zotero-scholium")
+    # the configuration and the environment take precedence over prefs.js
+    other = tmp_path / "Other"; other.mkdir(); (other / "zotero.sqlite").write_bytes(b"")
+    monkeypatch.setenv("ZOTERO_DATA_DIR", str(other))
+    assert cli.zotero_data_dir() == str(other)
+    assert cli.zotero_data_dir({"data_dir": str(data)}) == str(data)
+    # a PDF inside storage/ identifies its own library
+    pdf = other / "storage" / "KEY" / "p.pdf"
+    assert cli.zotero_data_dir({"pdf": str(pdf)}) == str(other)
+

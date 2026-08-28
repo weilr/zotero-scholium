@@ -25,6 +25,11 @@ Initial public version.
   only adds new ones (all three backends); the tool's earlier margin notes then count as obstacles
   for the layout.
 - The translation-fidelity check expands ligatures (ﬁ, ﬂ, ...) before comparing terms.
+- The annotation profile is stored in the Zotero data directory (`<data dir>/zotero-scholium/`)
+  rather than the user configuration directory; `profile --path` prints the location, and a
+  profile at the old location is migrated on the next `profile --from-library`. The data
+  directory is resolved from the configuration, `ZOTERO_DATA_DIR`, the PDF path, or Zotero's
+  prefs.js.
 - `scholium-bridge` plugin 0.3.1: data-only local endpoints protected by a token, tag support,
   opt-in cleanup of external annotations; `list` returns positions and tags.
 - The skill lives in `skills/zotero-scholium/` and is installable with `npx skills add

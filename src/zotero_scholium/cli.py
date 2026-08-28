@@ -19,7 +19,8 @@ Requires: pip install pymupdf
 Usage:    scholium --config config.json [--apply] [--list] [--backend auto|api|bridge|js]
           scholium profile --from-library
 """
-import argparse, json, os, sys, re, datetime, collections
+import argparse
+import glob, json, os, sys, re, datetime, collections
 import urllib.request, urllib.error
 import pymupdf
 
@@ -602,16 +603,71 @@ def api_apply(cfg, out, api):
 # ---------------------------------------------------------------------------
 # Backend 2: scholium-bridge plugin (Zotero 7 to 9)
 # ---------------------------------------------------------------------------
+def zotero_prefs_data_dir(profile_roots=None):
+    """Data directory recorded in Zotero's prefs.js (`extensions.zotero.dataDir`), or None."""
+    if profile_roots is None:
+        profile_roots = []
+        if os.environ.get("APPDATA"):
+            profile_roots.append(os.path.join(os.environ["APPDATA"], "Zotero", "Zotero", "Profiles"))
+        profile_roots.append(os.path.expanduser("~/Library/Application Support/Zotero/Profiles"))
+        profile_roots.append(os.path.expanduser("~/.zotero/zotero"))
+    for root in profile_roots:
+        for prefs in sorted(glob.glob(os.path.join(root, "*", "prefs.js"))):
+            try:
+                text = open(prefs, encoding="utf8", errors="ignore").read()
+            except OSError:
+                continue
+            m = re.search(r'user_pref\("extensions\.zotero\.dataDir",\s*"((?:[^"\\]|\\.)*)"\)', text)
+            if m:
+                try:
+                    return json.loads('"' + m.group(1) + '"')  # prefs.js uses JavaScript string escapes
+                except ValueError:
+                    continue
+    return None
+
+
 def _data_dir_candidates(cfg):
+    """Possible Zotero data directories, most specific first: the configuration, the ZOTERO_DATA_DIR
+    environment variable, the PDF path (…/storage/<KEY>/file.pdf), Zotero's prefs.js, and the default."""
     c = []
     if cfg and cfg.get("data_dir"):
         c.append(cfg["data_dir"])
+    if os.environ.get("ZOTERO_DATA_DIR"):
+        c.append(os.environ["ZOTERO_DATA_DIR"])
     if cfg and cfg.get("pdf"):
         p = os.path.abspath(cfg["pdf"]).replace("\\", "/")
         if "/storage/" in p:
             c.append(p.split("/storage/")[0])
+    prefs = zotero_prefs_data_dir()
+    if prefs:
+        c.append(prefs)
     c.append(os.path.join(os.path.expanduser("~"), "Zotero"))
     return c
+
+
+def zotero_data_dir(cfg=None):
+    """The Zotero data directory: the first candidate that contains zotero.sqlite, else the first that exists,
+    else the default location."""
+    cands = _data_dir_candidates(cfg)
+    for d in cands:
+        if os.path.isfile(os.path.join(d, "zotero.sqlite")):
+            return d
+    for d in cands:
+        if os.path.isdir(d):
+            return d
+    return cands[-1]
+
+
+def profile_dir(cfg=None):
+    """Directory of profile.json and profile.md: <Zotero data dir>/zotero-scholium/. The profile describes
+    the annotation habits of one library, so it is kept next to that library rather than in the user
+    configuration directory."""
+    return os.path.join(zotero_data_dir(cfg), "zotero-scholium")
+
+
+def legacy_profile_dir():
+    """Location used by versions before 0.1.0: the user configuration directory."""
+    return os.path.join(os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config"), "zotero-scholium")
 
 
 def bridge_connect(cfg):
@@ -889,20 +945,37 @@ def profile_main(argv):
     ap = argparse.ArgumentParser(prog="scholium profile", description="Derive an annotation profile from the user's own Zotero annotations (read-only).")
     ap.add_argument("--from-library", action="store_true", help="analyse the library of the running Zotero instance")
     ap.add_argument("--exclude-author", default="", help="annotationAuthorName whose annotations are excluded from the analysis (e.g. the name of an automated tool)")
-    ap.add_argument("--out", default=None, help="directory for profile.json and profile.md (default: the user configuration directory)")
+    ap.add_argument("--path", action="store_true", help="print the resolved profile location and exit (no library access)")
+    ap.add_argument("--data-dir", default=None, help="Zotero data directory (default: ZOTERO_DATA_DIR, Zotero's prefs.js, or ~/Zotero)")
+    ap.add_argument("--out", default=None, help="directory for profile.json and profile.md (default: <Zotero data dir>/zotero-scholium/)")
     a = ap.parse_args(argv)
+    cfg = {"data_dir": a.data_dir} if a.data_dir else None
+    out = a.out or profile_dir(cfg)
+    md_path = os.path.join(out, "profile.md")
+    legacy_md = os.path.join(legacy_profile_dir(), "profile.md")
+    if a.path:
+        print(json.dumps({"data_dir": zotero_data_dir(cfg), "profile_md": md_path, "exists": os.path.exists(md_path),
+                          "legacy_profile_md": legacy_md if os.path.exists(legacy_md) else None}, ensure_ascii=False, indent=1))
+        return
     if not a.from_library:
-        ap.error("only --from-library is implemented")
+        ap.error("use --from-library to derive the profile, or --path to print its location")
     prof = profile_from_library(a.exclude_author)
-    out = a.out or os.path.join(os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config"), "zotero-scholium")
     os.makedirs(out, exist_ok=True)
     json.dump(prof, open(os.path.join(out, "profile.json"), "w", encoding="utf8"), ensure_ascii=False, indent=1)
-    md_path = os.path.join(out, "profile.md")
-    existing = open(md_path, encoding="utf8").read() if os.path.exists(md_path) else ""
+    migrated = None
+    if os.path.exists(md_path):
+        existing = open(md_path, encoding="utf8").read()
+    elif os.path.exists(legacy_md):
+        existing = open(legacy_md, encoding="utf8").read()   # keep the interpretation and the user's rules
+        migrated = legacy_md
+    else:
+        existing = ""
     open(md_path, "w", encoding="utf8").write(merge_profile_md(profile_markdown(prof), existing))
-    print(json.dumps({"written": [os.path.join(out, "profile.json"), os.path.join(out, "profile.md")], "summary": {
-        k: prof[k] for k in ("annotations_analysed", "language", "types", "comment_rate", "comment_len_median", "comment_style", "levels", "child_notes")}},
-        ensure_ascii=False, indent=1))
+    report = {"written": [os.path.join(out, "profile.json"), md_path], "summary": {
+        k: prof[k] for k in ("annotations_analysed", "language", "types", "comment_rate", "comment_len_median", "comment_style", "levels", "child_notes")}}
+    if migrated:
+        report["migrated_from"] = migrated
+    print(json.dumps(report, ensure_ascii=False, indent=1))
 
 
 # ---------------------------------------------------------------------------
