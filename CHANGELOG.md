@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.0 (2026-08-28)
 
 Initial public version.
 
@@ -12,6 +12,7 @@ Initial public version.
   profile draft to be completed by the agent together with the user.
 - Backends: the official local API of Zotero 10 and later (no plugin required), the
   `scholium-bridge` plugin for Zotero 7 to 9, and a Run-JavaScript file as a last resort.
+- The `scholium-bridge` plugin carries the project's version number.
 - Repeated runs replace only annotations tagged `zotero-scholium` (or with identical content).
   Existing notes are never deleted; a new version receives a versioned title.
 - Claude Code skill `skills/zotero-scholium`, including a Chinese writing-style guide.
