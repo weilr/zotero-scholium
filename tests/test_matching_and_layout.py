@@ -175,11 +175,46 @@ def test_merge_profile_keeps_interpretation_and_user_rules():
     assert merged.count(cli.USER_RULES_MARK) == 1 and merged.count(cli.INTERPRETATION_MARK) == 1
 
 
+_TEXT_ANN = {"type": "text", "color": "#1a73e8", "comment": "hi", "pageLabel": "1",
+             "sortIndex": "00000|000000|00001", "position": {"pageIndex": 0, "rects": [[1, 2, 3, 4]], "fontSize": 8, "rotation": 0}}
+
+
 def test_render_js_is_self_contained(tmp_path):
-    cfg = dict(cli.DEFAULTS); cfg.update({"item_key": "I", "attachment_key": "A", "author": "bot"})
-    js = cli.render_js(cfg, [{"type": "text", "color": "#1a73e8", "comment": "hi", "pageLabel": "1",
-                              "sortIndex": "00000|000000|00001", "position": {"pageIndex": 0, "rects": [[1, 2, 3, 4]], "fontSize": 8, "rotation": 0}}])
+    cfg = dict(cli.DEFAULTS); cfg.update({"item_key": "I", "attachment_key": "A"})
+    js = cli.render_js(cfg, [_TEXT_ANN])
     assert "Zotero.Items.getByLibraryAndKey" in js and json.dumps(cli.TAG) in js
+    assert "annotationAuthorName" not in js, "the JavaScript backend writes no author name"
+
+
+def test_author_key_is_rejected(tmp_path):
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"pdf": "x.pdf", "item_key": "I", "attachment_key": "A", "out_dir": "o", "author": ""}), encoding="utf8")
+    with pytest.raises(SystemExit, match="author"):
+        cli.main(["--config", str(cfg)])
+
+
+class _FakeApi:
+    def __init__(self):
+        self.created = []
+
+    def children(self, key, item_type=None):
+        return []
+
+    def delete(self, keys):
+        return len(keys)
+
+    def create(self, items):
+        self.created.extend(items)
+        return [f"K{i}" for i in range(len(items))], []
+
+
+def test_api_apply_writes_no_author_name():
+    cfg = dict(cli.DEFAULTS); cfg.update({"item_key": "I", "attachment_key": "A"})
+    api = _FakeApi()
+    res = cli.api_apply(cfg, [_TEXT_ANN], api)
+    assert res["ok"] and len(api.created) == 1
+    assert all("annotationAuthorName" not in it for it in api.created)
+    assert "author" not in cli.DEFAULTS
 
 
 def test_check_translations_flags_added_content_and_accepts_faithful_translation():

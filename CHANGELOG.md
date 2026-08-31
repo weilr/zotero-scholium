@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The `author` configuration key is removed: no author name is written, and repeated runs identify
+  earlier annotations by tag and identical content only.
+
 ## 0.1.0 (2026-08-28)
 
 Initial public version.

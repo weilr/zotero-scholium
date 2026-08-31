@@ -48,10 +48,9 @@ editable, are synchronised as data, and leave the PDF file untouched.
 
 Every annotation and note created by the tool carries the tag `zotero-scholium`. Earlier versions
 used the tags `zotero-marginalia` and `zotero-paper-annotate`; all three are recognised. On a repeated run the tool deletes only
-annotations that carry one of these tags, that have the configured author name, or whose text or
-comment is identical to something about to be created. Existing child notes are never deleted; if a
-note with the same title prefix exists, the new note receives a versioned title
-(`… (v2, 2026-08-26)`).
+annotations that carry one of these tags or whose text or comment is identical to something about to
+be created. Existing child notes are never deleted; if a note with the same title prefix exists, the
+new note receives a versioned title (`… (v2, 2026-08-26)`).
 
 ## Margin layout
 

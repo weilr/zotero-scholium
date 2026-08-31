@@ -184,7 +184,6 @@ pip install .                            # provides the `scholium` command
 | `summaries[]` | | `page`, `anchor` (a unique phrase locating the paragraph), `text` (without hard line breaks); optional `place` (`"top"` or `"bottom"`: a box across the text column at that end of the page, no anchor needed), `side` (`"left"`, `"right"`), `color`, `font_size`, `kind: "note"` (sticky note) |
 | `levels` | | named colours, e.g. `{"claim": "#ff6666", "term": "#ffd400"}` |
 | `note_html`, `note_title_prefix` | | HTML file of the child note; the prefix identifies an existing note with the same title |
-| `author` | | `annotationAuthorName` shown in the reader (default: empty) |
 | `core_color`, `other_color`, `text_color` | | defaults `#ff6666`, `#ffd400`, `#1a73e8` |
 | `font_size` | | font size of margin text in points (default 8) |
 | `margin_side` | | `auto` (default: the paragraph's side, or the wider margin), `left`, or `right` |
@@ -226,7 +225,7 @@ Annotations created by the tool are excluded from the statistics, so the profile
 ## Safety model
 
 - The PDF is opened read-only and is never written to.
-- Every annotation and note created by the tool carries the tag `zotero-scholium`. A re-run deletes only annotations that carry this tag, that have the configured author name, or whose content is identical to what is about to be created.
+- Every annotation and note created by the tool carries the tag `zotero-scholium`. A re-run deletes only annotations that carry this tag or whose content is identical to what is about to be created.
 - Existing child notes are never deleted. If a note with the same title exists, the new note receives a versioned title of the form `Title (v2, YYYY-MM-DD)`.
 - Annotations imported from the PDF file (shown as locked, "external" annotations) are left in place unless `cleanup_external` is enabled.
 - Local API keys and plugin tokens are stored locally and are excluded from version control.

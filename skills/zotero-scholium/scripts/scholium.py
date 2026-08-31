@@ -33,7 +33,6 @@ APP_NAME = "zotero-scholium"
 BASE = "http://127.0.0.1:23119"
 
 DEFAULTS = {
-    "author": "",               # annotationAuthorName shown in the reader; empty: annotations appear as the user's own
     "levels": {},               # named colour levels, e.g. {"claim": "#ff6666", "method": "#ffd400"}; referenced by "level" in highlights
     "core_color": "#ff6666",    # legacy two-level scheme: highlights carrying "core": true/false
     "other_color": "#ffd400",
@@ -721,16 +720,15 @@ def api_list(cfg, api):
 
 
 def api_apply(cfg, out, api):
-    author = cfg["author"]
     mine_content = set(a["comment"] for a in out) | set(a["text"] for a in out if a.get("text"))
-    # (0) cleanup: only annotations carrying the tool's tag, the configured author name, or identical content;
+    # (0) cleanup: only annotations carrying the tool's tag or identical content;
     #     skipped entirely with "cleanup": false
     rows = api.children(cfg["attachment_key"], "annotation") if cfg.get("cleanup", True) else []
     to_delete, kept = [], 0
     for r in rows:
         d = r["data"]
         tags = {t["tag"] for t in d.get("tags", [])}
-        mine = bool(tags & OWN_TAGS) or (author and d.get("annotationAuthorName") == author) or \
+        mine = bool(tags & OWN_TAGS) or \
                (d.get("annotationComment") or "") in mine_content or (d.get("annotationText") or "") in mine_content
         if mine:
             to_delete.append(r["key"])
@@ -758,8 +756,6 @@ def api_apply(cfg, out, api):
               "annotationComment": a.get("comment", ""), "annotationColor": a["color"],
               "annotationPageLabel": a["pageLabel"], "annotationSortIndex": a["sortIndex"],
               "annotationPosition": json.dumps(a["position"]), "tags": [{"tag": TAG}]}
-        if author:
-            it["annotationAuthorName"] = author
         if a["type"] in ("highlight", "underline"):
             it["annotationText"] = a.get("text", "")
         items.append(it)
@@ -884,7 +880,7 @@ def bridge_apply(cfg, out):
         lst, _ = bridge_list(cfg)
         if lst:
             html, prefix = version_note(html, prefix, [n["title"] for n in lst.get("notes", [])])
-    payload = {"itemKey": cfg["item_key"], "attachmentKey": cfg["attachment_key"], "author": cfg["author"],
+    payload = {"itemKey": cfg["item_key"], "attachmentKey": cfg["attachment_key"],
                "cleanup": bool(cfg.get("cleanup", True)), "cleanupExternal": bool(cfg.get("cleanup_external")), "tag": TAG, "legacyTags": sorted(LEGACY_TAGS), "annotations": out,
                "note": {"html": html, "titlePrefix": prefix, "replace": bool(cfg.get("note_replace", False))} if html else None}
     s, h, t = http("POST", "/scholium-bridge/apply", payload, {"X-Annotate-Token": token}, timeout=180)
@@ -905,10 +901,10 @@ def render_js(cfg, out):
     return f"""// Usage: in Zotero, open Tools -> Developer -> Run JavaScript, enable "Run as async function",
 // paste the entire content of this file, and click Run.
 // Effect (all changes are made in the Zotero database; the PDF file is not modified):
-//   (0) {'delete annotations previously created by this tool on the attachment (tag "' + TAG + '", author "' + cfg['author'] + '", or identical content);' if cfg.get('cleanup', True) else 'keep every existing annotation (cleanup disabled);'}
+//   (0) {'delete annotations previously created by this tool on the attachment (tag "' + TAG + '" or identical content);' if cfg.get('cleanup', True) else 'keep every existing annotation (cleanup disabled);'}
 //   (1) {"create a child note (if a note with the same title exists, the new note receives a versioned title; no note is deleted);" if html else "(no child note in this run)"}
 //   (2) create {n_h} highlight/underline annotations and {n_t} margin text annotations.
-var ITEM_KEY = {json.dumps(cfg['item_key'])}, ATT_KEY = {json.dumps(cfg['attachment_key'])}, AUTHOR = {json.dumps(cfg['author'])}, TAG = {json.dumps(TAG)};
+var ITEM_KEY = {json.dumps(cfg['item_key'])}, ATT_KEY = {json.dumps(cfg['attachment_key'])}, TAG = {json.dumps(TAG)};
 var OWN_TAGS = {json.dumps(sorted(OWN_TAGS))};
 var CLEANUP = {json.dumps(bool(cfg.get('cleanup', True)))};
 var NOTE_HTML = {json.dumps(html, ensure_ascii=False)};
@@ -925,7 +921,7 @@ var MINE = new Set(ANNOTATIONS.map(a => a.comment).concat(ANNOTATIONS.filter(a =
 var removed = 0, kept = 0;
 for (let a of (CLEANUP ? att.getAnnotations(true) : [])) {{
   let tags = a.getTags().map(t => t.tag);
-  let mine = tags.some(t => OWN_TAGS.includes(t)) || (AUTHOR && a.annotationAuthorName === AUTHOR) ||
+  let mine = tags.some(t => OWN_TAGS.includes(t)) ||
              MINE.has(a.annotationComment) || (a.annotationText && MINE.has(a.annotationText));
   if (mine) {{ await a.eraseTx(); removed++; }} else {{ kept++; }}
 }}
@@ -957,7 +953,6 @@ await Zotero.DB.executeTransaction(async function () {{
     let type = a.type;
     try {{ ann.annotationType = type; }}
     catch (e) {{ type = "note"; ann.annotationType = type; }}  // Zotero without text annotations: fall back to a sticky note
-    if (AUTHOR) ann.annotationAuthorName = AUTHOR;
     if (type === "highlight") ann.annotationText = a.text;
     ann.annotationComment = a.comment;
     ann.annotationColor = a.color;
@@ -1237,7 +1232,10 @@ def main(argv=None):
                     help="do not read the attachment's existing annotations before laying out margin notes (they may then be overlapped)")
     ap.add_argument("--version", action="version", version=f"scholium {__version__}")
     args = ap.parse_args(argv)
-    cfg = dict(DEFAULTS); cfg.update(json.load(open(args.config, encoding="utf8")))
+    raw = json.load(open(args.config, encoding="utf8"))
+    if "author" in raw:
+        sys.exit("config error: the 'author' key is not supported")
+    cfg = dict(DEFAULTS); cfg.update(raw)
     for k in ("pdf", "item_key", "attachment_key", "out_dir"):
         if not cfg.get(k):
             sys.exit(f"config missing required key: {k}")

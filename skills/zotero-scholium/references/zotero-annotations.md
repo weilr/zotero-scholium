@@ -11,7 +11,7 @@
 | `annotationPageLabel` | page label string, usually the page number. |
 | `annotationSortIndex` | `"ppppp|oooooo|ttttt"`: page index (5 digits), character offset (6 digits, may be 0), distance from the page top in PDF points (5 digits). Affects sidebar ordering only. |
 | `annotationPosition` | JSON string. Highlight: `{"pageIndex":0,"rects":[[x0,y0,x1,y1],…]}`, one rectangle per line. Text: `{"pageIndex":0,"rects":[[x0,y0,x1,y1]],"fontSize":8,"rotation":0}`. Note: one 22×22 rectangle. Coordinates are in PDF user space (origin at the bottom left, y axis upward). PyMuPDF uses a top-left origin: `y_pdf = page.height − y_fitz` when the media box starts at 0. |
-| `annotationAuthorName` | author name shown in the reader. Accepted on write through the local API, but not a reliable ownership marker; use the tag instead. |
+| `annotationAuthorName` | author name shown in the reader. Not set by the tool; the configuration key `author` is not accepted. Ownership is marked by the tag. |
 | `annotationIsExternal` | `true` for annotations Zotero imported from the PDF file (displayed as locked). Not exposed by the local API. |
 | `tags` | `[{"tag": "…"}]`. The tool tags everything it creates with `zotero-scholium`. |
 
@@ -26,7 +26,7 @@ Zotero 10.0 (2026-08-17) added write requests to the local API; Zotero 7 to 9 re
 
 ## scholium-bridge plugin (Zotero 7 to 9)
 
-Endpoints on Zotero's own local server (`http://127.0.0.1:23119`, localhost only): `GET /scholium-bridge/ping`, `POST /scholium-bridge/list {attachmentKey}`, and `POST /scholium-bridge/apply {itemKey, attachmentKey, author, tag, cleanup, cleanupExternal, annotations[], note{html,titlePrefix,replace}}`. The header `X-Annotate-Token` must equal the content of `<Zotero data dir>/scholium-bridge.token`, created on first start. The endpoints accept data only; no code is executed. Installation: Tools → Plugins → gear icon → Install Plugin From File. Note for plugin authors: an endpoint's `init` must take exactly one parameter; otherwise Zotero's server treats it as the legacy callback style and never responds.
+Endpoints on Zotero's own local server (`http://127.0.0.1:23119`, localhost only): `GET /scholium-bridge/ping`, `POST /scholium-bridge/list {attachmentKey}`, and `POST /scholium-bridge/apply {itemKey, attachmentKey, tag, cleanup, cleanupExternal, annotations[], note{html,titlePrefix,replace}}`. The header `X-Annotate-Token` must equal the content of `<Zotero data dir>/scholium-bridge.token`, created on first start. The endpoints accept data only; no code is executed. Installation: Tools → Plugins → gear icon → Install Plugin From File. Note for plugin authors: an endpoint's `init` must take exactly one parameter; otherwise Zotero's server treats it as the legacy callback style and never responds.
 
 ## Routes not used
 

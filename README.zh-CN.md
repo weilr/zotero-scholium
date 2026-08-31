@@ -184,7 +184,6 @@ pip install .                            # 提供 `scholium` 命令
 | `summaries[]` | | `page`、`anchor`（定位段落的唯一短语）、`text`（不含硬换行）；可选 `place`（`"top"` 或 `"bottom"`：横跨正文栏、置于该页顶部或底部的文本框，无需 anchor）、`side`（`"left"`、`"right"`）、`color`、`font_size`、`kind: "note"`（便签） |
 | `levels` | | 命名颜色，例如 `{"claim": "#ff6666", "term": "#ffd400"}` |
 | `note_html`、`note_title_prefix` | | 子笔记的 HTML 文件；前缀用于识别已存在的同名笔记 |
-| `author` | | 阅读器中显示的注释作者名（默认为空） |
 | `core_color`、`other_color`、`text_color` | | 默认 `#ff6666`、`#ffd400`、`#1a73e8` |
 | `font_size` | | 页边文字字号，单位 pt（默认 8） |
 | `margin_side` | | `auto`（默认：段落所在一侧，或较宽的页边）、`left` 或 `right` |
@@ -226,7 +225,7 @@ scholium profile --from-library      # 只读；生成 profile.json 与 profile.
 ## 安全边界
 
 - PDF 以只读方式打开，不会被写入。
-- 工具创建的所有注释与笔记均带有标签 `zotero-scholium`。重复运行时，仅删除带有该标签、署名与配置一致、或内容与本次生成完全相同的注释。
+- 工具创建的所有注释与笔记均带有标签 `zotero-scholium`。重复运行时，仅删除带有该标签、或内容与本次生成完全相同的注释。
 - 已有的子笔记不会被删除。若存在同名笔记，新笔记以"标题 (v2, YYYY-MM-DD)"形式的版本化标题创建。
 - 从 PDF 文件导入的"外部"注释（显示为锁定状态）默认保留，除非启用 `cleanup_external`。
 - 本地 API key 与插件令牌仅保存在本机，不纳入版本控制。

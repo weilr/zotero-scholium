@@ -74,11 +74,10 @@ var ScholiumBridge = {
     if (!att) throw new Error("attachment not found: " + data.attachmentKey);
     const parent = data.itemKey ? Zotero.Items.getByLibraryAndKey(libraryID, data.itemKey)
                                 : (att.parentID ? Zotero.Items.get(att.parentID) : null);
-    const author = data.author || "Claude";
     const anns = Array.isArray(data.annotations) ? data.annotations : [];
     const MINE = new Set(anns.map(a => a.comment).concat(anns.filter(a => a.text).map(a => a.text)));
 
-    // (0) cleanup: annotations tagged or authored by this tool, or with identical content.
+    // (0) cleanup: annotations tagged by this tool or with identical content.
     //     External (PDF-imported, locked) annotations are only removed when data.cleanupExternal is true.
     const tag = data.tag || "";
     const ownTags = new Set([tag].concat(data.legacyTags || []).filter(Boolean));
@@ -86,7 +85,7 @@ var ScholiumBridge = {
     if (data.cleanup !== false) {
       for (const a of att.getAnnotations(true)) {
         const tags = a.getTags().map(t => t.tag);
-        const mine = tags.some(t => ownTags.has(t)) || a.annotationAuthorName === author ||
+        const mine = tags.some(t => ownTags.has(t)) ||
                      (data.cleanupExternal && a.annotationIsExternal) ||
                      MINE.has(a.annotationComment) || (a.annotationText && MINE.has(a.annotationText));
         if (mine) { await a.eraseTx(); removed++; } else { kept++; }
@@ -131,7 +130,6 @@ var ScholiumBridge = {
         let type = a.type;
         try { ann.annotationType = type; }
         catch (e) { type = "note"; ann.annotationType = type; }   // Zotero versions without text annotations
-        ann.annotationAuthorName = author;
         if (type === "highlight" || type === "underline") ann.annotationText = a.text || "";
         ann.annotationComment = a.comment || "";
         ann.annotationColor = a.color || "#ffd400";

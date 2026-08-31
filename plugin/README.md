@@ -18,8 +18,8 @@ which listens on localhost only):
 Requests must carry the header `X-Annotate-Token`, whose value is the content of
 `<Zotero data directory>/scholium-bridge.token`, a random string written by the plugin on first
 start. The endpoints accept **data only**; no code is evaluated. The `apply` endpoint can create
-annotations and notes, and can delete only annotations that carry the tool's tag, its author name, or
-identical content, or, when `cleanupExternal: true` is passed explicitly, annotations that Zotero
+annotations and notes, and can delete only annotations that carry the tool's tag or identical
+content, or, when `cleanupExternal: true` is passed explicitly, annotations that Zotero
 imported from the PDF file.
 
 ## Installation

@@ -137,7 +137,7 @@ The objective is output that reads as a researcher's own notes rather than gener
 
 ## Configuration keys
 
-Required: `pdf`, `item_key`, `attachment_key`, `out_dir`. Content: `highlights[]`, `summaries[]`, `note_html`, `note_title_prefix`. Optional: `author` (default empty), `core_color`, `other_color`, `text_color`, `font_size` (8), `margin_side` (`auto`, `left`, `right`), `summary_kind` (`text`, `note`), `preview_pages`, `data_dir` (bridge backend), `cleanup` (default true: remove the tool's own earlier annotations on the attachment before writing; set false when the user wants every existing annotation kept, and then do not highlight sentences the user already highlighted), `cleanup_external` (bridge backend, default false), `note_replace` (keep `false`; it deletes every child note whose title starts with the prefix). Per `summaries[]` item: `place`, `side`, `color`, `font_size`, `kind`.
+Required: `pdf`, `item_key`, `attachment_key`, `out_dir`. Content: `highlights[]`, `summaries[]`, `note_html`, `note_title_prefix`. Optional: `core_color`, `other_color`, `text_color`, `font_size` (8), `margin_side` (`auto`, `left`, `right`), `summary_kind` (`text`, `note`), `preview_pages`, `data_dir` (bridge backend), `cleanup` (default true: remove the tool's own earlier annotations on the attachment before writing; set false when the user wants every existing annotation kept, and then do not highlight sentences the user already highlighted), `cleanup_external` (bridge backend, default false), `note_replace` (keep `false`; it deletes every child note whose title starts with the prefix). Per `summaries[]` item: `place`, `side`, `color`, `font_size`, `kind`.
 
 ## Known pitfalls
 
