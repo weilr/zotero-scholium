@@ -6,8 +6,7 @@
   "note_title_prefix": "Full title of the paper",
   "out_dir": "out",
   "preview_pages": [
-    1,
-    4
+    1
   ],
   "cleanup": true,
   "highlights": [

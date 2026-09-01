@@ -86,10 +86,10 @@ python <skill dir>/scripts/scholium.py --config <config.json>
 The tool matches the phrases, measures the text columns, lays out the margin boxes (on the paragraph's own side in two-column papers, clear of figures, existing annotations, neighbouring boxes, the header, and the footer), writes `annotations.json` and the fallback `create_annotations.js`, renders `preview_p<N>.png`, and reports `missed`.
 
 - `missed` must be empty. Typical causes: the phrase spans a page break, contains a symbol, or a small-caps word is joined to its neighbour in the extraction (`MODELNAMEoutperforms`); choose a substring that avoids the problem.
-- Open a preview PNG and confirm that the highlights cover the intended sentences and that the margin boxes sit beside their paragraphs. The preview font spaces Latin letters irregularly; Zotero renders the text correctly.
+- The report is the check; do not open the previews by default. Open a preview PNG only when a `layout_warning` cannot be resolved from the report alone, and open only the affected page (the preview font spaces Latin letters irregularly; Zotero renders the text correctly). Keep `preview_pages` at its default `[1]`; add a page only for such an inspection.
 - Review `translation_warnings` in the output. Each entry names a comment that contains terms or numbers absent from the highlighted text, or that is much longer or shorter than the span it translates. Correct the comment or extend the highlight until the list is empty; the only acceptable residue is a unit or format conversion.
 - Check `existing_annotations` in the output. When Zotero was reachable it reports how many existing annotations were read and how many rectangles were avoided; margin notes are then guaranteed not to cover the user's own annotations. If it reports `unavailable`, tell the user that existing annotations could not be taken into account. `layout_warnings` lists boxes for which the margin had no free space; move the summary to a neighbouring paragraph or drop it.
-- A band (`place: "top"` or `"bottom"`) appears in the preview across the text column, above the title, or between the text and the footer (beneath the footer when that gap is too small). A `layout_warning` for it means the page has no free space at that end: shorten the text or move it to the other end of the page.
+- A band (`place: "top"` or `"bottom"`) is laid across the text column, above the title, or between the text and the footer (beneath the footer when that gap is too small). A `layout_warning` for it means the page has no free space at that end: shorten the text or move it to the other end of the page.
 - Confirm that the checksum of the PDF has not changed.
 - Re-read every comment in `annotations.json` against the style checklist before applying.
 
@@ -101,6 +101,10 @@ python <skill dir>/scripts/scholium.py --config <config.json> --apply
 `backend` in the output identifies the channel used; `result` reports the numbers removed and created; `now_in_zotero` is a read-back. Ask the user to close and reopen the PDF. If `applied` is `false`, act on `apply_error` (install the plugin on Zotero 7–9, or fall back to executing the JavaScript file). `--list` reads back annotations and note titles at any time.
 
 Repeated runs are safe: only annotations tagged by the tool (or with identical content) are replaced; the user's own annotations remain; existing notes are never deleted (a new note receives a versioned title). Iterate by editing the configuration and re-applying; do not edit the generated JavaScript by hand.
+
+## Batch runs
+
+Annotate one paper per agent context. For several papers, run one sub-agent (or one fresh session) per paper, pass it only the item key, the attachment key, and the profile location, and have it report a single line back (counts, note title, remaining warnings). Do not start a second paper in a context that has already read one: the whole context is re-sent on every model call, so the cost grows with the square of the number of papers.
 
 ## Customisation
 
@@ -137,7 +141,7 @@ The objective is output that reads as a researcher's own notes rather than gener
 
 ## Configuration keys
 
-Required: `pdf`, `item_key`, `attachment_key`, `out_dir`. Content: `highlights[]`, `summaries[]`, `note_html`, `note_title_prefix`. Optional: `core_color`, `other_color`, `text_color`, `font_size` (8), `margin_side` (`auto`, `left`, `right`), `summary_kind` (`text`, `note`), `preview_pages`, `data_dir` (bridge backend), `cleanup` (default true: remove the tool's own earlier annotations on the attachment before writing; set false when the user wants every existing annotation kept, and then do not highlight sentences the user already highlighted), `cleanup_external` (bridge backend, default false), `note_replace` (keep `false`; it deletes every child note whose title starts with the prefix). Per `summaries[]` item: `place`, `side`, `color`, `font_size`, `kind`.
+Required: `pdf`, `item_key`, `attachment_key`, `out_dir`. Content: `highlights[]`, `summaries[]`, `note_html`, `note_title_prefix`. Optional: `core_color`, `other_color`, `text_color`, `font_size` (8), `margin_side` (`auto`, `left`, `right`), `summary_kind` (`text`, `note`), `preview_pages` (keep the default `[1]`), `data_dir` (bridge backend), `cleanup` (default true: remove the tool's own earlier annotations on the attachment before writing; set false when the user wants every existing annotation kept, and then do not highlight sentences the user already highlighted), `cleanup_external` (bridge backend, default false), `note_replace` (keep `false`; it deletes every child note whose title starts with the prefix). Per `summaries[]` item: `place`, `side`, `color`, `font_size`, `kind`.
 
 ## Known pitfalls
 
