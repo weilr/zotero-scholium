@@ -107,6 +107,8 @@ Repeated runs are safe: only annotations tagged by the tool (or with identical c
 
 Annotate one paper per agent context. For several papers, run one sub-agent (or one fresh session) per paper, pass it only the item key, the attachment key, and the profile location, and have it report a single line back (counts, note title, remaining warnings). Do not start a second paper in a context that has already read one: the whole context is re-sent on every model call, so the cost grows with the square of the number of papers.
 
+First determine whether the request covers one paper or several. One paper is annotated directly. Only when it covers several, ask the user before starting whether to annotate them one after another or with several sub-agents in parallel, and wait for the answer. Sub-agent calls issued in one response run in parallel; one call per response runs them in sequence.
+
 ## Customisation
 
 The user states preferences in conversation or in the `## User's rules (always win)` section of the profile; the assistant translates them into configuration fields. Everything not listed here is content, not layout, and is handled by the profile and the writing rules.

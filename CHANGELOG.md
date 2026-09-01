@@ -4,9 +4,10 @@
 
 - The `author` configuration key is removed: no author name is written, and repeated runs identify
   earlier annotations by tag and identical content only.
-- The skill annotates one paper per agent context (a batch spawns one sub-agent per paper) and
-  relies on the dry-run report instead of preview images; a preview is opened only for a layout
-  warning the report cannot resolve, and `preview_pages` stays at its default `[1]`.
+- The skill annotates one paper per agent context (a batch spawns one sub-agent per paper after
+  asking whether to run them in sequence or in parallel) and relies on the dry-run report instead
+  of preview images; a preview is opened only for a layout warning the report cannot resolve, and
+  `preview_pages` stays at its default `[1]`.
 - `scholium extract` prints the paper's text with page markers, de-hyphenated, without running
   headers, footers, page numbers and the bibliography.
 - A highlight may give just the start and the end of a long span separated by an ellipsis; an
