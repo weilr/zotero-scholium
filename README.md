@@ -164,12 +164,13 @@ pip install .                            # provides the `scholium` command
 3. **Generate, review, and apply.**
 
    ```bash
+   scholium extract --pdf paper.pdf         # the paper's text, page-marked, de-hyphenated, without the bibliography
    scholium --config config.json            # match text, render previews, report unmatched phrases
    scholium --config config.json --apply    # write into Zotero (Zotero 10: confirm the dialog once)
    scholium --config config.json --list     # read back what is currently stored in Zotero
    ```
 
-   The first command writes `annotations.json`, a fallback `create_annotations.js`, and `preview_p<N>.png` for the configured pages, and lists any phrases that could not be located.
+   The first command writes `annotations.json`, a fallback `create_annotations.js`, and `preview_p<N>.png` for the configured pages, and lists any phrases that could not be located, each with the closest passage found on the page.
 
 [`examples/direct_api_example.py`](examples/direct_api_example.py) demonstrates the underlying Zotero 10 local API calls in approximately thirty lines for use in other applications.
 
@@ -180,8 +181,8 @@ pip install .                            # provides the `scholium` command
 | `pdf` | yes | path of the PDF attachment |
 | `item_key`, `attachment_key` | yes | Zotero keys of the parent item and the attachment |
 | `out_dir` | yes | directory for generated files |
-| `highlights[]` | | `page` (1-based), `text` (verbatim), `comment`, and one of `level`, `color`, or the legacy boolean `core`; optional `type: "underline"` |
-| `summaries[]` | | `page`, `anchor` (a unique phrase locating the paragraph), `text` (without hard line breaks); optional `place` (`"top"` or `"bottom"`: a box across the text column at that end of the page, no anchor needed), `side` (`"left"`, `"right"`), `color`, `font_size`, `kind: "note"` (sticky note) |
+| `highlights[]` | | `page` (1-based), `text` (verbatim; a long span may give just its first and last words separated by an ellipsis `…`), `comment`, and one of `level`, `color`, or the legacy boolean `core`; optional `type: "underline"`, `occurrence` (the N-th appearance when the text repeats) |
+| `summaries[]` | | `page`, `anchor` (a unique phrase locating the paragraph), `text` (without hard line breaks); optional `place` (`"top"` or `"bottom"`: a box across the text column at that end of the page, no anchor needed), `side` (`"left"`, `"right"`), `color`, `font_size`, `kind: "note"` (sticky note), `occurrence` |
 | `levels` | | named colours, e.g. `{"claim": "#ff6666", "term": "#ffd400"}` |
 | `note_html`, `note_title_prefix` | | HTML file of the child note; the prefix identifies an existing note with the same title |
 | `core_color`, `other_color`, `text_color` | | defaults `#ff6666`, `#ffd400`, `#1a73e8` |
@@ -189,6 +190,7 @@ pip install .                            # provides the `scholium` command
 | `margin_side` | | `auto` (default: the paragraph's side, or the wider margin), `left`, or `right` |
 | `summary_kind` | | `text` (default: visible margin text) or `note` (sticky notes) |
 | `preview_pages` | | pages rendered as PNG previews (default `[1]`) |
+| `snap` | | accept phrases that match at similarity ≥ 0.95 and report them under `snapped` (default false) |
 | `data_dir` | | Zotero data directory (inferred from the PDF path or Zotero's preferences by default); holds the profile and the bridge token |
 | `cleanup` | | `true` (default): before writing, remove the annotations this tool created earlier on the attachment; `false`: keep every existing annotation and only add new ones |
 | `cleanup_external` | | bridge backend only: also remove annotations imported from the PDF file (default `false`) |

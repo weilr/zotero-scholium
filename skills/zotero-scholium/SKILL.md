@@ -70,11 +70,11 @@ The file is located at `<Zotero data dir>/storage/<ATTACHMENT_KEY>/<filename>`. 
 
 ### 2. Read the entire paper, then write the content
 
-Prefer `storage/<KEY>/.zotero-ft-cache` (Zotero's own text extraction) or PyMuPDF. Read the appendices as well; ablations, failure cases, and engineering details are frequently reported there.
+Run `python <skill dir>/scripts/scholium.py extract --pdf <pdf> --out <out_dir>/text.txt` and read that file once: it carries page markers (`--- p.N ---`), joins hyphenation, and drops running headers, footers and the bibliography, and a phrase copied from it matches in step 3 (`.zotero-ft-cache` and PyMuPDF remain as fallbacks). Read the appendices as well; ablations, failure cases, and engineering details are frequently reported there.
 
 Write a JSON configuration (template: `examples/config.template.json`):
 
-- **highlights**: `page` (1-based), `text` (verbatim; may span lines, since matching ignores whitespace, hyphenation, and ligatures, so text may be pasted from the extraction; avoid mathematical symbols such as ≥ and ×), `core`, and `comment` (the translation). Mark as core: the contributions enumerated in the introduction, the main claim of the abstract, the first quantitative sentence of each results subsection, and the summary sentence of the conclusion. Each sentence is highlighted once; for a sentence that crosses a page break, use only the part on one page.
+- **highlights**: `page` (1-based), `text` (verbatim; may span lines, since matching ignores whitespace, hyphenation, and ligatures, so text may be pasted from the extraction; avoid mathematical symbols such as ≥ and ×; a long span may give just its first and last few words separated by an ellipsis, `Our model achieves … the training costs`, and the tool highlights everything between the anchors; `occurrence: N` picks the N-th appearance when the text repeats on the page), `core`, and `comment` (the translation). Mark as core: the contributions enumerated in the introduction, the main claim of the abstract, the first quantitative sentence of each results subsection, and the summary sentence of the conclusion. Each sentence is highlighted once; for a sentence that crosses a page break, use only the part on one page.
 - **summaries**: `page`, `anchor` (a unique phrase inside the paragraph, used to locate its first line), and `text`. At most one per paragraph; omit paragraphs for which there is nothing substantive to say. Optional per item: `place` (`"top"` or `"bottom"`: a box across the text column at that end of the page, no anchor needed), `side` (`"left"` or `"right"`), `color`, `font_size`, and `kind: "note"` (a sticky note). See Customisation.
 - **note_html**: path of the reading note (template: `examples/reading_note.template.html`).
 
@@ -85,7 +85,8 @@ python <skill dir>/scripts/scholium.py --config <config.json>
 ```
 The tool matches the phrases, measures the text columns, lays out the margin boxes (on the paragraph's own side in two-column papers, clear of figures, existing annotations, neighbouring boxes, the header, and the footer), writes `annotations.json` and the fallback `create_annotations.js`, renders `preview_p<N>.png`, and reports `missed`.
 
-- `missed` must be empty. Typical causes: the phrase spans a page break, contains a symbol, or a small-caps word is joined to its neighbour in the extraction (`MODELNAMEoutperforms`); choose a substring that avoids the problem.
+- `missed` must be empty. Each entry reports the closest passage on the page (`closest`, with `similarity` and sometimes a page `hint`); copy `closest` into the configuration instead of re-reading the paper. Typical causes: the phrase spans a page break, contains a symbol, or a small-caps word is joined to its neighbour in the extraction (`MODELNAMEoutperforms`). With `"snap": true` matches at similarity 0.95 or higher are accepted automatically and listed under `snapped`; check that list.
+- `ambiguous_matches` lists phrases and anchors that occur more than once on their page; the annotation sits at the first occurrence (`used: 1`). To pick another one, set `"occurrence": N` on the item; an explicit occurrence is not warned about.
 - The report is the check; do not open the previews by default. Open a preview PNG only when a `layout_warning` cannot be resolved from the report alone, and open only the affected page (the preview font spaces Latin letters irregularly; Zotero renders the text correctly). Keep `preview_pages` at its default `[1]`; add a page only for such an inspection.
 - Review `translation_warnings` in the output. Each entry names a comment that contains terms or numbers absent from the highlighted text, or that is much longer or shorter than the span it translates. Correct the comment or extend the highlight until the list is empty; the only acceptable residue is a unit or format conversion.
 - Check `existing_annotations` in the output. When Zotero was reachable it reports how many existing annotations were read and how many rectangles were avoided; margin notes are then guaranteed not to cover the user's own annotations. If it reports `unavailable`, tell the user that existing annotations could not be taken into account. `layout_warnings` lists boxes for which the margin had no free space; move the summary to a neighbouring paragraph or drop it.
@@ -130,18 +131,22 @@ The objective is output that reads as a researcher's own notes rather than gener
 
   ```
   As an AI academic expert, translate the following English text to Chinese with native fluency and technical precision. Keep core ML terms (attention, transformer, loss, etc.) and model/dataset names in English. Use standard Chinese translations for established concepts. Make it read naturally for Chinese researchers.
+
   Text: ${sourceText}
+
   Output only the translation.
   ```
 
   The comment contains the translation only: no notes, no alternatives, no source text. Numbers and model names stay unchanged (rewriting a number in the target language's own convention, such as 500k as a native numeral, is acceptable).
 - **Margin notes**: complete sentences; no `label: content` format; no arrows, circled numbers, or bracketed tags. Reactions ("larger than expected"), questions ("why only axis-aligned rotations?"), and cross-references ("inconsistent with the ablation on p. 8?") are appropriate. Leave a paragraph without a note rather than write filler. Usually 15–40 words.
+- **Mathematics**: in highlight comments and margin texts, write mathematics with Unicode symbols and `<sub>`/`<sup>` (`d<sub>k</sub>`, `x<sup>2</sup>`, √, ×, ≤, α); the reader renders only the tags `<b> <i> <sub> <sup>`, and raw LaTeX stays visible as source. In the reading note use the note editor's math nodes, rendered with KaTeX: `<span class="math">$d_k$</span>` inline, `<pre class="math">$$…$$</pre>` for a display equation.
+
 - **Reading note**: paragraphs rather than bullet lists with bold labels; concrete figures; first-person assessments and unresolved questions; limitations in the authors' words together with the reader's own; the full citation and code link at the end, without a sign-off line. Vary sentence length. Avoid stock phrases ("it is worth noting", "not only … but also", "marks a milestone"), em-dash asides, emoji, and aphoristic closing sentences.
 - Before applying, review every comment: label-colon notes, symbols, stock phrases, and the absence of any judgement of the reader's own are all defects to be corrected first.
 
 ## Configuration keys
 
-Required: `pdf`, `item_key`, `attachment_key`, `out_dir`. Content: `highlights[]`, `summaries[]`, `note_html`, `note_title_prefix`. Optional: `core_color`, `other_color`, `text_color`, `font_size` (8), `margin_side` (`auto`, `left`, `right`), `summary_kind` (`text`, `note`), `preview_pages` (keep the default `[1]`), `data_dir` (bridge backend), `cleanup` (default true: remove the tool's own earlier annotations on the attachment before writing; set false when the user wants every existing annotation kept, and then do not highlight sentences the user already highlighted), `cleanup_external` (bridge backend, default false), `note_replace` (keep `false`; it deletes every child note whose title starts with the prefix). Per `summaries[]` item: `place`, `side`, `color`, `font_size`, `kind`.
+Required: `pdf`, `item_key`, `attachment_key`, `out_dir`. Content: `highlights[]`, `summaries[]`, `note_html`, `note_title_prefix`. Optional: `core_color`, `other_color`, `text_color`, `font_size` (8), `margin_side` (`auto`, `left`, `right`), `summary_kind` (`text`, `note`), `preview_pages` (keep the default `[1]`), `snap` (default false: accept phrases matching at similarity ≥ 0.95, reported under `snapped`), `data_dir` (bridge backend), `cleanup` (default true: remove the tool's own earlier annotations on the attachment before writing; set false when the user wants every existing annotation kept, and then do not highlight sentences the user already highlighted), `cleanup_external` (bridge backend, default false), `note_replace` (keep `false`; it deletes every child note whose title starts with the prefix). Per `summaries[]` item: `place`, `side`, `color`, `font_size`, `kind`, `occurrence`; per `highlights[]` item: `occurrence`.
 
 ## Known pitfalls
 

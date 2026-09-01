@@ -164,12 +164,13 @@ pip install .                            # 提供 `scholium` 命令
 3. **生成、检查、写入。**
 
    ```bash
+   scholium extract --pdf paper.pdf         # 论文全文，带页码标记、合并断字、去参考文献
    scholium --config config.json            # 匹配原文，渲染预览，报告未匹配的句子
    scholium --config config.json --apply    # 写入 Zotero（Zotero 10 首次运行需确认授权对话框）
    scholium --config config.json --list     # 读取当前库中已有的注释与笔记
    ```
 
-   第一条命令生成 `annotations.json`、备用的 `create_annotations.js` 以及所配置页面的 `preview_p<N>.png`，并列出无法定位的短语。
+   第一条命令生成 `annotations.json`、备用的 `create_annotations.js` 以及所配置页面的 `preview_p<N>.png`，并列出无法定位的短语，以及该页上找到的最接近原句。
 
 [本地 API 调用示例](examples/direct_api_example.py)（`examples/direct_api_example.py`）以约三十行代码演示了 Zotero 10 本地 API 的基本调用，可用于其他应用。
 
@@ -180,8 +181,8 @@ pip install .                            # 提供 `scholium` 命令
 | `pdf` | 是 | PDF 附件路径 |
 | `item_key`、`attachment_key` | 是 | 父条目与附件的 Zotero key |
 | `out_dir` | 是 | 生成文件的输出目录 |
-| `highlights[]` | | `page`（从 1 起）、`text`（逐字原文）、`comment`，以及 `level`、`color`、旧式布尔值 `core` 三者之一；可选 `type: "underline"` |
-| `summaries[]` | | `page`、`anchor`（定位段落的唯一短语）、`text`（不含硬换行）；可选 `place`（`"top"` 或 `"bottom"`：横跨正文栏、置于该页顶部或底部的文本框，无需 anchor）、`side`（`"left"`、`"right"`）、`color`、`font_size`、`kind: "note"`（便签） |
+| `highlights[]` | | `page`（从 1 起）、`text`（逐字原文；长句可只写首尾几词、中间用省略号 `…`）、`comment`，以及 `level`、`color`、旧式布尔值 `core` 三者之一；可选 `type: "underline"`、`occurrence`（原文重复时指定第几处） |
+| `summaries[]` | | `page`、`anchor`（定位段落的唯一短语）、`text`（不含硬换行）；可选 `place`（`"top"` 或 `"bottom"`：横跨正文栏、置于该页顶部或底部的文本框，无需 anchor）、`side`（`"left"`、`"right"`）、`color`、`font_size`、`kind: "note"`（便签）、`occurrence` |
 | `levels` | | 命名颜色，例如 `{"claim": "#ff6666", "term": "#ffd400"}` |
 | `note_html`、`note_title_prefix` | | 子笔记的 HTML 文件；前缀用于识别已存在的同名笔记 |
 | `core_color`、`other_color`、`text_color` | | 默认 `#ff6666`、`#ffd400`、`#1a73e8` |
@@ -189,6 +190,7 @@ pip install .                            # 提供 `scholium` 命令
 | `margin_side` | | `auto`（默认：段落所在一侧，或较宽的页边）、`left` 或 `right` |
 | `summary_kind` | | `text`（默认：可见的页边文字）或 `note`（便签） |
 | `preview_pages` | | 渲染为 PNG 预览的页码（默认 `[1]`） |
+| `snap` | | 相似度 ≥ 0.95 的短语自动采用并报告在 `snapped`（默认 false） |
 | `data_dir` | | Zotero 数据目录（默认从 PDF 路径或 Zotero 首选项推断）；存放画像与 bridge 令牌 |
 | `cleanup` | | `true`（默认）：写入前删除本工具此前在该附件上创建的注释；`false`：保留全部已有注释，只新增 |
 | `cleanup_external` | | 仅 bridge 通道：同时清理从 PDF 文件导入的注释（默认 `false`） |

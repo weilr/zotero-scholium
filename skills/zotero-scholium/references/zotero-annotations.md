@@ -28,6 +28,8 @@ Zotero 10.0 (2026-08-17) added write requests to the local API; Zotero 7 to 9 re
 
 Endpoints on Zotero's own local server (`http://127.0.0.1:23119`, localhost only): `GET /scholium-bridge/ping`, `POST /scholium-bridge/list {attachmentKey}`, and `POST /scholium-bridge/apply {itemKey, attachmentKey, tag, cleanup, cleanupExternal, annotations[], note{html,titlePrefix,replace}}`. The header `X-Annotate-Token` must equal the content of `<Zotero data dir>/scholium-bridge.token`, created on first start. The endpoints accept data only; no code is executed. Installation: Tools → Plugins → gear icon → Install Plugin From File. Note for plugin authors: an endpoint's `init` must take exactly one parameter; otherwise Zotero's server treats it as the legacy callback style and never responds.
 
+Rich text and mathematics: `annotationComment` and `annotationText` render only `<b> <i> <sub> <sup>`; write mathematics in comments with Unicode symbols and these tags. Note HTML renders mathematics through the note editor's KaTeX nodes: `<span class="math">$…$</span>` inline, `<pre class="math">$$…$$</pre>` for display equations.
+
 ## Routes not used
 
 - Writing annotations into the PDF: they become external, locked annotations in Zotero, are stored in the database with an empty author, and the file is re-uploaded on synchronisation. Restoring the file leaves the locked copies in place, producing duplicates.

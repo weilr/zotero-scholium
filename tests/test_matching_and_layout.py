@@ -361,7 +361,7 @@ def test_normalise_summary_resolves_defaults_from_cfg():
     sp = cli.normalise_summary({"page": 1, "anchor": "a phrase", "text": "note"}, _cfg(font_size=9, text_color="#123456"),
                                [(612.0, 792.0)])
     assert sp == {"page": 0, "text": "note", "place": "margin", "side": "auto", "kind": "text", "color": "#123456",
-                  "font_size": 9.0, "rect": None, "anchor": "a phrase"}
+                  "font_size": 9.0, "rect": None, "anchor": "a phrase", "occurrence": None}
     sp = cli.normalise_summary({"page": 1, "place": "top", "text": "band", "color": "#ff0000", "font_size": 10, "side": "left"},
                                _cfg(margin_side="right", summary_kind="text"), [(612.0, 792.0)])
     assert sp["place"] == "top" and sp["anchor"] is None and sp["side"] == "left" and sp["color"] == "#ff0000" and sp["font_size"] == 10.0
@@ -615,3 +615,101 @@ def test_profile_markdown_renders_layout_lines():
     assert "page-top notes on 50%" in md and "margin side: right" in md and "9.0 pt" in md
     assert "- page-top summary: ___" in md and "- margin side: ___" in md and "- sticky notes instead of margin text: ___" in md
     assert "top of page 1" in cli.USER_RULES_TEMPLATE
+
+
+def test_match_range_ellipsis(pdf_path):
+    doc = pymupdf.open(pdf_path)
+    pi = cli.PageIndex(doc[0])
+    ws, reason = pi.match_range("Data heterogeneity and unstable", "diverse dynamics")
+    assert reason is None
+    text = " ".join(w[4] for w in ws)
+    assert text.startswith("Data heterogeneity") and text.endswith("diverse dynamics.")
+    assert pi.match_range("Data", "dynamics")[0] is None, "anchors of a word or two are refused"
+    assert pi.match_range("diverse dynamics", "Data heterogeneity")[0] is None, "end before start"
+    ws, reason = pi.match_range("learning", "dynamics")
+    assert ws is None and "spans" in reason, "ambiguous anchors are refused with the span count"
+    ws, reason = pi.match_range("learning", "dynamics", occurrence=1)
+    assert reason is None and ws, "an explicit occurrence selects among ambiguous spans"
+    assert pi.match_range("learning", "dynamics", occurrence=9)[0] is None
+
+
+def test_ellipsis_span_in_build(pdf_path, tmp_path):
+    cfg = dict(cli.DEFAULTS)
+    cfg.update({"pdf": pdf_path, "item_key": "I", "attachment_key": "A", "out_dir": str(tmp_path),
+                "preview_pages": [], "highlights": [
+                    {"page": 1, "core": True, "text": "Foundation models have transformed … remains a challenge", "comment": "x"}]})
+    out, missed = cli.build(cfg)
+    assert not missed and out[0]["text"].startswith("Foundation models") and out[0]["text"].endswith("remains a challenge.")
+
+
+def test_missed_reports_closest_and_snap(pdf_path, tmp_path):
+    base = {"pdf": pdf_path, "item_key": "I", "attachment_key": "A", "out_dir": str(tmp_path), "preview_pages": []}
+    typo = "Data heterogenity and unstable long-term dynamics inhibit learning"  # missing an 'e'
+    cfg = dict(cli.DEFAULTS); cfg.update(base); cfg["highlights"] = [{"page": 1, "text": typo, "comment": "x"}]
+    out, missed = cli.build(cfg)
+    assert not out and len(missed) == 1
+    assert missed[0]["similarity"] >= 0.9 and "heterogeneity" in missed[0]["closest"]
+    cfg = dict(cli.DEFAULTS); cfg.update(base, snap=True); cfg["highlights"] = [{"page": 1, "text": typo, "comment": "x"}]
+    out, missed = cli.build(cfg)
+    assert not missed and out[0]["snapped"] >= 0.95 and "heterogeneity" in out[0]["text"]
+
+
+def test_translation_check_ignores_math_tags_and_hyphen_halves():
+    anns = [
+        {"type": "highlight", "text": "the scatter- add operation", "comment": "scatter-add 操作", "pageLabel": "1"},
+        {"type": "highlight", "text": "attention weights", "comment": "注意力权重 $\\frac{1}{\\sqrt{d_k}}$ 与 d<sub>k</sub>", "pageLabel": "1"},
+        {"type": "highlight", "text": "the model uses attention", "comment": "该模型用 attention，另外还讨论了 diffusion", "pageLabel": "1"},
+    ]
+    ws = cli.check_translations(anns)
+    assert len(ws) == 1 and "diffusion" in ws[0]["reasons"][0]
+
+
+def test_extract_text_dehyphenates_pages_and_cuts_references(tmp_path):
+    doc = pymupdf.open()
+    for pno in range(3):
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((250, 30), "Running Head Journal", fontsize=9)
+        if pno == 0:
+            page.insert_textbox(pymupdf.Rect(72, 100, 132, 300), "stabili- zation", fontsize=10, fontname="helv")
+        elif pno == 1:
+            page.insert_text((72, 120), "Second page body text.", fontsize=10)
+        else:
+            page.insert_text((72, 100), "References", fontsize=12)
+            page.insert_text((72, 130), "[1] A. Vaswani, Attention is all you need. NeurIPS, 2017.", fontsize=9)
+            page.insert_text((72, 160), "Appendix A Results", fontsize=12)
+            page.insert_text((72, 190), "Extra ablation details.", fontsize=10)
+        page.insert_text((300, 770), str(pno + 1), fontsize=9)
+    fp = tmp_path / "extract.pdf"; doc.save(str(fp)); doc.close()
+    text = cli.extract_text(str(fp))
+    assert "--- p.1 ---" in text and "--- p.2 ---" in text and "--- p.3 ---" in text
+    assert "stabilization" in text, "hyphenation across the line break is joined"
+    assert "Running Head" not in text, "the running header is dropped"
+    assert "[references removed]" in text and "Vaswani" not in text
+    assert "Appendix A Results" in text and "Extra ablation details." in text
+
+
+def test_duplicate_sentence_reports_occurrences(tmp_path):
+    doc = pymupdf.open(); page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 100), "The same sentence appears here.", fontsize=10)
+    page.insert_text((72, 140), "Unrelated middle text for the anchor paragraph.", fontsize=10)
+    page.insert_text((72, 180), "The same sentence appears here.", fontsize=10)
+    fp = tmp_path / "dup.pdf"; doc.save(str(fp)); doc.close()
+    cfg = dict(cli.DEFAULTS)
+    cfg.update({"pdf": str(fp), "item_key": "I", "attachment_key": "A", "out_dir": str(tmp_path), "preview_pages": [],
+                "highlights": [{"page": 1, "text": "The same sentence appears here.", "comment": "x"}],
+                "summaries": [{"page": 1, "anchor": "Unrelated middle text", "text": "note"}]})
+    out, missed = cli.build(cfg)
+    assert not missed
+    hl = [a for a in out if a["type"] == "highlight"][0]
+    assert hl["occurrences"] == 2, "a duplicated sentence is flagged"
+    assert hl["position"]["rects"][0][1] > 650, "the first occurrence (higher on the page) is highlighted"
+    tx = [a for a in out if a["type"] == "text"][0]
+    assert "occurrences" not in tx, "a unique anchor is not flagged"
+    cfg["highlights"] = [{"page": 1, "text": "The same sentence appears here.", "comment": "x", "occurrence": 2}]
+    out, missed = cli.build(cfg)
+    hl = [a for a in out if a["type"] == "highlight"][0]
+    assert not missed and "occurrences" not in hl, "an explicit occurrence is not warned about"
+    assert hl["position"]["rects"][0][1] < 650, "occurrence 2 highlights the lower instance"
+    cfg["highlights"] = [{"page": 1, "text": "The same sentence appears here.", "comment": "x", "occurrence": 3}]
+    out, missed = cli.build(cfg)
+    assert missed and "occurs 2 time" in missed[0]["reason"]

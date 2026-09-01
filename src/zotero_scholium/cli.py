@@ -17,10 +17,11 @@ Backends (--backend auto selects the first available one):
 
 Requires: pip install pymupdf
 Usage:    scholium --config config.json [--apply] [--list] [--backend auto|api|bridge|js]
+          scholium extract --pdf paper.pdf
           scholium profile --from-library
 """
 import argparse
-import glob, json, os, sys, re, datetime, collections
+import difflib, glob, json, os, sys, re, datetime, collections
 import urllib.request, urllib.error
 import pymupdf
 
@@ -54,6 +55,9 @@ DEFAULTS = {
 # Text matching and layout (the PDF is only read)
 # ---------------------------------------------------------------------------
 LIG = {"ﬁ": "fi", "ﬂ": "fl", "ﬀ": "ff", "ﬃ": "ffi", "ﬄ": "ffl", "’": "'", "‘": "'", "“": '"', "”": '"'}
+TAG_RE = re.compile(r"</?[a-zA-Z][^>]*>")     # the reader accepts <b> <i> <sub> <sup> in comments
+MATH_RE = re.compile(r"\$\$[^$]*\$\$|\$[^$\n]+\$|\\\([^()]*\\\)|\\[a-zA-Z]+")
+SPAN_SEP = re.compile(r"\s*(?:…|\.\.\.)\s*")  # separates the start and end anchors of a highlight span
 
 
 def norm_str(s):
@@ -92,13 +96,64 @@ class PageIndex:
         crossing = sum(1 for w in body if w[0] < mid - 6 and w[2] > mid + 6)
         self.two_col = crossing < max(3, len(body) * 0.02)
 
-    def match(self, phrase):
+    def match(self, phrase, occurrence=1):
+        """Words of the `occurrence`-th appearance (1-based) of the phrase on the page."""
         key = norm_str(phrase)
-        pos = self.text.find(key)
-        if pos < 0:
-            return None
+        pos, start = -1, 0
+        for _ in range(max(1, occurrence)):
+            pos = self.text.find(key, start)
+            if pos < 0:
+                return None
+            start = pos + max(1, len(key))
         idxs = sorted(set(self.wmap[pos:pos + len(key)]))
         return [self.words[i] for i in idxs]
+
+    def count(self, phrase):
+        """Occurrences of the normalised phrase on the page; more than one means the match is ambiguous."""
+        key = norm_str(phrase)
+        return self.text.count(key) if key else 0
+
+    def match_range(self, start, end, max_span=1200, occurrence=None):
+        """Words from an occurrence of `start` to the following occurrence of `end`, both inclusive.
+        Returns (words, reason); on failure words is None and reason says why."""
+        a, b = norm_str(start), norm_str(end)
+        if len(a) < 8 or len(b) < 8:
+            return None, "each side of the ellipsis needs a few words"
+        spans, i = [], self.text.find(a)
+        while i >= 0:
+            j = self.text.find(b, i + len(a))
+            if j >= 0 and j + len(b) - i <= max_span:
+                spans.append((i, j + len(b)))
+            i = self.text.find(a, i + 1)
+        distinct = sorted(set(spans))
+        if not distinct:
+            return None, "start or end phrase not found on the page (or the span is longer than ~200 words)"
+        if occurrence:
+            if len(distinct) < occurrence:
+                return None, f"occurrence {occurrence} requested but only {len(distinct)} span(s) found on the page"
+            s0, s1 = distinct[occurrence - 1]
+        elif len(distinct) > 1:
+            return None, f'{len(distinct)} possible spans on the page; make the anchors more specific or set "occurrence"'
+        else:
+            s0, s1 = distinct[0]
+        idxs = sorted(set(self.wmap[s0:s1]))
+        return [self.words[i] for i in idxs], None
+
+    def closest(self, phrase):
+        """Best fuzzy window on this page for a phrase that did not match exactly: (words, similarity)."""
+        key = norm_str(phrase)
+        if not key or not self.text:
+            return None, 0.0
+        sm = difflib.SequenceMatcher(None, self.text, key, autojunk=False)
+        m = sm.find_longest_match(0, len(self.text), 0, len(key))
+        if not m.size:
+            return None, 0.0
+        start = max(0, m.a - m.b)
+        ratio = difflib.SequenceMatcher(None, self.text[start:start + len(key)], key, autojunk=False).ratio()
+        idxs = sorted(set(self.wmap[start:start + len(key)]))
+        if not idxs:
+            return None, 0.0
+        return [self.words[i] for i in idxs], ratio
 
     @staticmethod
     def line_rects(ws):
@@ -269,7 +324,8 @@ def normalise_summary(item, cfg, page_sizes):
     if rect is None and (place == "margin" or kind == "note") and not anchor:
         raise ValueError("anchor is required for margin placement and for sticky notes")
     return {"page": page, "text": text, "place": place, "side": side, "kind": kind, "color": color,
-            "font_size": font_size, "rect": rect, "anchor": anchor}
+            "font_size": font_size, "rect": rect, "anchor": anchor,
+            "occurrence": int(item.get("occurrence") or 0) or None}
 
 
 OBSTACLE_TYPES = ("text", "note", "image", "ink")
@@ -347,7 +403,8 @@ def place_blocks(blocks, occupied, floor, ceiling, gap=3.0):
 def _box_height(sp, width):
     if sp["kind"] == "note":
         return NOTE_ICON
-    return len(wrap(sp["text"], width - 3, sp["font_size"])) * sp["font_size"] * 1.5 + 6
+    text = TAG_RE.sub("", sp["text"])   # <sub>/<sup> tags take no width in the reader
+    return len(wrap(text, width - 3, sp["font_size"])) * sp["font_size"] * 1.5 + 6
 
 
 def _intersects(rect, rects):
@@ -365,6 +422,8 @@ def _summary_annotation(pi, sp, rect, warning=None):
         ann["position"]["rotation"] = 0
     if warning:
         ann["layout_warning"] = warning
+    if sp.get("occurrences"):
+        ann["occurrences"] = sp["occurrences"]
     return ann
 
 
@@ -413,9 +472,18 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
     # 3. margin boxes and sticky notes beside their anchors (a sticky note ignores `place`)
     groups = {}
     for sp in [s for s in specs if not s["rect"] and (s["kind"] == "note" or s["place"] == "margin")]:
-        ws = pi.match(sp["anchor"])
+        occ = sp.get("occurrence")
+        ws = pi.match(sp["anchor"], occ or 1)
         if not ws:
-            missed.append({"kind": "summary", "page": p + 1, "anchor": sp["anchor"]}); continue
+            entry = {"kind": "summary", "page": p + 1, "anchor": sp["anchor"]}
+            if occ:
+                n = pi.count(sp["anchor"])
+                if n:
+                    entry["reason"] = f"occurrence {occ} requested but the anchor occurs {n} time(s) on the page"
+            missed.append(entry); continue
+        n = pi.count(" ".join(w[4] for w in ws))
+        if n > 1 and not occ:                     # the box sits beside the first occurrence
+            sp["occurrences"] = n
         r = pi.line_rects(ws)[0]
         mx0, mx1 = pi.margin_box(r, sp["side"])
         if sp["kind"] == "note":  # the icon hugs the text column
@@ -449,17 +517,51 @@ def build(cfg, obstacles=None):
     for h in cfg.get("highlights", []):
         p = int(h["page"]) - 1
         pi = page_index(p)
-        ws = pi.match(h["text"])
+        occ = int(h.get("occurrence") or 0) or None   # 1-based; None: the first occurrence, ambiguity is reported
+        ws, reason, snapped = pi.match(h["text"], occ or 1), None, None
         if not ws:
-            missed.append({"kind": "highlight", "page": p + 1, "text": h["text"][:60]}); continue
+            parts = [s for s in SPAN_SEP.split(h["text"]) if s]
+            if len(parts) == 2:                      # "first words … last words" selects the span between the anchors
+                ws, reason = pi.match_range(parts[0], parts[1], occurrence=occ)
+            elif len(parts) > 2:
+                reason = "more than one ellipsis in the phrase"
+            if not ws and not reason and occ:
+                n = pi.count(h["text"])
+                if n:
+                    reason = f"occurrence {occ} requested but the phrase occurs {n} time(s) on the page"
+        if not ws:
+            entry = {"kind": "highlight", "page": p + 1, "text": h["text"][:60]}
+            if reason:
+                entry["reason"] = reason
+            best_ws, best_r, best_p = None, 0.0, p
+            for q in (p, p - 1, p + 1):
+                if 0 <= q < len(doc):
+                    cand, r2 = page_index(q).closest(h["text"])
+                    if cand and r2 > best_r:
+                        best_ws, best_r, best_p = cand, r2, q
+            if best_ws:
+                entry["similarity"] = round(best_r, 2)
+                entry["closest"] = " ".join(w[4] for w in best_ws)[:300]
+                if best_p != p:
+                    entry["hint"] = f"the closest passage is on page {best_p + 1}"
+                elif cfg.get("snap") and not occ and best_r >= 0.95:
+                    ws, snapped = best_ws, round(best_r, 2)
+            if not ws:
+                missed.append(entry); continue
         rects = [[round(r.x0, 2), round(pi.H - r.y1, 2), round(r.x1, 2), round(pi.H - r.y0, 2)] for r in pi.line_rects(ws)]
         top = int(round(pi.H - rects[0][3]))
         # colour precedence: explicit "color", then named "level" (resolved through cfg["levels"]), then legacy core/other
         color = h.get("color") or cfg.get("levels", {}).get(h.get("level", ""), None) or \
                 (cfg["core_color"] if h.get("core") else cfg["other_color"])
-        out.append({"type": h.get("type", "highlight") if h.get("type") in ("highlight", "underline") else "highlight",
-                    "color": color, "text": " ".join(w[4] for w in ws), "comment": h.get("comment", ""), "pageLabel": str(p + 1),
-                    "sortIndex": f"{p:05d}|{0:06d}|{top:05d}", "position": {"pageIndex": p, "rects": rects}})
+        ann = {"type": h.get("type", "highlight") if h.get("type") in ("highlight", "underline") else "highlight",
+               "color": color, "text": " ".join(w[4] for w in ws), "comment": h.get("comment", ""), "pageLabel": str(p + 1),
+               "sortIndex": f"{p:05d}|{0:06d}|{top:05d}", "position": {"pageIndex": p, "rects": rects}}
+        if snapped:
+            ann["snapped"] = snapped
+        n = pi.count(ann["text"])
+        if n > 1 and not occ:                     # the first occurrence was highlighted without being asked for
+            ann["occurrences"] = n
+        out.append(ann)
     page_sizes = [(pg.rect.width, pg.rect.height) for pg in doc]
     specs = []
     for s in cfg.get("summaries", []):
@@ -516,10 +618,13 @@ CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
 
 
 def _tokens(s):
-    """Latin words (3+ characters) and numbers, lower-cased; hyphenation across lines is joined first."""
+    """Latin words (3+ characters) and numbers, lower-cased; hyphenation across lines is joined first,
+    and both the joined form and its two halves count as terms."""
     s = "".join(LIG.get(c, c) for c in s)  # expand ligatures so that "preﬁx" and "prefix" are the same term
-    s = re.sub(r"(\w)-\s+(\w)", r"\1\2", s).lower()
     toks = set()
+    for m in re.finditer(r"([A-Za-z]{2,})-\s+([A-Za-z]{2,})", s):
+        toks.update(part.lower() for part in m.groups() if len(part) >= 3)
+    s = re.sub(r"(\w)-\s+(\w)", r"\1\2", s).lower()
     for t in re.findall(r"[a-z0-9]+(?:\.[0-9]+)?", s):
         if len(t) >= 3 or any(c.isdigit() for c in t):
             toks.add(t)
@@ -553,10 +658,11 @@ def check_translations(annotations):
         if a.get("type") not in ("highlight", "underline") or not a.get("comment"):
             continue
         text, comment = a["text"], a["comment"]
+        plain = TAG_RE.sub(" ", MATH_RE.sub(" ", comment))  # rich-text tags and mathematics are display, not content
         text_tokens = _tokens(text)
-        extra = sorted(t for t in _tokens(comment) if not _covered(t, text_tokens))
+        extra = sorted(t for t in _tokens(plain) if not _covered(t, text_tokens))
         words = len(re.findall(r"[A-Za-z]+", text))
-        cjk = len(CJK_RE.findall(comment))
+        cjk = len(CJK_RE.findall(plain))
         reasons = []
         if extra:
             reasons.append("terms or numbers not present in the highlighted text: " + ", ".join(extra))
@@ -593,6 +699,105 @@ def note_title_from_html(html):
 # ---------------------------------------------------------------------------
 # HTTP helper
 # ---------------------------------------------------------------------------
+PAGE_NUM_RE = re.compile(r"^(?:\d{1,4}|[ivxlcdm]{1,7})$", re.I)
+
+
+def extract_text(pdf_path, pages=None, keep_references=False):
+    """The paper's text, page by page, for reading once and for copying highlight phrases from.
+
+    Lines are de-hyphenated and ligatures expanded with the same rules the matcher uses, so a phrase
+    copied from this output matches. Running headers and footers (lines recurring on most pages) and
+    standalone page numbers are dropped; the bibliography between the References heading and the next
+    heading (judged by font size and weight) is replaced by a marker line unless keep_references is set."""
+    doc = pymupdf.open(pdf_path)
+    sel = list(range(len(doc))) if not pages else [p - 1 for p in pages if 1 <= p <= len(doc)]
+    page_rows, weighted = [], []
+    for p in sel:
+        rows = []
+        for bi, block in enumerate(doc[p].get_text("dict").get("blocks", [])):
+            for line in block.get("lines", []):
+                dx, dy = line.get("dir", (1, 0))
+                if abs(dx - 1) > 0.01 or abs(dy) > 0.01:
+                    continue                      # vertical text, e.g. an arXiv stamp in the margin
+                spans = line.get("spans", [])
+                txt = re.sub(r"\s+", " ", "".join(s.get("text", "") for s in spans)).strip()
+                if not txt:
+                    continue
+                size = max((s.get("size", 0.0) for s in spans), default=0.0)
+                bold = bool(spans) and all(s.get("flags", 0) & 16 for s in spans)
+                rows.append((bi, txt, size, bold))
+                weighted.append((size, len(txt)))
+        page_rows.append(rows)
+    weighted.sort()
+    total, acc, body_size = sum(w for _, w in weighted), 0, 10.0
+    for size, w in weighted:                      # length-weighted median font size = the body text
+        acc += w
+        if acc >= total / 2:
+            body_size = size; break
+
+    def heading(t, size, bold):
+        return len(t) < 70 and (size >= body_size + 0.8 or (bold and size >= body_size - 0.1))
+
+    counts = collections.Counter()
+    for rows in page_rows:
+        for t in {norm_str(t) for _, t, _, _ in rows[:3] + rows[-3:]}:
+            counts[t] += 1
+    recurring = {t for t, n in counts.items() if t and len(page_rows) >= 3 and n > len(page_rows) / 2}
+    out, in_refs = [], False
+    for p, rows in zip(sel, page_rows):
+        paras = []
+        for i, (blk, t, size, bold) in enumerate(rows):
+            n = norm_str(t)
+            if PAGE_NUM_RE.match(t) or ((i < 3 or i >= len(rows) - 3) and n in recurring):
+                continue
+            if not keep_references:
+                if not in_refs and n in ("references", "bibliography"):
+                    in_refs = True
+                    paras.append([None, "[references removed]"])
+                    continue
+                if in_refs:
+                    if n.startswith(("appendix", "supplementary")) or heading(t, size, bold):
+                        in_refs = False           # the bibliography ends at the next heading
+                    else:
+                        continue
+            t = "".join(LIG.get(c, c) for c in t)
+            if paras and paras[-1][0] == blk:
+                prev = paras[-1][1]
+                paras[-1][1] = prev[:-1] + t if prev.endswith("-") and t[:1].islower() else prev + " " + t
+            else:
+                paras.append([blk, t])
+        out.append(f"--- p.{p + 1} ---\n" +
+                   "\n".join(re.sub(r"([A-Za-z])-\s+([a-z])", r"\1\2", t) for _, t in paras))
+    return "\n\n".join(out) + "\n"
+
+
+def extract_main(argv):
+    ap = argparse.ArgumentParser(prog="scholium extract",
+                                 description="Print the PDF's text with page markers, de-hyphenated, without running headers, footers, page numbers and the bibliography.")
+    ap.add_argument("--pdf", help="path of the PDF (default: the \"pdf\" key of --config)")
+    ap.add_argument("--config", help="JSON configuration file to take the pdf path from")
+    ap.add_argument("--out", help="write to this file instead of standard output")
+    ap.add_argument("--pages", help="page or page range, e.g. 3 or 1-8 (default: all pages)")
+    ap.add_argument("--keep-references", action="store_true", help="keep the bibliography")
+    args = ap.parse_args(argv)
+    pdf = args.pdf or (json.load(open(args.config, encoding="utf8")).get("pdf") if args.config else None)
+    if not pdf:
+        sys.exit("extract: give --pdf or --config")
+    pages = None
+    if args.pages:
+        m = re.match(r"^(\d+)(?:-(\d+))?$", args.pages)
+        if not m:
+            sys.exit("extract: --pages takes N or N-M")
+        pages = list(range(int(m.group(1)), int(m.group(2) or m.group(1)) + 1))
+    text = extract_text(pdf, pages=pages, keep_references=args.keep_references)
+    if args.out:
+        open(args.out, "w", encoding="utf8").write(text)
+        print(f"{args.out}: {len(text)} characters")
+    else:
+        print(text)
+    return 0
+
+
 def http(method, path, body=None, headers=None, timeout=60):
     data = json.dumps(body, ensure_ascii=False).encode("utf8") if body is not None else None
     req = urllib.request.Request(BASE + path, data=data, method=method)
@@ -1222,6 +1427,8 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] == "profile":
         return profile_main(argv[1:])
+    if argv and argv[0] == "extract":
+        return extract_main(argv[1:])
     ap = argparse.ArgumentParser(prog="scholium", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", required=True, help="path of the JSON configuration file (see README)")
     ap.add_argument("--apply", action="store_true", help="write the annotations into Zotero using the backend selected by --backend")
@@ -1269,6 +1476,8 @@ def main(argv=None):
     report = {"highlights": by_type.get("highlight", 0), "underlines": by_type.get("underline", 0),
               "margin_texts": by_type.get("text", 0), "sticky_notes": by_type.get("note", 0),
               "missed": missed, "translation_warnings": check_translations(out),
+              "snapped": [{"page": a["pageLabel"], "text": a["text"][:60], "similarity": a["snapped"]} for a in out if a.get("snapped")],
+              "ambiguous_matches": [{"page": a["pageLabel"], "text": (a.get("text") or a.get("comment", ""))[:60], "occurrences": a["occurrences"], "used": 1} for a in out if a.get("occurrences")],
               "layout_warnings": [{"page": a["pageLabel"], "text": a["comment"][:60], "reason": a["layout_warning"]} for a in out if a.get("layout_warning")],
               "existing_annotations": existing_info, "js": js_path,
               "previews": [os.path.join(cfg["out_dir"], f"preview_p{p}.png") for p in cfg["preview_pages"]]}
