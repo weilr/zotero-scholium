@@ -21,7 +21,7 @@ Usage:    scholium --config config.json [--apply] [--list] [--backend auto|api|b
           scholium profile --from-library
 """
 import argparse
-import difflib, glob, json, os, sys, re, datetime, collections
+import difflib, glob, hashlib, json, os, sys, re, datetime, collections
 import urllib.request, urllib.error
 import pymupdf
 
@@ -49,6 +49,9 @@ DEFAULTS = {
                                 # By default existing notes are preserved and a new note receives a versioned title.
     "cleanup": True,            # False: keep every existing annotation on the attachment (the tool's own included); only add
     "cleanup_external": False,  # bridge backend only: additionally delete annotations Zotero imported from the PDF file
+    "core_range": None,         # [low, high]: expected number of highlights in core_color; outside it a style warning is reported
+    "banned_phrases": [],       # strings that must not occur in comments, margin texts or the note (reported as style warnings)
+    "sentences": None,          # sentences.json written by `extract --sentences` (default: <out_dir>/sentences.json)
 }
 
 # ---------------------------------------------------------------------------
@@ -514,11 +517,42 @@ def build(cfg, obstacles=None):
 
     fs = float(cfg["font_size"])
     out, missed = [], []
+    sentences = None
+
+    def resolve(item, kind):
+        """Fill page, text/anchor and occurrence of an entry that names sentence ids; None (and a missed entry) on failure."""
+        nonlocal sentences
+        if "id" not in item and "ids" not in item:
+            return item
+        try:
+            if sentences is None:
+                sentences = _load_sentences(cfg)
+            ids = [int(item["id"])] if "id" in item else list(range(int(item["ids"][0]), int(item["ids"][1]) + 1))
+            recs = [sentences[i] for i in ids if i in sentences]
+            if len(recs) != len(ids) or not ids:
+                raise KeyError("unknown sentence id " + ", ".join(str(i) for i in ids if i not in sentences))
+            if len({r["page"] for r in recs}) > 1:
+                raise KeyError("ids span more than one page")
+        except (KeyError, ValueError, TypeError, FileNotFoundError) as e:
+            missed.append({"kind": kind, "id": item.get("id", item.get("ids")), "reason": str(e).strip("'")})
+            return None
+        text = " ".join(r["text"] for r in recs)
+        fields = {"page": recs[0]["page"], "text" if kind == "highlight" else "anchor": text, "_from_id": True}
+        if len(recs) == 1 and not item.get("occurrence"):
+            fields["occurrence"] = recs[0]["occurrence"]
+        return dict(item, **fields)
+
     for h in cfg.get("highlights", []):
+        h = resolve(h, "highlight")
+        if h is None:
+            continue
         p = int(h["page"]) - 1
         pi = page_index(p)
         occ = int(h.get("occurrence") or 0) or None   # 1-based; None: the first occurrence, ambiguity is reported
         ws, reason, snapped = pi.match(h["text"], occ or 1), None, None
+        if not ws and h.get("_from_id") and len(h["text"].split()) > 10:
+            words = h["text"].split()                # a sentence from the extraction: anchor on its ends
+            ws, reason = pi.match_range(" ".join(words[:5]), " ".join(words[-5:]), occurrence=occ)
         if not ws:
             parts = [s for s in SPAN_SEP.split(h["text"]) if s]
             if len(parts) == 2:                      # "first words … last words" selects the span between the anchors
@@ -565,6 +599,9 @@ def build(cfg, obstacles=None):
     page_sizes = [(pg.rect.width, pg.rect.height) for pg in doc]
     specs = []
     for s in cfg.get("summaries", []):
+        s = resolve(s, "summary") if isinstance(s, dict) else s
+        if s is None:
+            continue
         try:
             specs.append(normalise_summary(s, cfg, page_sizes))
         except ValueError as e:
@@ -677,6 +714,132 @@ def check_translations(annotations):
     return warnings
 
 
+STYLE_SYMBOL_RE = re.compile(r"[→←↑↓⇒①-⑳【】]")            # arrows, circled numbers, bracket tags
+LABEL_RE = re.compile(r"^[^：:，,。.]{1,12}[：:]\s*\S")         # "label: content" at the start of a margin note
+MATH_FORMAT_RE = re.compile(r"\^|_\{|(?:\b10|\de)−\d")        # ^, _{ or a bare minus exponent instead of <sup>/<sub>
+MATH_NODE_RE = re.compile(r'<(?:span|pre) class="math">(.*?)</(?:span|pre)>', re.S)
+READER_TAGS = {"b", "i", "sub", "sup"}                        # the only tags the reader renders in comments
+
+
+def _overlaps(rect, rects, tol=2.0):
+    """True when `rect` shares more than `tol` points in both directions with one of `rects`."""
+    return any(min(rect[2], o[2]) - max(rect[0], o[0]) > tol and min(rect[3], o[3]) - max(rect[1], o[1]) > tol for o in rects)
+
+
+def _existing_rects(listing, keep_own=False):
+    """(key, rects) of the annotations already in Zotero that a run leaves in place, keyed by page index."""
+    rects = {}
+    for a in (listing or {}).get("annotations", []):
+        if not keep_own and set(a.get("tags") or []) & OWN_TAGS:
+            continue
+        pos = parse_position(a.get("position"))
+        rs = [[float(v) for v in r] for r in (pos.get("rects") or []) if len(r) == 4]
+        if pos.get("pageIndex") is None or not rs:
+            continue
+        rects.setdefault(int(pos["pageIndex"]), []).append((a.get("key"), rs))
+    return rects
+
+
+def _text_defects(s):
+    """(kind, reason) pairs for display defects in a comment or margin text."""
+    found = []
+    if MATH_RE.search(s):
+        found.append(("latex", "raw LaTeX; write mathematics with Unicode symbols and <sub>/<sup>"))
+    if MATH_FORMAT_RE.search(s):
+        found.append(("math_format", "exponent or subscript written with ^, _{ or a bare minus; use <sup>/<sub>"))
+    tags = [m.group(1).lower() for m in re.finditer(r"</?([a-zA-Z][a-zA-Z0-9]*)[^>]*>", s)]
+    bad = sorted(set(tags) - READER_TAGS)
+    if bad:
+        found.append(("tag", "tags the reader does not render: " + ", ".join(bad)))
+    unbalanced = [t for t in READER_TAGS if s.count(f"<{t}>") != s.count(f"</{t}>")]
+    if unbalanced:
+        found.append(("tag", "unclosed tag: " + ", ".join(sorted(unbalanced))))
+    if "\n" in s:
+        found.append(("line_break", "hard line break"))
+    return found
+
+
+def check_style(annotations, cfg, listing=None, note_html=None):
+    """Mechanical style checks on the generated annotations and the note; each finding is a warning.
+
+    Checked: display defects in comments and margin texts (raw LaTeX, ^/_ exponents, tags the reader does not
+    render, hard line breaks), label-colon margin notes and arrows or circled numbers in them, `banned_phrases`, highlights
+    that duplicate or intersect each other, highlights that overlap annotations already in Zotero (the tool's
+    own earlier ones excepted unless `cleanup` is false), the number of core-coloured highlights against
+    `core_range`, and mathematics in the note (a double backslash inside a math node, LaTeX outside one).
+    """
+    warnings = []
+    existing = _existing_rects(listing, keep_own=not cfg.get("cleanup", True))
+    banned = [b for b in (cfg.get("banned_phrases") or []) if b]
+    marks = [a for a in annotations if a["type"] in ("highlight", "underline")]
+
+    def warn(kind, a, reason):
+        label = a.get("text") if a["type"] in ("highlight", "underline") else a.get("comment", "")
+        warnings.append({"kind": kind, "page": a["pageLabel"], "text": (label or "")[:60], "reason": reason})
+
+    for a in annotations:
+        is_mark = a["type"] in ("highlight", "underline")
+        comment = a.get("comment", "")
+        for kind, reason in _text_defects(comment):
+            warn(kind, a, reason)
+        if not is_mark and LABEL_RE.match(comment):
+            warn("label", a, "label-colon form; write a sentence")
+        if not is_mark and STYLE_SYMBOL_RE.search(comment):
+            warn("symbol", a, "arrows, circled numbers or bracket tags; write a sentence")
+        hits = [b for b in banned if b in TAG_RE.sub("", comment)]
+        if hits:
+            warn("banned_phrase", a, "contains: " + ", ".join(hits))
+        if is_mark:
+            page, rects = a["position"]["pageIndex"], a["position"]["rects"]
+            for key, rs in existing.get(page, []):
+                if any(_overlaps(r, rs) for r in rects):
+                    warn("user_overlap", a, f"overlaps an existing annotation ({key})")
+                    break
+    for i, a in enumerate(marks):
+        for b in marks[i + 1:]:
+            if a["position"]["pageIndex"] != b["position"]["pageIndex"]:
+                continue
+            if a["position"]["rects"] == b["position"]["rects"]:
+                warn("duplicate", b, "the same span is highlighted twice")
+            elif any(_overlaps(r, b["position"]["rects"]) for r in a["position"]["rects"]):
+                warn("overlap", b, "intersects another highlight: " + a["text"][:40])
+    if cfg.get("core_range"):
+        lo, hi = cfg["core_range"]
+        n = sum(1 for a in marks if a["color"] == cfg["core_color"])
+        if not lo <= n <= hi:
+            warnings.append({"kind": "core_count", "page": None, "text": None,
+                             "reason": f"{n} highlights in the core colour {cfg['core_color']}; core_range is {lo}-{hi}"})
+    if note_html:
+        def nwarn(reason):
+            warnings.append({"kind": "note_math", "page": None, "text": "reading note", "reason": reason})
+        for m in MATH_NODE_RE.findall(note_html):
+            if "\\\\" in m:
+                nwarn("double backslash inside a math node: " + m.strip()[:40])
+            elif "$" not in m:
+                nwarn("math node without $ delimiters: " + m.strip()[:40])
+        rest = MATH_NODE_RE.sub(" ", note_html)
+        if re.search(r"\$\$|\$[^$\n]+\$", rest):
+            nwarn("LaTeX outside a math node is displayed as source")
+        hits = [b for b in banned if b in TAG_RE.sub(" ", rest)]
+        if hits:
+            warnings.append({"kind": "banned_phrase", "page": None, "text": "reading note", "reason": "contains: " + ", ".join(hits)})
+    return warnings
+
+
+def compact_listing(listing):
+    """Counts and the other annotations of a listing; the tool's own annotations are counted only."""
+    anns = listing.get("annotations", [])
+    own = [a for a in anns if set(a.get("tags") or []) & OWN_TAGS]
+    others = [a for a in anns if not (set(a.get("tags") or []) & OWN_TAGS)]
+    return {"ok": True, "backend": listing.get("backend"), "attachmentKey": listing.get("attachmentKey"),
+            "annotations": len(anns), "own": len(own), "others": len(others),
+            "by_type": dict(collections.Counter(a["type"] for a in anns)),
+            "by_color": dict(collections.Counter(a.get("color") or "" for a in anns)),
+            "others_detail": [{"key": a["key"], "type": a["type"], "color": a.get("color"), "page": a.get("pageLabel"),
+                               "text": (a.get("text") or a.get("comment") or "")[:60]} for a in others],
+            "notes": listing.get("notes", [])}
+
+
 def version_note(html, prefix, existing_titles):
     """Existing notes are never deleted: if a note with this title prefix exists, the new note receives a versioned title."""
     same = [t for t in existing_titles if t and prefix and t.startswith(prefix)]
@@ -702,8 +865,8 @@ def note_title_from_html(html):
 PAGE_NUM_RE = re.compile(r"^(?:\d{1,4}|[ivxlcdm]{1,7})$", re.I)
 
 
-def extract_text(pdf_path, pages=None, keep_references=False):
-    """The paper's text, page by page, for reading once and for copying highlight phrases from.
+def extract_paragraphs(pdf_path, pages=None, keep_references=False):
+    """[(page number, [(kind, text), ...]), ...] with kind "heading", "para" or "marker".
 
     Lines are de-hyphenated and ligatures expanded with the same rules the matcher uses, so a phrase
     copied from this output matches. Running headers and footers (lines recurring on most pages) and
@@ -753,7 +916,7 @@ def extract_text(pdf_path, pages=None, keep_references=False):
             if not keep_references:
                 if not in_refs and n in ("references", "bibliography"):
                     in_refs = True
-                    paras.append([None, "[references removed]"])
+                    paras.append([None, "[references removed]", "marker"])
                     continue
                 if in_refs:
                     if n.startswith(("appendix", "supplementary")) or heading(t, size, bold):
@@ -761,14 +924,105 @@ def extract_text(pdf_path, pages=None, keep_references=False):
                     else:
                         continue
             t = "".join(LIG.get(c, c) for c in t)
-            if paras and paras[-1][0] == blk:
+            kind = "heading" if heading(t, size, bold) else "para"
+            if paras and paras[-1][0] == blk and kind == "para" and paras[-1][2] == "para":
                 prev = paras[-1][1]
                 paras[-1][1] = prev[:-1] + t if prev.endswith("-") and t[:1].islower() else prev + " " + t
             else:
-                paras.append([blk, t])
-        out.append(f"--- p.{p + 1} ---\n" +
-                   "\n".join(re.sub(r"([A-Za-z])-\s+([a-z])", r"\1\2", t) for _, t in paras))
-    return "\n\n".join(out) + "\n"
+                paras.append([blk, t, kind])
+        out.append((p + 1, [(kind, re.sub(r"([A-Za-z])-\s+([a-z])", r"\1\2", t)) for _, t, kind in paras]))
+    return out
+
+
+def extract_text(pdf_path, pages=None, keep_references=False):
+    """The paper's text with page markers, one paragraph per line (see extract_paragraphs)."""
+    return "\n\n".join(f"--- p.{p} ---\n" + "\n".join(t for _, t in paras)
+                       for p, paras in extract_paragraphs(pdf_path, pages, keep_references)) + "\n"
+
+
+ABBREV_RE = re.compile(r"(?:\b(?:e\.g|i\.e|et al|cf|vs|viz|resp|approx|ca|Fig|Figs|Eq|Eqs|Sec|Secs|Tab|Ref|Refs|No|Nos|Dr|Prof|Mr|Ms|Mrs|St|Vol|pp|Ch|Def|Thm|Lem|Prop|Cor|Alg|App)|\b[A-Z])\.$")
+SENT_END_RE = re.compile(r"[.!?][\"'”’)\]]*(?=\s+[A-Z0-9(\[\"“‘])")
+MIN_SENTENCE_WORDS = 3   # shorter fragments ("Proof.", "Theorem 2.") merge with their predecessor
+
+
+def split_sentences(text):
+    """The sentences of one paragraph.
+
+    A full stop after an abbreviation, an initial or inside a number does not end a sentence, and a
+    fragment of fewer than MIN_SENTENCE_WORDS words is merged with its predecessor."""
+    text = " ".join(text.split())
+    parts, start = [], 0
+    for m in SENT_END_RE.finditer(text):
+        head = text[start:m.end()]
+        if ABBREV_RE.search(head.rstrip("\"'”’)]")):
+            continue
+        parts.append(head.strip()); start = m.end()
+    tail = text[start:].strip()
+    if tail:
+        parts.append(tail)
+    merged = []
+    for part in parts:
+        if merged and (len(part.split()) < MIN_SENTENCE_WORDS or len(merged[-1].split()) < MIN_SENTENCE_WORDS):
+            merged[-1] += " " + part
+        else:
+            merged.append(part)
+    return merged
+
+
+def extract_sentences(pdf_path, pages=None, keep_references=False):
+    """Numbered sentences plus headings and markers, in reading order.
+
+    A sentence is {"id", "page", "para", "text"} with ids counted from 1 across the document; a heading is
+    {"page", "para", "heading"}; a marker is {"page", "para", "marker"}."""
+    items, sid, para = [], 0, 0
+    for p, paras in extract_paragraphs(pdf_path, pages, keep_references):
+        for kind, text in paras:
+            para += 1
+            if kind == "heading":
+                items.append({"page": p, "para": para, "heading": text})
+            elif kind == "marker":
+                items.append({"page": p, "para": para, "marker": text})
+            else:
+                for sent in split_sentences(text):
+                    sid += 1
+                    items.append({"id": sid, "page": p, "para": para, "text": sent})
+    return items
+
+
+def render_sentences(items):
+    """The listing an agent reads: page markers, `## heading` lines, `id | sentence` lines, blank lines between paragraphs."""
+    out, page, para = [], None, None
+    for it in items:
+        if it["page"] != page:
+            if out:
+                out.append("")
+            out.append(f"--- p.{it['page']} ---"); page, para = it["page"], None
+        elif "id" in it and para is not None and it["para"] != para:
+            out.append("")                        # a blank line between two sentence paragraphs
+        para = it["para"] if "id" in it else None
+        if "heading" in it:
+            out.append("## " + it["heading"])
+        elif "marker" in it:
+            out.append(it["marker"])
+        else:
+            out.append(f"{it['id']} | {it['text']}")
+    return "\n".join(out) + "\n"
+
+
+def _load_sentences(cfg):
+    """{id: sentence} from the sentences file, each with its occurrence among identical sentences on its page."""
+    path = cfg.get("sentences") or os.path.join(cfg["out_dir"], "sentences.json")
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"sentences file not found: {path} (run `scholium extract --sentences`)")
+    data = json.load(open(path, encoding="utf8"))
+    seen, table = collections.Counter(), {}
+    for it in data.get("sentences", []):
+        if "id" not in it:
+            continue
+        key = (it["page"], norm_str(it["text"]))
+        seen[key] += 1
+        table[int(it["id"])] = dict(it, occurrence=seen[key])
+    return table
 
 
 def extract_main(argv):
@@ -779,6 +1033,7 @@ def extract_main(argv):
     ap.add_argument("--out", help="write to this file instead of standard output")
     ap.add_argument("--pages", help="page or page range, e.g. 3 or 1-8 (default: all pages)")
     ap.add_argument("--keep-references", action="store_true", help="keep the bibliography")
+    ap.add_argument("--sentences", metavar="JSON", help="write numbered sentences to this JSON file and print the numbered listing instead of plain text")
     args = ap.parse_args(argv)
     pdf = args.pdf or (json.load(open(args.config, encoding="utf8")).get("pdf") if args.config else None)
     if not pdf:
@@ -789,10 +1044,19 @@ def extract_main(argv):
         if not m:
             sys.exit("extract: --pages takes N or N-M")
         pages = list(range(int(m.group(1)), int(m.group(2) or m.group(1)) + 1))
-    text = extract_text(pdf, pages=pages, keep_references=args.keep_references)
+    if args.sentences:
+        items = extract_sentences(pdf, keep_references=args.keep_references)   # ids count over the whole document
+        n = sum(1 for it in items if "id" in it)
+        json.dump({"pdf": pdf, "sentences": [it for it in items if "id" in it],
+                   "headings": [it for it in items if "id" not in it]}, open(args.sentences, "w", encoding="utf8"), ensure_ascii=False, indent=0)
+        text = render_sentences([it for it in items if not pages or it["page"] in pages])
+        summary = f"{n} sentences -> {args.sentences}"
+    else:
+        text = extract_text(pdf, pages=pages, keep_references=args.keep_references)
+        summary = f"{len(text)} characters"
     if args.out:
         open(args.out, "w", encoding="utf8").write(text)
-        print(f"{args.out}: {len(text)} characters")
+        print(f"{args.out}: {summary}")
     else:
         print(text)
     return 0
@@ -1393,6 +1657,14 @@ def profile_main(argv):
 
 
 # ---------------------------------------------------------------------------
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def pick_backend(requested, cfg):
     """Return (name, handle, reason)."""
     ver, sid = zotero_version()
@@ -1433,8 +1705,10 @@ def main(argv=None):
     ap.add_argument("--config", required=True, help="path of the JSON configuration file (see README)")
     ap.add_argument("--apply", action="store_true", help="write the annotations into Zotero using the backend selected by --backend")
     ap.add_argument("--list", action="store_true", help="list the attachment's current annotations and notes without writing")
+    ap.add_argument("--full", action="store_true", help="with --list: print every annotation with text, comment and position")
     ap.add_argument("--backend", default="auto", choices=["auto", "api", "bridge", "js"])
     ap.add_argument("--allow-missed", action="store_true", help="apply even if some phrases could not be located in the PDF")
+    ap.add_argument("--allow-warnings", action="store_true", help="apply even if style warnings are reported")
     ap.add_argument("--ignore-existing", action="store_true",
                     help="do not read the attachment's existing annotations before laying out margin notes (they may then be overlapped)")
     ap.add_argument("--version", action="version", version=f"scholium {__version__}")
@@ -1455,10 +1729,10 @@ def main(argv=None):
             res, err = bridge_list(cfg)
         else:
             res, err = None, why
-        print(json.dumps(res if res else {"error": err}, ensure_ascii=False, indent=1))
+        print(json.dumps((res if args.full else compact_listing(res)) if res else {"error": err}, ensure_ascii=False, indent=1))
         sys.exit(0 if res else 1)
 
-    obstacles, existing_info = {}, "not consulted (--ignore-existing)"
+    obstacles, existing_info, listing = {}, "not consulted (--ignore-existing)", None
     if not args.ignore_existing:
         name, handle, why = pick_backend(args.backend if args.backend != "js" else "auto", cfg)
         listing = api_list(cfg, handle) if name == "api" else (bridge_list(cfg)[0] if name == "bridge" else None)
@@ -1468,14 +1742,18 @@ def main(argv=None):
                              "avoided_rects": sum(len(v) for v in obstacles.values())}
         else:
             existing_info = f"unavailable ({why}); existing annotations were not taken into account"
+    pdf_before = _sha256(cfg["pdf"])
     out, missed = build(cfg, obstacles)
     json.dump(out, open(os.path.join(cfg["out_dir"], "annotations.json"), "w", encoding="utf8"), ensure_ascii=False, indent=1)
     js_path = os.path.join(cfg["out_dir"], "create_annotations.js")
     open(js_path, "w", encoding="utf8").write(render_js(cfg, out))
     by_type = collections.Counter(a["type"] for a in out)
+    note_html = open(cfg["note_html"], encoding="utf8").read() if cfg.get("note_html") else None
     report = {"highlights": by_type.get("highlight", 0), "underlines": by_type.get("underline", 0),
               "margin_texts": by_type.get("text", 0), "sticky_notes": by_type.get("note", 0),
+              "colors": dict(collections.Counter(a["color"] for a in out if a["type"] in ("highlight", "underline"))),
               "missed": missed, "translation_warnings": check_translations(out),
+              "style_warnings": check_style(out, cfg, listing, note_html),
               "snapped": [{"page": a["pageLabel"], "text": a["text"][:60], "similarity": a["snapped"]} for a in out if a.get("snapped")],
               "ambiguous_matches": [{"page": a["pageLabel"], "text": (a.get("text") or a.get("comment", ""))[:60], "occurrences": a["occurrences"], "used": 1} for a in out if a.get("occurrences")],
               "layout_warnings": [{"page": a["pageLabel"], "text": a["comment"][:60], "reason": a["layout_warning"]} for a in out if a.get("layout_warning")],
@@ -1483,9 +1761,14 @@ def main(argv=None):
               "previews": [os.path.join(cfg["out_dir"], f"preview_p{p}.png") for p in cfg["preview_pages"]]}
 
     if args.apply:
+        blockers = []
         if missed and not args.allow_missed:
+            blockers.append("some phrases could not be located; correct them or pass --allow-missed")
+        if report["style_warnings"] and not args.allow_warnings:
+            blockers.append("style warnings are reported; correct them or pass --allow-warnings")
+        if blockers:
             report["applied"] = False
-            report["apply_error"] = "some phrases could not be located; correct them or pass --allow-missed"
+            report["apply_error"] = "; ".join(blockers)
         else:
             name, handle, why = pick_backend(args.backend, cfg)
             report["backend"] = name; report["backend_reason"] = why
@@ -1507,6 +1790,8 @@ def main(argv=None):
                 report["applied"] = False
                 report["apply_error"] = err
                 report["fallback"] = "execute the generated file in Zotero: Tools -> Developer -> Run JavaScript (Run as async function): " + js_path
+    pdf_after = _sha256(cfg["pdf"])
+    report["pdf_sha256"] = {"before": pdf_before, "after": pdf_after, "unchanged": pdf_before == pdf_after}
     print(json.dumps(report, ensure_ascii=False, indent=1))
     if missed or (args.apply and not report.get("applied")):
         sys.exit(2)

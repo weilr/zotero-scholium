@@ -2,36 +2,35 @@
   "pdf": "/path/to/Zotero/storage/ATTACHKEY/paper.pdf",
   "item_key": "ITEMKEY1",
   "attachment_key": "ATTACHKEY",
+  "out_dir": "out",
+  "sentences": "out/sentences.json",
   "note_html": "reading_note.html",
   "note_title_prefix": "Full title of the paper",
-  "out_dir": "out",
   "preview_pages": [
     1
   ],
   "cleanup": true,
+  "core_range": [10, 15],
+  "banned_phrases": [],
   "highlights": [
     {
-      "page": 1,
+      "id": 12,
       "core": true,
-      "text": "the first enumerated contribution, copied verbatim from the PDF text",
-      "comment": "translation of the sentence into the user's language"
+      "comment": "translation of sentence 12 into the user's language"
     },
     {
-      "page": 5,
+      "ids": [40, 41],
       "core": false,
-      "text": "all models are given the same fine-tuning budget regardless of dataset size",
-      "comment": "translation"
+      "comment": "translation of sentences 40 and 41, which are consecutive on one page"
     }
   ],
   "summaries": [
     {
-      "page": 1,
-      "anchor": "a unique phrase inside the paragraph",
-      "text": "one or two complete sentences placed in the margin beside the paragraph"
+      "id": 55,
+      "text": "one or two complete sentences placed in the margin beside the paragraph that contains sentence 55"
     },
     {
-      "page": 8,
-      "anchor": "another unique phrase",
+      "id": 130,
       "text": "a reaction, a question, or a cross-reference, written as a sentence rather than in label-colon form"
     },
     {

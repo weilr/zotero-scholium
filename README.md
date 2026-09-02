@@ -93,7 +93,7 @@ Highlight the key claims and results of "Attention Is All You Need" with transla
 Write a reading note for "Attention Is All You Need"
 ```
 
-The agent locates the item through the local API, selects the sentences, writes the comments and margin notes, applies them with the bundled script, and reports what was written. On Zotero 10 the first write shows an authorisation dialog; choose "Always Allow". Close and reopen the PDF in the reader to see the annotations. Requests in Chinese follow the bundled Chinese style guide.
+The agent locates the item through the local API, reads the paper once as numbered sentences, selects sentences by number, writes the comments and margin notes, applies them with the bundled script in one run, and reports what was written. On Zotero 10 the first write shows an authorisation dialog; choose "Always Allow". Close and reopen the PDF in the reader to see the annotations. Requests in Chinese follow the bundled Chinese style guide.
 
 ## What's inside
 
@@ -101,6 +101,9 @@ The agent locates the item through the local API, selects the sentences, writes 
 |---|---|
 | `skills/zotero-scholium/SKILL.md` | The workflow: locating the item, choosing sentences, writing comments and margin notes, invoking the script, verifying the result |
 | `skills/zotero-scholium/references/style-zh.md` | Style guide for Chinese comments, margin notes, and reading notes |
+| `skills/zotero-scholium/references/configuration.md` | Configuration keys, commands, and report fields |
+| `skills/zotero-scholium/references/backends.md` | Write channels, failure handling, and pitfalls |
+| `skills/zotero-scholium/references/profile.md` | Precedence and procedure of the annotation profile |
 | `skills/zotero-scholium/references/zotero-annotations.md` | The annotation data model of Zotero |
 | `skills/zotero-scholium/scripts/scholium.py` | The tool, identical to `src/zotero_scholium/cli.py` |
 | `skills/zotero-scholium/examples/` | Configuration and reading-note templates |
@@ -108,8 +111,8 @@ The agent locates the item through the local API, selects the sentences, writes 
 
 ## How it works
 
-1. The PDF is opened read-only with PyMuPDF and every page is indexed at word level.
-2. Each highlight phrase is matched against the normalised word sequence; one rectangle per text line is produced in PDF user space, together with Zotero's sort index.
+1. The PDF is opened read-only with PyMuPDF; `extract` numbers its sentences (running headers, footers and the bibliography removed), and every page is indexed at word level.
+2. Each highlight names a sentence by number (or gives a phrase); its text is matched against the normalised word sequence, and one rectangle per text line is produced in PDF user space, together with Zotero's sort index.
 3. The body columns are estimated from the distribution of word coordinates over the whole document. Each summary is anchored to the first line of its paragraph and laid out in the adjacent margin, avoiding existing annotations, figures, neighbouring boxes, the header, and the footer.
 4. The annotation objects are written through the selected backend, after removing the tool's own annotations from a previous run.
 
@@ -120,7 +123,9 @@ The verified JSON structure of annotation items, the authorisation flow of the l
 - **Native annotations.** Highlights, underlines, and margin text are Zotero annotation items: editable, searchable, and synchronised. The PDF file is never modified.
 - **Margin notes with automatic layout.** Placed beside the paragraph on its own side of the page, avoiding figures, existing annotations, neighbouring notes, the header, and the footer.
 - **Customisable placement.** A summary across the top of page 1, a remark at the bottom of a page, notes on a chosen side, sticky notes, or another colour and size for a single note; the profile learns these habits.
+- **Sentence numbering.** The agent reads the paper once as numbered sentences and selects them by number; the verbatim text and the coordinates come from the tool.
 - **Robust text matching.** Word-level matching that ignores whitespace, hyphenation, and ligatures.
+- **Style checks.** Mechanical defects in comments, margin notes, and the reading note are reported before anything is written.
 - **Translation fidelity check.** Comments that add terms or numbers absent from the highlighted span are reported before anything is written.
 - **Profile learning.** `scholium profile --from-library` derives the user's own annotation habits from the library; explicit user rules take precedence.
 - **Safe repeated runs.** Every object carries an ownership tag; a re-run replaces only the tool's own annotations and never deletes notes.
@@ -152,11 +157,13 @@ pip install .                            # provides the `scholium` command
      "out_dir": "out",
      "note_html": "reading_note.html",
      "note_title_prefix": "Attention Is All You Need",
+     "sentences": "out/sentences.json",
      "highlights": [
+       {"id": 3, "core": true, "comment": "translation or comment"},
        {"page": 1, "core": true, "text": "We propose a new simple network architecture, the Transformer, based solely on attention mechanisms", "comment": "translation or comment"}
      ],
      "summaries": [
-       {"page": 1, "anchor": "dispensing with recurrence and convolutions entirely", "text": "Replaces recurrence with attention; the whole model is attention plus feed-forward layers."}
+       {"id": 4, "text": "Replaces recurrence with attention; the whole model is attention plus feed-forward layers."}
      ]
    }
    ```
@@ -164,13 +171,13 @@ pip install .                            # provides the `scholium` command
 3. **Generate, review, and apply.**
 
    ```bash
-   scholium extract --pdf paper.pdf         # the paper's text, page-marked, de-hyphenated, without the bibliography
-   scholium --config config.json            # match text, render previews, report unmatched phrases
-   scholium --config config.json --apply    # write into Zotero (Zotero 10: confirm the dialog once)
-   scholium --config config.json --list     # read back what is currently stored in Zotero
+   scholium extract --pdf paper.pdf --sentences out/sentences.json --out out/sentences.txt   # numbered sentences to read and select from
+   scholium --config config.json            # build and report without writing
+   scholium --config config.json --apply    # build, check, write into Zotero, read back (Zotero 10: confirm the dialog once)
+   scholium --config config.json --list     # counts, the annotations that are not the tool's own, note titles (--full: everything)
    ```
 
-   The first command writes `annotations.json`, a fallback `create_annotations.js`, and `preview_p<N>.png` for the configured pages, and lists any phrases that could not be located, each with the closest passage found on the page.
+   Every run writes `annotations.json`, a fallback `create_annotations.js`, and `preview_p<N>.png` for the configured pages, and reports `missed` entries (each with the closest passage found on the page), `style_warnings`, `translation_warnings`, `layout_warnings`, and the PDF's hash before and after. `--apply` refuses to write while `missed` or `style_warnings` is non-empty (`--allow-missed`, `--allow-warnings`).
 
 [`examples/direct_api_example.py`](examples/direct_api_example.py) demonstrates the underlying Zotero 10 local API calls in approximately thirty lines for use in other applications.
 
@@ -181,8 +188,9 @@ pip install .                            # provides the `scholium` command
 | `pdf` | yes | path of the PDF attachment |
 | `item_key`, `attachment_key` | yes | Zotero keys of the parent item and the attachment |
 | `out_dir` | yes | directory for generated files |
-| `highlights[]` | | `page` (1-based), `text` (verbatim; a long span may give just its first and last words separated by an ellipsis `…`), `comment`, and one of `level`, `color`, or the legacy boolean `core`; optional `type: "underline"`, `occurrence` (the N-th appearance when the text repeats) |
-| `summaries[]` | | `page`, `anchor` (a unique phrase locating the paragraph), `text` (without hard line breaks); optional `place` (`"top"` or `"bottom"`: a box across the text column at that end of the page, no anchor needed), `side` (`"left"`, `"right"`), `color`, `font_size`, `kind: "note"` (sticky note), `occurrence` |
+| `sentences` | | JSON written by `scholium extract --sentences` (default `<out_dir>/sentences.json`) |
+| `highlights[]` | | `id` (a sentence number) or `ids` (`[first, last]`, consecutive sentences on one page) or `page` + `text` (verbatim; a long span may give just its first and last words separated by an ellipsis `…`; `occurrence` selects the N-th appearance when the text repeats); `comment`; one of `level`, `color`, or the legacy boolean `core`; optional `type: "underline"` |
+| `summaries[]` | | `text` (without hard line breaks) and `id` (a sentence of the paragraph) or `page` + `anchor` (a unique phrase locating the paragraph); optional `place` (`"top"` or `"bottom"`: a box across the text column at that end of the page, no anchor needed), `side` (`"left"`, `"right"`), `color`, `font_size`, `kind: "note"` (sticky note), `occurrence` |
 | `levels` | | named colours, e.g. `{"claim": "#ff6666", "term": "#ffd400"}` |
 | `note_html`, `note_title_prefix` | | HTML file of the child note; the prefix identifies an existing note with the same title |
 | `core_color`, `other_color`, `text_color` | | defaults `#ff6666`, `#ffd400`, `#1a73e8` |
@@ -191,6 +199,8 @@ pip install .                            # provides the `scholium` command
 | `summary_kind` | | `text` (default: visible margin text) or `note` (sticky notes) |
 | `preview_pages` | | pages rendered as PNG previews (default `[1]`) |
 | `snap` | | accept phrases that match at similarity ≥ 0.95 and report them under `snapped` (default false) |
+| `core_range` | | `[low, high]`: expected number of highlights in `core_color`; a count outside it is reported under `style_warnings` |
+| `banned_phrases` | | strings that must not occur in comments, margin texts, or the note; reported under `style_warnings` |
 | `data_dir` | | Zotero data directory (inferred from the PDF path or Zotero's preferences by default); holds the profile and the bridge token |
 | `cleanup` | | `true` (default): before writing, remove the annotations this tool created earlier on the attachment; `false`: keep every existing annotation and only add new ones |
 | `cleanup_external` | | bridge backend only: also remove annotations imported from the PDF file (default `false`) |
@@ -249,6 +259,8 @@ pip install -e ".[dev]"
 pytest                                      # tests use a synthetic PDF; no third-party content
 python scripts/check_skill_script_sync.py   # the skill bundles a copy of cli.py that must stay identical
 python scripts/check_skill_frontmatter.py   # SKILL.md front matter must be strict YAML
+python scripts/measure_context.py           # token size of the skill files (--pdf: and of a paper's extraction; --max-skill-tokens: the CI limit)
+python scripts/session_usage.py FILE...     # model calls and tokens of Codex rollouts or Claude Code transcripts
 ```
 
 The plugin is packaged by the release workflow; to build it locally, archive `manifest.json` and `bootstrap.js` from `plugin/scholium-bridge/` at the root of a zip file named `scholium-bridge.xpi`.

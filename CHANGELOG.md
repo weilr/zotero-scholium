@@ -17,6 +17,27 @@
   the item selects the N-th appearance directly.
 - The translation check ignores mathematics and rich-text tags and accepts rejoined hyphenations;
   comments may carry `<sub>`/`<sup>`, and reading notes may carry KaTeX math nodes.
+- The dry-run report gains `style_warnings` (raw LaTeX and `^`/`_{` in comments, tags the reader
+  does not render, label-colon margin notes and arrows or circled numbers in them, hard line
+  breaks, phrases from `banned_phrases`, duplicate or intersecting highlights, highlights over
+  annotations already in Zotero, a core-colour count outside `core_range`, note math nodes with a
+  double backslash or LaTeX outside a node) and `colors`, the number of highlights per colour.
+- `--list` prints the counts by type and colour, the annotations that are not the tool's own, and
+  the note titles; `--list --full` prints every annotation.
+- Batch procedure of the skill: the coordinating context only dispatches one sub-agent per paper
+  and collects one line from each; the sub-agent performs the whole procedure including `--apply`;
+  reviews and corrections run in fresh sub-agents.
+- `scholium extract --sentences` numbers the paper's sentences; `highlights[]` and `summaries[]` name
+  sentences by `id` (or `ids` for a consecutive span) and the tool supplies the text and the
+  coordinates. `--apply` refuses to write while `missed` or `style_warnings` is non-empty
+  (`--allow-warnings`), and the report carries the PDF's SHA-256 before and after the run.
+- SKILL.md is reduced to the workflow; configuration keys, commands and report fields, write channels
+  and pitfalls, and the profile procedure move to `references/configuration.md`,
+  `references/backends.md` and `references/profile.md`.
+- `scripts/measure_context.py` reports the token size of the skill files (CI limits the SKILL.md
+  body) and `scripts/session_usage.py` the model calls and tokens of Codex rollouts and Claude Code
+  transcripts.
+- The release workflow publishes the version's CHANGELOG section as the GitHub release notes.
 
 ## 0.1.0 (2026-08-28)
 

@@ -713,3 +713,56 @@ def test_duplicate_sentence_reports_occurrences(tmp_path):
     cfg["highlights"] = [{"page": 1, "text": "The same sentence appears here.", "comment": "x", "occurrence": 3}]
     out, missed = cli.build(cfg)
     assert missed and "occurs 2 time" in missed[0]["reason"]
+
+
+def test_style_warnings_flag_mechanical_defects(pdf_path, tmp_path):
+    note = tmp_path / "note.html"
+    note.write_text('<h1>T</h1><p>inline <span class="math">$\\\\frac{a}{b}$</span>, raw $y^2$ here, 值得注意</p>', encoding="utf8")
+    cfg = dict(cli.DEFAULTS)
+    cfg.update({"pdf": pdf_path, "item_key": "I", "attachment_key": "A", "out_dir": str(tmp_path), "preview_pages": [],
+                "note_html": str(note), "core_range": [2, 3], "banned_phrases": ["值得注意"],
+                "highlights": [
+                    {"page": 1, "core": True, "text": "Foundation models have transformed machine learning", "comment": "基础模型 $x^2$ 改变了机器学习"},
+                    {"page": 1, "core": False, "text": "Data heterogeneity and unstable long-term dynamics", "comment": "QK^T 与 10−3 不稳定"},
+                    {"page": 1, "core": False, "text": "Data heterogeneity and unstable long-term dynamics", "comment": "重复一次"},
+                    {"page": 1, "core": False, "text": "patch jittering, a stabilization method", "comment": "值得注意 <span>补丁</span> 抖动<sub>k"},
+                ],
+                "summaries": [
+                    {"page": 1, "anchor": "Our work contributes", "text": "方法：三招→吞吐 ①"},
+                    {"page": 1, "anchor": "topology-aware sampling", "text": "第一行\n第二行"},
+                ]})
+    out, missed = cli.build(cfg)
+    assert not missed
+    first = [a for a in out if a["type"] == "highlight"][0]
+    listing = {"annotations": [
+        {"key": "USER1", "type": "highlight", "tags": [], "position": {"pageIndex": 0, "rects": first["position"]["rects"][:1]}},
+        {"key": "OWN1", "type": "highlight", "tags": ["zotero-scholium"], "position": {"pageIndex": 0, "rects": first["position"]["rects"][:1]}},
+    ]}
+    w = cli.check_style(out, cfg, listing, note.read_text(encoding="utf8"))
+    kinds = {x["kind"] for x in w}
+    assert {"latex", "math_format", "tag", "symbol", "label", "line_break", "banned_phrase", "duplicate",
+            "user_overlap", "core_count", "note_math"} <= kinds, kinds
+    assert sum(1 for x in w if x["kind"] == "user_overlap") == 1, "the tool's own earlier annotation is replaced, not an overlap"
+    assert any("USER1" in x["reason"] for x in w)
+    assert any(x["kind"] == "core_count" and "1 " in x["reason"] for x in w)
+    assert sum(1 for x in w if x["kind"] == "note_math") == 2, "double backslash in a math node; LaTeX outside a node"
+    assert all(x["kind"] != "user_overlap" for x in cli.check_style(out, cfg, None, None))
+    cfg["highlights"] = [{"page": 1, "core": True, "text": "Foundation models have transformed machine learning", "comment": "基础模型改变了机器学习，d<sub>k</sub> 与 x<sup>2</sup> 正常。"},
+                         {"page": 1, "core": True, "text": "patch jittering, a stabilization method", "comment": "补丁抖动，一种稳定化方法"}]
+    cfg["summaries"] = [{"page": 1, "anchor": "Our work contributes", "text": "这三招里拓扑感知采样贡献最大。"}]
+    note.write_text('<h1>T</h1><p><span class="math">$\\frac{a}{b}$</span> <pre class="math">$$x^2$$</pre></p>', encoding="utf8")
+    out, missed = cli.build(cfg)
+    own_only = {"annotations": listing["annotations"][1:]}
+    assert not missed and cli.check_style(out, cfg, own_only, note.read_text(encoding="utf8")) == []
+
+
+def test_compact_listing_counts_and_details_only_others():
+    listing = {"ok": True, "backend": "api", "attachmentKey": "A", "notes": [{"key": "N1", "title": "T"}], "annotations": [
+        {"key": "K1", "type": "highlight", "color": "#ff6666", "tags": ["zotero-scholium"], "pageLabel": "1", "text": "a", "comment": "b", "position": {"pageIndex": 0, "rects": [[0, 0, 1, 1]]}},
+        {"key": "K2", "type": "text", "color": "#1a73e8", "tags": ["zotero-scholium"], "pageLabel": "2", "text": "", "comment": "c", "position": {"pageIndex": 1, "rects": [[0, 0, 1, 1]]}},
+        {"key": "U1", "type": "highlight", "color": "#ffd400", "tags": [], "pageLabel": "3", "text": "user's own", "comment": "", "position": {"pageIndex": 2, "rects": [[0, 0, 1, 1]]}}]}
+    c = cli.compact_listing(listing)
+    assert (c["annotations"], c["own"], c["others"]) == (3, 2, 1)
+    assert c["by_type"] == {"highlight": 2, "text": 1} and c["by_color"] == {"#ff6666": 1, "#1a73e8": 1, "#ffd400": 1}
+    assert c["others_detail"] == [{"key": "U1", "type": "highlight", "color": "#ffd400", "page": "3", "text": "user's own"}]
+    assert c["notes"] == [{"key": "N1", "title": "T"}] and c["backend"] == "api"

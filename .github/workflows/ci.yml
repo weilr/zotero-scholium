@@ -20,6 +20,7 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: python scripts/check_skill_script_sync.py
       - run: python scripts/check_skill_frontmatter.py
+      - run: python scripts/measure_context.py --max-skill-tokens 3000
       - run: pytest -q
       - name: syntax-check the plugin
         run: node --check plugin/scholium-bridge/bootstrap.js

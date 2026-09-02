@@ -93,7 +93,7 @@ Claude Code 插件方式则使用 `/plugin update zotero-scholium@zotero-scholiu
 为《Attention Is All You Need》写一篇阅读笔记
 ```
 
-代理会通过本地 API 定位条目、选择句子、撰写评论与页边批注、用内置脚本写入，并报告结果。Zotero 10 首次写入会弹出授权对话框，选择"始终允许"。写入后关闭并重新打开该 PDF 即可看到注释。中文请求按随附的中文写作规范执行。
+代理会通过本地 API 定位条目、把论文按编号句子读一遍、按编号选句、撰写评论与页边批注、用内置脚本一次写入，并报告结果。Zotero 10 首次写入会弹出授权对话框，选择"始终允许"。写入后关闭并重新打开该 PDF 即可看到注释。中文请求按随附的中文写作规范执行。
 
 ## 技能内容
 
@@ -101,6 +101,9 @@ Claude Code 插件方式则使用 `/plugin update zotero-scholium@zotero-scholiu
 |---|---|
 | `skills/zotero-scholium/SKILL.md` | 工作流程：定位条目、选择句子、撰写评论与页边批注、调用脚本、核对结果 |
 | `skills/zotero-scholium/references/style-zh.md` | 中文评论、页边批注与阅读笔记的写作规范 |
+| `skills/zotero-scholium/references/configuration.md` | 配置键、命令与报告字段 |
+| `skills/zotero-scholium/references/backends.md` | 写入通道、失败处理与注意事项 |
+| `skills/zotero-scholium/references/profile.md` | 标注画像的优先级与流程 |
 | `skills/zotero-scholium/references/zotero-annotations.md` | Zotero 注释的数据模型 |
 | `skills/zotero-scholium/scripts/scholium.py` | 工具本体，与 `src/zotero_scholium/cli.py` 完全一致 |
 | `skills/zotero-scholium/examples/` | 配置文件与阅读笔记模板 |
@@ -108,8 +111,8 @@ Claude Code 插件方式则使用 `/plugin update zotero-scholium@zotero-scholiu
 
 ## 工作原理
 
-1. 以只读方式用 PyMuPDF 打开 PDF，对每一页建立词级索引。
-2. 将每条高亮短语与规范化后的词序列匹配，按文本行生成 PDF 用户空间中的矩形，并计算 Zotero 的排序索引。
+1. 以只读方式用 PyMuPDF 打开 PDF；`extract` 为句子编号（去掉页眉页脚与参考文献），并对每一页建立词级索引。
+2. 每条高亮按编号指定一句（或给出原文短语）；其原文与规范化后的词序列匹配，按文本行生成 PDF 用户空间中的矩形，并计算 Zotero 的排序索引。
 3. 根据全文档词坐标的分布估计正文栏的边界；每条总结锚定到所在段落的首行，布局在相邻的页边，避开已有注释、图表、相邻批注、页眉和页脚。
 4. 先移除上一次运行创建的工具自身注释，再通过所选通道写入新的注释对象。
 
@@ -120,7 +123,9 @@ Claude Code 插件方式则使用 `/plugin update zotero-scholium@zotero-scholiu
 - **原生注释。** 高亮、下划线与页边文字均为 Zotero 注释条目：可编辑、可检索、可同步。不改动 PDF 文件。
 - **页边批注自动布局。** 批注置于段落所在一侧的页边，自动避开图表、已有注释、相邻批注、页眉与页脚。
 - **可定制的位置与样式。** 首页顶部的论文总结、页底的一句评语、固定放在某一侧的批注、便签，或单条批注的颜色与字号；画像会学习这些习惯。
+- **句子编号。** 代理把论文按编号句子读一遍，按编号选句；逐字原文与坐标由工具补出。
 - **稳健的原文匹配。** 词级匹配，忽略空白、连字符与连字。
+- **风格检查。** 评论、页边批注与阅读笔记中的机械缺陷在写入前报告。
 - **译文一致性检查。** 评论中出现而高亮原文中没有的术语或数字，在写入前以警告形式报告。
 - **画像学习。** `scholium profile --from-library` 从文库中已有的注释归纳用户自己的标注习惯；用户的明确规则始终优先。
 - **可安全重复运行。** 每个对象都带有所有权标签；重新运行只替换工具自身的注释，绝不删除笔记。
@@ -152,11 +157,13 @@ pip install .                            # 提供 `scholium` 命令
      "out_dir": "out",
      "note_html": "reading_note.html",
      "note_title_prefix": "Attention Is All You Need",
+     "sentences": "out/sentences.json",
      "highlights": [
+       {"id": 3, "core": true, "comment": "我们提出一种新的简单网络架构 Transformer，完全基于 attention 机制。"},
        {"page": 1, "core": true, "text": "We propose a new simple network architecture, the Transformer, based solely on attention mechanisms", "comment": "我们提出一种新的简单网络架构 Transformer，完全基于 attention 机制。"}
      ],
      "summaries": [
-       {"page": 1, "anchor": "dispensing with recurrence and convolutions entirely", "text": "用 attention 取代循环结构，整个模型只有 attention 和前馈层。"}
+       {"id": 4, "text": "用 attention 取代循环结构，整个模型只有 attention 和前馈层。"}
      ]
    }
    ```
@@ -164,13 +171,13 @@ pip install .                            # 提供 `scholium` 命令
 3. **生成、检查、写入。**
 
    ```bash
-   scholium extract --pdf paper.pdf         # 论文全文，带页码标记、合并断字、去参考文献
-   scholium --config config.json            # 匹配原文，渲染预览，报告未匹配的句子
-   scholium --config config.json --apply    # 写入 Zotero（Zotero 10 首次运行需确认授权对话框）
-   scholium --config config.json --list     # 读取当前库中已有的注释与笔记
+   scholium extract --pdf paper.pdf --sentences out/sentences.json --out out/sentences.txt   # 带编号的句子，供阅读与选句
+   scholium --config config.json            # 生成并报告，不写入
+   scholium --config config.json --apply    # 生成、检查、写入 Zotero、回读（Zotero 10 首次运行需确认授权对话框）
+   scholium --config config.json --list     # 各类型/颜色数量、非本工具的注释、笔记标题（--full：全部输出）
    ```
 
-   第一条命令生成 `annotations.json`、备用的 `create_annotations.js` 以及所配置页面的 `preview_p<N>.png`，并列出无法定位的短语，以及该页上找到的最接近原句。
+   每次运行都生成 `annotations.json`、备用的 `create_annotations.js` 以及所配置页面的 `preview_p<N>.png`，并报告 `missed`（附该页上最接近的原句）、`style_warnings`、`translation_warnings`、`layout_warnings` 以及运行前后 PDF 的哈希。`missed` 或 `style_warnings` 不为空时 `--apply` 不写入（`--allow-missed`、`--allow-warnings`）。
 
 [本地 API 调用示例](examples/direct_api_example.py)（`examples/direct_api_example.py`）以约三十行代码演示了 Zotero 10 本地 API 的基本调用，可用于其他应用。
 
@@ -181,8 +188,9 @@ pip install .                            # 提供 `scholium` 命令
 | `pdf` | 是 | PDF 附件路径 |
 | `item_key`、`attachment_key` | 是 | 父条目与附件的 Zotero key |
 | `out_dir` | 是 | 生成文件的输出目录 |
-| `highlights[]` | | `page`（从 1 起）、`text`（逐字原文；长句可只写首尾几词、中间用省略号 `…`）、`comment`，以及 `level`、`color`、旧式布尔值 `core` 三者之一；可选 `type: "underline"`、`occurrence`（原文重复时指定第几处） |
-| `summaries[]` | | `page`、`anchor`（定位段落的唯一短语）、`text`（不含硬换行）；可选 `place`（`"top"` 或 `"bottom"`：横跨正文栏、置于该页顶部或底部的文本框，无需 anchor）、`side`（`"left"`、`"right"`）、`color`、`font_size`、`kind: "note"`（便签）、`occurrence` |
+| `sentences` | | `scholium extract --sentences` 写出的 JSON（默认 `<out_dir>/sentences.json`） |
+| `highlights[]` | | `id`（句子编号）或 `ids`（`[起, 止]`，同一页上连续的句子）或 `page` + `text`（逐字原文；长句可只写首尾几词、中间用省略号 `…`；`occurrence` 在原文重复时指定第几处）；`comment`；以及 `level`、`color`、旧式布尔值 `core` 三者之一；可选 `type: "underline"` |
+| `summaries[]` | | `text`（不含硬换行），以及 `id`（该段落中的一句）或 `page` + `anchor`（定位段落的唯一短语）；可选 `place`（`"top"` 或 `"bottom"`：横跨正文栏、置于该页顶部或底部的文本框，无需 anchor）、`side`（`"left"`、`"right"`）、`color`、`font_size`、`kind: "note"`（便签）、`occurrence` |
 | `levels` | | 命名颜色，例如 `{"claim": "#ff6666", "term": "#ffd400"}` |
 | `note_html`、`note_title_prefix` | | 子笔记的 HTML 文件；前缀用于识别已存在的同名笔记 |
 | `core_color`、`other_color`、`text_color` | | 默认 `#ff6666`、`#ffd400`、`#1a73e8` |
@@ -191,6 +199,8 @@ pip install .                            # 提供 `scholium` 命令
 | `summary_kind` | | `text`（默认：可见的页边文字）或 `note`（便签） |
 | `preview_pages` | | 渲染为 PNG 预览的页码（默认 `[1]`） |
 | `snap` | | 相似度 ≥ 0.95 的短语自动采用并报告在 `snapped`（默认 false） |
+| `core_range` | | `[low, high]`：`core_color` 高亮的预期数量；超出时报告在 `style_warnings` |
+| `banned_phrases` | | 评论、页边文字和笔记中不得出现的字符串；报告在 `style_warnings` |
 | `data_dir` | | Zotero 数据目录（默认从 PDF 路径或 Zotero 首选项推断）；存放画像与 bridge 令牌 |
 | `cleanup` | | `true`（默认）：写入前删除本工具此前在该附件上创建的注释；`false`：保留全部已有注释，只新增 |
 | `cleanup_external` | | 仅 bridge 通道：同时清理从 PDF 文件导入的注释（默认 `false`） |
@@ -253,6 +263,8 @@ pip install -e ".[dev]"
 pytest                                      # 测试基于合成 PDF，不含任何第三方内容
 python scripts/check_skill_script_sync.py   # 技能目录中包含 cli.py 的副本，两者必须保持一致
 python scripts/check_skill_frontmatter.py   # SKILL.md 的 front matter 必须是严格合法的 YAML
+python scripts/measure_context.py           # 技能文件的 token 体积（--pdf：外加一篇论文的抽取结果；--max-skill-tokens：CI 上限）
+python scripts/session_usage.py FILE...     # Codex rollout 或 Claude Code transcript 的模型调用次数与 token
 ```
 
 插件由发布工作流打包；如需本地构建，将 `plugin/scholium-bridge/` 中的 `manifest.json` 与 `bootstrap.js` 置于 zip 压缩包根目录，命名为 `scholium-bridge.xpi`。
