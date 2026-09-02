@@ -3,14 +3,14 @@
   "owner": { "name": "weilr" },
   "metadata": {
     "description": "Native Zotero annotations from human or LLM reading.",
-    "version": "0.1.0"
+    "version": "0.1.1"
   },
   "plugins": [
     {
       "name": "zotero-scholium",
       "source": "./",
       "description": "Annotate papers in Zotero with native highlights, translation comments, margin notes, and reading notes.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "category": "productivity",
       "keywords": ["zotero", "annotations", "pdf", "research"]
     }

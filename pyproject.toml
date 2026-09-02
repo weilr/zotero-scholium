@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zotero-scholium"
-version = "0.1.0"
+version = "0.1.1"
 description = "Write reading results, human or model-generated, back into Zotero as native annotations: highlights with comments, margin text notes, and child notes. No plugin required on Zotero 10 and later."
 readme = "README.md"
 license = { text = "MIT" }
