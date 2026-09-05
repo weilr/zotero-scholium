@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Annotation cleanup uses only current and legacy tool tags across the API, bridge and generated
+  JavaScript backends; matching text or empty comments no longer identify user annotations as owned.
+- The API creates new notes and annotations before cleaning up old items, reports creation failures,
+  and verifies newly created keys by reading them back. Failed or incomplete writes are not reported
+  as successful, and the skill reconciles stored items before retrying.
+- Read requests and safe writes retry transient failures. POST requests are not repeated after
+  timeouts or HTTP 500/503 errors, avoiding duplicate creation when a response fails after a commit.
+- The skill reviews the dry-run report before applying, preserves existing annotations for partial
+  additions, and passes task scope, language and preferences to batch agents with separate output
+  directories for each paper.
+- Translation comments contain only translations; reader judgements belong in margin notes and
+  reading notes. The skill entrypoint removes duplicated instructions and shortens its description.
+- Add 24 regression cases covering annotation ownership, write results, read-back and HTTP retries.
+
 ## 0.1.1 (2026-09-03)
 
 - The `author` configuration key is removed: no author name is written, and repeated runs identify

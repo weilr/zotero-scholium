@@ -6,7 +6,7 @@
 |---|---|---|
 | `pdf` | yes | path of the PDF attachment |
 | `item_key`, `attachment_key` | yes | Zotero keys of the parent item and the attachment |
-| `out_dir` | yes | directory for generated files (`annotations.json`, `create_annotations.js`, previews) |
+| `out_dir` | yes | directory for generated files (`annotations.json`, `create_annotations.js`, previews); use `out/<ATTACHMENT_KEY>` to isolate papers |
 | `sentences` | | the JSON written by `extract --sentences` (default `<out_dir>/sentences.json`); needed by entries that use `id` or `ids` |
 | `highlights[]` | | see below |
 | `summaries[]` | | see below |
@@ -21,13 +21,15 @@
 | `core_range` | | `[low, high]`: expected number of highlights in `core_color`; a count outside it is a style warning |
 | `banned_phrases` | | strings that must not occur in comments, margin texts or the note; each occurrence is a style warning |
 | `data_dir` | | Zotero data directory (inferred from the PDF path or Zotero's preferences by default); holds the profile and the bridge token |
-| `cleanup` | | `true` (default): remove the tool's own earlier annotations on the attachment before writing; `false`: keep every existing annotation and only add (then do not highlight sentences the user already highlighted) |
+| `cleanup` | | `true` (default): replace the tool's tagged earlier annotations on the attachment; use only for a complete redo. Set `false` for added notes, margin remarks or selected-scope annotations: keep existing annotations and only add |
 | `cleanup_external` | | bridge backend only: also remove annotations imported from the PDF file (default `false`) |
-| `note_replace` | | delete existing child notes with the same title prefix before creating the new one (default `false`; keep it) |
+| `note_replace` | | replace existing child notes with the same title prefix (default `false`; keep it) |
 
 ### `highlights[]`
 
 One of `id` (a sentence number from `sentences.txt`), `ids` (`[first, last]`, consecutive sentences on one page), or `page` + `text` (a verbatim phrase; a long span may give its first and last words separated by `…`, and `occurrence: N` selects the N-th appearance on the page). Colour: `core: true/false`, or `level` (a name in `levels`), or `color`. `comment` is the translation. Optional `type: "underline"`.
+
+Include only requested output types. For limited-scope work, adjust or omit `core_range` rather than adding highlights to meet a whole-paper target. With `cleanup: false`, avoid sentences that are already highlighted.
 
 ### `summaries[]`
 
@@ -56,7 +58,7 @@ scholium.py --config <config.json> --apply         # build, report, write, read 
 scholium.py --config <config.json> --list [--full] # what is currently stored on the attachment
 ```
 
-`--apply` refuses to write while `missed` or `style_warnings` is non-empty (`--allow-missed`, `--allow-warnings` override). `--backend auto|api|bridge|js` selects the write channel; `--ignore-existing` skips reading the attachment's annotations before layout. `--list` prints the counts by type and colour, the annotations that are not the tool's own, and the note titles; `--list --full` prints every annotation with text, comment and position.
+Run without `--apply` first and review `missed`, `style_warnings`, `translation_warnings` and `layout_warnings`; correct the configuration before applying. `--apply` refuses to write while `missed` or `style_warnings` is non-empty (`--allow-missed`, `--allow-warnings` override). `--backend auto|api|bridge|js` selects the write channel; `--ignore-existing` skips reading the attachment's annotations before layout. `--list` prints the counts by type and colour, the annotations that are not the tool's own, and the note titles; `--list --full` prints every annotation with text, comment and position.
 
 ## Report fields
 
@@ -74,3 +76,6 @@ scholium.py --config <config.json> --list [--full] # what is currently stored on
 | `pdf_sha256` | the file's hash before and after the run and `unchanged` |
 | `js`, `previews` | paths of the generated JavaScript file and preview PNGs |
 | `applied`, `backend`, `result`, `now_in_zotero`, `apply_error`, `fallback` | with `--apply`: the channel used, the numbers removed and created, a read-back, or the cause of failure and the manual fallback |
+| `verification` | API read-back: `missing_annotations` and `missing_notes` list newly returned keys that were not found |
+
+The API's `result.createdKeys` and `result.noteKeys` identify newly written annotations and notes; `result.failed` records reported creation failures. API cleanup runs only after all new items are created successfully. The apply flow checks returned keys against a fresh read-back; missing keys or failed read-back leave `applied: false`. An HTTP exception may leave no `result`. A failure may follow partial writes: inspect any available result and run `--list` before retrying.

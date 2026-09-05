@@ -75,10 +75,9 @@ var ScholiumBridge = {
     const parent = data.itemKey ? Zotero.Items.getByLibraryAndKey(libraryID, data.itemKey)
                                 : (att.parentID ? Zotero.Items.get(att.parentID) : null);
     const anns = Array.isArray(data.annotations) ? data.annotations : [];
-    const MINE = new Set(anns.map(a => a.comment).concat(anns.filter(a => a.text).map(a => a.text)));
 
-    // (0) cleanup: annotations tagged by this tool or with identical content.
-    //     External (PDF-imported, locked) annotations are only removed when data.cleanupExternal is true.
+    // (0) cleanup: annotations tagged by this tool.
+    //     Also remove external (PDF-imported, locked) annotations when data.cleanupExternal is true.
     const tag = data.tag || "";
     const ownTags = new Set([tag].concat(data.legacyTags || []).filter(Boolean));
     let removed = 0, kept = 0;
@@ -86,8 +85,7 @@ var ScholiumBridge = {
       for (const a of att.getAnnotations(true)) {
         const tags = a.getTags().map(t => t.tag);
         const mine = tags.some(t => ownTags.has(t)) ||
-                     (data.cleanupExternal && a.annotationIsExternal) ||
-                     MINE.has(a.annotationComment) || (a.annotationText && MINE.has(a.annotationText));
+                     (data.cleanupExternal && a.annotationIsExternal);
         if (mine) { await a.eraseTx(); removed++; } else { kept++; }
       }
     }

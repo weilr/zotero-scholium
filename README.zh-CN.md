@@ -114,7 +114,7 @@ Claude Code 插件方式则使用 `/plugin update zotero-scholium@zotero-scholiu
 1. 以只读方式用 PyMuPDF 打开 PDF；`extract` 为句子编号（去掉页眉页脚与参考文献），并对每一页建立词级索引。
 2. 每条高亮按编号指定一句（或给出原文短语）；其原文与规范化后的词序列匹配，按文本行生成 PDF 用户空间中的矩形，并计算 Zotero 的排序索引。
 3. 根据全文档词坐标的分布估计正文栏的边界；每条总结锚定到所在段落的首行，布局在相邻的页边，避开已有注释、图表、相邻批注、页眉和页脚。
-4. 先移除上一次运行创建的工具自身注释，再通过所选通道写入新的注释对象。
+4. 通过所选通道写入注释对象，启用 cleanup 时替换工具自身的旧注释。API 通道仅在新条目全部创建成功后清理旧注释。
 
 注释条目的实测 JSON 结构、本地 API 的授权流程以及通道顺序的取舍见 [设计说明](docs/design.md)。
 
@@ -168,7 +168,9 @@ pip install .                            # 提供 `scholium` 命令
    }
    ```
 
-3. **生成、检查、写入。**
+   只保留用户要求的输出类型。每篇论文使用独立的 `out_dir`，如 `out/<ATTACHMENT_KEY>`，句子文件和笔记文件也放在该目录。仅完整重做时使用 `cleanup: true`；只补笔记、页边批注或处理选定范围时，设置 `cleanup: false`。
+
+3. **生成、检查、写入。** 首先不带 `--apply` 运行，检查下述四类报告并修正配置，再写入。
 
    ```bash
    scholium extract --pdf paper.pdf --sentences out/sentences.json --out out/sentences.txt   # 带编号的句子，供阅读与选句
@@ -202,9 +204,9 @@ pip install .                            # 提供 `scholium` 命令
 | `core_range` | | `[low, high]`：`core_color` 高亮的预期数量；超出时报告在 `style_warnings` |
 | `banned_phrases` | | 评论、页边文字和笔记中不得出现的字符串；报告在 `style_warnings` |
 | `data_dir` | | Zotero 数据目录（默认从 PDF 路径或 Zotero 首选项推断）；存放画像与 bridge 令牌 |
-| `cleanup` | | `true`（默认）：写入前删除本工具此前在该附件上创建的注释；`false`：保留全部已有注释，只新增 |
+| `cleanup` | | `true`（默认）：删除该附件上带有本工具标签的旧注释，仅完整重做时使用；补充内容或处理选定范围时设为 `false`，保留已有注释 |
 | `cleanup_external` | | 仅 bridge 通道：同时清理从 PDF 文件导入的注释（默认 `false`） |
-| `note_replace` | | 创建新笔记前删除同前缀的已有子笔记（默认 `false`；破坏性选项） |
+| `note_replace` | | 替换同前缀的已有子笔记（默认 `false`；破坏性选项） |
 
 ### 写入通道
 
@@ -237,7 +239,7 @@ scholium profile --from-library      # 只读；生成 profile.json 与 profile.
 ## 安全边界
 
 - PDF 以只读方式打开，不会被写入。
-- 工具创建的所有注释与笔记均带有标签 `zotero-scholium`。重复运行时，仅删除带有该标签、或内容与本次生成完全相同的注释。
+- 工具创建的所有注释与笔记均带有标签 `zotero-scholium`。`cleanup: true` 时，API、bridge 和生成的 JavaScript 仅删除带有该标签或旧标签 `zotero-marginalia`、`zotero-paper-annotate` 的注释；内容相同不代表属于本工具。
 - 已有的子笔记不会被删除。若存在同名笔记，新笔记以"标题 (v2, YYYY-MM-DD)"形式的版本化标题创建。
 - 从 PDF 文件导入的"外部"注释（显示为锁定状态）默认保留，除非启用 `cleanup_external`。
 - 本地 API key 与插件令牌仅保存在本机，不纳入版本控制。
@@ -246,6 +248,9 @@ scholium profile --from-library      # 只读；生成 profile.json 与 profile.
 
 **写入后看不到注释。**
 关闭并重新打开 Zotero 阅读器中的该 PDF；已打开的阅读器标签页不会重新加载外部创建的注释。
+
+**写入后报告失败。**
+API 结果包含 `createdKeys`、`noteKeys` 和 `failed`，HTTP 异常时可能没有结果。写入流程会回读并核对返回的新 key。回读失败时，即使部分内容已写入，也会报告 `applied: false`。检查 `apply_error` 和可用的 `result`，再用 `--list` 核对实际内容后决定如何重试。
 
 **部分短语被报告为 `missed`。**
 短语跨页、包含提取时呈现方式不同的符号，或小型大写字母的单词在提取文本中与相邻单词粘连。请改用同一页内较短的子串。

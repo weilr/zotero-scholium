@@ -114,7 +114,7 @@ The agent locates the item through the local API, reads the paper once as number
 1. The PDF is opened read-only with PyMuPDF; `extract` numbers its sentences (running headers, footers and the bibliography removed), and every page is indexed at word level.
 2. Each highlight names a sentence by number (or gives a phrase); its text is matched against the normalised word sequence, and one rectangle per text line is produced in PDF user space, together with Zotero's sort index.
 3. The body columns are estimated from the distribution of word coordinates over the whole document. Each summary is anchored to the first line of its paragraph and laid out in the adjacent margin, avoiding existing annotations, figures, neighbouring boxes, the header, and the footer.
-4. The annotation objects are written through the selected backend, after removing the tool's own annotations from a previous run.
+4. The annotation objects are written through the selected backend, replacing the tool's earlier annotations when cleanup is enabled. The API removes old annotations only after all new items are created successfully.
 
 The verified JSON structure of annotation items, the authorisation flow of the local API, and the reasoning behind the backend order are documented in [docs/design.md](docs/design.md).
 
@@ -159,8 +159,8 @@ pip install .                            # provides the `scholium` command
      "note_title_prefix": "Attention Is All You Need",
      "sentences": "out/sentences.json",
      "highlights": [
-       {"id": 3, "core": true, "comment": "translation or comment"},
-       {"page": 1, "core": true, "text": "We propose a new simple network architecture, the Transformer, based solely on attention mechanisms", "comment": "translation or comment"}
+       {"id": 3, "core": true, "comment": "translation of the highlighted sentence"},
+       {"page": 1, "core": true, "text": "We propose a new simple network architecture, the Transformer, based solely on attention mechanisms", "comment": "translation of the highlighted sentence"}
      ],
      "summaries": [
        {"id": 4, "text": "Replaces recurrence with attention; the whole model is attention plus feed-forward layers."}
@@ -168,7 +168,9 @@ pip install .                            # provides the `scholium` command
    }
    ```
 
-3. **Generate, review, and apply.**
+   Include only the requested output types. Use a separate `out_dir` for each paper, such as `out/<ATTACHMENT_KEY>`, and place its sentence and note files there. Set `cleanup: true` only for a complete redo; for added notes, margin remarks or a selected scope, set `cleanup: false`.
+
+3. **Generate, review, and apply.** Run without `--apply` first, review all four warning fields below and correct the configuration before applying.
 
    ```bash
    scholium extract --pdf paper.pdf --sentences out/sentences.json --out out/sentences.txt   # numbered sentences to read and select from
@@ -202,9 +204,9 @@ pip install .                            # provides the `scholium` command
 | `core_range` | | `[low, high]`: expected number of highlights in `core_color`; a count outside it is reported under `style_warnings` |
 | `banned_phrases` | | strings that must not occur in comments, margin texts, or the note; reported under `style_warnings` |
 | `data_dir` | | Zotero data directory (inferred from the PDF path or Zotero's preferences by default); holds the profile and the bridge token |
-| `cleanup` | | `true` (default): before writing, remove the annotations this tool created earlier on the attachment; `false`: keep every existing annotation and only add new ones |
+| `cleanup` | | `true` (default): remove the tool's tagged earlier annotations on the attachment; use only for a complete redo. Set `false` for additions or a selected scope to preserve existing annotations |
 | `cleanup_external` | | bridge backend only: also remove annotations imported from the PDF file (default `false`) |
-| `note_replace` | | delete existing child notes with the same title prefix before creating the new one (default `false`; destructive) |
+| `note_replace` | | replace existing child notes with the same title prefix (default `false`; destructive) |
 
 ### Backends
 
@@ -237,7 +239,7 @@ Annotations created by the tool are excluded from the statistics, so the profile
 ## Safety model
 
 - The PDF is opened read-only and is never written to.
-- Every annotation and note created by the tool carries the tag `zotero-scholium`. A re-run deletes only annotations that carry this tag or whose content is identical to what is about to be created.
+- Every annotation and note created by the tool carries the tag `zotero-scholium`. With `cleanup: true`, API, bridge and generated JavaScript delete only annotations bearing this tag or the legacy tags `zotero-marginalia` and `zotero-paper-annotate`. Identical content alone does not establish ownership.
 - Existing child notes are never deleted. If a note with the same title exists, the new note receives a versioned title of the form `Title (v2, YYYY-MM-DD)`.
 - Annotations imported from the PDF file (shown as locked, "external" annotations) are left in place unless `cleanup_external` is enabled.
 - Local API keys and plugin tokens are stored locally and are excluded from version control.
@@ -245,6 +247,8 @@ Annotations created by the tool are excluded from the statistics, so the profile
 ## Troubleshooting
 
 **The annotations do not appear after applying.** Close and reopen the PDF in the Zotero reader; open reader tabs do not reload annotations created externally.
+
+**Apply failed after writing.** API results include `createdKeys`, `noteKeys` and `failed`; an HTTP exception may leave no result. The apply flow verifies returned keys by reading them back. A failed check leaves `applied: false` even if some items were written. Inspect `apply_error` and any available `result`, then run `--list` to reconcile stored items before retrying.
 
 **Some phrases are reported as `missed`.** The phrase spans a page break, contains a symbol that the extraction renders differently, or a small-caps word is joined to its neighbour in the extraction. Choose a shorter substring within one page.
 

@@ -21,7 +21,7 @@ Usage:    scholium --config config.json [--apply] [--list] [--backend auto|api|b
           scholium profile --from-library
 """
 import argparse
-import difflib, glob, hashlib, json, os, sys, re, datetime, collections
+import difflib, glob, hashlib, json, os, sys, re, time, datetime, collections
 import urllib.request, urllib.error
 import pymupdf
 
@@ -1062,20 +1062,35 @@ def extract_main(argv):
     return 0
 
 
+GET_ATTEMPTS = 3
+
+
 def http(method, path, body=None, headers=None, timeout=60):
+    """One HTTP call against the local API.
+
+    A busy Zotero can leave a request hanging until the socket times out, which
+    surfaces as status 0. GET is safe to repeat, so a read is retried a few times
+    before giving up; every other method is returned to the caller as-is, because
+    a POST that timed out may still have been committed.
+    """
     data = json.dumps(body, ensure_ascii=False).encode("utf8") if body is not None else None
-    req = urllib.request.Request(BASE + path, data=data, method=method)
-    if data is not None:
-        req.add_header("Content-Type", "application/json")
-    for k, v in (headers or {}).items():
-        req.add_header(k, v)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.status, dict(r.headers), r.read().decode("utf8", "ignore")
-    except urllib.error.HTTPError as e:
-        return e.code, dict(e.headers), e.read().decode("utf8", "ignore")
-    except Exception as e:
-        return 0, {}, str(e)
+    attempts = GET_ATTEMPTS if method.upper() == "GET" else 1
+    for attempt in range(attempts):
+        req = urllib.request.Request(BASE + path, data=data, method=method)
+        if data is not None:
+            req.add_header("Content-Type", "application/json")
+        for k, v in (headers or {}).items():
+            req.add_header(k, v)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.status, dict(r.headers), r.read().decode("utf8", "ignore")
+        except urllib.error.HTTPError as e:
+            return e.code, dict(e.headers), e.read().decode("utf8", "ignore")
+        except Exception as e:
+            if attempt == attempts - 1:
+                return 0, {}, str(e)
+            time.sleep(5 * (attempt + 1))
+    return 0, {}, "unreachable"
 
 
 def zotero_version():
@@ -1118,18 +1133,39 @@ class LocalApi:
             self._save_key()
         return self.key
 
+    WRITE_TIMEOUT = 600
+    WRITE_ATTEMPTS = 4
+
     def write(self, method, path, body=None, extra=None):
-        """Write request with automatic (re)authorization on 401."""
+        """Write request with automatic (re)authorization on 401 and retries.
+
+        Zotero serialises every write behind one library-wide version counter, so a
+        batch that lands while another write is in flight comes back as 412 with a
+        stale If-Unmodified-Since-Version; retrying with a fresh version fixes it.
+        A busy Zotero can also take minutes to commit a 50-item batch, hence the long
+        timeout. Timeouts (status 0) and server errors (500/503) are only retried
+        for idempotent methods: a POST may already have committed, so retrying it
+        could duplicate annotations.
+        """
         s = h = t = None
-        for attempt in range(2):
+        auth_retried = False
+        idempotent = method.upper() != "POST"
+        for attempt in range(self.WRITE_ATTEMPTS):
             if not self.key:
                 self.authorize()
             hdr = {"Zotero-Server-ID": self.server_id, "Zotero-API-Key": self.key}
             hdr.update(extra or {})
-            s, h, t = http(method, path, body, hdr, timeout=120)
-            if s == 401 and attempt == 0:
+            if attempt and "If-Unmodified-Since-Version" in hdr:
+                hdr["If-Unmodified-Since-Version"] = self.library_version()
+            s, h, t = http(method, path, body, hdr, timeout=self.WRITE_TIMEOUT)
+            if s == 401 and not auth_retried:
+                auth_retried = True
                 self.key = None
                 self.keys.pop(self.server_id, None)
+                continue
+            retryable = s == 412 or (idempotent and s in (0, 500, 503))
+            if retryable and attempt < self.WRITE_ATTEMPTS - 1:
+                time.sleep(5 * (attempt + 1))
                 continue
             return s, h, t
         return s, h, t
@@ -1189,23 +1225,20 @@ def api_list(cfg, api):
 
 
 def api_apply(cfg, out, api):
-    mine_content = set(a["comment"] for a in out) | set(a["text"] for a in out if a.get("text"))
-    # (0) cleanup: only annotations carrying the tool's tag or identical content;
-    #     skipped entirely with "cleanup": false
+    # Capture old owned keys before creating anything; matching text is not ownership.
     rows = api.children(cfg["attachment_key"], "annotation") if cfg.get("cleanup", True) else []
     to_delete, kept = [], 0
     for r in rows:
-        d = r["data"]
-        tags = {t["tag"] for t in d.get("tags", [])}
-        mine = bool(tags & OWN_TAGS) or \
-               (d.get("annotationComment") or "") in mine_content or (d.get("annotationText") or "") in mine_content
-        if mine:
+        tags = {t["tag"] for t in r["data"].get("tags", [])}
+        if tags & OWN_TAGS:
             to_delete.append(r["key"])
         else:
             kept += 1
-    removed = api.delete(to_delete) if to_delete else 0
-    # (1) child note: existing notes are preserved; the title is versioned if a note with the same prefix exists
-    note_created, notes_removed = False, 0
+    result = {"ok": False, "backend": "api", "removed": 0, "kept": kept,
+              "noteCreated": False, "notesRemoved": 0, "created": {},
+              "createdKeys": [], "noteKeys": [], "failed": []}
+    victims = []
+    # (1) Child note: preserve old notes until all new content has been created.
     if cfg.get("note_html") and cfg.get("item_key"):
         html = open(cfg["note_html"], encoding="utf8").read()
         prefix = cfg.get("note_title_prefix") or cfg.get("note_title") or ""
@@ -1213,11 +1246,14 @@ def api_apply(cfg, out, api):
         titles = [note_title_from_html(c["data"].get("note", "")) for c in existing]
         if cfg.get("note_replace") and prefix:
             victims = [c["key"] for c, t in zip(existing, titles) if t.startswith(prefix)]
-            notes_removed = api.delete(victims) if victims else 0
             titles = []
         html, _ = version_note(html, prefix, titles)
-        api.create([{"itemType": "note", "parentItem": cfg["item_key"], "note": html, "tags": [{"tag": TAG}]}])
-        note_created = True
+        keys, failed = api.create([{"itemType": "note", "parentItem": cfg["item_key"], "note": html, "tags": [{"tag": TAG}]}])
+        result["noteKeys"] = keys
+        result["noteCreated"] = not failed and len(keys) == 1
+        if not result["noteCreated"]:
+            result["failed"] = failed or [{"message": "note creation returned no unique item key"}]
+            return result
     # (2) annotations
     items = []
     for a in out:
@@ -1229,12 +1265,20 @@ def api_apply(cfg, out, api):
             it["annotationText"] = a.get("text", "")
         items.append(it)
     created_keys, failed = api.create(items)
+    result["createdKeys"] = created_keys
+    if failed or len(set(created_keys)) != len(items):
+        result["failed"] = failed or [{"message": "annotation creation returned fewer unique keys than requested"}]
+        result["created"] = {"created_keys": len(created_keys), "failed": result["failed"]}
+        return result
     counts = {}
     for a in out:
         counts[a["type"]] = counts.get(a["type"], 0) + 1
-    return {"ok": True, "backend": "api", "removed": removed, "kept": kept, "noteCreated": note_created,
-            "notesRemoved": notes_removed,
-            "created": counts if not failed else {"created_keys": len(created_keys), "failed": failed}}
+    result["created"] = counts
+    # Do not remove earlier work if either creation call failed.
+    result["removed"] = api.delete(to_delete) if to_delete else 0
+    result["notesRemoved"] = api.delete(victims) if victims else 0
+    result["ok"] = True
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1370,7 +1414,7 @@ def render_js(cfg, out):
     return f"""// Usage: in Zotero, open Tools -> Developer -> Run JavaScript, enable "Run as async function",
 // paste the entire content of this file, and click Run.
 // Effect (all changes are made in the Zotero database; the PDF file is not modified):
-//   (0) {'delete annotations previously created by this tool on the attachment (tag "' + TAG + '" or identical content);' if cfg.get('cleanup', True) else 'keep every existing annotation (cleanup disabled);'}
+//   (0) {'delete annotations carrying a current or legacy tool tag on the attachment;' if cfg.get('cleanup', True) else 'keep every existing annotation (cleanup disabled);'}
 //   (1) {"create a child note (if a note with the same title exists, the new note receives a versioned title; no note is deleted);" if html else "(no child note in this run)"}
 //   (2) create {n_h} highlight/underline annotations and {n_t} margin text annotations.
 var ITEM_KEY = {json.dumps(cfg['item_key'])}, ATT_KEY = {json.dumps(cfg['attachment_key'])}, TAG = {json.dumps(TAG)};
@@ -1386,12 +1430,10 @@ var att = Zotero.Items.getByLibraryAndKey(libraryID, ATT_KEY);
 if (!parent) throw new Error("item not found: " + ITEM_KEY);
 if (!att) throw new Error("attachment not found: " + ATT_KEY);
 
-var MINE = new Set(ANNOTATIONS.map(a => a.comment).concat(ANNOTATIONS.filter(a => a.text).map(a => a.text)));
 var removed = 0, kept = 0;
 for (let a of (CLEANUP ? att.getAnnotations(true) : [])) {{
   let tags = a.getTags().map(t => t.tag);
-  let mine = tags.some(t => OWN_TAGS.includes(t)) ||
-             MINE.has(a.annotationComment) || (a.annotationText && MINE.has(a.annotationText));
+  let mine = tags.some(t => OWN_TAGS.includes(t));
   if (mine) {{ await a.eraseTx(); removed++; }} else {{ kept++; }}
 }}
 
@@ -1780,16 +1822,30 @@ def main(argv=None):
                     res, err = bridge_apply(cfg, out)
             except Exception as e:
                 res, err = None, str(e)
-            if res:
-                report["applied"] = True
+            report["applied"] = False
+            if res is not None:
                 report["result"] = res
-                lst = api_list(cfg, handle) if name == "api" else bridge_list(cfg)[0]
-                if lst:
+            if res and res.get("ok"):
+                try:
+                    lst = api_list(cfg, handle) if name == "api" else bridge_list(cfg)[0]
+                    if not lst:
+                        raise RuntimeError("read-back unavailable")
                     report["now_in_zotero"] = {"annotations": len(lst["annotations"]), "notes": [n["title"][:70] for n in lst["notes"]]}
+                    if name == "api":
+                        ann_keys = {a["key"] for a in lst["annotations"]}
+                        note_keys = {n["key"] for n in lst["notes"]}
+                        verification = {"missing_annotations": sorted(set(res["createdKeys"]) - ann_keys),
+                                        "missing_notes": sorted(set(res["noteKeys"]) - note_keys)}
+                        report["verification"] = verification
+                        if any(verification.values()):
+                            raise RuntimeError("new items are missing from read-back")
+                    report["applied"] = True
+                except Exception as e:
+                    report["apply_error"] = f"write returned success, but verification failed: {e}; inspect --list before retrying"
             else:
-                report["applied"] = False
-                report["apply_error"] = err
-                report["fallback"] = "execute the generated file in Zotero: Tools -> Developer -> Run JavaScript (Run as async function): " + js_path
+                report["apply_error"] = (res.get("error") or "some items could not be created; inspect result.failed and --list before retrying") if res else err
+                if name == "js":
+                    report["fallback"] = "execute the generated file in Zotero: Tools -> Developer -> Run JavaScript (Run as async function): " + js_path
     pdf_after = _sha256(cfg["pdf"])
     report["pdf_sha256"] = {"before": pdf_before, "after": pdf_after, "unchanged": pdf_before == pdf_after}
     print(json.dumps(report, ensure_ascii=False, indent=1))
