@@ -23,6 +23,7 @@ Usage:    scholium --config config.json [--apply] [--list] [--backend auto|api|b
 import argparse
 import difflib, glob, hashlib, json, os, sys, re, time, datetime, collections
 import urllib.request, urllib.error
+from decimal import Decimal
 import pymupdf
 
 __version__ = "0.1.1"
@@ -533,11 +534,16 @@ def build(cfg, obstacles=None):
                 raise KeyError("unknown sentence id " + ", ".join(str(i) for i in ids if i not in sentences))
             if len({r["page"] for r in recs}) > 1:
                 raise KeyError("ids span more than one page")
+            text = " ".join(r["text"] for r in recs)
+            matches = page_index(recs[0]["page"] - 1).count(text)
+            if not matches:
+                raise ValueError("sentence id text cannot be matched exactly; re-run `scholium extract --sentences` or use page and text")
+            if not item.get("occurrence") and matches > 1 and (len(recs) != 1 or matches != recs[0]["same_text_count"]):
+                raise ValueError(f"ambiguous sentence id: {matches} passages match; set occurrence explicitly after checking the page")
         except (KeyError, ValueError, TypeError, FileNotFoundError) as e:
             missed.append({"kind": kind, "id": item.get("id", item.get("ids")), "reason": str(e).strip("'")})
             return None
-        text = " ".join(r["text"] for r in recs)
-        fields = {"page": recs[0]["page"], "text" if kind == "highlight" else "anchor": text, "_from_id": True}
+        fields = {"page": recs[0]["page"], "text" if kind == "highlight" else "anchor": text}
         if len(recs) == 1 and not item.get("occurrence"):
             fields["occurrence"] = recs[0]["occurrence"]
         return dict(item, **fields)
@@ -550,9 +556,6 @@ def build(cfg, obstacles=None):
         pi = page_index(p)
         occ = int(h.get("occurrence") or 0) or None   # 1-based; None: the first occurrence, ambiguity is reported
         ws, reason, snapped = pi.match(h["text"], occ or 1), None, None
-        if not ws and h.get("_from_id") and len(h["text"].split()) > 10:
-            words = h["text"].split()                # a sentence from the extraction: anchor on its ends
-            ws, reason = pi.match_range(" ".join(words[:5]), " ".join(words[-5:]), occurrence=occ)
         if not ws:
             parts = [s for s in SPAN_SEP.split(h["text"]) if s]
             if len(parts) == 2:                      # "first words … last words" selects the span between the anchors
@@ -652,6 +655,14 @@ def build(cfg, obstacles=None):
 
 
 CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
+NUMBER_RE = re.compile(
+    r"(?<![A-Za-z0-9_.])(?P<value>[+−-]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)"
+    r"(?:[eE][+-]?\d+)?)"
+    r"(?:\s*(?P<scale>[kK](?![A-Za-z])|[千万亿]))?"
+    r"(?:\s*(?P<percent>[%％]))?"
+    r"(?:\s*(?P<unit>[kmgt]i?b|[numμ]?s|[kmg]?hz|毫秒|微秒|纳秒|秒)(?![A-Za-z]))?"
+    r"(?![A-Za-z0-9_]|\.\d|,\d)"
+)
 
 
 def _tokens(s):
@@ -662,6 +673,24 @@ def _tokens(s):
     for m in re.finditer(r"([A-Za-z]{2,})-\s+([A-Za-z]{2,})", s):
         toks.update(part.lower() for part in m.groups() if len(part) >= 3)
     s = re.sub(r"(\w)-\s+(\w)", r"\1\2", s).lower()
+    # Keep version-bearing names intact even when their numeric parts are decimals.
+    toks.update(t for t in re.findall(r"(?<![a-z0-9])[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)+", s)
+                if any(c.isdigit() for c in t))
+    def number_token(match):
+        # Decimal tuple scaling is exact, including values beyond the default precision.
+        number = Decimal(match["value"].replace(",", "").replace("−", "-"))
+        sign, digits, exponent = number.as_tuple()
+        exponent += {None: 0, "k": 3, "千": 3, "万": 4, "亿": 8}[match["scale"]]
+        digits = list(digits)
+        while digits and digits[-1] == 0:
+            digits.pop()
+            exponent += 1
+        value = str(Decimal((sign, digits, exponent))) if digits else "0"
+        # Keep units on their quantities; spaces must not hide a unit change.
+        unit = {"毫秒": "ms", "微秒": "us", "纳秒": "ns", "秒": "s", "μs": "us"}.get(match["unit"], match["unit"])
+        toks.add(value + ("%" if match["percent"] else "") + (" " + unit if unit else ""))
+        return " "
+    s = NUMBER_RE.sub(number_token, s)
     for t in re.findall(r"[a-z0-9]+(?:\.[0-9]+)?", s):
         if len(t) >= 3 or any(c.isdigit() for c in t):
             toks.add(t)
@@ -669,16 +698,11 @@ def _tokens(s):
 
 
 def _covered(tok, text_tokens):
-    """A comment token is covered if it, a prefix/extension of it, or its digit skeleton appears in the source text."""
+    """Numbers and digit-bearing names require exact matches; words allow inflections."""
+    if any(c.isdigit() for c in tok):
+        return tok in text_tokens
     if tok in text_tokens or tok + "s" in text_tokens or tok + "es" in text_tokens or tok.rstrip("s") in text_tokens:
         return True
-    if any(c.isdigit() for c in tok):
-        d = re.sub(r"[^0-9]", "", tok)
-        for u in text_tokens:
-            du = re.sub(r"[^0-9]", "", u)
-            if d and du and (d == du or d.startswith(du) or du.startswith(d)):
-                return True
-        return False
     return any(len(tok) >= 4 and (u.startswith(tok) or tok.startswith(u)) and min(len(u), len(tok)) >= 4 for u in text_tokens)
 
 
@@ -1010,18 +1034,21 @@ def render_sentences(items):
 
 
 def _load_sentences(cfg):
-    """{id: sentence} from the sentences file, each with its occurrence among identical sentences on its page."""
+    """Load a cache for this exact PDF, counting complete sentences separately from substring matches."""
     path = cfg.get("sentences") or os.path.join(cfg["out_dir"], "sentences.json")
     if not os.path.exists(path):
         raise FileNotFoundError(f"sentences file not found: {path} (run `scholium extract --sentences`)")
     data = json.load(open(path, encoding="utf8"))
+    if not data.get("pdf_sha256") or data["pdf_sha256"] != _sha256(cfg["pdf"]):
+        raise ValueError("sentence cache has no matching PDF fingerprint; re-run `scholium extract --sentences`")
+    counts = collections.Counter((it["page"], norm_str(it["text"])) for it in data.get("sentences", []) if "id" in it)
     seen, table = collections.Counter(), {}
     for it in data.get("sentences", []):
         if "id" not in it:
             continue
         key = (it["page"], norm_str(it["text"]))
         seen[key] += 1
-        table[int(it["id"])] = dict(it, occurrence=seen[key])
+        table[int(it["id"])] = dict(it, occurrence=seen[key], same_text_count=counts[key])
     return table
 
 
@@ -1045,9 +1072,13 @@ def extract_main(argv):
             sys.exit("extract: --pages takes N or N-M")
         pages = list(range(int(m.group(1)), int(m.group(2) or m.group(1)) + 1))
     if args.sentences:
+        pdf_hash = _sha256(pdf)
         items = extract_sentences(pdf, keep_references=args.keep_references)   # ids count over the whole document
         n = sum(1 for it in items if "id" in it)
-        json.dump({"pdf": pdf, "sentences": [it for it in items if "id" in it],
+        if _sha256(pdf) != pdf_hash:
+            sys.exit("extract: PDF changed during extraction; run again")
+        os.makedirs(os.path.dirname(os.path.abspath(args.sentences)), exist_ok=True)
+        json.dump({"pdf": pdf, "pdf_sha256": pdf_hash, "sentences": [it for it in items if "id" in it],
                    "headings": [it for it in items if "id" not in it]}, open(args.sentences, "w", encoding="utf8"), ensure_ascii=False, indent=0)
         text = render_sentences([it for it in items if not pages or it["page"] in pages])
         summary = f"{n} sentences -> {args.sentences}"
@@ -1055,6 +1086,7 @@ def extract_main(argv):
         text = extract_text(pdf, pages=pages, keep_references=args.keep_references)
         summary = f"{len(text)} characters"
     if args.out:
+        os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         open(args.out, "w", encoding="utf8").write(text)
         print(f"{args.out}: {summary}")
     else:

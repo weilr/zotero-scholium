@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Sentence ids reject ambiguous substring matches and repeated ranges instead of silently selecting
+  another passage. Sentence caches carry the source PDF's SHA-256; changed PDFs and legacy caches
+  without a fingerprint require a fresh extraction. Extraction creates missing output directories.
+- Translation checks compare numeric values without dropping decimal points, signs or percent
+  markers, while accepting equivalent decimal, thousands and Chinese quantity-scale notation.
 - Annotation cleanup uses only current and legacy tool tags across the API, bridge and generated
   JavaScript backends; matching text or empty comments no longer identify user annotations as owned.
 - The API creates new notes and annotations before cleaning up old items, reports creation failures,

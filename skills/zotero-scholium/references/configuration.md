@@ -7,7 +7,7 @@
 | `pdf` | yes | path of the PDF attachment |
 | `item_key`, `attachment_key` | yes | Zotero keys of the parent item and the attachment |
 | `out_dir` | yes | directory for generated files (`annotations.json`, `create_annotations.js`, previews); use `out/<ATTACHMENT_KEY>` to isolate papers |
-| `sentences` | | the JSON written by `extract --sentences` (default `<out_dir>/sentences.json`); needed by entries that use `id` or `ids` |
+| `sentences` | | the JSON written by `extract --sentences` (default `<out_dir>/sentences.json`); needed by `id` or `ids`. Its PDF fingerprint must match the current file; re-extract legacy caches without a fingerprint or after changing the PDF |
 | `highlights[]` | | see below |
 | `summaries[]` | | see below |
 | `levels` | | named colours, e.g. `{"claim": "#ff6666", "term": "#ffd400"}`, referenced by `level` in highlights |
@@ -30,6 +30,8 @@
 One of `id` (a sentence number from `sentences.txt`), `ids` (`[first, last]`, consecutive sentences on one page), or `page` + `text` (a verbatim phrase; a long span may give its first and last words separated by `…`, and `occurrence: N` selects the N-th appearance on the page). Colour: `core: true/false`, or `level` (a name in `levels`), or `color`. `comment` is the translation. Optional `type: "underline"`.
 
 Include only requested output types. For limited-scope work, adjust or omit `core_range` rather than adding highlights to meet a whole-paper target. With `cleanup: false`, avoid sentences that are already highlighted.
+
+Ids require an exact text match. If a sentence also appears inside another sentence, or a range matches multiple passages, the entry is reported as ambiguous instead of selecting the first match. After checking the page, set `occurrence` to the intended passage; repeated complete sentences retain their existing id-based ordering.
 
 ### `summaries[]`
 

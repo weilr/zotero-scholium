@@ -66,9 +66,9 @@ def test_extract_sentences_numbers_paragraphs_and_headings(tmp_path):
 
 def test_build_resolves_ids_ranges_and_summary_ids(tmp_path):
     fp = tmp_path / "paper.pdf"; _three_page_pdf(str(fp))
-    items = cli.extract_sentences(str(fp))
     sfile = tmp_path / "sentences.json"
-    json.dump({"pdf": str(fp), "sentences": items}, open(sfile, "w", encoding="utf8"), ensure_ascii=False)
+    cli.extract_main(["--pdf", str(fp), "--sentences", str(sfile)])
+    items = json.loads(sfile.read_text(encoding="utf8"))["sentences"]
     sents = {i["id"]: i for i in items if "id" in i}
     first = next(i for i in sents.values() if i["text"].startswith("Foundation models"))
     study = first["id"] + 1

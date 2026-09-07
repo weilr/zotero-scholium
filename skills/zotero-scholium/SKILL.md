@@ -46,6 +46,8 @@ python <skill dir>/scripts/scholium.py extract --pdf <pdf> --sentences <out_dir>
 ```
 For a whole-paper task, read `sentences.txt` in full, appendices included; for a selected scope, read that scope with enough context. It contains page markers, headings and numbered sentences grouped by paragraph; headers, footers and bibliography are removed. Use `--pages N-M` if output is truncated. Do not also read the PDF or full-text cache.
 
+Extraction creates output directories and binds `sentences.json` to the PDF's SHA-256. Re-extract old caches without a fingerprint, or after replacing the PDF. If an id is reported as ambiguous, check the page's matching passages and set `occurrence` explicitly; do not guess a position.
+
 Write one configuration from `examples/config.template.json`, including only requested outputs. Set `cleanup: true` only for a complete redo; use `cleanup: false` when adding notes, margin remarks or annotations within a selected scope. Keep `note_replace: false`.
 
 - `highlights[]`: `id` (one sentence) or `ids: [first, last]` (consecutive sentences on one page), `core`, and `comment` (the translation). Core: the contributions enumerated in the introduction, the main claim of the abstract, the first quantitative sentence of each results subsection, the summary sentence of the conclusion. Each sentence at most once.
