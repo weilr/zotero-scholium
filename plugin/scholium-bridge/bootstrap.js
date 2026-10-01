@@ -12,7 +12,7 @@
  */
 
 var ScholiumBridge = {
-  version: "0.1.2",
+  version: "0.1.3",
   token: null,
   paths: ["/scholium-bridge/ping", "/scholium-bridge/list", "/scholium-bridge/apply"],
 

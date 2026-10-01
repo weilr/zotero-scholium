@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 (2026-10-01)
 
 - The reader toggle applies to every reader at once and is remembered across tabs and restarts
   (preference `extensions.scholium-bridge.showAnnotations`); the annotations are hidden until it is
