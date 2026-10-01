@@ -65,7 +65,7 @@ Claude Code 也可以把技能作为插件安装，由 `/plugin` 负责更新：
 
 - Python 3.9 及以上，并安装 [PyMuPDF](https://pymupdf.readthedocs.io/)：`pip install pymupdf`
 - Zotero 7 及以上，处于运行状态；本地服务器默认已启用
-- 仅 Zotero 7–9 需要：随附的 [`scholium-bridge` 插件](plugin/README.md)。Zotero 10 无需插件。
+- 随附的 [`scholium-bridge` 插件](plugin/README.md)：Zotero 7–9 必需，作为写入通道；Zotero 10 可选，提供工具注释在阅读器中的显示开关。
 
 ### 更新
 
@@ -129,6 +129,7 @@ Claude Code 插件方式则使用 `/plugin update zotero-scholium@zotero-scholiu
 - **译文一致性检查。** 评论中出现而高亮原文中没有的术语或数字，在写入前以警告形式报告。
 - **画像学习。** `scholium profile --from-library` 从文库中已有的注释归纳用户自己的标注习惯；用户的明确规则始终优先。
 - **可安全重复运行。** 每个对象都带有所有权标签；重新运行只替换工具自身的注释，绝不删除笔记。
+- **默认隐藏。** 安装随附插件后，工具写入的注释在 Zotero 阅读器中默认隐藏；阅读器工具栏中的眼睛按钮在当前标签页显示或隐藏这些注释，每个新打开的阅读器都从隐藏开始。
 - **三条写入通道。** 官方本地 API（Zotero 10+）、随附插件（Zotero 7–9）或生成脚本，按可用性自动选择。
 
 ## 命令行使用

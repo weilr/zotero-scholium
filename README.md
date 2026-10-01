@@ -65,7 +65,7 @@ Copy [`skills/zotero-scholium/`](skills/zotero-scholium/) into the agent's skill
 
 - Python 3.9 or later with [PyMuPDF](https://pymupdf.readthedocs.io/): `pip install pymupdf`
 - Zotero 7 or later, running; its local server is enabled by default
-- Zotero 7–9 only: the bundled [`scholium-bridge`](plugin/README.md) plugin. Zotero 10 needs no plugin.
+- The bundled [`scholium-bridge`](plugin/README.md) plugin: required on Zotero 7–9 as the write channel; optional on Zotero 10, where it adds the reader toggle for the tool's annotations.
 
 ### Updating
 
@@ -129,6 +129,7 @@ The verified JSON structure of annotation items, the authorisation flow of the l
 - **Translation fidelity check.** Comments that add terms or numbers absent from the highlighted span are reported before anything is written.
 - **Profile learning.** `scholium profile --from-library` derives the user's own annotation habits from the library; explicit user rules take precedence.
 - **Safe repeated runs.** Every object carries an ownership tag; a re-run replaces only the tool's own annotations and never deletes notes.
+- **Hidden until wanted.** With the bundled plugin installed, the tool's annotations are hidden in the Zotero reader; an eye button in the reader toolbar shows or hides them for that tab, and every newly opened reader starts hidden.
 - **Three write channels.** The official local API (Zotero 10+), the bundled plugin (Zotero 7–9), or a generated script, selected automatically.
 
 ## Command-line use

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- The bundled plugin hides the tool's annotations in every reader view (tab, window, item-pane
+  preview) until the eye button in the reader toolbar is pressed. Each reader starts hidden and is
+  toggled separately; stored annotations are not changed. The plugin supports Zotero 7 and later;
+  its endpoints remain needed only on Zotero 7 to 9.
 - Sentence ids reject ambiguous substring matches and repeated ranges instead of silently selecting
   another passage. Sentence caches carry the source PDF's SHA-256; changed PDFs and legacy caches
   without a fingerprint require a fresh extraction. Extraction creates missing output directories.
