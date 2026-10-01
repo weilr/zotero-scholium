@@ -271,6 +271,7 @@ python scripts/check_skill_script_sync.py   # 技能目录中包含 cli.py 的�
 python scripts/check_skill_frontmatter.py   # SKILL.md 的 front matter 必须是严格合法的 YAML
 python scripts/measure_context.py           # 技能文件的 token 体积（--pdf：外加一篇论文的抽取结果；--max-skill-tokens：CI 上限）
 python scripts/session_usage.py FILE...     # Codex rollout 或 Claude Code transcript 的模型调用次数与 token
+python scripts/sync_local_skills.py DIR...  # 发布后：把这一版装进本地技能目录（保留自带的 SKILL.md；退出码 1 表示需核对，--ack）
 ```
 
 插件由发布工作流打包；如需本地构建，将 `plugin/scholium-bridge/` 中的 `manifest.json` 与 `bootstrap.js` 置于 zip 压缩包根目录，命名为 `scholium-bridge.xpi`。

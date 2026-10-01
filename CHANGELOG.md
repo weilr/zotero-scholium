@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `scripts/sync_local_skills.py` installs the latest release tag into local skill directories. Files edited there and a
+  directory's own SKILL.md are kept; it exits 1 while the released SKILL.md has changed since the own one was aligned
+  (`--ack` records the alignment).
+
 ## 0.1.2 (2026-10-01)
 
 - The bundled plugin hides the tool's annotations in every reader view (tab, window, item-pane

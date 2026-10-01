@@ -266,6 +266,7 @@ python scripts/check_skill_script_sync.py   # the skill bundles a copy of cli.py
 python scripts/check_skill_frontmatter.py   # SKILL.md front matter must be strict YAML
 python scripts/measure_context.py           # token size of the skill files (--pdf: and of a paper's extraction; --max-skill-tokens: the CI limit)
 python scripts/session_usage.py FILE...     # model calls and tokens of Codex rollouts or Claude Code transcripts
+python scripts/sync_local_skills.py DIR...  # after a release: install it into local skill directories (keeps an own SKILL.md; exit 1: review, --ack)
 ```
 
 The plugin is packaged by the release workflow; to build it locally, archive `manifest.json` and `bootstrap.js` from `plugin/scholium-bridge/` at the root of a zip file named `scholium-bridge.xpi`.
