@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 (2026-10-01)
 
 - The bundled plugin hides the tool's annotations in every reader view (tab, window, item-pane
   preview) until the eye button in the reader toolbar is pressed. Each reader starts hidden and is
