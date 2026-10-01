@@ -1,8 +1,8 @@
 /* Scholium Bridge: a minimal plugin for Zotero 7 and later.
- * Reader toggle (all versions): annotations tagged by zotero-scholium are hidden in every reader view
- * (tab, window, item-pane preview) until the eye button in the reader toolbar is pressed. Each newly
- * opened reader starts hidden. Hiding removes the annotations from the view only; stored items are
- * not changed.
+ * Reader toggle (all versions): the eye button in the reader toolbar shows or hides annotations tagged
+ * by zotero-scholium in every reader view (tab, window, item-pane preview) at once. The choice is kept
+ * in the preference extensions.scholium-bridge.showAnnotations; until it is first switched on, the
+ * annotations are hidden. Hiding removes them from the view only; stored items are not changed.
  * Endpoints (needed on Zotero 7 to 9 only), on Zotero's built-in local HTTP server (http://127.0.0.1:23119):
  *   GET  /scholium-bridge/ping   -> { ok, version, dataDir }                       (no token)
  *   POST /scholium-bridge/list   -> annotations of one attachment                  (token)
@@ -185,8 +185,9 @@ var ScholiumBridge = {
 
 var ScholiumToggle = {
   tag: "zotero-scholium",
+  pref: "extensions.scholium-bridge.showAnnotations",
   active: false,
-  shown: new WeakSet(),     // readers whose scholium annotations are currently displayed
+  shown: false,             // one state for every reader, loaded from and saved to the preference
   handler: null,
   proto: null,              // ReaderInstance.prototype, once reached through a reader
   original: null,
@@ -200,7 +201,12 @@ var ScholiumToggle = {
     catch (e) { return false; }
   },
 
-  hidden(reader) { return this.active && !this.shown.has(reader); },
+  hidden() { return this.active && !this.shown; },
+
+  readPref() {
+    try { return Zotero.Prefs.get(this.pref, true) === true; }
+    catch (e) { return false; }
+  },
 
   ownAnnotations(reader) {
     const att = Zotero.Items.get(reader.itemID);
@@ -216,7 +222,7 @@ var ScholiumToggle = {
     if (!p || typeof p._getAnnotation !== "function") return false;
     const self = this, original = p._getAnnotation;
     this.wrapper = function (item) {
-      if (self.hidden(this) && self.isOwn(item)) return null;
+      if (self.hidden() && self.isOwn(item)) return null;
       return original.apply(this, arguments);
     };
     p._getAnnotation = this.wrapper;
@@ -262,20 +268,35 @@ var ScholiumToggle = {
   async hideLoaded(reader) {
     try {
       await reader._initPromise;
-      if (!this.hidden(reader)) return;
+      if (!this.hidden()) return;
       const keys = this.ownAnnotations(reader).map(a => a.key);
       if (keys.length) await reader.unsetAnnotations(keys);
     } catch (e) { this.log("hide failed: " + e); }
   },
 
-  async toggle(reader, button) {
-    const show = !this.shown.has(reader);
-    if (show) this.shown.add(reader); else this.shown.delete(reader);
-    this.paint(button, reader);
+  // Switch every open reader and its button, and save the choice for later readers and sessions.
+  // An item-pane preview that is already showing follows on its next load.
+  async toggle() {
+    this.shown = !this.shown;
+    try { Zotero.Prefs.set(this.pref, this.shown, true); }
+    catch (e) { this.log("preference not saved: " + e); }
+    const readers = Array.from(Zotero.Reader._readers || []);
+    for (const reader of readers) this.repaint(reader);
+    await Promise.all(readers.map(reader => this.refresh(reader).catch(e => this.log("refresh failed: " + e))));
+  },
+
+  async refresh(reader) {
     const own = this.ownAnnotations(reader);
     if (!own.length) return;
-    if (show) await reader.setAnnotations(own);
+    if (this.shown) await reader.setAnnotations(own);
     else await reader.unsetAnnotations(own.map(a => a.key));
+  },
+
+  repaint(reader) {
+    try {
+      const doc = reader._iframeWindow && reader._iframeWindow.document;
+      if (doc) for (const b of doc.querySelectorAll(".scholium-toggle")) this.paint(b);
+    } catch (e) {}
   },
 
   label(shown) {
@@ -303,21 +324,21 @@ var ScholiumToggle = {
     return svg;
   },
 
-  paint(button, reader) {
-    const shown = this.shown.has(reader);
+  paint(button) {
+    const shown = this.shown;
     button.classList.toggle("active", shown);
     button.setAttribute("aria-pressed", String(shown));
     button.title = this.label(shown);
     button.replaceChildren(this.icon(button.ownerDocument, shown));
   },
 
-  button(reader, doc) {
+  button(doc) {
     const button = doc.createElement("button");
     button.className = "toolbar-button scholium-toggle";
     button.tabIndex = -1;
-    this.paint(button, reader);
+    this.paint(button);
     button.addEventListener("click", () => {
-      this.toggle(reader, button).catch(e => this.log("toggle failed: " + e));
+      this.toggle().catch(e => this.log("toggle failed: " + e));
     });
     return button;
   },
@@ -326,7 +347,7 @@ var ScholiumToggle = {
     const { reader, doc, append } = event;
     if (!this.active || !reader || !doc) return;
     if (!this.proto && this.patch(reader)) this.hideLoaded(reader);
-    append(this.button(reader, doc));
+    append(this.button(doc));
   },
 
   // readers opened before the plugin started: their toolbars have already been rendered
@@ -338,7 +359,7 @@ var ScholiumToggle = {
       if (!this.active || !host || host.querySelector(".scholium-toggle")) return;
       const section = doc.createElement("div");
       section.className = "section";
-      section.append(this.button(reader, doc));
+      section.append(this.button(doc));
       host.append(section);
     } catch (e) { this.log("toolbar button failed: " + e); }
   },
@@ -346,6 +367,7 @@ var ScholiumToggle = {
   start(pluginID) {
     const R = Zotero.Reader;
     if (!R || typeof R.registerEventListener !== "function") return;
+    this.shown = this.readPref();
     this.active = true;
     this.handler = event => {
       try { this.onRenderToolbar(event); } catch (e) { this.log("toolbar: " + e); }
@@ -361,7 +383,7 @@ var ScholiumToggle = {
     if (!this.active) return;
     const R = Zotero.Reader;
     const readers = Array.from(R._readers || []);
-    const hidden = readers.filter(r => !this.shown.has(r));
+    const hidden = !this.shown;
     this.active = false;   // the wrapper passes everything through from here on
     try { R.unregisterEventListener("renderToolbar", this.handler); } catch (e) {}
     this.unhook();
@@ -371,7 +393,7 @@ var ScholiumToggle = {
         const doc = reader._iframeWindow && reader._iframeWindow.document;
         if (doc) for (const b of doc.querySelectorAll(".scholium-toggle")) (b.closest(".section") || b).remove();
       } catch (e) {}
-      if (hidden.includes(reader)) {
+      if (hidden) {
         const own = this.ownAnnotations(reader);
         if (own.length) reader.setAnnotations(own).catch(e => this.log("restore failed: " + e));
       }

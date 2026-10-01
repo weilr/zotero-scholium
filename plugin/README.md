@@ -2,18 +2,20 @@
 
 The plugin has two functions:
 
-- **Reader toggle** (Zotero 7 and later): hides the tool's annotations in the reader until they are
-  asked for.
+- **Reader toggle** (Zotero 7 and later): shows or hides the tool's annotations in the reader with
+  one button.
 - **Write endpoints** (needed on Zotero 7 to 9 only): Zotero 10 provides an official local API with
   write support, which `scholium` uses directly; the local API of Zotero 7, 8, and 9 is read-only.
 
 ## Reader toggle
 
-Annotations that carry the tool's tag `zotero-scholium` are hidden in every reader view: reader tabs,
-reader windows, and the attachment preview in the item pane. The eye button at the right end of the
-reader toolbar shows them in that tab or window, and a second click hides them again. Every newly
-opened reader starts hidden, and each reader is toggled separately. Annotations that the tool writes
-or changes while a reader is open follow that reader's state.
+The eye button at the right end of the reader toolbar shows or hides the annotations that carry the
+tool's tag `zotero-scholium` in every reader view at once: reader tabs, reader windows, and the
+attachment preview in the item pane. The choice is kept in the preference
+`extensions.scholium-bridge.showAnnotations` and applies to readers opened later and after a restart;
+until the button is first used, the annotations are hidden. Annotations that the tool writes or
+changes while a reader is open follow the current choice; an item-pane preview that is already
+showing follows on its next load.
 
 Hiding removes the annotations from the reader's view and sidebar only. The stored annotations, their
 synchronisation, searches, and notes created from annotations are not affected. Disabling or removing

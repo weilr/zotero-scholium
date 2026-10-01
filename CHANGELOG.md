@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The reader toggle applies to every reader at once and is remembered across tabs and restarts
+  (preference `extensions.scholium-bridge.showAnnotations`); the annotations are hidden until it is
+  first switched on.
 - `scripts/sync_local_skills.py` installs the latest release tag into local skill directories. Files edited there and a
   directory's own SKILL.md are kept; it exits 1 while the released SKILL.md has changed since the own one was aligned
   (`--ack` records the alignment).

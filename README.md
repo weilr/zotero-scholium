@@ -129,7 +129,7 @@ The verified JSON structure of annotation items, the authorisation flow of the l
 - **Translation fidelity check.** Comments that add terms or numbers absent from the highlighted span are reported before anything is written.
 - **Profile learning.** `scholium profile --from-library` derives the user's own annotation habits from the library; explicit user rules take precedence.
 - **Safe repeated runs.** Every object carries an ownership tag; a re-run replaces only the tool's own annotations and never deletes notes.
-- **Hidden until wanted.** With the bundled plugin installed, the tool's annotations are hidden in the Zotero reader; an eye button in the reader toolbar shows or hides them for that tab, and every newly opened reader starts hidden.
+- **Hidden until wanted.** With the bundled plugin installed, the tool's annotations are hidden in the Zotero reader; an eye button in the reader toolbar shows or hides them in every reader at once, and the choice is remembered across tabs and restarts.
 - **Three write channels.** The official local API (Zotero 10+), the bundled plugin (Zotero 7–9), or a generated script, selected automatically.
 
 ## Command-line use

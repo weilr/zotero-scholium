@@ -151,14 +151,21 @@ class ReaderManager {
   }
 }
 
-function boot(locale) {
+function boot(locale, prefs = {}) {
   const Reader = new ReaderManager();
+  const store = new Map(Object.entries(prefs));
+  const full = name => { if (!name.startsWith('extensions.scholium-bridge.')) throw Error('unexpected preference ' + name); };
   const context = vm.createContext({ Zotero: {
     debug() {}, locale, Reader, Items: { get: id => attachments.get(id) || null },
+    Prefs: {
+      get(name, global) { if (!global) throw Error('expected a full preference name'); full(name); return store.get(name); },
+      set(name, value, global) { if (!global) throw Error('expected a full preference name'); full(name); store.set(name, value); },
+    },
   } });
   vm.runInContext(source, context);
-  return { Reader, toggle: context.ScholiumToggle };
+  return { Reader, toggle: context.ScholiumToggle, store };
 }
+const PREF = 'extensions.scholium-bridge.showAnnotations';
 const sorted = set => [...set].sort();
 const buttons = reader => reader.doc.querySelectorAll('.scholium-toggle');
 const describe = button => ({
@@ -175,71 +182,88 @@ const user = () => [
   annotation('i1', [], 'image'), annotation('k1', [], 'ink'),
 ];
 const newAttachment = () => { const att = attachment([...user(), ...own()]); attachments.set(att.id, att); return att; };
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
 (async () => {
   const facts = {};
 
-  // fresh start, then a tab, a second tab, a preview, updates, and shutdown
+  // first run, nothing saved: two tabs, one click, updates, a third tab, previews, shutdown
   {
-    const { Reader, toggle } = boot('en-US');
+    const { Reader, toggle, store } = boot('en-US');
     toggle.start('scholium-bridge@zotero-scholium');
     facts.tag = toggle.tag;
-    facts.hooksBeforeFirstReader = {
-      push: Object.prototype.hasOwnProperty.call(Reader._readers, 'push'),
-      openPreview: Object.prototype.hasOwnProperty.call(Reader, 'openPreview'),
-    };
+    facts.hooksBeforeFirstReader = { push: hasOwn(Reader._readers, 'push'), openPreview: hasOwn(Reader, 'openPreview') };
     const att = newAttachment();
     const tab = Reader.open(att);
     await settle();
     facts.openView = sorted(tab.view);
     facts.openEverShown = sorted(tab.everShown);
-    facts.hooksAfterFirstReader = {
-      push: Object.prototype.hasOwnProperty.call(Reader._readers, 'push'),
-      openPreview: Object.prototype.hasOwnProperty.call(Reader, 'openPreview'),
-    };
-    facts.buttonsOnOpen = buttons(tab).length;
+    facts.hooksAfterFirstReader = { push: hasOwn(Reader._readers, 'push'), openPreview: hasOwn(Reader, 'openPreview') };
+    const second = Reader.open(att);
+    await settle();
+    facts.secondOpen = sorted(second.view);
+    facts.prefBeforeClick = store.has(PREF);
+    facts.buttonsOnOpen = buttons(tab).length + buttons(second).length;
     facts.buttonHidden = describe(buttons(tab)[0]);
 
     buttons(tab)[0].click(); await settle();
-    facts.shownView = sorted(tab.view);
-    facts.buttonShown = describe(buttons(tab)[0]);
+    facts.shownViews = [sorted(tab.view), sorted(second.view)];
+    facts.shownButtons = [describe(buttons(tab)[0]), describe(buttons(second)[0])];
+    facts.prefAfterShow = store.get(PREF);
 
     att.list.push(annotation('s2', ['zotero-scholium']));
     Reader.notify(att, ['s2']); await settle();
     facts.addedWhileShown = sorted(tab.view);
 
-    buttons(tab)[0].click(); await settle();
-    facts.hiddenAgain = sorted(tab.view);
+    const third = Reader.open(att);
+    await settle();
+    facts.thirdOpenWhileShown = sorted(third.view);
+    facts.thirdButton = describe(buttons(third)[0]);
+    const shownPreview = await Reader.openPreview(att);
+    await settle();
+    facts.previewWhileShown = sorted(shownPreview.view);
+
+    buttons(second)[0].click(); await settle();
+    facts.hiddenViews = [sorted(tab.view), sorted(second.view), sorted(third.view)];
+    facts.hiddenButtons = [tab, second, third].map(r => describe(buttons(r)[0]));
+    facts.prefAfterHide = store.get(PREF);
     Reader.notify(att, ['s1', 'u1']); await settle();
     facts.modifiedWhileHidden = sorted(tab.view);
+    const preview = await Reader.openPreview(att);
+    await settle();
+    facts.previewWhileHidden = sorted(preview.view);
 
     renderToolbar(tab);
     facts.rerender = { count: buttons(tab).length, button: describe(buttons(tab)[0]) };
-
-    buttons(tab)[0].click(); await settle();
-    const second = Reader.open(att);
-    await settle();
-    facts.secondTab = sorted(second.view);
-    facts.firstTabAfterSecond = sorted(tab.view);
-
-    const preview = await Reader.openPreview(att);
-    await settle();
-    facts.preview = sorted(preview.view);
 
     toggle.stop(); await settle();
     facts.afterStop = {
       restored: ReaderInstance.prototype._getAnnotation === originalGetAnnotation,
       listeners: listeners.length,
-      buttons: buttons(tab).length + buttons(second).length,
-      secondTab: sorted(second.view),
-      firstTab: sorted(tab.view),
+      buttons: [tab, second, third].reduce((n, r) => n + buttons(r).length, 0),
+      views: [sorted(tab.view), sorted(second.view), sorted(third.view)],
     };
     listeners = [];
   }
 
-  // plugin started while a tab is already open
+  // a later session: the saved choice applies from the start, and shutdown leaves it alone
   {
-    const { Reader, toggle } = boot('zh-CN');
+    const { Reader, toggle, store } = boot('en-US', { [PREF]: true });
+    toggle.start('scholium-bridge@zotero-scholium');
+    const att = newAttachment();
+    const tab = Reader.open(att);
+    await settle();
+    facts.restartView = sorted(tab.view);
+    facts.restartButton = describe(buttons(tab)[0]);
+    toggle.stop(); await settle();
+    facts.restartAfterStop = sorted(tab.view);
+    facts.restartPrefAfterStop = store.get(PREF);
+    listeners = [];
+  }
+
+  // plugin started while a tab is already open, nothing saved
+  {
+    const { Reader, toggle, store } = boot('zh-CN');
     const att = newAttachment();
     const tab = Reader.open(att);
     await settle();
@@ -251,6 +275,7 @@ const newAttachment = () => { const att = attachment([...user(), ...own()]); att
     facts.preexistingTitle = buttons(tab)[0].title;
     buttons(tab)[0].click(); await settle();
     facts.preexistingShown = sorted(tab.view);
+    facts.preexistingPref = store.get(PREF);
     toggle.stop();
     listeners = [];
   }
@@ -263,7 +288,7 @@ const newAttachment = () => { const att = attachment([...user(), ...own()]); att
     const preview = await Reader.openPreview(att);
     await settle();
     facts.previewFirst = sorted(preview.view);
-    facts.previewFirstHooks = Object.prototype.hasOwnProperty.call(Reader, 'openPreview');
+    facts.previewFirstHooks = hasOwn(Reader, 'openPreview');
     toggle.stop();
     listeners = [];
   }
@@ -286,49 +311,55 @@ def facts():
 USER = sorted(["u1", "p1", "n1", "c1", "x1", "g1", "g2", "d1", "t1", "o1", "i1", "k1"])
 ALL = sorted(USER + ["m1", "s1"])
 WITH_S2 = sorted(ALL + ["s2"])
+HIDDEN_BUTTON = {"title": "Show scholium annotations", "pressed": "false", "active": False, "paths": 3}
+SHOWN_BUTTON = {"title": "Hide scholium annotations", "pressed": "true", "active": True, "paths": 2}
 
 
 def test_toggle_recognises_only_the_current_tag(facts):
     assert facts["tag"] == cli.TAG
 
 
-def test_new_reader_starts_hidden_without_showing_them_first(facts):
+def test_first_run_is_hidden_without_showing_them_first(facts):
     assert facts["hooksBeforeFirstReader"] == {"push": True, "openPreview": True}
     assert facts["openView"] == USER
     assert facts["openEverShown"] == USER
     assert facts["hooksAfterFirstReader"] == {"push": False, "openPreview": False}
+    assert facts["secondOpen"] == USER
+    assert facts["prefBeforeClick"] is False
+    assert facts["buttonsOnOpen"] == 2
+    assert facts["buttonHidden"] == HIDDEN_BUTTON
 
 
-def test_toolbar_button_reflects_and_switches_the_state(facts):
-    assert facts["buttonsOnOpen"] == 1
-    assert facts["buttonHidden"] == {"title": "Show scholium annotations", "pressed": "false", "active": False, "paths": 3}
-    assert facts["shownView"] == ALL
-    assert facts["buttonShown"] == {"title": "Hide scholium annotations", "pressed": "true", "active": True, "paths": 2}
-    assert facts["rerender"] == {"count": 1, "button": facts["buttonHidden"]}
+def test_one_click_switches_every_reader_and_is_saved(facts):
+    assert facts["shownViews"] == [ALL, ALL]
+    assert facts["shownButtons"] == [SHOWN_BUTTON, SHOWN_BUTTON]
+    assert facts["prefAfterShow"] is True
+    assert facts["hiddenViews"] == [USER, USER, USER]
+    assert facts["hiddenButtons"] == [HIDDEN_BUTTON] * 3
+    assert facts["prefAfterHide"] is False
 
 
-def test_updates_follow_the_reader_state(facts):
+def test_new_readers_and_updates_follow_the_current_state(facts):
     assert facts["addedWhileShown"] == WITH_S2
-    assert facts["hiddenAgain"] == USER
+    assert facts["thirdOpenWhileShown"] == WITH_S2
+    assert facts["thirdButton"] == SHOWN_BUTTON
+    assert facts["previewWhileShown"] == WITH_S2
     assert facts["modifiedWhileHidden"] == USER
-
-
-def test_each_reader_has_its_own_state(facts):
-    assert facts["secondTab"] == USER
-    assert facts["firstTabAfterSecond"] == WITH_S2
-    assert facts["preview"] == USER
+    assert facts["previewWhileHidden"] == USER
     assert facts["previewFirst"] == USER
     assert facts["previewFirstHooks"] is False
+    assert facts["rerender"] == {"count": 1, "button": HIDDEN_BUTTON}
+
+
+def test_saved_choice_applies_in_a_later_session(facts):
+    assert facts["restartView"] == ALL
+    assert facts["restartButton"] == SHOWN_BUTTON
+    assert facts["restartAfterStop"] == ALL
+    assert facts["restartPrefAfterStop"] is True
 
 
 def test_shutdown_restores_zotero_and_shows_hidden_annotations(facts):
-    assert facts["afterStop"] == {
-        "restored": True,
-        "listeners": 0,
-        "buttons": 0,
-        "secondTab": WITH_S2,
-        "firstTab": WITH_S2,
-    }
+    assert facts["afterStop"] == {"restored": True, "listeners": 0, "buttons": 0, "views": [WITH_S2] * 3}
 
 
 def test_reader_open_before_start_is_hidden_and_gets_a_button(facts):
@@ -337,10 +368,12 @@ def test_reader_open_before_start_is_hidden_and_gets_a_button(facts):
     assert facts["preexistingButtons"] == 1
     assert facts["preexistingTitle"] == "显示 Scholium 批注"
     assert facts["preexistingShown"] == ALL
+    assert facts["preexistingPref"] is True
 
 
 def test_user_annotations_stay_visible_and_no_item_is_written(facts):
-    for key in ("openView", "hiddenAgain", "modifiedWhileHidden", "secondTab", "preview", "previewFirst",
-                "preexistingAfterStart"):
-        assert set(USER) <= set(facts[key]), key
+    views = [facts[k] for k in ("openView", "secondOpen", "modifiedWhileHidden", "previewWhileHidden",
+                                "previewFirst", "preexistingAfterStart")] + facts["hiddenViews"]
+    for view in views:
+        assert set(USER) <= set(view)
     assert facts["writes"] == []
