@@ -1,0 +1,333 @@
+/* The Scholium section of the item pane. The colours are Zotero's theme variables, so the section
+   follows the light and the dark theme. */
+
+.scholium-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 0 4px;
+}
+
+.scholium-pane [hidden] {
+  display: none !important;
+}
+
+/* model and effort */
+
+.scholium-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(96px, auto);
+  gap: 10px;
+}
+
+.scholium-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.scholium-field > span {
+  color: var(--fill-secondary);
+  font-size: 11px;
+}
+
+.scholium-select {
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 24px 0 8px;
+  border: var(--material-border-quarternary);
+  border-radius: 6px;
+  background-color: var(--material-background);
+  background-image: linear-gradient(45deg, transparent 50%, var(--fill-secondary) 50%),
+                    linear-gradient(135deg, var(--fill-secondary) 50%, transparent 50%);
+  background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+  color: var(--fill-primary);
+  font: inherit;
+}
+
+.scholium-select:hover:not(:disabled) {
+  border-color: var(--fill-tertiary);
+}
+
+.scholium-select:focus-visible {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px var(--accent-blue30);
+}
+
+.scholium-select:disabled {
+  opacity: 0.5;
+}
+
+/* buttons */
+
+.scholium-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.scholium-spacer {
+  flex: 1;
+}
+
+.scholium-button {
+  appearance: none;
+  height: 26px;
+  margin: 0;
+  padding: 0 12px;
+  border: var(--material-border-quarternary);
+  border-radius: 6px;
+  background: var(--material-background);
+  color: var(--fill-primary);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.scholium-button:hover:not(:disabled) {
+  border-color: var(--fill-tertiary);
+}
+
+.scholium-button:active:not(:disabled) {
+  background: var(--fill-quinary);
+}
+
+.scholium-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-blue30);
+}
+
+.scholium-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.scholium-button.primary {
+  border-color: transparent;
+  background: var(--accent-blue);
+  color: var(--accent-white, #fff);
+  font-weight: 600;
+}
+
+.scholium-button.primary:hover:not(:disabled) {
+  border-color: transparent;
+  filter: brightness(1.08);
+}
+
+.scholium-button.quiet {
+  padding: 0 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--fill-secondary);
+}
+
+.scholium-button.quiet:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--fill-quinary);
+  color: var(--fill-primary);
+}
+
+.scholium-button.danger {
+  color: var(--accent-red);
+}
+
+.scholium-button.danger:hover:not(:disabled) {
+  color: var(--accent-red);
+}
+
+.scholium-button.small {
+  height: 24px;
+  padding: 0 14px;
+}
+
+/* the state line: a dot in the colour of the state, pulsing while the paper runs */
+
+.scholium-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px;
+  border: var(--material-border-quarternary);
+  border-radius: 8px;
+  background: var(--material-background);
+  color: var(--fill-primary);
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.scholium-state::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 0.42em;
+  border-radius: 50%;
+  background: var(--fill-tertiary);
+}
+
+.scholium-state.running::before {
+  background: var(--accent-blue);
+  animation: scholium-pulse 1.4s ease-in-out infinite;
+}
+
+.scholium-state.ok::before {
+  background: var(--accent-green);
+}
+
+.scholium-state.error::before {
+  background: var(--accent-red);
+}
+
+.scholium-state.paused::before {
+  background: var(--accent-orange);
+}
+
+@keyframes scholium-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* the transcript */
+
+.scholium-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: -6px;
+  color: var(--fill-secondary);
+  font-size: 11px;
+}
+
+.scholium-caption .scholium-button {
+  height: 20px;
+  font-size: 11px;
+}
+
+.scholium-log {
+  box-sizing: border-box;
+  min-height: 80px;
+  padding: 8px 10px;
+  overflow: auto;
+  resize: vertical;
+  border: var(--material-border-quarternary);
+  border-radius: 8px;
+  background: var(--material-background);
+  color: var(--fill-primary);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.scholium-entry {
+  display: flex;
+  gap: 0.35em;
+  margin: 3px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.scholium-bullet {
+  flex: none;
+}
+
+.scholium-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.scholium-entry.info {
+  color: var(--fill-secondary);
+  font-size: 11.5px;
+}
+
+.scholium-entry.tool,
+.scholium-entry.result {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11.5px;
+}
+
+.scholium-entry.tool .scholium-bullet {
+  color: var(--accent-green);
+}
+
+.scholium-entry.result {
+  padding-inline-start: 1.2em;
+  color: var(--fill-secondary);
+}
+
+.scholium-entry.final {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--fill-quinary);
+  font-weight: 600;
+}
+
+.scholium-entry.prompt {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 88%;
+  margin: 10px 0 8px auto;
+  padding: 5px 10px;
+  border-radius: 10px;
+  background: var(--accent-blue10);
+}
+
+.scholium-entry.error {
+  color: var(--accent-red);
+}
+
+/* the message box */
+
+.scholium-composer {
+  padding: 6px 8px 6px 10px;
+  border: var(--material-border-quarternary);
+  border-radius: 8px;
+  background: var(--material-background);
+  color: var(--fill-primary);
+}
+
+.scholium-composer:focus-within {
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px var(--accent-blue30);
+}
+
+.scholium-input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 12em;
+  margin: 0;
+  padding: 2px 0;
+  overflow-y: auto;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.scholium-input::placeholder {
+  color: var(--fill-secondary);
+}
+
+.scholium-send-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.scholium-hint {
+  color: var(--fill-secondary);
+  font-size: 11px;
+}

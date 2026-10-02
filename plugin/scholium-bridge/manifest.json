@@ -2,7 +2,7 @@
   "manifest_version": 2,
   "name": "Scholium Bridge",
   "version": "0.1.3",
-  "description": "Shows or hides annotations created by zotero-scholium in every Zotero reader with an eye button in the reader toolbar; they are hidden until it is first used, and the choice is remembered. On Zotero 7 to 9 it also provides token-protected local HTTP endpoints through which a script can create highlight and text annotations and child notes; Zotero 10 provides an official write API. The endpoints accept data only; no code is executed.",
+  "description": "Shows or hides annotations created by zotero-scholium in every Zotero reader with an eye button in the reader toolbar; they are hidden until it is first used, and the choice is remembered. A Scholium section in the item pane starts the installed Claude Code to annotate the selected paper in the background, shows the process, continues the conversation with follow-up requests, and deletes the tool's annotations. On Zotero 7 to 9 it also provides token-protected local HTTP endpoints through which a script can create highlight and text annotations and child notes; Zotero 10 provides an official write API. The endpoints accept data only; no code is executed.",
   "homepage_url": "https://github.com/weilr/zotero-scholium",
   "author": "zotero-scholium contributors",
   "applications": {

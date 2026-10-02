@@ -14,7 +14,7 @@ jobs:
       - name: build scholium-bridge.xpi
         run: |
           cd plugin/scholium-bridge
-          zip -r ../scholium-bridge.xpi manifest.json bootstrap.js
+          zip -r ../scholium-bridge.xpi manifest.json bootstrap.js content locale
       - name: write update.json for Zotero's plugin updater
         run: |
           VERSION=$(python -c "import json;print(json.load(open('plugin/scholium-bridge/manifest.json'))['version'])")
