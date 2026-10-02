@@ -65,7 +65,7 @@ Copy [`skills/zotero-scholium/`](skills/zotero-scholium/) into the agent's skill
 
 - Python 3.9 or later with [PyMuPDF](https://pymupdf.readthedocs.io/): `pip install pymupdf`
 - Zotero 7 or later, running; its local server is enabled by default
-- The bundled [`scholium-bridge`](plugin/README.md) plugin: required on Zotero 7–9 as the write channel; optional on Zotero 10, where it adds the reader toggle for the tool's annotations.
+- The bundled [`scholium-bridge`](plugin/README.md) plugin: required on Zotero 7–9 as the write channel; optional on Zotero 10, where it adds the reader toggle for the tool's annotations and one-click annotation.
 
 ### Updating
 
@@ -130,6 +130,7 @@ The verified JSON structure of annotation items, the authorisation flow of the l
 - **Profile learning.** `scholium profile --from-library` derives the user's own annotation habits from the library; explicit user rules take precedence.
 - **Safe repeated runs.** Every object carries an ownership tag; a re-run replaces only the tool's own annotations and never deletes notes.
 - **Hidden until wanted.** With the bundled plugin installed, the tool's annotations are hidden in the Zotero reader; an eye button in the reader toolbar shows or hides them in every reader at once, and the choice is remembered across tabs and restarts.
+- **One-click annotation.** With the bundled plugin and Claude Code installed, the Scholium section in Zotero's item pane runs the skill on the selected paper in the background, one paper at a time; it chooses the model (from the list Claude Code reports; the latest Opus by default) and the effort (medium until changed), and shows the paper's state and the process as Claude Code does; it takes extra instructions or follow-up requests that continue the paper's conversation, shows the turns and tokens of each run, and lets the queue wait for the reset when the usage limit is reached; a system notification reports the end. **Delete annotations** in the same section removes the tool's annotations from the paper after a confirmation.
 - **Three write channels.** The official local API (Zotero 10+), the bundled plugin (Zotero 7–9), or a generated script, selected automatically.
 
 ## Command-line use
@@ -269,7 +270,7 @@ python scripts/session_usage.py FILE...     # model calls and tokens of Codex ro
 python scripts/sync_local_skills.py DIR...  # after a release: install it into local skill directories (keeps an own SKILL.md; exit 1: review, --ack)
 ```
 
-The plugin is packaged by the release workflow; to build it locally, archive `manifest.json` and `bootstrap.js` from `plugin/scholium-bridge/` at the root of a zip file named `scholium-bridge.xpi`.
+The plugin is packaged by the release workflow; to build it locally, archive `manifest.json`, `bootstrap.js` and the `content/` and `locale/` folders from `plugin/scholium-bridge/` at the root of a zip file named `scholium-bridge.xpi`.
 
 ## Contributing
 

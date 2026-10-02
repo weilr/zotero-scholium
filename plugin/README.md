@@ -1,9 +1,12 @@
 # scholium-bridge
 
-The plugin has two functions:
+The plugin has four functions:
 
 - **Reader toggle** (Zotero 7 and later): shows or hides the tool's annotations in the reader with
   one button.
+- **One-click annotation** (Zotero 7 and later): starts Claude Code in the background to annotate the
+  selected paper.
+- **Deleting the tool's annotations** (Zotero 7 and later): removes them from the selected paper.
 - **Write endpoints** (needed on Zotero 7 to 9 only): Zotero 10 provides an official local API with
   write support, which `scholium` uses directly; the local API of Zotero 7, 8, and 9 is read-only.
 
@@ -20,6 +23,81 @@ showing follows on its next load.
 Hiding removes the annotations from the reader's view and sidebar only. The stored annotations, their
 synchronisation, searches, and notes created from annotations are not affected. Disabling or removing
 the plugin shows them again in open readers.
+
+## One-click annotation
+
+**Annotate** in the *Scholium* section of the item pane starts the Claude Code CLI in the background
+for the selected paper; papers started while another runs wait in a queue and run one at a time. A
+regular item is annotated through its best PDF attachment.
+
+Requirements: Claude Code installed and signed in, and the zotero-scholium skill installed in
+`~/.claude/skills/zotero-scholium`. The plugin starts the installed `claude` executable unchanged and
+does not read its credentials; the usage counts toward the signed-in Claude account.
+
+Each run:
+
+- works in the Zotero data directory with `claude -p --output-format stream-json`, the permission
+  mode `auto`, file writes pre-approved only inside `<data dir>/tmp/scholium/`, and the skill
+  directory added;
+- receives the item key, the attachment key, the PDF path, and the output directory
+  `<data dir>/tmp/scholium/<attachment key>`, and is told not to ask questions or start sub-agents;
+- logs every event to `<data dir>/tmp/scholium/<attachment key>/claude-run.jsonl`; a follow-up adds
+  to the same log.
+
+The *Scholium* section of the item pane, in the library and in the reader's side pane, holds the
+controls and the process of the selected paper:
+
+- **Model** lists the models the installed Claude Code reports, asked once per Zotero session
+  through the initialize request of its stream-json protocol, which calls no model. Until another
+  model is chosen, the latest Opus (`opus`) is used; *Claude Code's default* passes no `--model`.
+- **Effort** lists the levels the chosen model accepts. It starts at `medium` and keeps the last
+  choice; a model that does not accept that level gets `medium` (or its lowest level), and a model
+  without levels gets no `--effort`.
+- Both choices apply to the papers started afterwards, are saved, and are shared by all panes.
+- **Annotate**, **Cancel** and **Delete annotations** act on the selected paper; **Cancel** also takes
+  a queued paper out of the queue. **Show log** above the transcript shows the log file.
+- A state line shows the step of six and the elapsed time while the paper runs, its place in the
+  queue, its latest outcome with the minutes, turns and tokens of the run (the tooltip splits the
+  tokens into input, cache and output), or the deletion, and the paper being annotated when it is
+  another one. For a paper run earlier, the outcome comes from the saved log.
+- The process is shown as Claude Code shows it: Claude's text, each tool call with its command or
+  file, and the first lines of each result (errors in red); a failed run ends with its error. A
+  running paper is shown live; for a paper run earlier the saved log is shown. The box is resized
+  at its lower edge, and its height is kept.
+- The box below the transcript takes the user's words. With **Annotate** they go to the new run as
+  extra instructions. Once the paper has a run, **Send** (or Ctrl+Enter) continues that run's
+  conversation with them (`claude -p --resume <session>`), for example to change some annotations.
+  The words appear in the transcript.
+
+A notice in the corner of the window appears when a paper starts and when it ends, and closes by itself; when a paper ends, a system
+notification reports the run's last line (counts, note title, remaining warnings) or the error.
+Neither appears while a Scholium section is on screen in the focused Zotero window.
+
+When Claude Code reports that the usage limit is reached, the queue waits: the interrupted paper
+stays at its head, the state line and a notice give the reset time, and a minute after the reset the
+paper continues its conversation where it stopped, followed by the rest of the queue. Without a reset
+time the queue tries again after ten minutes. **Continue now** in the section ends the wait at once.
+
+Papers that already carry the tool's annotations are annotated again only after a confirmation; the
+new run replaces those annotations.
+
+| Preference | Default | Meaning |
+|---|---|---|
+| `extensions.scholium-bridge.claudePath` | found automatically | path of the `claude` executable |
+| `extensions.scholium-bridge.claudeModel` | `opus` (the latest Opus) | value of `--model`, none when empty; set in the Scholium section |
+| `extensions.scholium-bridge.claudeEffort` | `medium` | value of `--effort`; set in the Scholium section |
+| `extensions.scholium-bridge.claudePermissionMode` | `auto` | value of `--permission-mode` |
+| `extensions.scholium-bridge.logHeight` | `320` | height of the transcript box in pixels; set by resizing it |
+
+## Deleting the tool's annotations
+
+**Delete annotations** in the Scholium section permanently deletes the annotations tagged
+`zotero-scholium` on every PDF attachment of the selected paper, after a confirmation that states the
+count. Annotations without that tag and the reading notes are kept; a paper being annotated or queued
+is left alone.
+The deletion syncs like any deletion in Zotero. The configuration of an earlier run stays in
+`<data dir>/tmp/scholium/<attachment key>/config.json`; applying it with the skill's script writes the
+annotations again.
 
 ## Write endpoints
 
@@ -48,10 +126,11 @@ restart is required.
 
 ```bash
 cd plugin/scholium-bridge
-zip -r ../scholium-bridge.xpi manifest.json bootstrap.js
+zip -r ../scholium-bridge.xpi manifest.json bootstrap.js content locale
 ```
 
-`manifest.json` and `bootstrap.js` must be located at the root of the archive.
+`manifest.json`, `bootstrap.js` and the `content/` and `locale/` folders must be located at the root of the archive.
+`content/` holds the section's icons and its stylesheet `scholium.css`, which uses Zotero's theme variables.
 
 ## Notes for plugin authors
 

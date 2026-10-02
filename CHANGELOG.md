@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- The bundled plugin annotates papers with one click: **Annotate** in a Scholium section of the item pane (library
+  and reader side pane) starts the installed Claude Code in the background (`claude -p`, permission mode `auto`,
+  file writes pre-approved only in `<data dir>/tmp/scholium/`), one paper at a time. The section chooses the model
+  from the list Claude Code reports (the latest Opus unless another is chosen) and the effort (`medium` until
+  another level is chosen, then the last choice); it cancels runs, shows the paper's state, and shows the process
+  as Claude Code does (text, tool calls, results, and the error of a failed run), live or from the saved log, in a
+  box resized at its lower edge. Notices at the start and the end close by themselves, and a system notification
+  reports the end; neither appears while the section is on screen. A paper that already carries the tool's
+  annotations is annotated again only after a confirmation, and every run is logged.
+- The Scholium section also takes extra instructions for a run and continues a paper's conversation with follow-up
+  requests (`claude -p --resume`). It shows each run's minutes, turns and tokens. When the usage limit is reached,
+  the queue waits, and the interrupted paper continues its conversation by itself after the reset.
+- **Delete annotations** in the same section permanently deletes the annotations tagged `zotero-scholium` on the
+  paper after a confirmation; other annotations and reading notes are kept, and a paper being annotated is left
+  alone.
+
 ## 0.1.3 (2026-10-01)
 
 - The reader toggle applies to every reader at once and is remembered across tabs and restarts

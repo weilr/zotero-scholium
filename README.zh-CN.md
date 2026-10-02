@@ -65,7 +65,7 @@ Claude Code 也可以把技能作为插件安装，由 `/plugin` 负责更新：
 
 - Python 3.9 及以上，并安装 [PyMuPDF](https://pymupdf.readthedocs.io/)：`pip install pymupdf`
 - Zotero 7 及以上，处于运行状态；本地服务器默认已启用
-- 随附的 [`scholium-bridge` 插件](plugin/README.md)：Zotero 7–9 必需，作为写入通道；Zotero 10 可选，提供工具注释在阅读器中的显示开关。
+- 随附的 [`scholium-bridge` 插件](plugin/README.md)：Zotero 7–9 必需，作为写入通道；Zotero 10 可选，提供工具注释在阅读器中的显示开关和一键批注。
 
 ### 更新
 
@@ -130,6 +130,7 @@ Claude Code 插件方式则使用 `/plugin update zotero-scholium@zotero-scholiu
 - **画像学习。** `scholium profile --from-library` 从文库中已有的注释归纳用户自己的标注习惯；用户的明确规则始终优先。
 - **可安全重复运行。** 每个对象都带有所有权标签；重新运行只替换工具自身的注释，绝不删除笔记。
 - **默认隐藏。** 安装随附插件后，工具写入的注释在 Zotero 阅读器中默认隐藏；阅读器工具栏中的眼睛按钮在所有阅读器中同时显示或隐藏这些注释，所选状态在切换标签页和重启后保持。
+- **一键批注。** 安装随附插件和 Claude Code 后，在条目侧栏的 Scholium 区块点「批注这篇」，即可在后台对所选论文运行本技能，多篇时逐篇排队；区块内可选择模型（列表取自 Claude Code，默认为最新的 Opus）和推理强度（初始为 medium，之后记住上次的选择），显示论文状态，并像 Claude Code 一样实时显示过程；同一区块可附加要求、接着对话修改批注，显示每次运行的轮数和 token，额度用完时队列等到重置后自动继续；结束时弹出系统通知。区块里的「删除批注」在确认后删除这篇论文上的工具批注。
 - **三条写入通道。** 官方本地 API（Zotero 10+）、随附插件（Zotero 7–9）或生成脚本，按可用性自动选择。
 
 ## 命令行使用
@@ -274,7 +275,7 @@ python scripts/session_usage.py FILE...     # Codex rollout 或 Claude Code tran
 python scripts/sync_local_skills.py DIR...  # 发布后：把这一版装进本地技能目录（保留自带的 SKILL.md；退出码 1 表示需核对，--ack）
 ```
 
-插件由发布工作流打包；如需本地构建，将 `plugin/scholium-bridge/` 中的 `manifest.json` 与 `bootstrap.js` 置于 zip 压缩包根目录，命名为 `scholium-bridge.xpi`。
+插件由发布工作流打包；如需本地构建，将 `plugin/scholium-bridge/` 中的 `manifest.json`、`bootstrap.js` 以及 `content/`、`locale/` 目录置于 zip 压缩包根目录，命名为 `scholium-bridge.xpi`。
 
 ## 参与贡献
 
