@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Scholium Bridge",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Annotates papers with Claude Code from the Scholium section of the item pane, and shows or hides the tool's annotations in the reader. On Zotero 7 to 9 it also lets the tool write annotations through local endpoints.",
   "homepage_url": "https://github.com/weilr/zotero-scholium",
   "author": "zotero-scholium contributors",

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.4 (2026-10-04)
 
 - The bundled plugin annotates papers with one click: **Annotate** in a Scholium section of the item pane (library
   and reader side pane) starts the installed Claude Code in the background (`claude -p`, permission mode `auto`,
