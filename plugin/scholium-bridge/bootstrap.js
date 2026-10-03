@@ -410,7 +410,9 @@ var ScholiumToggle = {
  * model, from the list Claude Code reports, and the effort; it starts, cancels and deletes, shows the
  * state of the paper, and shows the transcript live, like Claude Code: Claude's text, each tool call
  * and its result; for an earlier run it shows the saved log. A box below the transcript takes extra
- * instructions for a new run, or continues the paper's latest conversation (`--resume`). The state
+ * instructions for a new run, or continues the paper's latest conversation (`--resume`). The
+ * section opens the annotation profile (<data dir>/zotero-scholium/profile.md), which every run
+ * follows, as plain text beside a live Markdown preview in an editor sheet over the Zotero window. The state
  * line shows the turns and tokens of a run; when the usage limit is reached, the queue waits and the
  * interrupted paper continues its conversation after the reset. The section's look is
  * content/scholium.css, linked into each main window. Short notices at the start and the end close by
@@ -446,7 +448,7 @@ var ScholiumRunner = {
   EFFORTS: ["low", "medium", "high", "xhigh", "max"],   // when the model's levels are unknown
   DEFAULT_EFFORT: "medium", // until another level is chosen
   LOG_HEIGHT: 320,
-  STYLE_URL: "chrome://scholium-bridge/content/scholium.css",
+  chrome: "chrome://scholium-bridge/content/",   // the content folder; startup() puts the version into it
 
   log(msg) { Zotero.debug("[scholium-bridge] " + msg); },
 
@@ -473,6 +475,22 @@ var ScholiumRunner = {
       deleteThis: zh ? "删除批注" : "Delete annotations",
       logButton: zh ? "打开日志" : "Show log",
       transcriptCaption: zh ? "运行过程" : "Transcript",
+      profileOpen: zh ? "个人配置 ↗" : "Personal profile ↗",
+      profileTitle: zh ? "个人配置" : "Personal profile",
+      profileAbout: zh ? "每次批注都遵循这份画像。重新统计文库只改写开头的统计，Interpretation 和 User's rules 两节保持不变。"
+                       : "Every run follows this profile. Deriving it again from the library rewrites only the statistics at the top; the Interpretation and User's rules sections are kept.",
+      profileSave: zh ? "保存" : "Save",
+      profileCancel: zh ? "取消" : "Cancel",
+      profileKeys: key => zh ? `${key}+S 保存 · Esc 关闭` : `${key}+S to save · Esc to close`,
+      profileNew: zh ? "文件还不存在，保存后创建" : "The file does not exist yet; saving creates it",
+      profileDirty: zh ? "有未保存的修改" : "Unsaved changes",
+      profileSaved: time => zh ? `已保存 ${time}` : `Saved at ${time}`,
+      profileDiscard: zh ? "放弃未保存的修改吗？" : "Discard the unsaved changes?",
+      profileChanged: zh ? "profile.md 在打开后被别处改动过（例如重新统计了文库）。用这里的内容覆盖它吗？"
+                         : "profile.md was changed elsewhere after it was opened (for example by deriving it again from the library). Overwrite it with this text?",
+      profileNotSaved: zh ? "未保存：文件已被别处改动" : "Not saved: the file was changed elsewhere",
+      profileReadFailed: msg => zh ? `读不到画像文件：${msg}` : `The profile could not be read: ${msg}`,
+      profileFailed: msg => zh ? `保存失败：${msg}` : `The profile could not be saved: ${msg}`,
       noHistory: zh ? "这篇还没有运行记录。" : "This paper has not been run yet.",
       queuedThis: n => zh ? `排队中，前面还有 ${n} 篇` : `Queued, ${n} ahead`,
       otherRunning: title => zh ? `正在批注另一篇：${title}` : `Annotating another paper: ${title}`,
@@ -716,13 +734,14 @@ var ScholiumRunner = {
         const link = doc.createElementNS("http://www.w3.org/1999/xhtml", "link");
         link.id = "scholium-bridge-style";
         link.setAttribute("rel", "stylesheet");
-        link.setAttribute("href", this.STYLE_URL);
+        link.setAttribute("href", this.chrome + "scholium.css");
         doc.documentElement.append(link);
       }
     } catch (e) { this.log("stylesheet failed: " + e); }
   },
 
   removeFromWindow(win) {
+    if (this.editor && this.editor.doc === win.document) this.closeProfile(this.editor, false);
     try { const link = win.document.querySelector('[href="scholium-bridge.ftl"]'); if (link) link.remove(); } catch (e) {}
     try { const style = win.document.getElementById("scholium-bridge-style"); if (style) style.remove(); } catch (e) {}
   },
@@ -788,8 +807,8 @@ var ScholiumRunner = {
     if (!manager || typeof manager.registerSection !== "function") return;
     this.paneID = manager.registerSection({
       paneID: "scholium", pluginID,
-      header: { l10nID: "scholium-section", icon: "chrome://scholium-bridge/content/icon16.svg" },
-      sidenav: { l10nID: "scholium-sidenav", icon: "chrome://scholium-bridge/content/icon20.svg" },
+      header: { l10nID: "scholium-section", icon: this.chrome + "icon16.svg" },
+      sidenav: { l10nID: "scholium-sidenav", icon: this.chrome + "icon20.svg" },
       onItemChange: ({ item, setEnabled }) => { setEnabled(this.paneKeys(item).length > 0); },
       onRender: ({ doc, body, item }) => { this.renderPane(doc, body, item); },
       onAsyncRender: ({ body }) => this.loadHistory(body),
@@ -997,7 +1016,8 @@ var ScholiumRunner = {
     pane.resume = this.paneButton(doc, this.text("resumeNow"), () => { this.resumeQueue(); });
     pane.remove = this.paneButton(doc, this.text("deleteThis"), () => { this.removeAnnotations([item]).catch(e => this.log("delete failed: " + e)); },
                                   "quiet danger");
-    actions.append(pane.annotate, pane.cancel, pane.resume, div("scholium-spacer"), pane.remove);
+    pane.profile = this.paneButton(doc, this.text("profileOpen"), () => { this.openProfile(doc); }, "quiet");
+    actions.append(pane.annotate, pane.cancel, pane.resume, div("scholium-spacer"), pane.profile, pane.remove);
     pane.state = div("scholium-state");
     const caption = div("scholium-caption");
     pane.log = this.paneButton(doc, this.text("logButton"), () => { this.revealLog(pane.shownKey); }, "quiet");
@@ -1038,6 +1058,307 @@ var ScholiumRunner = {
     }
     this.paintPane(pane);
     this.loadModels().catch(() => {});
+  },
+
+  // the annotation profile, <data dir>/zotero-scholium/profile.md, which every run follows; a missing
+  // one starts as scholium.py's template, so that `scholium profile --from-library` keeps the rules
+  PROFILE_TEMPLATE: "# Annotation profile\n\n## User's rules (always win)\n\n"
+    + "Rules recorded in this section take precedence over the learned statistics above. Re-running\n"
+    + "`profile --from-library` regenerates the sections above and leaves this section unchanged.\n\n"
+    + "- (none yet; add rules here, e.g. \"comments are translations\", \"two colours only: red = core, yellow = other\")\n",
+
+  profilePath() { return PathUtils.join(Zotero.DataDirectory.dir, "zotero-scholium", "profile.md"); },
+
+  // the profile's editor: a sheet over the Zotero window of the button, one at a time. It is part of
+  // the window's own page, like the section, so it needs no page or window of its own.
+  openProfile(doc) {
+    try {
+      if (this.editor) {
+        this.editor.input.focus();
+        return this.editor;
+      }
+      return this.renderProfileEditor(doc);
+    } catch (e) {
+      this.log("profile editor failed: " + e);
+      return null;
+    }
+  },
+
+  // the editor: profile.md as it is, in a plain text box; the file keeps its line ends
+  renderProfileEditor(doc) {
+    const win = doc.defaultView;
+    const el = (tag, cls, text) => {
+      const e = doc.createElement(tag);
+      e.className = cls;
+      if (text) e.textContent = text;
+      return e;
+    };
+    const ed = { doc, win, path: this.profilePath(), disk: null, eol: "\n", dirty: false, readFailed: false, message: null,
+                 before: doc.activeElement };
+    ed.root = el("div", "scholium-sheet-backdrop");
+    ed.root.id = "scholium-profile-sheet";
+    const sheet = el("div", "scholium-sheet");
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-label", this.text("profileTitle"));
+    const head = el("div", "scholium-editor-head");
+    const path = el("div", "scholium-editor-path", ed.path);
+    path.title = ed.path;
+    head.append(el("div", "scholium-sheet-title", this.text("profileTitle")), el("div", "scholium-editor-about", this.text("profileAbout")), path);
+    // the text on the left, on the right as Markdown shows it, as it is typed
+    ed.input = el("textarea", "scholium-editor");
+    ed.input.setAttribute("spellcheck", "false");
+    ed.input.addEventListener("input", () => {
+      ed.dirty = true;
+      ed.message = null;
+      this.paintEditor(ed);
+      this.paintPreview(ed);
+    });
+    ed.input.addEventListener("scroll", () => { this.syncPreview(ed); });
+    ed.preview = el("div", "scholium-preview");
+    const panes = el("div", "scholium-editor-panes");
+    panes.append(ed.input, ed.preview);
+    ed.status = el("span", "scholium-hint");
+    ed.save = this.paneButton(doc, this.text("profileSave"), () => {
+      this.saveProfile(ed).then(ok => { if (ok) this.closeProfile(ed, false); });
+    }, "primary");
+    const foot = el("div", "scholium-editor-foot");
+    foot.append(ed.status, el("span", "scholium-spacer"),
+                this.paneButton(doc, this.text("profileCancel"), () => { this.closeProfile(ed); }), ed.save);
+    sheet.append(head, panes, foot);
+    ed.root.append(sheet);
+    // the sheet's keys stay in the sheet
+    sheet.addEventListener("keydown", e => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        this.closeProfile(ed);
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.saveProfile(ed);
+      }
+    });
+    // back in Zotero from another program: the file as it is now, unless it is being edited here
+    ed.onFocus = () => { if (!ed.dirty) this.loadProfile(ed); };
+    win.addEventListener("focus", ed.onFocus);
+    doc.documentElement.append(ed.root);
+    this.editor = ed;
+    return this.loadProfile(ed).then(() => { try { ed.input.focus(); } catch (e) {} return ed; });
+  },
+
+  async loadProfile(ed) {
+    let text = null;
+    try {
+      if (await this.exists(ed.path)) text = await IOUtils.readUTF8(ed.path);
+    } catch (e) {
+      Object.assign(ed, { readFailed: true, message: { text: this.text("profileReadFailed", String(e && e.message || e)), error: true } });
+      this.paintEditor(ed);
+      return;
+    }
+    if (ed.loaded && text === ed.disk) return;
+    // a missing profile starts as the template and is written on saving
+    Object.assign(ed, { loaded: true, disk: text, eol: text && text.includes("\r\n") ? "\r\n" : "\n", dirty: false, readFailed: false, message: null });
+    ed.input.value = (text === null ? this.PROFILE_TEMPLATE : text).replace(/\r\n/g, "\n");
+    this.paintEditor(ed);
+    this.paintPreview(ed);
+  },
+
+  async saveProfile(ed) {
+    if (ed.readFailed) return false;
+    try {
+      const now = (await this.exists(ed.path)) ? await IOUtils.readUTF8(ed.path) : null;
+      if (now !== ed.disk && !Services.prompt.confirm(ed.win, this.text("profileTitle"), this.text("profileChanged"))) {
+        ed.message = { text: this.text("profileNotSaved"), error: true };
+        this.paintEditor(ed);
+        return false;
+      }
+      const text = String(ed.input.value).replace(/\r\n/g, "\n").replace(/\n/g, ed.eol);
+      await IOUtils.makeDirectory(PathUtils.join(Zotero.DataDirectory.dir, "zotero-scholium"), { createAncestors: true, ignoreExisting: true });
+      await IOUtils.writeUTF8(ed.path, text);
+      Object.assign(ed, { disk: text, dirty: false, message: { text: this.text("profileSaved", this.clock(Date.now())), error: false } });
+      this.paintEditor(ed);
+      return true;
+    } catch (e) {
+      this.log("profile not saved: " + e);
+      ed.message = { text: this.text("profileFailed", String(e && e.message || e)), error: true };
+      this.paintEditor(ed);
+      return false;
+    }
+  },
+
+  mayCloseProfile(ed) {
+    return !ed.dirty || Services.prompt.confirm(ed.win, this.text("profileTitle"), this.text("profileDiscard"));
+  },
+
+  // unsaved changes are kept unless the user lets them go; on shutdown and when the window closes, without asking
+  closeProfile(ed, ask = true) {
+    if (ask && !this.mayCloseProfile(ed)) return false;
+    try { ed.win.removeEventListener("focus", ed.onFocus); } catch (e) {}
+    ed.root.remove();
+    if (this.editor === ed) this.editor = null;
+    try { if (ed.before && ed.before.isConnected) ed.before.focus(); } catch (e) {}
+    return true;
+  },
+
+  // the line under the text: an error or the last save, else unsaved changes, a new file, or the keys
+  paintEditor(ed) {
+    const m = ed.message;
+    const key = Services.appinfo && Services.appinfo.OS === "Darwin" ? "⌘" : "Ctrl";
+    ed.status.textContent = m && (m.error || !ed.dirty) ? m.text
+      : ed.dirty ? this.text("profileDirty")
+      : ed.disk === null ? this.text("profileNew")
+      : this.text("profileKeys", key);
+    ed.status.className = "scholium-hint" + (m && m.error ? " error" : "");
+    ed.input.disabled = ed.readFailed;
+    ed.save.disabled = ed.readFailed || (!ed.dirty && ed.disk !== null);
+  },
+
+  // the preview shows the text in the box, with its unsaved changes
+  paintPreview(ed) {
+    ed.preview.replaceChildren(...this.renderMarkdown(ed.doc, ed.input.value));
+    this.syncPreview(ed);
+  },
+
+  // the preview follows the text box's scrolling, by proportion
+  syncPreview(ed) {
+    const room = ed.input.scrollHeight - ed.input.clientHeight;
+    ed.preview.scrollTop = room > 0 ? ed.input.scrollTop / room * (ed.preview.scrollHeight - ed.preview.clientHeight) : 0;
+  },
+
+  // Markdown as elements: headings, paragraphs, nested lists, quotes, code blocks, rules, and the inline
+  // forms; the text only ever becomes text, so nothing in it is run or loaded
+  renderMarkdown(doc, text) {
+    const out = [];
+    const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+    const listItem = /^\s*([-*+]|\d{1,9}[.)])\s+/;
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      let m;
+      if (!line.trim()) {
+        i++;
+      } else if ((m = /^\s{0,3}(```|~~~)/.exec(line))) {
+        const body = [];
+        for (i++; i < lines.length && !lines[i].trim().startsWith(m[1]); i++) body.push(lines[i]);
+        i++;
+        const pre = doc.createElement("pre");
+        const code = doc.createElement("code");
+        code.textContent = body.join("\n");
+        pre.append(code);
+        out.push(pre);
+      } else if ((m = /^\s{0,3}(#{1,6})\s+(.*?)(\s+#+)?\s*$/.exec(line))) {
+        const h = doc.createElement("h" + m[1].length);
+        this.inlineMarkdown(doc, h, m[2]);
+        out.push(h);
+        i++;
+      } else if (this.markdownRule(line)) {
+        out.push(doc.createElement("hr"));
+        i++;
+      } else if (/^\s{0,3}>/.test(line)) {
+        const body = [];
+        for (; i < lines.length && /^\s{0,3}>/.test(lines[i]); i++) body.push(lines[i].replace(/^\s{0,3}>\s?/, ""));
+        const quote = doc.createElement("blockquote");
+        quote.append(...this.renderMarkdown(doc, body.join("\n")));
+        out.push(quote);
+      } else if (listItem.test(line)) {
+        i = this.markdownList(doc, lines, i, out);
+      } else {
+        const body = [];
+        for (; i < lines.length && lines[i].trim() && !this.markdownBlock(lines[i]) && !listItem.test(lines[i]); i++) body.push(lines[i].trim());
+        const para = doc.createElement("p");
+        this.inlineMarkdown(doc, para, body.join("\n"));
+        out.push(para);
+      }
+    }
+    return out;
+  },
+
+  markdownRule(line) { return /^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line); },
+
+  markdownBlock(line) { return /^\s{0,3}(#{1,6}\s|>|```|~~~)/.test(line) || this.markdownRule(line); },
+
+  // a list from line i and the lists nested in it by indentation; returns the line after it
+  markdownList(doc, lines, i, out) {
+    const item = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
+    const width = space => space.replace(/\t/g, "    ").length;
+    const items = [];
+    let blank = false;
+    for (; i < lines.length; i++) {
+      const line = lines[i];
+      const m = item.exec(line);
+      if (m) {
+        items.push({ indent: width(m[1]), ordered: /\d/.test(m[2]), start: parseInt(m[2], 10), text: [m[3]] });
+        blank = false;
+      } else if (!line.trim()) {
+        blank = true;
+      } else if (width(/^\s*/.exec(line)[0]) >= 2 || (!blank && !this.markdownBlock(line))) {
+        items[items.length - 1].text.push(line.trim());   // the item's text goes on
+        blank = false;
+      } else {
+        break;
+      }
+    }
+    const open = [];   // { indent, list, li } from the outermost list in
+    for (const it of items) {
+      while (open.length && open[open.length - 1].indent > it.indent) open.pop();
+      let top = open[open.length - 1];
+      // a bullet after a number, or the other way round, starts a list of its own
+      if (top && top.indent === it.indent && top.ordered !== it.ordered) {
+        open.pop();
+        top = open[open.length - 1];
+      }
+      if (!top || it.indent > top.indent) {
+        const list = doc.createElement(it.ordered ? "ol" : "ul");
+        if (it.ordered && it.start !== 1) list.setAttribute("start", String(it.start));
+        if (top && top.li) top.li.append(list);
+        else out.push(list);
+        top = { indent: it.indent, ordered: it.ordered, list, li: null };
+        open.push(top);
+      }
+      const li = doc.createElement("li");
+      this.inlineMarkdown(doc, li, it.text.join("\n"));
+      top.list.append(li);
+      top.li = li;
+    }
+    return i;
+  },
+
+  // `code` (a colour code with a swatch of its colour), **bold**, *italics*, and [links](…) as their text with
+  // the address as tooltip, so that nothing in the preview leaves the window
+  inlineMarkdown(doc, parent, text) {
+    const re = /`([^`\n]+)`|\*\*([^*\n]+?)\*\*|\*([^*\s][^*\n]*?)\*|\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+    let at = 0;
+    let m;
+    while ((m = re.exec(text))) {
+      if (m.index > at) parent.append(doc.createTextNode(text.slice(at, m.index)));
+      at = re.lastIndex;
+      if (m[1] !== undefined) {
+        const code = doc.createElement("code");
+        if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(m[1])) {
+          const swatch = doc.createElement("span");
+          swatch.className = "scholium-swatch";
+          swatch.setAttribute("style", "background-color: " + m[1]);
+          code.append(swatch);
+        }
+        code.append(doc.createTextNode(m[1]));
+        parent.append(code);
+      } else if (m[2] !== undefined) {
+        const strong = doc.createElement("strong");
+        this.inlineMarkdown(doc, strong, m[2]);
+        parent.append(strong);
+      } else if (m[3] !== undefined) {
+        const em = doc.createElement("em");
+        this.inlineMarkdown(doc, em, m[3]);
+        parent.append(em);
+      } else {
+        const link = doc.createElement("span");
+        link.className = "scholium-link";
+        link.title = m[5];
+        this.inlineMarkdown(doc, link, m[4]);
+        parent.append(link);
+      }
+    }
+    if (at < text.length) parent.append(doc.createTextNode(text.slice(at)));
   },
 
   // the words in a pane's box continue the conversation of the paper it shows
@@ -1180,7 +1501,7 @@ var ScholiumRunner = {
   outcome(result, cancelled = false, started = 0) {
     const parts = [this.text(cancelled ? "cancelled" : this.succeeded(result) ? "done" : "failed")];
     const ms = result && result.duration_ms > 0 ? result.duration_ms : started ? Date.now() - started : 0;
-    if (ms) parts.push(this.text("minutes", Math.max(1, Math.round(ms / 60000))));
+    if (ms || started) parts.push(this.text("minutes", Math.max(1, Math.round(ms / 60000))));
     if (result && result.num_turns > 0) parts.push(this.text("turns", result.num_turns));
     const tokens = this.tokenCounts(result).reduce((n, [, count]) => n + count, 0);
     if (tokens) parts.push(this.text("tokens", this.amount(tokens)));
@@ -1593,6 +1914,7 @@ var ScholiumRunner = {
   },
 
   stop() {
+    if (this.editor) this.closeProfile(this.editor, false);
     if (this.paused) clearTimeout(this.paused.timer);
     this.paused = null;
     this.queue = [];
@@ -1606,7 +1928,12 @@ var ScholiumRunner = {
   },
 };
 
-var chromeHandle = null;   // chrome://scholium-bridge/content/ -> the plugin's content/ folder
+var chromeHandle = null;   // chrome://scholium-bridge-<version>/content/ -> the plugin's content/ folder
+
+// a chrome package per version, e.g. scholium-bridge-0-1-3
+function chromePackage(version) {
+  return "scholium-bridge-" + String(version || "0").replace(/[^0-9a-z]+/gi, "-").toLowerCase();
+}
 
 function install() {}
 function uninstall() {}
@@ -1624,8 +1951,10 @@ async function startup({ id, version, rootURI }) {
   try {
     const aomStartup = Components.classes["@mozilla.org/addons/addon-manager-startup;1"]
       .getService(Components.interfaces.amIAddonManagerStartup);
+    const pkg = chromePackage(version);
     chromeHandle = aomStartup.registerChrome(Services.io.newURI(rootURI + "manifest.json"),
-      [["content", "scholium-bridge", rootURI + "content/"]]);
+      [["content", pkg, rootURI + "content/"]]);
+    ScholiumRunner.chrome = "chrome://" + pkg + "/content/";
   } catch (e) { Zotero.debug("[scholium-bridge] chrome registration failed: " + e); }
   try { ScholiumToggle.start(id); ScholiumToggle.log("reader toggle registered"); }
   catch (e) { ScholiumToggle.log("reader toggle failed: " + e); }

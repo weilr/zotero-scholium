@@ -14,6 +14,10 @@
 - The Scholium section also takes extra instructions for a run and continues a paper's conversation with follow-up
   requests (`claude -p --resume`). It shows each run's minutes, turns and tokens. When the usage limit is reached,
   the queue waits, and the interrupted paper continues its conversation by itself after the reset.
+- **Personal profile ↗** in the Scholium section edits the annotation profile
+  (`<data dir>/zotero-scholium/profile.md`) as Markdown in an editor over the Zotero window, beside a live preview.
+  Unsaved changes and a file changed elsewhere are confirmed before they are lost or overwritten; a missing profile
+  starts as the template.
 - **Delete annotations** in the same section permanently deletes the annotations tagged `zotero-scholium` on the
   paper after a confirmation; other annotations and reading notes are kept, and a paper being annotated is left
   alone.

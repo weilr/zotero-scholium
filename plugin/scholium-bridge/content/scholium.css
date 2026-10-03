@@ -1,5 +1,5 @@
-/* The Scholium section of the item pane. The colours are Zotero's theme variables, so the section
-   follows the light and the dark theme. */
+/* The Scholium section of the item pane and the editor of the personal profile. The colours are
+   Zotero's theme variables, so both follow the light and the dark theme. */
 
 .scholium-pane {
   display: flex;
@@ -195,6 +195,7 @@
   }
 }
 
+
 /* the transcript */
 
 .scholium-caption {
@@ -330,4 +331,223 @@
 .scholium-hint {
   color: var(--fill-secondary);
   font-size: 11px;
+}
+
+.scholium-hint.error {
+  color: var(--accent-red);
+}
+
+/* the editor of the personal profile: a sheet over the Zotero window */
+
+.scholium-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.scholium-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  width: min(1280px, calc(100vw - 48px));
+  height: min(800px, calc(100vh - 48px));
+  padding: 16px 18px 14px;
+  border: var(--material-border-quarternary);
+  border-radius: 10px;
+  background: var(--material-sidepane);
+  color: var(--fill-primary);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  font: message-box;
+}
+
+.scholium-sheet-title {
+  margin-bottom: 2px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.scholium-editor-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.scholium-editor-about {
+  line-height: 1.45;
+}
+
+.scholium-editor-path {
+  color: var(--fill-secondary);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* the text and its preview side by side; one above the other in a narrow window */
+.scholium-editor-panes {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+}
+
+@media (max-width: 760px) {
+  .scholium-editor-panes {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+/* under the sheet's id: Zotero's own rules for text boxes are more specific than a class */
+#scholium-profile-sheet .scholium-editor {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  resize: none;
+  border: var(--material-border-quarternary);
+  border-radius: 8px;
+  background: var(--material-background);
+  color: var(--fill-primary);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.55;
+  tab-size: 2;
+}
+
+#scholium-profile-sheet .scholium-editor:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px var(--accent-blue30);
+}
+
+#scholium-profile-sheet .scholium-editor:disabled {
+  opacity: 0.6;
+}
+
+/* the preview: the Markdown set as a document */
+
+#scholium-profile-sheet .scholium-preview {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 6px 20px 14px;
+  overflow: auto;
+  border: var(--material-border-quarternary);
+  border-radius: 8px;
+  background: var(--material-background);
+  color: var(--fill-primary);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+#scholium-profile-sheet .scholium-preview :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1em 0 0.45em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+#scholium-profile-sheet .scholium-preview h1 {
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--fill-quinary);
+  font-size: 1.45em;
+}
+
+#scholium-profile-sheet .scholium-preview h2 {
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--fill-quinary);
+  font-size: 1.2em;
+}
+
+#scholium-profile-sheet .scholium-preview :is(h3, h4, h5, h6) {
+  font-size: 1.05em;
+}
+
+#scholium-profile-sheet .scholium-preview p {
+  margin: 0.55em 0;
+}
+
+#scholium-profile-sheet .scholium-preview :is(ul, ol) {
+  margin: 0.4em 0;
+  padding-inline-start: 1.6em;
+}
+
+#scholium-profile-sheet .scholium-preview ul {
+  list-style: disc;
+}
+
+#scholium-profile-sheet .scholium-preview ul ul {
+  list-style: circle;
+}
+
+#scholium-profile-sheet .scholium-preview li {
+  margin: 0.25em 0;
+}
+
+#scholium-profile-sheet .scholium-preview li > :is(ul, ol) {
+  margin: 0.2em 0;
+}
+
+#scholium-profile-sheet .scholium-preview code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--fill-quinary);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.9em;
+}
+
+#scholium-profile-sheet .scholium-preview pre {
+  padding: 8px 12px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--fill-quinary);
+}
+
+#scholium-profile-sheet .scholium-preview pre code {
+  padding: 0;
+  background: none;
+}
+
+#scholium-profile-sheet .scholium-preview blockquote {
+  margin: 0.55em 0;
+  padding-inline-start: 12px;
+  border-inline-start: 3px solid var(--fill-quarternary);
+  color: var(--fill-secondary);
+}
+
+#scholium-profile-sheet .scholium-preview hr {
+  margin: 1em 0;
+  border: none;
+  border-top: 1px solid var(--fill-quinary);
+}
+
+/* a colour code with a dot of its colour */
+.scholium-swatch {
+  display: inline-block;
+  width: 0.75em;
+  height: 0.75em;
+  margin-inline-end: 4px;
+  border-radius: 50%;
+  vertical-align: -0.05em;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+
+.scholium-link {
+  color: var(--accent-blue);
+  text-decoration: underline;
+}
+
+.scholium-editor-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }

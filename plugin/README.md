@@ -64,6 +64,16 @@ controls and the process of the selected paper:
   file, and the first lines of each result (errors in red); a failed run ends with its error. A
   running paper is shown live; for a paper run earlier the saved log is shown. The box is resized
   at its lower edge, and its height is kept.
+- **Personal profile ↗** opens the annotation profile `<data dir>/zotero-scholium/profile.md`, which
+  every run follows, in an editor over the Zotero window: the Markdown text as it is on the left, and
+  on the right a preview that formats it as it is typed and follows its scrolling; colour codes such
+  as `#ff6666` get a dot of their colour, and links are shown, not followed. **Save** closes the
+  editor, Ctrl+S keeps it open, **Cancel** or Esc closes it. Closing with unsaved changes asks first.
+  The file keeps its line ends. A file changed elsewhere since it was opened (for example by
+  `scholium profile --from-library`) is overwritten only after a confirmation; an unedited
+  text shows the file's current content when Zotero is focused again. A missing profile starts as
+  the empty `## User's rules (always win)` section of `scholium profile`'s template, which keeps that
+  section when it later writes the statistics, and is written on saving.
 - The box below the transcript takes the user's words. With **Annotate** they go to the new run as
   extra instructions. Once the paper has a run, **Send** (or Ctrl+Enter) continues that run's
   conversation with them (`claude -p --resume <session>`), for example to change some annotations.
@@ -141,6 +151,12 @@ through the first reader instance: an open reader at startup, or a reader caught
 to `Zotero.Reader._readers` (before it loads its annotations) or returns it from
 `Zotero.Reader.openPreview`. These two hooks are removed once the prototype is reached. The button is
 added through `Zotero.Reader.registerEventListener("renderToolbar", …)`.
+
+The `content/` folder is registered as `chrome://scholium-bridge-<version>/content/`, with the plugin
+version in the package name. Zotero keeps the stylesheets of a chrome address after a plugin is
+installed over a running copy, so under a fixed address the section would get the previous version's
+stylesheet. The profile editor is built in the main window's page, like the section, rather than in a
+window of its own.
 
 The `init` method of an endpoint class must declare exactly one parameter. Zotero's server inspects
 `init.length` and treats an arity of 0 or 2 as the legacy callback style, in which case the request

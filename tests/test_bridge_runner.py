@@ -2,7 +2,8 @@
 
 The simulated Subprocess replays stream-json output (split across chunks) and answers the model list
 request, so the command line, the task prompt, the Scholium section of the item
-pane (the models Claude Code reports, the remembered effort and the levels of each model, buttons, state line, resizable transcript, saved history, the message box), the self-closing
+pane (the models Claude Code reports, the remembered effort and the levels of each model, the
+editor sheet of the personal profile, buttons, state line, resizable transcript, saved history, the message box), the self-closing
 notices and the system notification (left out while the section is on screen in the focused
 window), follow-ups, the usage limit, deletion, failures, cancellation and the queue are checked
 without starting an agent. PathUtils behaves like Zotero's: it has no homeDir, and join()
@@ -11,6 +12,7 @@ rejects a first component that is not an absolute path.
 
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
@@ -26,7 +28,20 @@ HARNESS = r"""
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(process.argv[2], 'utf8');
-const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+const tick = () => new Promise(resolve => setImmediate(resolve));
+// an element as [tag.class[style][start=…][title=…], children or text…], to compare built pages
+const tree = n => (n && n.tagName
+  ? [n.tagName + (n.className ? '.' + n.className : '') + (n.attrs.style ? '[' + n.attrs.style + ']' : '')
+     + (n.attrs.start ? '[start=' + n.attrs.start + ']' : '') + (n.title ? '[title=' + n.title + ']' : ''),
+     ...(n.children.length ? n.children.map(tree) : n._text ? [n._text] : [])]
+  : n.textContent);
+// a key pressed in an element: its keydown listeners, and whether they kept the key to themselves
+const key = (el, opts) => {
+  const e = Object.assign({ defaultPrevented: false, stopped: false, preventDefault() { this.defaultPrevented = true; },
+                            stopPropagation() { this.stopped = true; } }, opts);
+  for (const f of el.listeners.keydown || []) f(e);
+  return e;
+};
 const settle = async (n = 20) => { for (let i = 0; i < n; i++) await tick(); };
 
 const CLAUDE = '/appdata/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe';
@@ -70,6 +85,13 @@ const RATE_LIMITED = [
   ev({ type: 'result', subtype: 'success', is_error: true, result: 'Rate limited', session_id: 'S1' }),
 ];
 const NSIFILE = { name: 'nsIFile' };
+const PROFILE_PATH = '/data/zotero-scholium/profile.md';
+const PROFILE_HEAD = '# Annotation profile (draft derived from the Zotero library)\n\nBased on 466 annotations on 50 papers.\n\n- Colours:\n  - `#ff6666` 75%\n';
+const PROFILE_INTERPRETATION = '- colour meanings: `#ff6666` = anything important\n- reading note: yes';
+const PROFILE_RULES = '- 高亮评论 = 中文翻译\n- 颜色只有两级：红 = 核心，黄 = 其他';
+const PROFILE = PROFILE_HEAD + '\n## Interpretation (to be completed by the assistant from the statistics and confirmed by the user)\n\n'
+  + PROFILE_INTERPRETATION + '\n\n## User\'s rules (always win)\n\nAnything written here overrides the learned statistics above.\n'
+  + 'Re-running regenerates the statistics only.\n\n' + PROFILE_RULES + '\n';
 // what Claude Code answers to the initialize request (abridged)
 const LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const MODELS = [
@@ -104,6 +126,8 @@ class El {
   }
   addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); }
   click() { for (const f of this.listeners.click || []) f({}); }
+  type(value) { this.value = value; for (const f of this.listeners.input || []) f({}); }
+  focus() { this.focused = true; }
   change(value) { this.value = value; for (const f of this.listeners.change || []) f({}); }
   append(...nodes) { for (const n of nodes) { if (n && typeof n === 'object') n.parent = this; this.children.push(n); } }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
@@ -114,10 +138,12 @@ class El {
 }
 
 function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, exitCode = 0, script = null, claudeExists = true, gateFirst = false,
-                   home = 'dirsvc', eraseFails = false, logs = {}, models = 'ok', claudeAt = CLAUDE, scripts = [] } = {}) {
+                   home = 'dirsvc', eraseFails = false, logs = {}, models = 'ok', claudeAt = CLAUDE, scripts = [], readFails = false,
+                   writeFails = false } = {}) {
   const log = { calls: [], stdin: [], notices: [], alerts: [], confirms: [], kills: 0, menus: [], unregistered: [], listeners: [],
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
-                ftl: [], tabs: [], selected: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0 };
+                ftl: [], tabs: [], selected: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
+                madeDirs: [] };
   const files = new Set(claudeExists ? [claudeAt] : []);
   // 97-character chunks split JSON lines; 'WAIT' holds the stream open until the process is killed
   const chunksFor = (n) => {
@@ -213,8 +239,16 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
   let focused = true;
   class IntersectionObserver { constructor(cb) { this.cb = cb; observers.intersection.push(this); } observe(el) { this.el = el; } disconnect() { this.off = true; } }
   class ResizeObserver { constructor(cb) { this.cb = cb; observers.resize.push(this); } observe(el) { this.el = el; } disconnect() { this.off = true; } }
-  const paneDoc = { createElement: tag => new El(tag), createTextNode: text => ({ textContent: text }),
-                    defaultView: { IntersectionObserver, ResizeObserver, document: { hasFocus: () => focused } } };
+  // the profile sheet goes into the page of the pane's window, over everything; the element that had the focus before
+  const lastFocus = new El('button');
+  const paneWin = { IntersectionObserver, ResizeObserver, listeners: {},
+                    addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); },
+                    removeEventListener(t, f) { this.listeners[t] = (this.listeners[t] || []).filter(g => g !== f); },
+                    dispatch(t) { for (const f of this.listeners[t] || []) f({}); } };
+  const paneDoc = { createElement: tag => new El(tag), createTextNode: text => ({ textContent: text }), hasFocus: () => focused,
+                    defaultView: paneWin, documentElement: new El('window'), activeElement: lastFocus };
+  paneWin.document = paneDoc;
+  const sheet = () => paneDoc.documentElement.children.find(c => c.id === 'scholium-profile-sheet') || null;
   const see = v => { for (const o of observers.intersection) if (!o.off) o.cb([{ isIntersecting: v }]); };
   const resize = el => { for (const o of observers.resize) if (!o.off && o.el === el) o.cb([]); };
   const focus = v => { focused = v; };
@@ -249,7 +283,8 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                 unregisterEventListener: (type, handler) => { log.listeners = log.listeners.filter(l => l.handler !== handler); } },
     },
     Services: {
-      prompt: { alert: (w, t, m) => log.alerts.push(m), confirm: (w, t, m) => { log.confirms.push(m); return confirm; } },
+      prompt: { alert: (w, t, m) => log.alerts.push(m),
+                confirm: (w, t, m) => { log.confirms.push(m); return Array.isArray(confirm) ? confirm.shift() : confirm; } },
       env: { get: n => (n === 'APPDATA' ? '/appdata' : n === 'USERPROFILE' && home === 'env' ? '/profile/u' : '') },
       dirsvc: { get: (key, iface) => {
         if (home !== 'dirsvc' || key !== 'Home' || iface !== NSIFILE) throw Error('NS_ERROR_FAILURE');
@@ -270,9 +305,16 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     } },
     IOUtils: {
       exists: async p => files.has(p) || p in log.writes,
-      makeDirectory: async () => {},
-      readUTF8: async p => { if (!(p in log.writes)) throw Error('missing'); return log.writes[p]; },
-      writeUTF8: async (p, t, o) => { log.writes[p] = (o && o.mode === 'append' ? (log.writes[p] || '') : '') + t; },
+      makeDirectory: async p => { log.madeDirs.push(p); },
+      readUTF8: async p => {
+        if (readFails && p === PROFILE_PATH) throw Error('NotReadableError');
+        if (!(p in log.writes)) throw Error('missing');
+        return log.writes[p];
+      },
+      writeUTF8: async (p, t, o) => {
+        if (writeFails && p === PROFILE_PATH) throw Error('NotAllowedError');
+        log.writes[p] = (o && o.mode === 'append' ? (log.writes[p] || '') : '') + t;
+      },
     },
     ChromeUtils: { importESModule: () => ({ Subprocess }) },
   });
@@ -300,7 +342,8 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     }, pane: () => runner.panes.get(body) };
   };
   const styles = () => mainDoc.documentElement.children.map(c => [c.tagName, c.id, c.attrs.rel, c.attrs.href]);
-  return { runner, log, item1, item2, att1, att2, note, pane, store, see, resize, focus, observers, timers, fire, styles,
+  return { runner, log, item1, item2, att1, att2, note, pane, store, see, resize, focus, observers, timers, fire, styles, sheet, paneWin, paneDoc, lastFocus,
+           chromePackage: context.chromePackage,
            live: () => timers.filter(t => t.live).map(t => t.ms), toolbarItems: () => mainDoc.bar.children.length };
 }
 const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descriptions: n.descriptions, closeTimer: n.closeTimer, shown: n.shown });
@@ -353,7 +396,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const toolNode = p1.list.children.find(c => c.className === 'scholium-entry tool');
     facts.look = { state: p1.state.className, tool: toolNode.children.map(c => [c.tagName, c.className]),
                    name: toolNode.children[1].children.map(c => c.tagName || 'text'),
-                   buttons: [p1.annotate, p1.cancel, p1.resume, p1.remove, p1.log, p1.send].map(b => b.className),
+                   buttons: [p1.annotate, p1.cancel, p1.resume, p1.profile, p1.remove, p1.log, p1.send].map(b => b.className),
                    parts: p1.body.children[0].children.map(c => c.className), selects: [p1.model.className, p1.effort.className],
                    input: p1.input.className, sendRow: p1.sendRow.className };
     const after = await h.pane(item1);              // rendered anew after the run: the transcript comes from memory
@@ -549,6 +592,181 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     await settle(300);
     p1.pane().cancel.click();                       // the interrupted paper leaves the queue, which ends the pause
     facts.pauseCancelled = { queue: h.runner.queue.length, paused: h.runner.paused, waits: h.live(), calls: h.log.calls.length };
+  }
+
+  // the content folder's chrome address carries the version, and every address of the plugin follows it
+  {
+    const h = harness();
+    h.runner.chrome = 'chrome://' + h.chromePackage('0.1.3.10022049') + '/content/';
+    h.runner.start('x');
+    const sec = h.log.sections[0];
+    facts.versioned = { pkg: h.chromePackage('0.1.3.10022049'), release: h.chromePackage('0.2.0'), icons: [sec.header.icon, sec.sidenav.icon],
+                        style: h.styles()[0][3] };
+  }
+
+  // the personal profile: profile.md as it is, in a sheet over the Zotero window
+  {
+    const CRLF = PROFILE.replace(/\n/g, '\r\n');
+    const h = harness({ logs: { [PROFILE_PATH]: CRLF }, confirm: [false, false] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    const q = p.pane();
+    const button = { text: q.profile.textContent, cls: q.profile.className };
+    q.profile.click(); await settle(20);
+    const root = h.sheet();
+    const box = root.children[0];
+    const [head, panes, foot] = box.children;
+    const [input, preview] = panes.children;
+    const [status, , cancel, save] = foot.children;
+    const [title, about, pathLine] = head.children;
+    const view = () => ({ status: status.textContent, error: status.className.includes('error'), saveDisabled: save.disabled,
+                          inputDisabled: input.disabled, open: !!h.sheet() });
+    const focusListeners = () => (h.paneWin.listeners.focus || []).length;
+    const f = { button, root: [root.className, root.id], box: [box.className, box.attrs.role, box.attrs['aria-label']],
+                title: [title.className, title.textContent], panes: [panes.className, input.className, preview.className],
+                previewed: preview.children.length,
+                head: [about, pathLine].map(c => [c.className, c.textContent]), pathTitle: pathLine.title,
+                buttons: [cancel.textContent, save.textContent, cancel.className, save.className],
+                text: input.value, focused: !!input.focused, opened: view(), unchanged: h.log.writes[PROFILE_PATH] === CRLF,
+                focusListeners: focusListeners() };
+    input.focused = false;
+    q.profile.click(); await settle(20);
+    f.again = { sheets: h.paneDoc.documentElement.children.filter(c => c.id === 'scholium-profile-sheet').length, focused: !!input.focused };
+    input.type(input.value + '- 页边批注用蓝色\n');
+    f.edited = view();
+    let k = key(box, { key: 's', ctrlKey: true }); await settle(20);
+    f.ctrlS = { prevented: k.defaultPrevented, stopped: k.stopped, saved: h.log.writes[PROFILE_PATH], view: view(), dirs: h.log.madeDirs.slice() };
+    input.type(input.value + '- 公式不高亮\n');
+    k = key(box, { key: 'Escape' });
+    f.escape = { prevented: k.defaultPrevented, stopped: k.stopped, view: view() };
+    cancel.click();
+    f.cancel = view();
+    save.click(); await settle(20);
+    f.saved = { text: h.log.writes[PROFILE_PATH], view: view(), confirms: h.log.confirms.slice(), focusListeners: focusListeners(),
+                refocused: !!h.lastFocus.focused };
+    facts.profile = f;
+  }
+  {
+    // a missing profile: the template, written on saving
+    const h = harness();
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    p.pane().profile.click(); await settle(20);
+    const [, panes, foot] = h.sheet().children[0].children;
+    const [input] = panes.children;
+    const [status, , , save] = foot.children;
+    const before = { status: status.textContent, saveDisabled: save.disabled, written: PROFILE_PATH in h.log.writes, text: input.value };
+    save.click(); await settle(20);
+    facts.profileCreated = { before, saved: h.log.writes[PROFILE_PATH], dirs: h.log.madeDirs, open: !!h.sheet(), confirms: h.log.confirms.length };
+  }
+  {
+    // the file changed elsewhere: asked before overwriting; back in Zotero, an unedited text follows the file
+    const h = harness({ logs: { [PROFILE_PATH]: PROFILE }, confirm: [false, true] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    p.pane().profile.click(); await settle(20);
+    const [, panes, foot] = h.sheet().children[0].children;
+    const [input] = panes.children;
+    const [status, , , save] = foot.children;
+    const f = {};
+    h.log.writes[PROFILE_PATH] = PROFILE + '- 新统计\n';
+    h.paneWin.dispatch('focus'); await settle(20);
+    f.reloaded = input.value;
+    input.type(input.value + '- 我的修改\n');
+    h.log.writes[PROFILE_PATH] = PROFILE + '- 再次统计\n';
+    h.paneWin.dispatch('focus'); await settle(20);
+    f.keptEdits = input.value.endsWith('- 我的修改\n');
+    save.click(); await settle(20);
+    f.refused = { confirms: h.log.confirms.slice(), file: h.log.writes[PROFILE_PATH], status: status.textContent,
+                  error: status.className.includes('error'), open: !!h.sheet() };
+    save.click(); await settle(20);
+    f.overwritten = { file: h.log.writes[PROFILE_PATH], open: !!h.sheet(), confirms: h.log.confirms.length };
+    facts.profileElsewhere = f;
+  }
+  {
+    // the preview beside the text: the text as Markdown as it is typed, scrolled with the text
+    const h = harness({ logs: { [PROFILE_PATH]: PROFILE } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    p.pane().profile.click(); await settle(20);
+    const [input, preview] = h.sheet().children[0].children[1].children;
+    input.type(input.value + '- **新规则**：`#2ea8e5` 用于方法\n');
+    const f = { tree: preview.children.map(tree) };
+    // the text box scrolled to 3/4 of its room: the preview goes to 3/4 of its own
+    Object.defineProperty(input, 'scrollHeight', { value: 1100 });
+    Object.defineProperty(preview, 'scrollHeight', { value: 2100 });
+    input.scrollTop = 750;
+    for (const g of input.listeners.scroll || []) g({});
+    f.scrolled = preview.scrollTop;
+    // typing moves the text box without a scroll event of its own: the rebuilt preview follows
+    input.scrollTop = 500;
+    input.type(input.value + '- x\n');
+    f.scrolledAfterTyping = preview.scrollTop;
+    facts.profilePreview = f;
+  }
+  {
+    // an unedited text, which changes on disk: the preview follows the file
+    const h = harness({ logs: { [PROFILE_PATH]: PROFILE } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    p.pane().profile.click(); await settle(20);
+    const [, preview] = h.sheet().children[0].children[1].children;
+    h.log.writes[PROFILE_PATH] = PROFILE + '- 新统计\n';
+    h.paneWin.dispatch('focus'); await settle(20);
+    facts.profilePreviewReload = tree(preview.children[preview.children.length - 1]);
+  }
+  {
+    // Markdown as the preview builds it
+    const h = harness();
+    const sample = ['# Title **bold** #', '', 'Para line one', 'line two with `code` and *em* and [link](https://x.y/z)', '',
+                    '## Rules', '', '1. first', '2. second', '   - nested `#ff6666` red', '     continued', '- other list', '  1. inner ordered', '',
+                    '> quote **q**', '', '```', '<script>alert(1)</script> **not bold**', '```', '', '---', '3. starts at three', '<b>raw</b>'].join('\r\n');
+    facts.markdown = h.runner.renderMarkdown(h.paneDoc, sample).map(tree);
+  }
+  {
+    // a profile that cannot be read is not overwritten; a failed save keeps the sheet and the text
+    const h = harness({ logs: { [PROFILE_PATH]: PROFILE }, readFails: true });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    p.pane().profile.click(); await settle(20);
+    const box = h.sheet().children[0];
+    const [, panes, foot] = box.children;
+    const [input] = panes.children;
+    const [status, , , save] = foot.children;
+    key(box, { key: 's', ctrlKey: true }); await settle(20);
+    facts.profileUnreadable = { status: status.textContent, error: status.className.includes('error'), inputDisabled: input.disabled,
+                                saveDisabled: save.disabled, file: h.log.writes[PROFILE_PATH] === PROFILE, dirs: h.log.madeDirs.length };
+  }
+  {
+    const h = harness({ logs: { [PROFILE_PATH]: PROFILE }, writeFails: true });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    p.pane().profile.click(); await settle(20);
+    const box = h.sheet().children[0];
+    const [, panes, foot] = box.children;
+    const [input] = panes.children;
+    const [status, , , save] = foot.children;
+    input.type(input.value + '- x\n');
+    save.click(); await settle(20);
+    facts.profileWriteFailed = { status: status.textContent, error: status.className.includes('error'), open: !!h.sheet(),
+                                 saveDisabled: save.disabled, kept: input.value.endsWith('- x\n') };
+    // Esc, and yes to discarding: closed after one question
+    key(box, { key: 'Escape' });
+    facts.profileDiscarded = { open: !!h.sheet(), confirms: h.log.confirms.slice() };
+  }
+  {
+    // the window closes, or the plugin shuts down: the sheet goes without asking
+    const h = harness({ logs: { [PROFILE_PATH]: PROFILE }, confirm: false });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    p.pane().profile.click(); await settle(20);
+    h.sheet().children[0].children[1].children[0].type('changed');
+    h.runner.removeFromWindow(h.paneWin);
+    const unloaded = { open: !!h.sheet(), focusListeners: (h.paneWin.listeners.focus || []).length };
+    p.pane().profile.click(); await settle(20);
+    h.sheet().children[0].children[1].children[0].type('changed');
+    h.runner.stop();
+    facts.profileShutdown = { unloaded, open: !!h.sheet(), confirms: h.log.confirms.length };
   }
 
   // existing scholium annotations: confirm, and refusal starts nothing
@@ -802,7 +1020,6 @@ def test_section_offers_model_effort_and_actions(facts):
 
 def css_rules():
     """The section's stylesheet as {selector: declarations}."""
-    import re
     text = re.sub(r"/\*.*?\*/", "", (PLUGIN / "content" / "scholium.css").read_text(encoding="utf8"), flags=re.S)
     text = re.sub(r"@keyframes[^{]*\{(?:[^{}]*\{[^}]*\})*[^}]*\}", "", text)
     assert text.count("{") == text.count("}")
@@ -813,22 +1030,23 @@ def test_section_is_styled_by_its_stylesheet(facts):
     look = facts["look"]
     assert look["parts"] == ["scholium-settings", "scholium-actions", "scholium-state ok", "scholium-caption", "scholium-log",
                              "scholium-composer"]
-    assert look["buttons"] == ["scholium-button primary", "scholium-button", "scholium-button", "scholium-button quiet danger",
-                               "scholium-button quiet", "scholium-button primary small"]
+    assert look["buttons"] == ["scholium-button primary", "scholium-button", "scholium-button", "scholium-button quiet",
+                               "scholium-button quiet danger", "scholium-button quiet", "scholium-button primary small"]
     assert look["selects"] == ["scholium-select", "scholium-select"] and look["input"] == "scholium-input"
     assert look["tool"] == [["span", "scholium-bullet"], ["span", "scholium-content"]] and look["name"] == ["b", "text"]
     rules = css_rules()
     for cls in ["scholium-pane", "scholium-settings", "scholium-field", "scholium-select", "scholium-actions", "scholium-spacer",
                 "scholium-button", "scholium-state", "scholium-caption", "scholium-log", "scholium-entry", "scholium-bullet",
                 "scholium-content", "scholium-composer", "scholium-input", "scholium-send-row", "scholium-hint"]:
-        assert "." + cls in rules, cls
+        assert any(re.search(r"\." + re.escape(cls) + r"(?![\w-])", sel) for sel in rules), cls
     log = rules[".scholium-log"]
     for part in ("background: var(--material-background)", "color: var(--fill-primary)", "border: var(--material-border-quarternary)",
                  "resize: vertical", "overflow: auto", "min-height: 80px"):
         assert part in log, part
     assert "display: none !important" in rules[".scholium-pane [hidden]"]
     assert "var(--accent-green)" in rules[".scholium-entry.tool .scholium-bullet"]
-    assert [sel for sel, body in rules.items() if "monospace" in body] == [".scholium-entry.tool, .scholium-entry.result"]
+    assert [sel for sel, body in rules.items() if "monospace" in body] == [".scholium-entry.tool, .scholium-entry.result", "#scholium-profile-sheet .scholium-editor",
+                                                                               "#scholium-profile-sheet .scholium-preview code"]
     assert "var(--accent-blue10)" in rules[".scholium-entry.prompt"] and "auto" in rules[".scholium-entry.prompt"]
     assert "var(--accent-blue)" in rules[".scholium-button.primary"] and "var(--accent-red)" in rules[".scholium-button.danger"]
     assert "border-color: var(--accent-blue)" in rules[".scholium-composer:focus-within"]
@@ -992,6 +1210,129 @@ def test_home_directory_comes_from_the_directory_service_or_the_environment(fact
     assert facts["home_env"] == {"calls": 1, "addDir": "/profile/u/.claude/skills/zotero-scholium",
                                  "notifications": ["批注完成：Paper ITEM1"]}
     assert facts["home_none"] == {"calls": 1, "addDir": None, "notifications": ["批注完成：Paper ITEM1"]}
+
+
+def test_personal_profile_is_edited_as_markdown_over_the_zotero_window(facts):
+    f = facts["profile"]
+    assert f["button"] == {"text": "个人配置 ↗", "cls": "scholium-button quiet"}
+    assert f["root"] == ["scholium-sheet-backdrop", "scholium-profile-sheet"] and f["box"] == ["scholium-sheet", "dialog", "个人配置"]
+    assert f["title"] == ["scholium-sheet-title", "个人配置"]
+    assert f["panes"] == ["scholium-editor-panes", "scholium-editor", "scholium-preview"] and f["previewed"] == 8
+    assert f["head"][0][0] == "scholium-editor-about" and "Interpretation 和 User's rules 两节保持不变" in f["head"][0][1]
+    assert f["head"][1] == ["scholium-editor-path", "/data/zotero-scholium/profile.md"]
+    assert f["pathTitle"] == "/data/zotero-scholium/profile.md"
+    assert f["buttons"] == ["取消", "保存", "scholium-button", "scholium-button primary"]
+    # the file as it is, with the line ends of the text box; nothing is written by opening it
+    assert "\r" not in f["text"] and f["text"].startswith("# Annotation profile (draft")
+    assert f["text"].endswith("- 颜色只有两级：红 = 核心，黄 = 其他\n")
+    assert f["focused"] is True and f["unchanged"] is True and f["focusListeners"] == 1
+    assert f["opened"] == {"status": "Ctrl+S 保存 · Esc 关闭", "error": False, "saveDisabled": True, "inputDisabled": False, "open": True}
+    assert f["again"] == {"sheets": 1, "focused": True}
+    assert f["edited"] == {"status": "有未保存的修改", "error": False, "saveDisabled": False, "inputDisabled": False, "open": True}
+    # Ctrl+S saves and stays; the file keeps its CRLF line ends; the key goes no further than the sheet
+    c = f["ctrlS"]
+    assert c["prevented"] is True and c["stopped"] is True and c["dirs"] == ["/data/zotero-scholium"]
+    assert c["saved"].endswith("\r\n- 页边批注用蓝色\r\n") and "\n" not in c["saved"].replace("\r\n", "")
+    assert re.fullmatch(r"已保存 \d\d:\d\d", c["view"]["status"]) and c["view"]["saveDisabled"] is True and c["view"]["open"] is True
+    # unsaved changes: Esc and Cancel ask, and a refusal keeps the sheet
+    assert f["escape"]["prevented"] is True and f["escape"]["stopped"] is True and f["escape"]["view"]["open"] is True
+    assert f["cancel"] == {"status": "有未保存的修改", "error": False, "saveDisabled": False, "inputDisabled": False, "open": True}
+    saved = f["saved"]
+    assert saved["text"].endswith("\r\n- 页边批注用蓝色\r\n- 公式不高亮\r\n") and saved["view"]["open"] is False
+    assert saved["confirms"] == ["放弃未保存的修改吗？", "放弃未保存的修改吗？"]
+    assert saved["focusListeners"] == 0 and saved["refocused"] is True
+
+
+def test_profile_preview_shows_the_text_as_markdown_as_it_is_typed(facts):
+    f = facts["profilePreview"]
+    t = f["tree"]
+    assert t[0] == ["h1", "Annotation profile (draft derived from the Zotero library)"]
+    assert t[1] == ["p", "Based on 466 annotations on 50 papers."]
+    assert t[2] == ["ul", ["li", "Colours:", ["ul", ["li", ["code", ["span.scholium-swatch[background-color: #ff6666]"], "#ff6666"], " 75%"]]]]
+    assert t[3] == ["h2", "Interpretation (to be completed by the assistant from the statistics and confirmed by the user)"]
+    assert t[5][0] == "h2" and t[5][1] == "User's rules (always win)"
+    # the unsaved rule is in the preview
+    assert t[-1] == ["ul", ["li", "高亮评论 = 中文翻译"], ["li", "颜色只有两级：红 = 核心，黄 = 其他"],
+                     ["li", ["strong", "新规则"], "：", ["code", ["span.scholium-swatch[background-color: #2ea8e5]"], "#2ea8e5"], " 用于方法"]]
+    # 750 of 1000 in the text box: 1500 of 2000 in the preview; 500 after typing: 1000 in the rebuilt preview
+    assert f["scrolled"] == 1500 and f["scrolledAfterTyping"] == 1000
+    assert facts["profilePreviewReload"] == ["ul", ["li", "高亮评论 = 中文翻译"], ["li", "颜色只有两级：红 = 核心，黄 = 其他"], ["li", "新统计"]]
+
+
+def test_markdown_preview_builds_elements_and_never_markup(facts):
+    assert facts["markdown"] == [
+        ["h1", "Title ", ["strong", "bold"]],
+        ["p", "Para line one\nline two with ", ["code", "code"], " and ", ["em", "em"], " and ",
+         ["span.scholium-link[title=https://x.y/z]", "link"]],
+        ["h2", "Rules"],
+        ["ol", ["li", "first"],
+               ["li", "second", ["ul", ["li", "nested ", ["code", ["span.scholium-swatch[background-color: #ff6666]"], "#ff6666"],
+                                        " red\ncontinued"]]]],
+        ["ul", ["li", "other list", ["ol", ["li", "inner ordered"]]]],
+        ["blockquote", ["p", "quote ", ["strong", "q"]]],
+        ["pre", ["code", "<script>alert(1)</script> **not bold**"]],
+        ["hr"],
+        ["ol[start=3]", ["li", "starts at three\n<b>raw</b>"]],
+    ]
+
+
+def test_missing_profile_starts_as_the_template_and_is_written_on_saving(facts):
+    c = facts["profileCreated"]
+    assert c["before"]["status"] == "文件还不存在，保存后创建" and c["before"]["saveDisabled"] is False and c["before"]["written"] is False
+    assert c["before"]["text"].startswith("# Annotation profile\n\n## User's rules (always win)\n\nRules recorded in this section take precedence")
+    assert c["saved"] == c["before"]["text"] and c["dirs"] == ["/data/zotero-scholium"] and c["open"] is False and c["confirms"] == 0
+
+
+def test_profile_changed_elsewhere_is_not_overwritten_unasked(facts):
+    f = facts["profileElsewhere"]
+    assert f["reloaded"].endswith("- 新统计\n") and f["keptEdits"] is True
+    r = f["refused"]
+    assert r["confirms"] == ["profile.md 在打开后被别处改动过（例如重新统计了文库）。用这里的内容覆盖它吗？"]
+    assert r["file"].endswith("- 再次统计\n") and r["status"] == "未保存：文件已被别处改动" and r["error"] is True and r["open"] is True
+    o = f["overwritten"]
+    assert o["file"].endswith("- 新统计\n- 我的修改\n") and o["open"] is False and o["confirms"] == 2
+
+
+def test_profile_read_and_write_failures_keep_the_file_and_the_text(facts):
+    assert facts["profileUnreadable"] == {"status": "读不到画像文件：NotReadableError", "error": True, "inputDisabled": True,
+                                          "saveDisabled": True, "file": True, "dirs": 0}
+    assert facts["profileWriteFailed"] == {"status": "保存失败：NotAllowedError", "error": True, "open": True,
+                                           "saveDisabled": False, "kept": True}
+    assert facts["profileDiscarded"] == {"open": False, "confirms": ["放弃未保存的修改吗？"]}
+    assert facts["profileShutdown"] == {"unloaded": {"open": False, "focusListeners": 0}, "open": False, "confirms": 0}
+
+
+def test_profile_sheet_covers_the_window_in_zotero_colours():
+    rules = css_rules()
+    backdrop = rules[".scholium-sheet-backdrop"]
+    for part in ("position: fixed", "inset: 0", "z-index: 10000"):
+        assert part in backdrop, part
+    preview = rules["#scholium-profile-sheet .scholium-preview"]
+    assert "overflow: auto" in preview and "background: var(--material-background)" in preview
+    assert "grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)" in rules[".scholium-editor-panes"]
+    assert "border-radius: 50%" in rules[".scholium-swatch"]
+    assert "background: var(--material-sidepane)" in rules[".scholium-sheet"]
+    editor = rules["#scholium-profile-sheet .scholium-editor"]
+    assert "background: var(--material-background)" in editor and "color: var(--fill-primary)" in editor
+    assert "var(--accent-red)" in rules[".scholium-hint.error"]
+    assert not (PLUGIN / "content" / "profile.xhtml").exists()
+
+
+def test_new_profile_keeps_its_rules_through_a_statistics_run(facts):
+    from zotero_scholium import cli
+    created = facts["profileCreated"]["saved"]
+    assert cli.USER_RULES_MARK in created
+    edited = created + "- 页边批注用蓝色\n"
+    merged = cli.merge_profile_md("# Annotation profile\n\nBased on 999 annotations.\n\n## Interpretation (x)\n\n- colour meanings: ___\n", edited)
+    assert "999 annotations" in merged and merged.rstrip().endswith("- 页边批注用蓝色")
+
+
+def test_plugin_addresses_carry_the_version(facts):
+    v = facts["versioned"]
+    assert v["pkg"] == "scholium-bridge-0-1-3-10022049" and v["release"] == "scholium-bridge-0-2-0"
+    base = "chrome://scholium-bridge-0-1-3-10022049/content/"
+    assert v["icons"] == [base + "icon16.svg", base + "icon20.svg"]
+    assert v["style"] == base + "scholium.css"
 
 
 def test_plugin_ships_the_section_icons_and_localization():
