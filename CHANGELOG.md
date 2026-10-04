@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.5 (2026-10-04)
 
 - The Scholium section also runs Codex: **Agent** chooses Claude Code or Codex, and the model list and
   effort levels follow the chosen agent (for Codex, the model of its `config.toml` unless another is
