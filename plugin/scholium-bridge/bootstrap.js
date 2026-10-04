@@ -3,8 +3,8 @@
  * by zotero-scholium in every reader view (tab, window, item-pane preview) at once. The choice is kept
  * in the preference extensions.scholium-bridge.showAnnotations; until it is first switched on, the
  * annotations are hidden. Hiding removes them from the view only; stored items are not changed.
- * One-click annotation (the item context menu needs Zotero 8; the reader's page menu works from 7):
- * starts the installed Claude Code in the background for the selected papers (see ScholiumRunner).
+ * One-click annotation (the Scholium section of the item pane): starts the installed Claude Code or
+ * Codex in the background for the paper shown (see ScholiumRunner).
  * Endpoints (needed on Zotero 7 to 9 only), on Zotero's built-in local HTTP server (http://127.0.0.1:23119):
  *   GET  /scholium-bridge/ping   -> { ok, version, dataDir }                       (no token)
  *   POST /scholium-bridge/list   -> annotations of one attachment                  (token)
@@ -403,22 +403,27 @@ var ScholiumToggle = {
   },
 };
 
-/* One-click annotation (Claude Code): the Scholium section in the item pane (library and reader side
- * pane) starts the user's own, unmodified Claude Code CLI in the background (`claude -p`, signed in
- * with the user's own account; no credentials are read). It runs the zotero-scholium skill on one
- * paper at a time with the Zotero data directory as working directory. The section chooses the
- * model, from the list Claude Code reports, and the effort; it starts, cancels and deletes, shows the
- * state of the paper, and shows the transcript live, like Claude Code: Claude's text, each tool call
- * and its result; for an earlier run it shows the saved log. A box below the transcript takes extra
- * instructions for a new run, or continues the paper's latest conversation (`--resume`). The
- * section opens the annotation profile (<data dir>/zotero-scholium/profile.md), which every run
- * follows, as plain text beside a live Markdown preview in an editor sheet over the Zotero window. The state
- * line shows the turns and tokens of a run; when the usage limit is reached, the queue waits and the
- * interrupted paper continues its conversation after the reset. The section's look is
- * content/scholium.css, linked into each main window. Short notices at the start and the end close by
- * themselves, and a system notification reports the end; both are left out while a Scholium section
- * is on screen in the focused window. Every event is logged to
- * <data dir>/tmp/scholium/<attachment key>/claude-run.jsonl.
+/* One-click annotation (Claude Code or Codex): the Scholium section in the item pane (library and
+ * reader side pane) starts the user's own, unmodified agent CLI in the background, signed in with the
+ * user's own account; no credentials are read. It runs the zotero-scholium skill on one paper at a
+ * time. Claude Code runs as `claude -p` with the Zotero data directory as working directory. Codex
+ * runs as `codex app-server`, spoken to in JSON-RPC as llm-for-zotero does; its working directory
+ * is <data dir>/tmp/scholium, and its sandbox lets it write there, to the profile folder and to the
+ * skill's key folder, and reach Zotero's local server. Codex's automatic reviewer decides on anything
+ * beyond that; a question that still reaches the plugin is declined, since no one is there to answer.
+ * The section chooses the agent, the model, from the list the agent reports, and the effort; it
+ * starts, cancels and deletes, shows the state of the paper, and shows the transcript live: the
+ * agent's text, each tool call and its result; for an earlier run it shows the saved log. A box below
+ * the transcript takes extra instructions for a new run, or continues the paper's latest conversation,
+ * with the agent that held it. The section opens the annotation profile
+ * (<data dir>/zotero-scholium/profile.md), which every run follows, as plain text beside a live
+ * Markdown preview in an editor sheet over the Zotero window. The state line shows the turns and
+ * tokens of a run; when the usage limit is reached, the queue waits and the interrupted paper
+ * continues its conversation after the reset. The section's look is content/scholium.css, linked
+ * into each main window. Short notices at the start and the end close by themselves, and a system
+ * notification reports the end; both are left out while a Scholium section is on screen in the
+ * focused window. Every event is logged to <data dir>/tmp/scholium/<attachment key>/claude-run.jsonl
+ * or codex-run.jsonl.
  */
 var ScholiumRunner = {
   pluginID: null,
@@ -428,9 +433,10 @@ var ScholiumRunner = {
   job: null,                // { title, key, libraryID, started, step } of the running paper
   last: null,               // { ok, title, key, libraryID, summary, log, at } of the latest finished paper
   notes: new Map(),         // attachment key -> { text, error, at, title }: the latest outcome, shown in its section
-  sessions: new Map(),      // attachment key -> Claude Code session of its latest run, which a follow-up continues
+  sessions: new Map(),      // attachment key -> { agent, id }: the conversation of its latest run, which a follow-up continues
+  logs: new Map(),          // attachment key -> the log of its latest run
   paused: null,             // { until, known, timer } while the usage limit holds the queue
-  RETRY_MS: 10 * 60000,     // the wait when Claude Code names no reset time
+  RETRY_MS: 10 * 60000,     // the wait when the agent names no reset time
   pref: "extensions.scholium-bridge.",
   STEPS: ["skill", "extract", "reading", "writing", "dryRun", "applying"],
   TICK_MS: 30000,
@@ -441,14 +447,16 @@ var ScholiumRunner = {
   MAX_ENTRIES: 3000,
   paneID: null,
   panes: new Map(),         // item pane section body -> { doc, keys, list, state, buttons, shownKey, seen }
-  models: null,             // [{ value, label, title, efforts }] as Claude Code reports them; null until it answered
-  modelsAsked: 0,           // when Claude Code was last asked; a failed request is repeated at most once a minute
-  modelsLoading: false,
-  DEFAULT_MODEL: "opus",    // Claude Code's alias of the latest Opus, until another model is chosen
+  AGENTS: ["claude", "codex"],
+  models: {},               // agent -> [{ value, label, title, efforts }] as the agent reports them; none until it answered
+  modelsAsked: {},          // agent -> when it was last asked; a failed request is repeated at most once a minute
+  modelsLoading: {},
+  DEFAULT_MODEL: "opus",    // Claude Code's alias of the latest Opus, until another model is chosen; Codex starts at its own default
   EFFORTS: ["low", "medium", "high", "xhigh", "max"],   // when the model's levels are unknown
   DEFAULT_EFFORT: "medium", // until another level is chosen
   LOG_HEIGHT: 320,
   chrome: "chrome://scholium-bridge/content/",   // the content folder; startup() puts the version into it
+  version: "",              // the plugin's, which it gives Codex as its client version
 
   log(msg) { Zotero.debug("[scholium-bridge] " + msg); },
 
@@ -461,16 +469,21 @@ var ScholiumRunner = {
       noPdf: zh ? "所选条目没有可用的 PDF 附件。" : "The selected items have no usable PDF attachment.",
       noClaude: zh ? "找不到 Claude Code（claude.exe）。请在 about:config 中设置 extensions.scholium-bridge.claudePath。"
                    : "Claude Code (claude) was not found. Set extensions.scholium-bridge.claudePath in about:config.",
+      noCodex: zh ? "找不到 Codex（codex.exe）。请在 about:config 中设置 extensions.scholium-bridge.codexPath。"
+                  : "Codex (codex) was not found. Set extensions.scholium-bridge.codexPath in about:config.",
       redoTitle: zh ? "重新批注" : "Annotate again",
       redo: (n, m) => zh ? `${m} 篇论文已有 Scholium 批注，共 ${n} 条。重新批注会替换这些批注，你自己的批注不受影响。继续吗？`
                          : `${m} of the papers already carry ${n} Scholium annotations. Annotating again replaces them; your own annotations are not affected. Continue?`,
       typical: zh ? "已在后台开始，通常需要 10–20 分钟。过程和进度见条目侧栏的 Scholium 区块。"
                   : "Started in the background; this usually takes 10–20 minutes. The Scholium section of the item pane shows the process and the progress.",
+      paneAgent: zh ? "智能体" : "Agent",
       paneModel: zh ? "模型" : "Model",
       paneEffort: zh ? "推理强度" : "Effort",
       paneNoEffort: zh ? "不适用" : "n/a",
       paneClaudeDefault: zh ? "Claude Code 默认" : "Claude Code's default",
       paneClaudeDefaultModel: name => zh ? `Claude Code 默认（${name}）` : `Claude Code's default (${name})`,
+      paneCodexDefault: zh ? "Codex 默认" : "Codex's default",
+      paneCodexDefaultModel: name => zh ? `Codex 默认（${name}）` : `Codex's default (${name})`,
       annotateThis: zh ? "批注这篇" : "Annotate",
       deleteThis: zh ? "删除批注" : "Delete annotations",
       logButton: zh ? "打开日志" : "Show log",
@@ -494,16 +507,20 @@ var ScholiumRunner = {
       noHistory: zh ? "这篇还没有运行记录。" : "This paper has not been run yet.",
       queuedThis: n => zh ? `排队中，前面还有 ${n} 篇` : `Queued, ${n} ahead`,
       otherRunning: title => zh ? `正在批注另一篇：${title}` : `Annotating another paper: ${title}`,
-      deleteTitle: zh ? "删除 Scholium 批注" : "Delete Scholium annotations",
-      deleteConfirm: (n, m) => zh
-        ? `将永久删除 ${m} 篇论文上的 ${n} 条 Scholium 批注（带 zotero-scholium 标签的批注）。你自己的批注和阅读笔记都保留。删除会同步，不能撤销。继续吗？`
-        : `This permanently deletes ${n} Scholium annotations (tagged zotero-scholium) on ${m} papers. Your own annotations and the reading notes are kept. The deletion syncs and cannot be undone. Continue?`,
+      deleteTitle: zh ? "删除 Scholium 批注和笔记" : "Delete Scholium annotations and notes",
+      deleteConfirm: (n, notes, m) => zh
+        ? `将删除 ${m} 篇论文上带 zotero-scholium 标签的 ${n} 条批注${notes ? `和 ${notes} 篇阅读笔记` : ""}。`
+          + `批注永久删除，不能撤销${notes ? "；笔记移到回收站，可以恢复" : ""}。你自己的批注和笔记都保留。删除会同步。继续吗？`
+        : `This deletes ${n} annotations${notes ? ` and ${notes} reading notes` : ""} tagged zotero-scholium on ${m} papers. `
+          + `The annotations are deleted for good${notes ? "; the notes go to the trash, where they can be restored" : ""}. `
+          + "Your own annotations and notes are kept. The deletion syncs. Continue?",
       deleteSkipped: n => zh ? `${n} 篇论文正在批注或排队，不会删除。` : `${n} papers being annotated or queued are skipped.`,
-      deleteNone: zh ? "所选论文没有 Scholium 批注。" : "The selected papers carry no Scholium annotations.",
-      deleteDone: (n, m) => zh ? `已删除 ${m} 篇论文上的 ${n} 条 Scholium 批注。` : `Deleted ${n} Scholium annotations on ${m} papers.`,
+      deleteNone: zh ? "所选论文没有 Scholium 批注或笔记。" : "The selected papers carry no Scholium annotations or notes.",
+      deleteDone: (n, notes, m) => zh ? `已删除 ${m} 篇论文上的 ${n} 条 Scholium 批注${notes ? `，${notes} 篇笔记已移到回收站` : ""}。`
+                                      : `Deleted ${n} Scholium annotations on ${m} papers${notes ? `; ${notes} notes moved to the trash` : ""}.`,
       deleteFailed: msg => zh ? `删除失败：${msg}` : `Deletion failed: ${msg}`,
       model: zh ? "模型" : "Model",
-      starting: zh ? "启动 Claude Code" : "starting Claude Code",
+      starting: name => zh ? `启动 ${name}` : `starting ${name}`,
       skill: zh ? "加载技能" : "loading the skill",
       extract: zh ? "提取句子" : "extracting sentences",
       reading: zh ? "通读论文" : "reading the paper",
@@ -529,7 +546,7 @@ var ScholiumRunner = {
       continuing: zh ? "接着上次的对话" : "continuing the conversation",
       continuedNotice: zh ? "已在后台接着上次的对话处理。" : "Continuing the conversation in the background.",
       resumeNow: zh ? "现在继续" : "Continue now",
-      limitTitle: zh ? "Claude 额度已用完" : "Claude usage limit reached",
+      limitTitle: name => zh ? `${name} 额度已用完` : `${name} usage limit reached`,
       pausedState: time => zh ? `额度已用完，${time} 重置后自动继续` : `Usage limit reached; continues by itself after ${time}`,
       pausedRetry: time => zh ? `额度已用完，${time} 自动重试` : `Usage limit reached; retries by itself at ${time}`,
       queuedAll: n => zh ? `${n} 篇排队` : `${n} queued`,
@@ -548,17 +565,27 @@ var ScholiumRunner = {
     try { return Zotero.Prefs.get(this.pref + name, true); } catch (e) { return undefined; }
   },
 
-  // the chosen model; "" is Claude Code's own default
-  modelPref() {
-    const value = this.getPref("claudeModel");
-    return typeof value === "string" ? value : this.DEFAULT_MODEL;
+  // the chosen agent: Claude Code until Codex is chosen
+  agent() {
+    return this.getPref("agent") === "codex" ? "codex" : "claude";
+  },
+
+  // the agent's name; `short` names the account whose usage limit it is
+  agentName(agent, short = false) {
+    return agent === "codex" ? "Codex" : short ? "Claude" : "Claude Code";
+  },
+
+  // the agent's chosen model; "" is the agent's own default
+  modelPref(agent = this.agent()) {
+    const value = this.getPref(agent + "Model");
+    return typeof value === "string" ? value : agent === "claude" ? this.DEFAULT_MODEL : "";
   },
 
   // the effort a run gets: the chosen level, remembered across sessions, when the model accepts it;
   // else medium, or the model's lowest level; none for a model without levels
-  effort() {
-    const levels = this.effortChoices();
-    const chosen = this.getPref("claudeEffort");
+  effort(agent = this.agent()) {
+    const levels = this.effortChoices(agent);
+    const chosen = this.getPref(agent + "Effort");
     return levels.includes(chosen) ? chosen : levels.includes(this.DEFAULT_EFFORT) ? this.DEFAULT_EFFORT : levels[0] || "";
   },
 
@@ -593,6 +620,66 @@ var ScholiumRunner = {
     if (!win) candidates.push("/opt/homebrew/bin/claude", "/usr/local/bin/claude", "/usr/bin/claude");
     for (const c of candidates) if (await this.exists(c)) return c;
     try { return await this.subprocess().pathSearch(exe); } catch (e) { return null; }
+  },
+
+  // the newest codex executable among the usual places: the Codex app keeps its own copy in a folder
+  // that changes with each update, npm's package carries a native one (its shim is a .cmd file), and
+  // Cargo, Homebrew and PATH may hold others. An older Codex may not read a newer one's config.toml.
+  async findCodex() {
+    const configured = this.getPref("codexPath");
+    if (configured) return (await this.exists(configured)) ? configured : null;
+    const home = this.home();
+    const win = Services.appinfo.OS === "WINNT";
+    const exe = win ? "codex.exe" : "codex";
+    const candidates = [];
+    if (win) {
+      const local = this.env("LOCALAPPDATA") || (home ? PathUtils.join(home, "AppData", "Local") : "");
+      if (local) {
+        const bin = PathUtils.join(local, "OpenAI", "Codex", "bin");
+        try { for (const dir of await IOUtils.getChildren(bin)) candidates.push(PathUtils.join(dir, exe)); } catch (e) {}
+        candidates.push(PathUtils.join(bin, exe));
+      }
+      const appData = this.env("APPDATA");
+      if (appData) {
+        const pkg = PathUtils.join(appData, "npm", "node_modules", "@openai", "codex", "node_modules", "@openai");
+        for (const [arch, triple] of [["x64", "x86_64-pc-windows-msvc"], ["arm64", "aarch64-pc-windows-msvc"]]) {
+          const vendor = PathUtils.join(pkg, "codex-win32-" + arch, "vendor", triple);
+          candidates.push(PathUtils.join(vendor, "bin", exe), PathUtils.join(vendor, "codex", exe));
+        }
+      }
+    } else {
+      candidates.push("/Applications/Codex.app/Contents/Resources/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex");
+    }
+    if (home) candidates.push(PathUtils.join(home, ".cargo", "bin", exe), PathUtils.join(home, ".local", "bin", exe));
+    try { candidates.push(await this.subprocess().pathSearch(exe)); } catch (e) {}
+    let best = null;
+    for (const path of new Set(candidates)) {
+      if (!(await this.exists(path))) continue;
+      const version = await this.codexVersion(path);
+      if (version && (!best || this.newer(version, best.version))) best = { path, version };
+    }
+    return best ? best.path : null;
+  },
+
+  // "codex-cli 0.160.0" -> [0, 160, 0, ""]; null when it does not start or answer
+  async codexVersion(path) {
+    try {
+      const proc = await this.subprocess().call({ command: path, arguments: ["--version"], stderr: "stdout" });
+      const timer = setTimeout(() => { try { proc.kill(); } catch (e) {} }, 15000);
+      let out = "";
+      try {
+        for (;;) { const s = await proc.stdout.readString(); if (!s) break; out += s; }
+        await proc.wait();
+      } finally { clearTimeout(timer); }
+      const m = /(\d+)\.(\d+)\.(\d+)(-[\w.]+)?/.exec(out);
+      return m ? [Number(m[1]), Number(m[2]), Number(m[3]), m[4] || ""] : null;
+    } catch (e) { return null; }
+  },
+
+  // whether version a is newer than b; a pre-release comes before its release
+  newer(a, b) {
+    for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+    return !a[3] && !!b[3];
   },
 
   subprocess() {
@@ -677,9 +764,9 @@ var ScholiumRunner = {
     if (home) args.push("--add-dir", PathUtils.join(home, ".claude", "skills", "zotero-scholium"));
     const outRoot = PathUtils.join(Zotero.DataDirectory.dir, "tmp", "scholium").replace(/\\/g, "/");
     args.push("--allowedTools", "Skill", "Read", `Write(${outRoot}/**)`, `Edit(${outRoot}/**)`);
-    const model = this.modelPref();
+    const model = this.modelPref("claude");
     if (model) args.push("--model", model);
-    const effort = this.effort();
+    const effort = this.effort("claude");
     if (effort) args.push("--effort", effort);
     if (job && job.resume) args.push("--resume", job.resume);
     return args;
@@ -704,11 +791,41 @@ var ScholiumRunner = {
     return step;
   },
 
+  // map one Codex notification to a progress step: its shell commands, and its file changes in the
+  // output folder
+  codexStep(msg) {
+    const item = (msg.method === "item/started" || msg.method === "item/completed") && msg.params && msg.params.item;
+    if (!item) return null;
+    if (item.type === "fileChange") {
+      return (item.changes || []).some(c => c && /scholium/i.test(String(c.path || "").replace(/\\/g, "/"))) ? "writing" : null;
+    }
+    if (item.type !== "commandExecution") return null;
+    const cmd = String(item.command || "");
+    if (/scholium\.py/.test(cmd) && /\bextract\b/.test(cmd)) return "extract";
+    if (/scholium\.py/.test(cmd) && /--apply/.test(cmd)) return "applying";
+    if (/scholium\.py/.test(cmd) && /--config/.test(cmd)) return "dryRun";
+    if (/sentences\.txt/i.test(cmd)) return "reading";
+    if (/SKILL\.md/.test(cmd)) return "skill";
+    return null;
+  },
+
+  // the command inside the shell Codex starts it in: `"C:\…\pwsh.exe" -Command 'python x.py'` -> python x.py
+  shellCommand(command) {
+    const s = String(command || "");
+    const m = /^\s*(?:"([^"]+)"|(\S+))\s+(?:-\w+\s+)*?(?:-Command|-c|-lc|\/c)\s+([\s\S]+)$/i.exec(s);
+    if (!m || !/(?:^|[\\/])(?:pwsh|powershell|bash|zsh|sh|cmd)(?:\.exe)?$/i.test(m[1] || m[2])) return s;
+    const inner = m[3].trim();
+    if (/^'[\s\S]*'$/.test(inner)) return inner.slice(1, -1).replace(/''/g, "'");
+    if (/^"[\s\S]*"$/.test(inner)) return inner.slice(1, -1);
+    return inner;
+  },
+
   elapsed(started) { return this.text("minutes", Math.max(1, Math.round((Date.now() - started) / 60000))); },
 
   stepText(step) {
     const i = this.STEPS.indexOf(step);
-    return i >= 0 ? this.text("stepOf", i + 1, this.STEPS.length, this.text(step)) : this.text(step || "starting");
+    if (i >= 0) return this.text("stepOf", i + 1, this.STEPS.length, this.text(step));
+    return step && step !== "starting" ? this.text(step) : this.text("starting", this.agentName(this.job && this.job.agent));
   },
 
   // the running paper's state line: its step, the time so far, and the papers waiting
@@ -750,6 +867,7 @@ var ScholiumRunner = {
   entries(event) {
     const out = [];
     if (!event || typeof event !== "object") return out;
+    if (typeof event.method === "string") return this.codexEntries(event);
     if (event.type === "system" && event.subtype === "init") {
       out.push({ kind: "info", text: `${this.text("model")}: ${event.model || "?"}` });
     }
@@ -791,6 +909,37 @@ var ScholiumRunner = {
     return out || "ok";
   },
 
+  // one Codex notification as display entries, in the same manner: its messages, each command and
+  // its output, file changes, tool calls; its reasoning is left out, as Claude's thinking is
+  codexEntries(msg) {
+    const item = msg.params && msg.params.item;
+    if (!item || typeof item !== "object") return [];
+    if (msg.method === "item/started") {
+      return item.type === "commandExecution"
+        ? [{ kind: "tool", name: "Shell", text: `Shell(${this.toolSummary({ command: this.shellCommand(item.command) })})` }] : [];
+    }
+    if (msg.method !== "item/completed") return [];
+    const failed = item.status === "failed" || item.status === "declined";
+    if (item.type === "agentMessage") return String(item.text || "").trim() ? [{ kind: "text", text: String(item.text).trim() }] : [];
+    if (item.type === "commandExecution") {
+      const output = String(item.aggregatedOutput || "");
+      return [{ kind: "result", text: failed && !output.trim() ? item.status : this.resultSummary(output),
+                error: failed || (typeof item.exitCode === "number" && item.exitCode !== 0) }];
+    }
+    if (item.type === "fileChange") {
+      return (item.changes || []).filter(c => c && c.path).map(c => ({ kind: "tool", name: "Edit", text: `Edit(${this.toolSummary({ file_path: c.path })})` }))
+        .concat(failed ? [{ kind: "result", text: item.status, error: true }] : []);
+    }
+    if (item.type === "mcpToolCall") {
+      const name = `${item.server}.${item.tool}`;
+      return [{ kind: "tool", name, text: `${name}(${this.toolSummary(item.arguments || {})})` },
+              { kind: "result", text: item.error ? String(item.error.message || item.status) : this.resultSummary(item.result && item.result.content),
+                error: !!item.error || failed }];
+    }
+    if (item.type === "webSearch") return [{ kind: "tool", name: "WebSearch", text: `WebSearch(${this.toolSummary({ pattern: item.query })})` }];
+    return [];
+  },
+
   // PDF attachment keys of the item shown in an item pane
   paneKeys(item) {
     try {
@@ -823,21 +972,23 @@ var ScholiumRunner = {
     this.panes.delete(body);
   },
 
-  // the models Claude Code offers, with the effort levels of each: the initialize request of its
-  // stream-json protocol answers without calling a model; only the model list is kept
-  async loadModels() {
-    if (this.models || this.modelsLoading || Date.now() - this.modelsAsked < 60000) return;
-    this.modelsAsked = Date.now();
-    this.modelsLoading = true;
+  // the models the agent offers, with the effort levels of each, asked once per session
+  async loadModels(agent = this.agent()) {
+    if (this.models[agent] || this.modelsLoading[agent] || Date.now() - (this.modelsAsked[agent] || 0) < 60000) return;
+    this.modelsAsked[agent] = Date.now();
+    this.modelsLoading[agent] = true;
     try {
-      const models = await this.askModels();
+      const models = agent === "codex" ? await this.askCodexModels() : await this.askModels();
       if (models) {
-        this.models = models;
+        this.models[agent] = models;
         for (const pane of this.panes.values()) this.fillSelects(pane);
       }
     } catch (e) { this.log("model list failed: " + e); }
-    finally { this.modelsLoading = false; }
+    finally { this.modelsLoading[agent] = false; }
   },
+
+  // Claude Code's models: the initialize request of its stream-json protocol answers without calling
+  // a model; only the model list is kept
 
   async askModels() {
     const claude = await this.findClaude();
@@ -894,17 +1045,60 @@ var ScholiumRunner = {
     return out;
   },
 
-  // the model options: Claude Code's list once it answered, and the chosen model in any case
-  modelChoices() {
-    const saved = this.modelPref();
-    const list = this.models || [{ value: "", label: this.text("paneClaudeDefault"), title: "", efforts: this.EFFORTS }];
+  // Codex's models and their effort levels (model/list), and the model its config.toml names
+  // (config/read; nothing else of the configuration is kept); no model is called
+  async askCodexModels() {
+    const codex = await this.findCodex();
+    if (!codex) return null;
+    const rpc = await this.codexServer(codex, Zotero.DataDirectory.dir);
+    const timer = setTimeout(() => rpc.close(), 60000);
+    try {
+      await this.codexHello(rpc);
+      const list = await rpc.request("model/list", {});
+      let configured = "";
+      try {
+        const read = await rpc.request("config/read", {});
+        configured = String((read && read.config && read.config.model) || "");
+      } catch (e) {}
+      return this.codexModelOptions(list && list.data, configured);
+    } finally {
+      clearTimeout(timer);
+      rpc.close();
+    }
+  },
+
+  // Codex's model list as options; the empty value runs Codex's own default: the model of its
+  // config.toml, else the one it marks as default. Hidden models are left out.
+  codexModelOptions(list, configured = "") {
+    if (!Array.isArray(list)) return null;
+    const out = [];
+    for (const m of list) {
+      if (!m || typeof m.model !== "string" || !m.model || m.hidden || out.some(o => o.value === m.model)) continue;
+      const efforts = Array.isArray(m.supportedReasoningEfforts)
+        ? m.supportedReasoningEfforts.map(e => String(e && typeof e === "object" ? e.reasoningEffort || "" : e || "")).filter(Boolean)
+        : this.EFFORTS;
+      out.push({ value: m.model, label: String(m.displayName || m.model), title: String(m.description || ""), efforts });
+    }
+    if (!out.length) return null;
+    const name = configured || (list.find(m => m && m.isDefault) || {}).model || "";
+    const twin = out.find(o => o.value === name);
+    out.unshift({ value: "", label: name ? this.text("paneCodexDefaultModel", twin ? twin.label : name) : this.text("paneCodexDefault"),
+                  title: "", efforts: twin ? twin.efforts : this.EFFORTS });
+    return out;
+  },
+
+  // the agent's model options: its list once it answered, and the chosen model in any case
+  modelChoices(agent = this.agent()) {
+    const saved = this.modelPref(agent);
+    const list = this.models[agent]
+      || [{ value: "", label: this.text(agent === "codex" ? "paneCodexDefault" : "paneClaudeDefault"), title: "", efforts: this.EFFORTS }];
     return list.some(m => m.value === saved) ? list : list.concat([{ value: saved, label: saved, title: "", efforts: this.EFFORTS }]);
   },
 
-  // the effort levels the chosen model accepts
-  effortChoices() {
-    const saved = this.modelPref();
-    return this.modelChoices().find(m => m.value === saved).efforts;
+  // the effort levels the agent's chosen model accepts
+  effortChoices(agent = this.agent()) {
+    const saved = this.modelPref(agent);
+    return this.modelChoices(agent).find(m => m.value === saved).efforts;
   },
 
   // a pane's selects from the model list and the saved choices
@@ -917,6 +1111,8 @@ var ScholiumRunner = {
         if (title) o.title = title;
         return o;
       };
+      pane.agent.replaceChildren(...this.AGENTS.map(a => option(a, this.agentName(a))));
+      pane.agent.value = this.agent();
       pane.model.replaceChildren(...this.modelChoices().map(m => option(m.value, m.label, m.title)));
       pane.model.value = this.modelPref();
       const levels = this.effortChoices();
@@ -926,10 +1122,11 @@ var ScholiumRunner = {
     } catch (e) { this.log("selects failed: " + e); }
   },
 
-  // a choice is saved and shown by every pane
+  // a choice is saved and shown by every pane; another agent's models are asked for
   choose(prefName, value) {
     try { Zotero.Prefs.set(this.pref + prefName, value, true); } catch (e) { this.log("preference not saved: " + e); }
     for (const pane of this.panes.values()) this.fillSelects(pane);
+    if (prefName === "agent") this.loadModels().catch(() => {});
   },
 
   // the hidden attribute alone leaves an element on screen in Zotero's main window
@@ -995,13 +1192,16 @@ var ScholiumRunner = {
     };
     const box = div("scholium-pane");
     const settings = div("scholium-settings");
+    pane.agent = doc.createElement("select");
     pane.model = doc.createElement("select");
     pane.effort = doc.createElement("select");
-    pane.model.className = pane.effort.className = "scholium-select";
-    pane.model.addEventListener("change", () => { this.choose("claudeModel", pane.model.value); });
-    pane.effort.addEventListener("change", () => { this.choose("claudeEffort", pane.effort.value); });
+    pane.agent.className = pane.model.className = pane.effort.className = "scholium-select";
+    pane.agent.addEventListener("change", () => { this.choose("agent", pane.agent.value); });
+    pane.model.addEventListener("change", () => { this.choose(this.agent() + "Model", pane.model.value); });
+    pane.effort.addEventListener("change", () => { this.choose(this.agent() + "Effort", pane.effort.value); });
     this.fillSelects(pane);
-    settings.append(field(this.text("paneModel"), pane.model), field(this.text("paneEffort"), pane.effort));
+    settings.append(field(this.text("paneAgent"), pane.agent), field(this.text("paneModel"), pane.model),
+                    field(this.text("paneEffort"), pane.effort));
     // the main action first, the contextual ones beside it, deletion apart at the end
     const actions = div("scholium-actions");
     pane.annotate = this.paneButton(doc, this.text("annotateThis"), () => {
@@ -1384,10 +1584,23 @@ var ScholiumRunner = {
     pane.send.disabled = pane.busy || !String(pane.input.value || "").trim();
   },
 
-  // a saved log: its entries, the session to continue, and the result of its latest run; null without a log
-  async readLog(key) {
-    const path = PathUtils.join(this.outDir(key), "claude-run.jsonl");
-    if (!(await this.exists(path))) return null;
+  logPath(key, agent) { return PathUtils.join(this.outDir(key), agent === "codex" ? "codex-run.jsonl" : "claude-run.jsonl"); },
+
+  // a saved log of the agent, or else the paper's latest one: its entries, the conversation to
+  // continue, and the result of its latest run; null without a log
+  async readLog(key, agent = null) {
+    let path = agent ? this.logPath(key, agent) : null;
+    if (!agent) {
+      let newest = -1;
+      for (const a of this.AGENTS) {
+        const p = this.logPath(key, a);
+        if (!(await this.exists(p))) continue;
+        let at = 0;
+        try { at = (await IOUtils.stat(p)).lastModified || 0; } catch (e) {}
+        if (at > newest) { newest = at; path = p; agent = a; }
+      }
+    }
+    if (!path || !(await this.exists(path))) return null;
     let text;
     try { text = await IOUtils.readUTF8(path); } catch (e) { return null; }
     const entries = [];
@@ -1401,7 +1614,8 @@ var ScholiumRunner = {
       if (event.type === "result") result = event;
       this.addEntries(entries, this.entries(event));
     }
-    if (session && !this.sessions.has(key)) this.sessions.set(key, session);
+    if (session && !this.sessions.has(key)) this.sessions.set(key, { agent, id: session });
+    if (!this.logs.has(key)) this.logs.set(key, path);
     return { entries: entries.slice(-this.MAX_ENTRIES), session, result };
   },
 
@@ -1602,7 +1816,7 @@ var ScholiumRunner = {
 
   revealLog(key) {
     if (!key) return;
-    try { Zotero.File.reveal(PathUtils.join(this.outDir(key), "claude-run.jsonl")); } catch (e) { this.log("reveal failed: " + e); }
+    try { Zotero.File.reveal(this.logs.get(key) || this.logPath(key, "claude")); } catch (e) { this.log("reveal failed: " + e); }
   },
 
   // system notification, visible while Zotero is in the background
@@ -1635,18 +1849,20 @@ var ScholiumRunner = {
     const own = jobs.map(j => j.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length);
     const total = own.reduce((a, b) => a + b, 0);
     if (total && !Services.prompt.confirm(win, this.text("redoTitle"), this.text("redo", total, own.filter(Boolean).length))) return 0;
-    jobs.forEach((j, i) => { j.own = own[i]; j.extra = extra; });
+    jobs.forEach((j, i) => { j.own = own[i]; j.extra = extra; j.agent = this.agent(); });
     this.enqueue(jobs);
     return jobs.length;
   },
 
-  // continue the paper's latest conversation with the user's words; false when that is not possible now
+  // continue the paper's latest conversation with the user's words, with the agent that held it; false
+  // when that is not possible now
   async followUp(att, say) {
     const session = att && this.sessions.get(att.key);
     if (!session || !say || this.busy(att.key)) return false;
     const job = await this.resolve(att);
     if (!job) return false;
-    job.resume = session;
+    job.agent = session.agent;
+    job.resume = session.id;
     job.say = say;
     this.enqueue([job]);
     return true;
@@ -1707,7 +1923,7 @@ var ScholiumRunner = {
     this.paused = { until: Date.now() + wait, known: !!until, timer: setTimeout(() => { this.resumeQueue(); }, wait) };
     const line = this.text(until ? "pausedState" : "pausedRetry", this.clock(this.paused.until));
     this.notice(job, line, true);
-    if (!this.paneInView()) this.notify(this.text("limitTitle"), line);
+    if (!this.paneInView()) this.notify(this.text("limitTitle", this.agentName(job.agent, true)), line);
     this.refresh();
   },
 
@@ -1730,7 +1946,8 @@ var ScholiumRunner = {
       try { if (job.att) icon = job.att.getItemTypeIconName(); } catch (e) {}
       const line = new pw.ItemProgress(icon, job.title);
       if (error) line.setError(); else line.setProgress(100);
-      pw.addDescription(text);
+      // a description per line: a description shows its text without line breaks
+      for (const part of String(text).split("\n")) pw.addDescription(part);
       pw.show();
       pw.startCloseTimer(error ? 2 * this.NOTICE_MS : this.NOTICE_MS);
     } catch (e) { this.log("notice failed: " + e); }
@@ -1740,11 +1957,18 @@ var ScholiumRunner = {
   finish(job, ok, summary, outcome, detail) {
     if (this.job && this.job.key === job.att.key) this.job = null;
     const title = this.text(ok ? "finished" : "failedLine", job.title);
-    this.last = { ok, title: job.title, key: job.att.key, libraryID: job.att.libraryID, summary,
-                  log: PathUtils.join(this.outDir(job.att.key), "claude-run.jsonl"), at: Date.now() };
+    this.last = { ok, title: job.title, key: job.att.key, libraryID: job.att.libraryID, summary, at: Date.now() };
     this.notes.set(job.att.key, { text: outcome || this.text(ok ? "done" : "failed"), error: !ok, at: Date.now(), title: detail || "" });
-    if (!this.paneInView()) this.notify(title, summary || "");
+    if (!this.paneInView()) this.notify(title, ok ? this.brief(summary) : summary || "");
     this.refresh();
+  },
+
+  // the run's last line for a notice, a line per part, without the note's title:
+  // 高亮 47 条（核心 13 条），页边批注 24 条，笔记《…》，剩余警告：…。 -> 高亮 47 条（核心 13 条）/ 页边批注 24 条 / 剩余警告：…
+  brief(summary) {
+    return String(summary || "").replace(/[，,]?[^，,]*《[^》]*》/g, "").replace(/[。.]\s*$/, "")
+      .split(/\s*[，；;]\s*|,\s+/).map(part => part.trim()).filter(Boolean).slice(0, 4)
+      .map(part => (part.length > 40 ? part.slice(0, 39) + "…" : part)).join("\n");
   },
 
   async tick(job) {
@@ -1757,25 +1981,27 @@ var ScholiumRunner = {
   async run(job) {
     const started = Date.now();
     const key = job.att.key;
-    this.job = { title: job.title, key, libraryID: job.att.libraryID, started, step: job.resume ? "continuing" : "starting" };
+    const agent = job.agent === "codex" ? "codex" : "claude";
+    this.job = { title: job.title, key, libraryID: job.att.libraryID, started, agent, step: job.resume ? "continuing" : "starting" };
     const running = this.job;
     // a continued conversation keeps its transcript; a new run starts afresh
-    this.transcript = job.resume ? ((await this.readLog(key)) || { entries: [] }).entries : [];
+    this.transcript = job.resume ? ((await this.readLog(key, agent)) || { entries: [] }).entries : [];
     this.transcriptKey = key;
+    const logPath = this.logPath(key, agent);
+    this.logs.set(key, logPath);
     this.startPanes(key);
     this.notice(job, this.text(job.resume ? "continuedNotice" : "typical"));
     this.refresh();
     this.tick(running).catch(() => {});
-    const claude = await this.findClaude();
-    if (!claude) {
-      this.appendEntries([{ kind: "final", text: this.text("noClaude"), error: true }]);
-      this.notice(job, this.text("noClaude"), true);
-      this.finish(job, false, this.text("noClaude"));
+    const program = agent === "codex" ? await this.findCodex() : await this.findClaude();
+    if (!program) {
+      const missing = this.text(agent === "codex" ? "noCodex" : "noClaude");
+      this.appendEntries([{ kind: "final", text: missing, error: true }]);
+      this.notice(job, missing, true);
+      this.finish(job, false, missing);
       return;
     }
-    const outDir = this.outDir(key);
-    await IOUtils.makeDirectory(outDir, { createAncestors: true, ignoreExisting: true });
-    const logPath = PathUtils.join(outDir, "claude-run.jsonl");
+    await IOUtils.makeDirectory(this.outDir(key), { createAncestors: true, ignoreExisting: true });
     if (!job.resume || !(await this.exists(logPath))) await IOUtils.writeUTF8(logPath, "");
     // the user's words, or an automatic continuation, go into the log as the plugin's own lines
     const mark = job.say || job.extra ? { type: "scholium", subtype: "prompt", text: job.say || this.text("extraLabel") + job.extra }
@@ -1784,20 +2010,59 @@ var ScholiumRunner = {
       await IOUtils.writeUTF8(logPath, JSON.stringify(mark) + "\n", { mode: "append" });
       this.appendEntries(this.entries(mark));
     }
-    let result = null, buffer = "", lastStep = -1, stderr = "", session = job.resume || null, limit = null;
-    const Subprocess = this.subprocess();
-    const proc = await Subprocess.call({
+    // what the agent's run leaves: its result (as Claude Code's result event), a usage limit, the
+    // conversation, the exit code and the end of stderr
+    const ctx = { job, key, logPath, running, lastStep: -1, result: null, limit: null, session: job.resume || null,
+                  exitCode: null, stderr: "", current: null };
+    if (agent === "codex") await this.runCodex(program, ctx);
+    else await this.runClaude(program, ctx);
+    this.current = null;
+    const { result, current, exitCode, limit, session } = ctx;
+    const summary = result && typeof result.result === "string" ? result.result.trim().split("\n").pop() : "";
+    let ok = false, message;
+    if (current.cancelled) {
+      message = this.text("cancelled");
+      this.appendEntries([{ kind: "final", text: message, error: true }]);
+      this.notice(job, message, true);
+    } else if (exitCode === 0 && result && !result.is_error) {
+      ok = true;
+      message = summary;
+      this.notice(job, [`${this.text("done")} · ${this.elapsed(started)}`, this.brief(summary)].filter(Boolean).join("\n"));
+    } else if (limit) {
+      return { exitCode, result, limited: true, until: limit.until, session };
+    } else {
+      message = (summary || ctx.stderr.trim().split("\n").pop() || `exit ${exitCode}`).slice(0, 300);
+      if (!(result && this.entries(result).length)) this.appendEntries([{ kind: "final", text: message, error: true }]);
+      this.notice(job, `${this.text("failed")} · ${message}`, true);
+    }
+    this.finish(job, ok, message, this.outcome(result, current.cancelled, started), this.tokenDetail(result));
+    return { exitCode, result };
+  },
+
+  // the running paper reached a step; steps only go forward
+  advance(ctx, step) {
+    const i = step ? this.STEPS.indexOf(step) : -1;
+    if (i <= ctx.lastStep) return;
+    ctx.lastStep = i;
+    ctx.running.step = step;
+    this.refresh();
+  },
+
+  // Claude Code: `claude -p` with the prompt on stdin and its stream-json events on stdout
+  async runClaude(claude, ctx) {
+    const { job, key, logPath } = ctx;
+    const proc = await this.subprocess().call({
       command: claude, arguments: this.args(job), workdir: Zotero.DataDirectory.dir, stderr: "pipe",
       environment: { PYTHONIOENCODING: "utf-8" }, environmentAppend: true,
     });
-    this.current = { key, proc, cancelled: false };
-    const current = this.current;
+    this.current = ctx.current = { key, proc, cancelled: false };
     this.refresh();
     await proc.stdin.write(this.prompt(job, job.own));
     await proc.stdin.close();
     const drainErr = (async () => {
-      for (;;) { const s = await proc.stderr.readString(); if (!s) break; stderr = (stderr + s).slice(-2000); }
+      for (;;) { const s = await proc.stderr.readString(); if (!s) break; ctx.stderr = (ctx.stderr + s).slice(-2000); }
     })().catch(() => {});
+    let buffer = "";
     for (;;) {
       const chunk = await proc.stdout.readString();
       if (!chunk) break;
@@ -1809,54 +2074,256 @@ var ScholiumRunner = {
         let event;
         try { event = JSON.parse(raw); } catch (e) { continue; }
         if (typeof event.session_id === "string" && event.session_id) {
-          session = event.session_id;
-          this.sessions.set(key, session);
+          ctx.session = event.session_id;
+          this.sessions.set(key, { agent: "claude", id: ctx.session });
         }
-        if (event.type === "result") result = event;
+        if (event.type === "result") ctx.result = event;
         if (event.type === "rate_limit_event" && event.rate_limit_info) {
           const info = event.rate_limit_info;
-          if (info.status === "rejected") limit = { until: info.resetsAt > 0 ? info.resetsAt * 1000 : null };
+          if (info.status === "rejected") ctx.limit = { until: info.resetsAt > 0 ? info.resetsAt * 1000 : null };
         }
-        if (event.type === "assistant" && event.error === "rate_limit" && !limit) limit = { until: null };
+        if (event.type === "assistant" && event.error === "rate_limit" && !ctx.limit) ctx.limit = { until: null };
         this.appendEntries(this.entries(event));
-        const step = this.step(event);
-        const i = step ? this.STEPS.indexOf(step) : -1;
-        if (i > lastStep) {
-          lastStep = i;
-          running.step = step;
-          this.refresh();
-        }
+        this.advance(ctx, this.step(event));
       }
     }
     await drainErr;
-    const { exitCode } = await proc.wait();
-    this.current = null;
-    const summary = result && typeof result.result === "string" ? result.result.trim().split("\n").pop() : "";
-    let ok = false, message;
-    if (current.cancelled) {
-      message = this.text("cancelled");
-      this.appendEntries([{ kind: "final", text: message, error: true }]);
-      this.notice(job, message, true);
-    } else if (exitCode === 0 && result && !result.is_error) {
-      ok = true;
-      message = summary;
-      this.notice(job, `${this.text("done")} · ${this.elapsed(started)}${summary ? "\n" + summary : ""}`);
-    } else if (limit) {
-      return { exitCode, result, limited: true, until: limit.until, session };
-    } else {
-      message = (summary || stderr.trim().split("\n").pop() || `exit ${exitCode}`).slice(0, 300);
-      if (!(result && this.entries(result).length)) this.appendEntries([{ kind: "final", text: message, error: true }]);
-      this.notice(job, `${this.text("failed")} · ${message}`, true);
+    ctx.exitCode = (await proc.wait()).exitCode;
+  },
+
+  // `codex app-server`: JSON-RPC over stdin and stdout, one message per line. Answers settle their
+  // requests, questions from Codex are answered by codexAnswer, and everything else goes to
+  // onMessage([[message, line], …]) a chunk at a time.
+  async codexServer(codex, workdir, onMessage = null) {
+    const proc = await this.subprocess().call({
+      command: codex, arguments: ["app-server"], workdir, stderr: "pipe",
+      environment: { PYTHONIOENCODING: "utf-8" }, environmentAppend: true,
+    });
+    const rpc = { proc, next: 1, pending: new Map(), stderr: "" };
+    const send = msg => proc.stdin.write(JSON.stringify(msg) + "\n");
+    rpc.request = (method, params) => new Promise((resolve, reject) => {
+      const id = rpc.next++;
+      rpc.pending.set(id, { resolve, reject });
+      send({ method, id, params }).catch(e => { rpc.pending.delete(id); reject(e); });
+    });
+    rpc.notify = method => { send({ method }).catch(() => {}); };
+    rpc.close = () => { try { proc.kill(); } catch (e) {} };
+    const errors = (async () => {
+      for (;;) { const s = await proc.stderr.readString(); if (!s) break; rpc.stderr = (rpc.stderr + s).slice(-2000); }
+    })().catch(() => {});
+    rpc.done = (async () => {
+      let buffer = "";
+      for (;;) {
+        const chunk = await proc.stdout.readString();
+        if (!chunk) break;
+        buffer += chunk;
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        const messages = [];
+        for (const raw of lines) {
+          let msg;
+          try { msg = JSON.parse(raw); } catch (e) { continue; }
+          if (!msg || typeof msg !== "object") continue;
+          const id = msg.id;
+          if (id !== undefined && id !== null && typeof msg.method !== "string") {
+            const waiting = rpc.pending.get(id);
+            if (waiting) {
+              rpc.pending.delete(id);
+              if (msg.error) waiting.reject(new Error(String(msg.error.message || JSON.stringify(msg.error))));
+              else waiting.resolve(msg.result);
+            }
+            continue;
+          }
+          if (id !== undefined && id !== null) send(Object.assign({ id }, this.codexAnswer(msg))).catch(() => {});
+          messages.push([msg, raw]);
+        }
+        if (onMessage && messages.length) await onMessage(messages);
+      }
+      await errors;
+      const tail = rpc.stderr.trim().split("\n").pop() || "";
+      for (const waiting of rpc.pending.values()) waiting.reject(new Error("codex app-server exited" + (tail ? ": " + tail : "")));
+      rpc.pending.clear();
+    })();
+    return rpc;
+  },
+
+  async codexHello(rpc) {
+    await rpc.request("initialize", { clientInfo: { name: "scholium-bridge", title: "Scholium", version: this.version || "0" } });
+    rpc.notify("initialized");
+  },
+
+  // a question from Codex during an unattended run: its automatic reviewer has decided on what it
+  // could, and nobody is there for the rest, so approvals are declined and questions get no answer
+  codexAnswer(msg) {
+    switch (msg.method) {
+      case "item/commandExecution/requestApproval":
+      case "item/fileChange/requestApproval": return { result: { decision: "decline" } };
+      case "execCommandApproval":
+      case "applyPatchApproval": return { result: { decision: "denied" } };
+      case "item/permissions/requestApproval": return { result: { permissions: {}, scope: "turn" } };
+      case "item/tool/requestUserInput": return { result: { answers: {} } };
+      case "mcpServer/elicitation/request": return { result: { action: "decline", content: null, _meta: null } };
     }
-    this.finish(job, ok, message, this.outcome(result, current.cancelled, started), this.tokenDetail(result));
-    return { exitCode, result };
+    return { error: { code: -32601, message: "not handled by scholium-bridge" } };
+  },
+
+  // streaming deltas and start-up chatter stay out of the log; the whole items carry the same text
+  codexNoise(msg) {
+    return /(?:[Dd]elta|summaryPartAdded|startupStatus\/updated|remoteControl\/status\/changed)$/.test(String(msg.method || ""));
+  },
+
+  // the zotero-scholium skill as Codex sees it from the working directory; a project skill of the
+  // data directory (<data dir>/.agents/skills) is added for this conversation only
+  async codexSkill(rpc, cwd) {
+    const find = async cwds => {
+      try {
+        const answer = await rpc.request("skills/list", { cwds });
+        for (const entry of (answer && answer.data) || []) {
+          for (const s of (entry && entry.skills) || []) if (s && s.name === "zotero-scholium" && s.path && s.enabled !== false) return s;
+        }
+      } catch (e) { this.log("skills/list failed: " + e); }
+      return null;
+    };
+    let skill = await find([cwd]);
+    if (!skill) {
+      skill = await find([Zotero.DataDirectory.dir]);
+      if (!skill) return null;
+      try { await rpc.request("skills/extraRoots/set", { extraRoots: [PathUtils.parent(PathUtils.parent(skill.path))] }); }
+      catch (e) { this.log("skill root failed: " + e); return null; }
+    }
+    return { name: skill.name, path: skill.path };
+  },
+
+  // where a Codex turn may write: the output folders, the profile folder, and the folder of the local
+  // API key that scholium.py keeps (%APPDATA% or ~/.config); it may reach Zotero's local server
+  codexRoots() {
+    const data = Zotero.DataDirectory.dir;
+    const roots = [PathUtils.join(data, "tmp", "scholium"), PathUtils.join(data, "zotero-scholium")];
+    const config = this.env("APPDATA") || (this.home() ? PathUtils.join(this.home(), ".config") : "");
+    if (config) roots.push(PathUtils.join(config, "zotero-scholium"));
+    return roots;
+  },
+
+  // Codex's token counts in Claude Code's terms: input without its cached part, cache writes and reads, output
+  codexUsage(t) {
+    if (!t) return {};
+    return { input_tokens: Math.max(0, t.inputTokens - t.cachedInputTokens - t.cacheWriteInputTokens),
+             cache_creation_input_tokens: t.cacheWriteInputTokens, cache_read_input_tokens: t.cachedInputTokens, output_tokens: t.outputTokens };
+  },
+
+  // when Codex's usage limit resets: the latest reset of a window that is used up; unknown otherwise
+  codexReset(limits) {
+    const full = [limits && limits.primary, limits && limits.secondary].filter(w => w && w.usedPercent >= 100 && w.resetsAt > 0);
+    return full.length ? Math.max(...full.map(w => w.resetsAt * 1000)) : null;
+  },
+
+  // Codex: one turn of a conversation through `codex app-server`, in a new thread or in the paper's
+  // earlier one, with <data dir>/tmp/scholium as working directory; the turn's end becomes a result
+  // in Claude Code's form, so that the log, the state line and a later history read alike
+  async runCodex(codex, ctx) {
+    const { job, key, logPath } = ctx;
+    const roots = this.codexRoots();
+    for (const root of roots) await IOUtils.makeDirectory(root, { createAncestors: true, ignoreExisting: true });
+    const cwd = roots[0];
+    const state = { thread: null, turn: null, done: null, text: "", base: null, usage: null, calls: 0, limits: null, timer: null };
+    let ended;
+    const over = new Promise(resolve => { ended = resolve; });
+    const counts = ["inputTokens", "cachedInputTokens", "cacheWriteInputTokens", "outputTokens"];
+    const rpc = await this.codexServer(codex, cwd, async messages => {
+      const lines = messages.filter(([msg]) => !this.codexNoise(msg)).map(([, raw]) => raw);
+      if (lines.length) await IOUtils.writeUTF8(logPath, lines.join("\n") + "\n", { mode: "append" });
+      for (const [msg] of messages) {
+        const p = msg.params || {};
+        const item = p.item || {};
+        if (msg.method === "item/completed" && item.type === "agentMessage" && String(item.text || "").trim()) state.text = String(item.text).trim();
+        if (msg.method === "thread/tokenUsage/updated" && p.tokenUsage && p.tokenUsage.total) {
+          const { total, last } = p.tokenUsage;
+          // the thread's totals before this run: the first update's total less its own call
+          if (!state.base) state.base = Object.fromEntries(counts.map(k => [k, (Number(total[k]) || 0) - (Number(last && last[k]) || 0)]));
+          state.usage = Object.fromEntries(counts.map(k => [k, Math.max(0, (Number(total[k]) || 0) - state.base[k])]));
+          state.calls += 1;
+        }
+        if (msg.method === "account/rateLimits/updated" && p.rateLimits) state.limits = p.rateLimits;
+        if (msg.method === "turn/completed" && p.turn && (!state.turn || p.turn.id === state.turn)) { state.done = p.turn; ended(); }
+        this.appendEntries(this.entries(msg));
+        this.advance(ctx, this.codexStep(msg));
+      }
+    });
+    rpc.done.then(ended, ended);
+    // cancelling interrupts the turn, so that the conversation records it; the server goes when the
+    // turn has ended, or after a few seconds
+    const stop = () => {
+      if (state.thread && state.turn) rpc.request("turn/interrupt", { threadId: state.thread, turnId: state.turn }).catch(() => {});
+      else rpc.close();
+      state.timer = setTimeout(() => rpc.close(), 5000);
+    };
+    this.current = ctx.current = { key, proc: rpc.proc, cancelled: false, stop };
+    this.refresh();
+    let failure = "";
+    try {
+      await this.codexHello(rpc);
+      const model = this.modelPref("codex");
+      const settings = { cwd, approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandbox: "workspace-write",
+                         serviceName: "scholium-bridge" };
+      if (model) settings.model = model;
+      const skill = job.resume ? null : await this.codexSkill(rpc, cwd);
+      const opened = job.resume ? await rpc.request("thread/resume", Object.assign({ threadId: job.resume }, settings))
+                                : await rpc.request("thread/start", settings);
+      const thread = opened && opened.thread && opened.thread.id;
+      if (!thread) throw new Error("Codex opened no conversation");
+      state.thread = ctx.session = thread;
+      this.sessions.set(key, { agent: "codex", id: thread });
+      // the start of a run, as Claude Code's log has it: the model and the conversation
+      const init = { type: "system", subtype: "init", agent: "codex", model: (opened && opened.model) || model, session_id: thread };
+      await IOUtils.writeUTF8(logPath, JSON.stringify(init) + "\n", { mode: "append" });
+      this.appendEntries(this.entries(init));
+      const input = [{ type: "text", text: this.prompt(job, job.own), text_elements: [] }];
+      if (skill) input.push({ type: "skill", name: skill.name, path: skill.path });
+      const params = { threadId: thread, input, sandboxPolicy: { type: "workspaceWrite", writableRoots: roots, networkAccess: true,
+                                                                 excludeTmpdirEnvVar: false, excludeSlashTmp: false } };
+      if (model) params.model = model;
+      const effort = this.effort("codex");
+      if (effort) params.effort = effort;
+      if (!ctx.current.cancelled) {
+        const begun = await rpc.request("turn/start", params);
+        state.turn = (begun && begun.turn && begun.turn.id) || null;
+        if (skill) this.advance(ctx, "skill");
+        if (ctx.current.cancelled) stop();
+        await over;
+      }
+    } catch (e) {
+      failure = String((e && e.message) || e);
+      this.log("codex run failed: " + failure);
+    } finally {
+      clearTimeout(state.timer);
+      rpc.close();
+      await rpc.done.catch(() => {});
+    }
+    const turn = state.done;
+    if (!turn || ctx.current.cancelled) {
+      ctx.exitCode = turn ? 0 : (await rpc.proc.wait()).exitCode || 1;
+      ctx.stderr = failure || rpc.stderr;
+      return;
+    }
+    const failed = turn.status !== "completed";
+    const error = turn.error || {};
+    if (failed && (error.codexErrorInfo === "usageLimitExceeded" || error.codexErrorInfo === "rateLimitExceeded")) {
+      ctx.limit = { until: this.codexReset(state.limits) };
+    }
+    ctx.result = { type: "result", agent: "codex", subtype: failed ? "error_during_execution" : "success", is_error: failed,
+                   result: failed ? String(error.message || turn.status) : state.text, session_id: state.thread,
+                   duration_ms: turn.durationMs > 0 ? turn.durationMs : Date.now() - ctx.running.started, num_turns: state.calls,
+                   usage: this.codexUsage(state.usage) };
+    await IOUtils.writeUTF8(logPath, JSON.stringify(ctx.result) + "\n", { mode: "append" });
+    this.appendEntries(this.entries(ctx.result));
+    ctx.exitCode = 0;
   },
 
   cancel() {
     const current = this.current;
     if (!current) return false;
     current.cancelled = true;
-    try { current.proc.kill(); } catch (e) {}
+    try { if (current.stop) current.stop(); else current.proc.kill(); } catch (e) {}
     return true;
   },
 
@@ -1874,37 +2341,57 @@ var ScholiumRunner = {
     return [...found.values()];
   },
 
-  // delete the annotations tagged zotero-scholium; user annotations and notes stay
+  // the tool's reading notes under a paper: its child notes tagged zotero-scholium
+  ownNotes(parent) {
+    try { return Zotero.Items.get(parent.getNotes()).filter(n => n.isNote() && n.getTags().some(t => t.tag === ScholiumToggle.tag)); }
+    catch (e) { return []; }
+  },
+
+  // delete the annotations tagged zotero-scholium, and move the reading notes tagged the same to the
+  // trash; the user's annotations and notes stay. A paper with an attachment being annotated or
+  // queued is left alone, notes included.
   async removeAnnotations(items) {
     const win = Zotero.getMainWindow();
     const busy = new Set(this.queue.map(j => j.att.key).concat(this.job ? [this.job.key] : []));
     const atts = this.pdfAttachments(items);
     const skipped = atts.filter(a => busy.has(a.key)).length;
-    const targets = atts.filter(a => !busy.has(a.key))
-      .map(att => ({ att, own: att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)) }))
-      .filter(t => t.own.length);
+    const busyParents = new Set(atts.filter(a => busy.has(a.key) && a.parentID).map(a => a.parentID));
+    const parents = new Set();
+    const targets = atts.filter(a => !busy.has(a.key)).map(att => {
+      const own = att.getAnnotations().filter(a => ScholiumToggle.isOwn(a));
+      let notes = [];
+      if (att.parentID && !parents.has(att.parentID) && !busyParents.has(att.parentID)) {
+        parents.add(att.parentID);
+        const parent = Zotero.Items.get(att.parentID);
+        if (parent) notes = this.ownNotes(parent);
+      }
+      return { att, own, notes };
+    }).filter(t => t.own.length || t.notes.length);
     const total = targets.reduce((n, t) => n + t.own.length, 0);
+    const notes = targets.reduce((n, t) => n + t.notes.length, 0);
     const skippedText = skipped ? "\n\n" + this.text("deleteSkipped", skipped) : "";
-    if (!total) { Services.prompt.alert(win, this.text("deleteTitle"), this.text("deleteNone") + skippedText); return 0; }
-    if (!Services.prompt.confirm(win, this.text("deleteTitle"), this.text("deleteConfirm", total, targets.length) + skippedText)) return 0;
-    let removed = 0, papers = 0, current = null;
+    if (!total && !notes) { Services.prompt.alert(win, this.text("deleteTitle"), this.text("deleteNone") + skippedText); return 0; }
+    if (!Services.prompt.confirm(win, this.text("deleteTitle"), this.text("deleteConfirm", total, notes, targets.length) + skippedText)) return 0;
+    let removed = 0, trashed = 0, papers = 0, current = null;
     try {
       for (const t of targets) {
         current = t;
-        await Zotero.Items.erase(t.own.map(a => a.id));
-        this.notes.set(t.att.key, { text: this.text("deleteDone", t.own.length, 1), error: false, at: Date.now() });
+        if (t.own.length) await Zotero.Items.erase(t.own.map(a => a.id));
         removed += t.own.length;
+        if (t.notes.length) await Zotero.Items.trashTx(t.notes.map(n => n.id));
+        trashed += t.notes.length;
         papers += 1;
+        this.notes.set(t.att.key, { text: this.text("deleteDone", t.own.length, t.notes.length, 1), error: false, at: Date.now() });
       }
-      this.notice({ att: targets[0].att, title: this.text("deleteTitle") }, this.text("deleteDone", removed, papers));
+      this.notice({ att: targets[0].att, title: this.text("deleteTitle") }, this.text("deleteDone", removed, trashed, papers));
     } catch (e) {
       const message = this.text("deleteFailed", String(e && e.message || e));
       this.log("delete failed: " + e);
       if (current) this.notes.set(current.att.key, { text: message, error: true, at: Date.now() });
-      this.notice({ att: null, title: this.text("deleteTitle") }, message + "\n" + this.text("deleteDone", removed, papers), true);
+      this.notice({ att: null, title: this.text("deleteTitle") }, message + "\n" + this.text("deleteDone", removed, trashed, papers), true);
     }
     this.refresh();
-    return removed;
+    return removed + trashed;
   },
 
   start(pluginID) {
@@ -1919,6 +2406,7 @@ var ScholiumRunner = {
     this.paused = null;
     this.queue = [];
     this.cancel();
+    try { if (this.current) this.current.proc.kill(); } catch (e) {}   // without waiting for Codex to end its turn
     for (const win of this.windows()) this.removeFromWindow(win);
     try { if (this.paneID) Zotero.ItemPaneManager.unregisterSection(this.paneID); } catch (e) {}
     this.paneID = null;
@@ -1956,6 +2444,7 @@ async function startup({ id, version, rootURI }) {
       [["content", pkg, rootURI + "content/"]]);
     ScholiumRunner.chrome = "chrome://" + pkg + "/content/";
   } catch (e) { Zotero.debug("[scholium-bridge] chrome registration failed: " + e); }
+  ScholiumRunner.version = version;
   try { ScholiumToggle.start(id); ScholiumToggle.log("reader toggle registered"); }
   catch (e) { ScholiumToggle.log("reader toggle failed: " + e); }
   try { ScholiumRunner.start(id); ScholiumRunner.log("annotation menu registered"); }

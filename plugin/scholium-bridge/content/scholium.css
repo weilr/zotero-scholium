@@ -12,12 +12,16 @@
   display: none !important;
 }
 
-/* model and effort */
+/* the agent on a row of its own; its model and effort below */
 
 .scholium-settings {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(96px, auto);
-  gap: 10px;
+  gap: 8px 10px;
+}
+
+.scholium-settings > .scholium-field:first-child {
+  grid-column: 1 / -1;
 }
 
 .scholium-field {

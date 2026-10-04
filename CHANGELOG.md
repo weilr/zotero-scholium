@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- The Scholium section also runs Codex: **Agent** chooses Claude Code or Codex, and the model list and
+  effort levels follow the chosen agent (for Codex, the model of its `config.toml` unless another is
+  chosen). Codex runs through `codex app-server`, the newest copy found on the machine, in its
+  `workspace-write` sandbox with `<data dir>/tmp/scholium/` as working directory; commands may write
+  only to the output folder, the profile folder and the folder of the tool's local API key, and may
+  use the network. Requests beyond the sandbox go to Codex's automatic reviewer, and questions that
+  reach the plugin are declined. The transcript, the state line, follow-ups, the usage-limit pause
+  and cancelling work as for Claude Code; each run is logged to `codex-run.jsonl`, and a follow-up
+  continues with the agent that held the conversation.
+- The notice and the system notification at the end of a run show its last line a part per line,
+  without the note's title.
+- **Delete annotations** also moves the paper's reading notes tagged `zotero-scholium` to the trash;
+  other notes are kept.
+
 ## 0.1.4 (2026-10-04)
 
 - The bundled plugin annotates papers with one click: **Annotate** in a Scholium section of the item pane (library

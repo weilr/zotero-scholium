@@ -1,7 +1,9 @@
-"""Run the bridge's one-click annotation runner against a simulated Zotero and a scripted Claude Code.
+"""Run the bridge's one-click annotation runner against a simulated Zotero, a scripted Claude Code and
+a scripted Codex.
 
 The simulated Subprocess replays stream-json output (split across chunks) and answers the model list
-request, so the command line, the task prompt, the Scholium section of the item
+request; for Codex it plays `codex app-server`, answering its JSON-RPC requests and sending the
+notifications of a turn. So the command line, the task prompt, the Scholium section of the item
 pane (the models Claude Code reports, the remembered effort and the levels of each model, the
 editor sheet of the personal profile, buttons, state line, resizable transcript, saved history, the message box), the self-closing
 notices and the system notification (left out while the section is on screen in the focused
@@ -113,6 +115,93 @@ const MODEL_ANSWER = [
   ev({ type: 'control_response', response: { subtype: 'success', request_id: 'scholium-models',
        response: { models: MODELS, account: { email: 'someone@example.com' }, commands: [] } } }),
 ];
+// Codex: where its copies are and what they answer to --version (h0 holds no codex.exe; the one in
+// .local/bin does not answer)
+const CODEX_BIN = '/localappdata/OpenAI/Codex/bin';
+const CODEX_APP = CODEX_BIN + '/h1/codex.exe';
+const CODEX_NPM = '/appdata/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe';
+const CODEX_VERSIONS = {
+  [CODEX_BIN + '/codex.exe']: 'codex-cli 0.130.0-alpha.5\n',
+  [CODEX_APP]: 'codex-cli 0.160.0\n',
+  [CODEX_NPM]: 'codex-cli 0.144.0\n',
+  '/home/u/.cargo/bin/codex.exe': 'codex-cli 0.160.0-alpha.3\n',
+  '/home/u/.local/bin/codex.exe': '',
+};
+// what model/list answers (abridged)
+const CODEX_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'].map(reasoningEffort => ({ reasoningEffort, description: '' }));
+const CODEX_MODELS = [
+  { id: 'gpt-6.1-sol', model: 'gpt-6.1-sol', displayName: 'GPT-6.1-Sol', description: 'Latest workhorse model', hidden: false, isDefault: true,
+    supportedReasoningEfforts: CODEX_LEVELS, defaultReasoningEffort: 'low' },
+  { id: 'gpt-6-astra', model: 'gpt-6-astra', displayName: 'GPT-6-Astra', description: 'Frontier intelligence', hidden: false, isDefault: false,
+    supportedReasoningEfforts: CODEX_LEVELS, defaultReasoningEffort: 'medium' },
+  { id: 'gpt-6-luna', model: 'gpt-6-luna', displayName: 'GPT-6-Luna', description: 'Fast and affordable', hidden: false, isDefault: false,
+    supportedReasoningEfforts: CODEX_LEVELS.slice(0, 5), defaultReasoningEffort: 'medium' },
+  { id: 'gpt-reserve', model: 'gpt-reserve', displayName: 'GPT-Reserve', description: 'Hidden', hidden: true, isDefault: false,
+    supportedReasoningEfforts: CODEX_LEVELS, defaultReasoningEffort: 'medium' },
+  { id: 'gpt-5.5', model: 'gpt-5.5', displayName: 'GPT-5.5', description: 'Legacy coding model', hidden: false, isDefault: false,
+    supportedReasoningEfforts: CODEX_LEVELS.slice(0, 4), defaultReasoningEffort: 'medium' },
+];
+// the notifications of a Codex turn; TURN stands for the id that turn/start gave
+const note = (method, params) => ev({ method, params });
+const coItem = (phase, item) => note('item/' + phase, { item, threadId: 'T1', turnId: 'TURN' });
+const PWSH = '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command ';
+const shell = (id, command, done) => coItem(done ? 'completed' : 'started', Object.assign(
+  { type: 'commandExecution', id, command: PWSH + "'" + command + "'", status: done ? done.status || 'completed' : 'inProgress' },
+  done ? { exitCode: done.exitCode === undefined ? 0 : done.exitCode, aggregatedOutput: done.output } : {}));
+const tok = (inputTokens, cachedInputTokens, outputTokens) => ({ totalTokens: inputTokens + outputTokens, inputTokens, cachedInputTokens,
+                                                                cacheWriteInputTokens: 0, outputTokens, reasoningOutputTokens: 0 });
+const usage = (total, last) => note('thread/tokenUsage/updated', { threadId: 'T1', turnId: 'TURN', tokenUsage: { total, last, modelContextWindow: null } });
+const turnDone = turn => note('turn/completed', { threadId: 'T1', turn: Object.assign({ id: 'TURN', items: [], error: null, durationMs: null }, turn) });
+const CODEX_SCRIPT = [
+  note('mcpServer/startupStatus/updated', { name: 'node_repl', status: 'ready' }),
+  note('turn/started', { threadId: 'T1', turn: { id: 'TURN', status: 'inProgress' } }),
+  coItem('completed', { type: 'userMessage', id: 'm0', content: [] }),
+  coItem('completed', { type: 'reasoning', id: 'r1', summary: ['Planning the steps'], content: [] }),
+  note('item/agentMessage/delta', { itemId: 'a1', delta: '先' }),
+  coItem('completed', { type: 'agentMessage', id: 'a1', text: '先提取句子。' }),
+  shell('c1', 'python C:/skills/scholium.py extract --pdf x.pdf --sentences s.json'),
+  note('item/commandExecution/outputDelta', { itemId: 'c1', delta: '412' }),
+  shell('c1', 'python C:/skills/scholium.py extract --pdf x.pdf --sentences s.json', { output: '412 sentences -> s.json\n1\n2\n3\n4\n5' }),
+  usage(tok(100000, 60000, 1000), tok(100000, 60000, 1000)),
+  shell('c2', 'Get-Content D:\\Zotero\\tmp\\scholium\\ATT1\\sentences.txt'),
+  shell('c2', 'Get-Content D:\\Zotero\\tmp\\scholium\\ATT1\\sentences.txt', { output: '[1] First sentence.' }),
+  ev({ id: 'q1', method: 'item/commandExecution/requestApproval', params: { threadId: 'T1', turnId: 'TURN', itemId: 'c9', command: 'pip install x' } }),
+  ev({ id: 'q2', method: 'item/tool/requestUserInput', params: { threadId: 'T1', turnId: 'TURN', itemId: 'u1', questions: [] } }),
+  ev({ id: 'q3', method: 'account/chatgptAuthTokens/refresh', params: {} }),
+  coItem('completed', { type: 'fileChange', id: 'f1', status: 'completed',
+                        changes: [{ path: 'D:\\Zotero\\tmp\\scholium\\ATT1\\config.json', kind: { type: 'add' }, diff: '' }] }),
+  shell('c3', 'python C:/skills/scholium.py --config c.json'),
+  shell('c3', 'python C:/skills/scholium.py --config c.json', { exitCode: 2, status: 'failed', output: 'style_warnings: 1' }),
+  usage(tok(1300000, 1200000, 21000), tok(1200000, 1140000, 20000)),
+  shell('c4', 'python C:/skills/scholium.py --config c.json --apply'),
+  shell('c4', 'python C:/skills/scholium.py --config c.json --apply', { output: '{"applied": true}' }),
+  note('account/rateLimits/updated', { rateLimits: { limitId: 'codex', primary: { usedPercent: 40, windowDurationMins: 10080,
+                                                                                    resetsAt: Math.floor(Date.now() / 1000) + 259200 }, secondary: null } }),
+  coItem('completed', { type: 'agentMessage', id: 'a2', text: 'Done.\n' + SUMMARY }),
+  usage(tok(2600000, 2410000, 46778), tok(1300000, 1210000, 25778)),
+  turnDone({ status: 'completed', durationMs: 376500 }),
+];
+// a follow-up in the same thread: the totals include the earlier turn
+const CODEX_FOLLOW = [
+  note('turn/started', { threadId: 'T1', turn: { id: 'TURN', status: 'inProgress' } }),
+  coItem('completed', { type: 'agentMessage', id: 'a3', text: '改好了：第 5 页的译文已缩短。' }),
+  usage(tok(3000000, 2800000, 50000), tok(400000, 390000, 3222)),
+  turnDone({ status: 'completed', durationMs: 65000 }),
+];
+const CODEX_RESET = Math.floor(Date.now() / 1000) + 7200;
+const CODEX_LIMIT = [
+  note('turn/started', { threadId: 'T1', turn: { id: 'TURN', status: 'inProgress' } }),
+  coItem('completed', { type: 'agentMessage', id: 'a1', text: '先提取句子。' }),
+  note('account/rateLimits/updated', { rateLimits: { limitId: 'codex',
+    primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: CODEX_RESET },
+    secondary: { usedPercent: 90, windowDurationMins: 10080, resetsAt: CODEX_RESET + 259200 } } }),
+  note('error', { error: { message: "You've hit your usage limit.", codexErrorInfo: 'usageLimitExceeded' }, willRetry: false, threadId: 'T1', turnId: 'TURN' }),
+  turnDone({ status: 'failed', error: { message: "You've hit your usage limit. Try again at 9:00 PM.", codexErrorInfo: 'usageLimitExceeded' } }),
+];
+const CODEX_INIT = ev({ type: 'system', subtype: 'init', agent: 'codex', model: 'gpt-6-luna', session_id: 'T1' });
+const CODEX_RESULT = ev({ type: 'result', agent: 'codex', subtype: 'success', is_error: false, result: 'Done.\n' + SUMMARY, session_id: 'T1',
+                          duration_ms: 376500, num_turns: 3,
+                          usage: { input_tokens: 190000, cache_creation_input_tokens: 0, cache_read_input_tokens: 2410000, output_tokens: 46778 } });
 class El {
   constructor(tag) { this.tagName = tag; this.attrs = {}; this.listeners = {}; this.hidden = false; this.disabled = false; this._text = '';
                      this.title = ''; this.className = ''; this.value = ''; this.parent = null; this.children = []; this.removed = false;
@@ -139,12 +228,14 @@ class El {
 
 function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, exitCode = 0, script = null, claudeExists = true, gateFirst = false,
                    home = 'dirsvc', eraseFails = false, logs = {}, models = 'ok', claudeAt = CLAUDE, scripts = [], readFails = false,
-                   writeFails = false } = {}) {
+                   writeFails = false, codex = {}, logTimes = {}, notes = [], secondPdf = false } = {}) {
   const log = { calls: [], stdin: [], notices: [], alerts: [], confirms: [], kills: 0, menus: [], unregistered: [], listeners: [],
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
                 ftl: [], tabs: [], selected: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
-                madeDirs: [] };
-  const files = new Set(claudeExists ? [claudeAt] : []);
+                madeDirs: [], trashed: [], versionCalls: [], codexCalls: [], codexProcs: [], codexKills: 0, codexTurns: 0,
+                mtimes: Object.assign({}, logTimes), clock: 10 };
+  const co = Object.assign({ versions: CODEX_VERSIONS, scripts: [], skillAt: '/data', fail: null, failMessage: '' }, codex);
+  const files = new Set((claudeExists ? [claudeAt] : []).concat(Object.keys(co.versions)));
   // 97-character chunks split JSON lines; 'WAIT' holds the stream open until the process is killed
   const chunksFor = (n) => {
     const entries = scripts[n] || (n === 0 && gateFirst ? SCRIPT.concat(['WAIT']) : script || SCRIPT.concat([LAST, RESULT]));
@@ -184,8 +275,71 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     async wait() { return { exitCode: 0 }; }
     kill() { log.modelKills++; this.killed = true; }
   }
+  // codex --version
+  class VersionProc {
+    constructor(path) { this.out = co.versions[path] ? [co.versions[path]] : []; }
+    get stdout() { return { readString: async () => { await tick(); return this.out.shift() || ''; } }; }
+    async wait() { return { exitCode: 0 }; }
+    kill() {}
+  }
+  // codex app-server: answers each request as Codex does; turn/start plays the next script, in
+  // 97-character chunks; 'WAIT' holds the turn until it is interrupted or the server is killed
+  class CodexProc {
+    constructor() { this.out = []; this.sent = []; this.killed = false; this.wake = null; log.codexProcs.push(this); }
+    emit(lines) {
+      for (const line of lines) {
+        if (line === 'WAIT') break;
+        for (let i = 0; i < line.length; i += 97) this.out.push(line.slice(i, i + 97));
+      }
+      if (this.wake) { const w = this.wake; this.wake = null; w(); }
+    }
+    get stdin() {
+      return { write: async text => { for (const line of String(text).split('\n')) if (line.trim()) this.receive(JSON.parse(line)); },
+               close: async () => {} };
+    }
+    receive(msg) {
+      this.sent.push(msg);
+      if (typeof msg.method !== 'string' || msg.id === undefined) return;      // an answer of the plugin, or a notification
+      const answer = result => this.emit([ev({ id: msg.id, result })]);
+      const p = msg.params || {};
+      if (co.fail === msg.method) return this.emit([ev({ id: msg.id, error: { code: -32600, message: co.failMessage } })]);
+      switch (msg.method) {
+        case 'initialize': return answer({ userAgent: 'scholium-bridge/0.160.0', codexHome: '/home/u/.codex' });
+        case 'model/list': return answer({ data: CODEX_MODELS, nextCursor: null });
+        case 'config/read': return answer({ config: { model: 'gpt-6-astra', mcp_servers: { s: { env: { TOKEN: 'secret-token' } } } } });
+        case 'skills/list': return answer({ data: p.cwds.map(cwd => ({ cwd, errors: [], skills: [{ name: 'other', path: '/x/other/SKILL.md', enabled: true }]
+          .concat(co.skillAt === cwd ? [{ name: 'zotero-scholium', path: cwd === '/data' ? '/data/.agents/skills/zotero-scholium/SKILL.md'
+                                                                                      : '/home/u/.codex/skills/zotero-scholium/SKILL.md', enabled: true }] : []) })) });
+        case 'skills/extraRoots/set': return answer({});
+        case 'thread/start': return answer({ thread: { id: 'T1' }, model: p.model || 'gpt-6-astra' });
+        case 'thread/resume': return answer({ thread: { id: p.threadId }, model: p.model || 'gpt-6-astra' });
+        case 'turn/start': {
+          log.codexTurns += 1;
+          const id = 'U' + log.codexTurns;
+          answer({ turn: { id, status: 'inProgress', items: [] } });
+          return this.emit((co.scripts[log.codexTurns - 1] || CODEX_SCRIPT).map(l => l.split('"TURN"').join(JSON.stringify(id))));
+        }
+        case 'turn/interrupt':
+          answer({});
+          return this.emit([turnDone({ status: 'interrupted' }).split('"TURN"').join(JSON.stringify(p.turnId))]);
+      }
+      this.emit([ev({ id: msg.id, error: { code: -32601, message: 'unknown method ' + msg.method } })]);
+    }
+    get stdout() {
+      return { readString: async () => {
+        await tick();
+        while (!this.out.length && !this.killed) await new Promise(r => { this.wake = r; });
+        return this.killed ? '' : this.out.shift();
+      } };
+    }
+    get stderr() { return { readString: async () => '' }; }
+    async wait() { return { exitCode: this.killed ? 1 : 0 }; }
+    kill() { log.codexKills++; this.killed = true; if (this.wake) { const w = this.wake; this.wake = null; w(); } }
+  }
   const Subprocess = {
     call: async opts => {
+      if (opts.arguments[0] === '--version') { log.versionCalls.push(opts.command); return new VersionProc(opts.command); }
+      if (opts.arguments[0] === 'app-server') { log.codexCalls.push(opts); return new CodexProc(); }
       if (opts.arguments.includes('--input-format')) { log.modelCalls.push(opts); return new ModelProc(); }
       const p = new Proc(); log.calls.push({ opts, proc: p }); return p;
     },
@@ -207,15 +361,21 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     getAnnotations: () => anns, getDisplayTitle: () => 'att ' + key, getItemTypeIconName: () => 'attachmentPDF',
   });
   const items = new Map();
+  // child notes of ITEM1, N0, N1…, with the given tags; trashing takes a note from its paper
+  const childNotes = { ITEM1: notes.map((tags, i) => ({ key: 'N' + i, id: 'N' + i, parentID: 'ITEM1', isNote: () => true, isAnnotation: () => false,
+                                                         getTags: () => tags.map(tag => ({ tag })) })), ITEM2: [] };
   const regular = (key, att) => ({ key, id: key, libraryID: 1, isRegularItem: () => true, isAttachment: () => false, isPDFAttachment: () => false,
-    getBestAttachment: async () => att, getAttachments: () => [att.id, 'HTML_' + key], getDisplayTitle: () => 'Paper ' + key });
+    getBestAttachment: async () => att, getDisplayTitle: () => 'Paper ' + key,
+    getAttachments: () => [att.id].concat(secondPdf && key === 'ITEM1' ? ['ATT3'] : [], ['HTML_' + key]),
+    getNotes: () => childNotes[key].map(n => n.id) });
   const att1 = attachment('ATT1', 'ITEM1', existing.map((t, i) => annotation('E' + i, t)));
   const att2 = attachment('ATT2', 'ITEM2', []);
   const item1 = regular('ITEM1', att1), item2 = regular('ITEM2', att2);
   const note = { key: 'NOTE', isRegularItem: () => false, isAttachment: () => false, isPDFAttachment: () => false };
   const html = key => ({ key, id: key, attachmentContentType: 'text/html', isAttachment: () => true, isRegularItem: () => false,
                          isPDFAttachment: () => false, getAnnotations: () => { throw Error('not a file attachment with annotations'); } });
-  [item1, item2, att1, att2, html('HTML_ITEM1'), html('HTML_ITEM2')].forEach(i => items.set(i.id, i));
+  [item1, item2, att1, att2, attachment('ATT3', 'ITEM1', []), html('HTML_ITEM1'), html('HTML_ITEM2'), ...childNotes.ITEM1]
+    .forEach(i => items.set(i.id, i));
   const store = new Map(Object.entries(prefs));
   const mainDoc = {
     bar: new El('hbox'),
@@ -270,6 +430,10 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
           log.erased.push(...ids);
           for (const a of [att1, att2]) { const keep = a.getAnnotations().filter(x => !ids.includes(x.id)); a.getAnnotations = () => keep; }
         },
+        trashTx: async ids => {
+          log.trashed.push(...ids);
+          for (const k of Object.keys(childNotes)) childNotes[k] = childNotes[k].filter(n => !ids.includes(n.id));
+        },
       },
       File: { reveal: p => log.revealed.push(p) },
       getMainWindow: () => mainWin,
@@ -285,7 +449,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     Services: {
       prompt: { alert: (w, t, m) => log.alerts.push(m),
                 confirm: (w, t, m) => { log.confirms.push(m); return Array.isArray(confirm) ? confirm.shift() : confirm; } },
-      env: { get: n => (n === 'APPDATA' ? '/appdata' : n === 'USERPROFILE' && home === 'env' ? '/profile/u' : '') },
+      env: { get: n => (n === 'APPDATA' ? '/appdata' : n === 'LOCALAPPDATA' ? '/localappdata' : n === 'USERPROFILE' && home === 'env' ? '/profile/u' : '') },
       dirsvc: { get: (key, iface) => {
         if (home !== 'dirsvc' || key !== 'Home' || iface !== NSIFILE) throw Error('NS_ERROR_FAILURE');
         return { path: '/home/u' };
@@ -302,10 +466,12 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
         throw Error('PathUtils.join: Could not initialize path: NS_ERROR_FILE_UNRECOGNIZED_PATH');
       }
       return p.join('/');
-    } },
+    }, parent: p => p.replace(/\/[^/]*$/, '') },
     IOUtils: {
       exists: async p => files.has(p) || p in log.writes,
       makeDirectory: async p => { log.madeDirs.push(p); },
+      getChildren: async p => { if (p !== CODEX_BIN) throw Error('NotFoundError'); return [CODEX_BIN + '/h0', CODEX_BIN + '/h1']; },
+      stat: async p => { if (!(p in log.writes)) throw Error('NotFoundError'); return { lastModified: log.mtimes[p] || 0 }; },
       readUTF8: async p => {
         if (readFails && p === PROFILE_PATH) throw Error('NotReadableError');
         if (!(p in log.writes)) throw Error('missing');
@@ -314,6 +480,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       writeUTF8: async (p, t, o) => {
         if (writeFails && p === PROFILE_PATH) throw Error('NotAllowedError');
         log.writes[p] = (o && o.mode === 'append' ? (log.writes[p] || '') : '') + t;
+        log.mtimes[p] = ++log.clock;
       },
     },
     ChromeUtils: { importESModule: () => ({ Subprocess }) },
@@ -397,7 +564,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     facts.look = { state: p1.state.className, tool: toolNode.children.map(c => [c.tagName, c.className]),
                    name: toolNode.children[1].children.map(c => c.tagName || 'text'),
                    buttons: [p1.annotate, p1.cancel, p1.resume, p1.profile, p1.remove, p1.log, p1.send].map(b => b.className),
-                   parts: p1.body.children[0].children.map(c => c.className), selects: [p1.model.className, p1.effort.className],
+                   parts: p1.body.children[0].children.map(c => c.className), selects: [p1.agent.className, p1.model.className, p1.effort.className],
                    input: p1.input.className, sendRow: p1.sendRow.className };
     const after = await h.pane(item1);              // rendered anew after the run: the transcript comes from memory
     facts.paneRerendered = after.view();
@@ -844,13 +1011,20 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
   // deleting scholium annotations: only the tool's tag, after a confirmation, never a running paper
   {
     const existing = [['zotero-scholium'], ['zotero-scholium', 'personal'], ['mine'], ['zotero-marginalia'], []];
-    const h = harness({ existing });
+    const h = harness({ existing, notes: [['zotero-scholium'], ['mine'], [], ['zotero-scholium', 'reading']] });
     h.runner.start('x');
     const removed = await h.runner.removeAnnotations([h.item1, h.att1, h.note]);
     facts.deleted = { removed, erased: h.log.erased, remaining: h.att1.getAnnotations().map(a => a.key), confirms: h.log.confirms,
-                      notice: notice(h.log.notices.at(-1)) };
+                      notice: notice(h.log.notices.at(-1)), trashed: h.log.trashed, notesLeft: h.item1.getNotes() };
     const again = await h.runner.removeAnnotations([h.item1]);
     facts.deleteNothingLeft = { removed: again, alerts: h.log.alerts };
+  }
+  {
+    // only the tool's note is left: it goes as well
+    const h = harness({ notes: [['zotero-scholium']], locale: 'en-US', secondPdf: true });
+    h.runner.start('x');
+    facts.deleteNoteOnly = { removed: await h.runner.removeAnnotations([h.item2, h.item1]), trashed: h.log.trashed, erased: h.log.erased,
+                             confirms: h.log.confirms, notice: notice(h.log.notices.at(-1)).descriptions };
   }
   {
     const h = harness({ existing: [['zotero-scholium']], confirm: false });
@@ -865,12 +1039,13 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
                           state: p.view().state, kind: p.view().stateKind };
   }
   {
-    const h = harness({ existing: [['zotero-scholium']], gateFirst: true });
+    // a second PDF of the paper is free, but the paper's notes stay while its first PDF runs
+    const h = harness({ existing: [['zotero-scholium']], gateFirst: true, notes: [['zotero-scholium']], secondPdf: true });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]);
     await settle(60);
-    facts.deleteWhileRunning = { removed: await h.runner.removeAnnotations([h.item1]), erased: h.log.erased, alerts: h.log.alerts,
+    facts.deleteWhileRunning = { removed: await h.runner.removeAnnotations([h.item1]), erased: h.log.erased, trashed: h.log.trashed, alerts: h.log.alerts,
                                  paneButtons: { annotate: p.view().annotateDisabled, remove: p.view().removeDisabled } };
     h.log.calls[0].proc.kill();
     await settle(200);
@@ -920,6 +1095,227 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
                               notifications: log.notifications.map(n => n.title) };
   }
 
+  // the last line of a run as notices show it
+  facts.brief = ['高亮 47 条（核心 13 条），页边批注 24 条，笔记《Cooperative robotic exploration of a planetary skylight surface (v2, 2026-10-04)》，剩余警告：附件未包含补充材料。',
+                 '28 highlights (12 core), 9 margin notes, the note title, remaining warnings: none.',
+                 '第 5 页的译文已缩短；无剩余警告。', 'a'.repeat(60), '']
+    .map(s => harness().runner.brief(s));
+
+  // Codex: the newest of its copies; a configured path as it is; versions in order
+  {
+    const h = harness();
+    facts.codexFound = { path: await h.runner.findCodex(), asked: h.log.versionCalls.slice() };
+    const later = harness({ codex: { versions: Object.assign({}, CODEX_VERSIONS, { [CODEX_NPM]: 'codex-cli 0.161.0\n' }) } });
+    facts.codexFound.npmNewer = await later.runner.findCodex();
+    const h2 = harness({ prefs: { 'extensions.scholium-bridge.codexPath': '/custom/codex.exe' },
+                         codex: { versions: { '/custom/codex.exe': 'codex-cli 0.1.0\n' } } });
+    facts.codexConfigured = { path: await h2.runner.findCodex(), asked: h2.log.versionCalls.length };
+    const h3 = harness({ prefs: { 'extensions.scholium-bridge.codexPath': '/custom/missing.exe' } });
+    facts.codexConfiguredMissing = await h3.runner.findCodex();
+    facts.codexNewer = [[[0, 160, 0, ''], [0, 160, 0, '-alpha.3']], [[0, 160, 0, '-alpha.3'], [0, 160, 0, '']], [[0, 161, 0, ''], [0, 160, 9, '']],
+                        [[0, 9, 0, ''], [0, 10, 0, '']], [[1, 0, 0, ''], [0, 99, 99, '']], [[0, 160, 0, ''], [0, 160, 0, '']]]
+      .map(([a, b]) => h.runner.newer(a, b));
+    facts.shellCommands = ['"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command \'python a.py\'', "/bin/bash -lc 'ls -la'",
+                           'pwsh.exe -NoProfile -Command "Get-Content x"', 'python a.py', '"C:\\x\\other.exe" -c \'x\'', "pwsh -Command 'it''s'"]
+      .map(c => h.runner.shellCommand(c));
+    facts.codexReset = [null, { primary: { usedPercent: 50, resetsAt: 100 } },
+                        { primary: { usedPercent: 100, resetsAt: 100 }, secondary: { usedPercent: 100, resetsAt: 200 } },
+                        { primary: { usedPercent: 100, resetsAt: 0 }, secondary: { usedPercent: 99, resetsAt: 300 } }].map(l => h.runner.codexReset(l));
+  }
+
+  // Codex chosen in the section: its models, asked from codex app-server; each agent keeps its own choices
+  {
+    const h = harness();
+    h.runner.start('x');
+    const p = await h.pane(h.item1), other = await h.pane(h.item2);
+    await settle(40);
+    p.pane().agent.change('codex');
+    await settle(200);
+    const v = p.view();
+    const proc = h.log.codexProcs[0];
+    const call = h.log.codexCalls[0];
+    facts.codexModels = { agent: h.store.get('extensions.scholium-bridge.agent'), shown: p.pane().agent.value, otherShown: other.pane().agent.value,
+                          agents: p.pane().agent.children.map(o => [o.value, o.textContent]),
+                          models: v.models, labels: v.modelLabels, model: v.model, efforts: v.efforts, effort: v.effort,
+                          call: { command: call.command, args: call.arguments, workdir: call.workdir }, sent: proc.sent.map(m => m.method),
+                          hello: proc.sent[0].params, killed: proc.killed, secretKept: JSON.stringify(h.runner.models).includes('secret-token'),
+                          calls: h.log.codexCalls.length };
+    p.pane().model.change('gpt-5.5');
+    p.pane().effort.change('max');                 // not a level of GPT-5.5
+    facts.codexModels.legacy = { efforts: p.view().efforts, effort: p.view().effort };
+    p.pane().model.change('gpt-6-luna');
+    p.pane().effort.change('high');
+    facts.codexModels.chosen = { model: h.store.get('extensions.scholium-bridge.codexModel'), effort: h.store.get('extensions.scholium-bridge.codexEffort'),
+                                 claudeModel: h.store.get('extensions.scholium-bridge.claudeModel') || null,
+                                 claudeEffort: h.store.get('extensions.scholium-bridge.claudeEffort') || null, otherModel: other.pane().model.value };
+    p.pane().agent.change('claude');
+    await settle(40);
+    facts.codexModels.back = { model: p.view().model, effort: p.view().effort, labels: p.view().modelLabels.slice(0, 2) };
+    p.pane().agent.change('codex');
+    await settle(40);
+    facts.codexModels.again = { model: p.view().model, effort: p.view().effort, calls: h.log.codexCalls.length };
+  }
+
+  // a Codex run, then a follow-up in the same conversation while Claude Code is chosen
+  {
+    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex', 'extensions.scholium-bridge.codexModel': 'gpt-6-luna',
+                                 'extensions.scholium-bridge.codexEffort': 'high' }, codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW] } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(200);
+    const before = h.log.codexCalls.length;
+    await h.runner.annotate([h.item1]);
+    await settle(500);
+    const call = h.log.codexCalls[before];
+    const sent = h.log.codexProcs[before].sent;
+    const req = m => sent.find(x => x.method === m);
+    const logPath = '/data/tmp/scholium/ATT1/codex-run.jsonl';
+    const lines = () => h.log.writes[logPath].trim().split('\n').map(l => JSON.parse(l));
+    const turn = req('turn/start').params;
+    facts.codexRun = {
+      call: { command: call.command, args: call.arguments, workdir: call.workdir, env: call.environment, append: call.environmentAppend },
+      methods: sent.filter(m => typeof m.method === 'string').map(m => m.method),
+      skillLists: sent.filter(m => m.method === 'skills/list').map(m => m.params.cwds),
+      roots: req('skills/extraRoots/set').params.extraRoots,
+      thread: req('thread/start').params,
+      turn: Object.assign({}, turn, { input: turn.input.map(i => (i.type === 'text' ? { type: 'text', elements: i.text_elements } : i)) }),
+      prompt: turn.input[0].text,
+      answers: sent.filter(m => m.method === undefined),
+      dirs: h.log.madeDirs.slice(),
+      entries: p.view().entries, state: p.view().state, stateTitle: p.view().stateTitle,
+      logged: lines().map(l => l.method || l.type), init: lines().find(l => l.type === 'system'), result: lines().find(l => l.type === 'result'),
+      killed: h.log.codexProcs[before].killed, session: h.runner.sessions.get('ATT1'), notices: h.log.notices.map(notice),
+      sendShown: !p.view().sendHidden, claudeCalls: h.log.calls.length,
+    };
+    p.pane().log.click();
+    facts.codexRun.revealed = h.log.revealed.slice();
+    p.pane().agent.change('claude');
+    p.pane().input.value = '第 5 页那条译文改短';
+    for (const f of p.pane().input.listeners.input) f({});
+    p.pane().send.click();
+    await settle(500);
+    const sent2 = h.log.codexProcs.at(-1).sent;
+    facts.codexFollowUp = { claudeCalls: h.log.calls.length, methods: sent2.filter(m => typeof m.method === 'string').map(m => m.method),
+                            resume: sent2.find(m => m.method === 'thread/resume').params, input: sent2.find(m => m.method === 'turn/start').params.input,
+                            effort: sent2.find(m => m.method === 'turn/start').params.effort, state: p.view().state,
+                            entries: p.view().entries.slice(-4), results: lines().filter(l => l.type === 'result').length,
+                            markers: lines().filter(l => l.type === 'scholium').map(l => l.text) };
+  }
+
+  // a Codex step by step: the skill, then the extraction, while the turn runs; cancelling interrupts the turn
+  {
+    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT.slice(0, 7).concat(['WAIT'])] } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await h.runner.annotate([h.item1]);
+    await settle(300);
+    const during = p.view().state;
+    p.pane().cancel.click();
+    await settle(300);
+    const proc = h.log.codexProcs.at(-1);
+    const logged = h.log.writes['/data/tmp/scholium/ATT1/codex-run.jsonl'].trim().split('\n').map(l => JSON.parse(l));
+    facts.codexCancel = { during, interrupt: proc.sent.find(m => m.method === 'turn/interrupt').params, killed: proc.killed,
+                          last: p.view().entries.at(-1), state: p.view().state, results: logged.filter(l => l.type === 'result').length,
+                          waits: h.live(), current: h.runner.current };
+  }
+  {
+    // the turn has begun with the skill: its first step; shutting down does not wait for the turn to end
+    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT.slice(0, 2).concat(['WAIT'])] } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await h.runner.annotate([h.item1]);
+    await settle(300);
+    facts.codexCancel.begun = p.view().state;
+    h.runner.stop();
+    facts.codexCancel.shutdown = h.log.codexProcs.at(-1).killed;
+    await settle(100);
+  }
+  {
+    // the skill in Codex's own skills folder: no extra root; no skill at all: the prompt alone
+    const found = {};
+    for (const skillAt of ['/data/tmp/scholium', null]) {
+      const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { skillAt } });
+      h.runner.start('x');
+      await h.runner.annotate([h.item1]);
+      await settle(400);
+      const sent = h.log.codexProcs.at(-1).sent;
+      found[skillAt || 'none'] = { methods: sent.filter(m => typeof m.method === 'string').map(m => m.method).filter(m => m.startsWith('skills/')),
+                                   input: sent.find(m => m.method === 'turn/start').params.input.slice(1),
+                                   model: 'model' in sent.find(m => m.method === 'thread/start').params };
+    }
+    facts.codexSkillFound = found;
+  }
+
+  // the Codex usage limit: the queue waits until the window resets, then the thread continues
+  {
+    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_LIMIT, CODEX_FOLLOW] } });
+    h.runner.start('x');
+    const p1 = await h.pane(h.item1);
+    await h.runner.annotate([h.item1, h.item2]);
+    await settle(400);
+    facts.codexLimit = { clock: h.runner.paused && h.runner.clock(h.runner.paused.until), expected: h.runner.clock(CODEX_RESET * 1000 + 60000),
+                         known: h.runner.paused && h.runner.paused.known,
+                         queue: h.runner.queue.map(j => [j.att.key, j.agent, j.resume || null]), notifications: h.log.notifications.map(n => n.title),
+                         last: p1.view().entries.at(-1), state: p1.view().state };
+    h.fire();
+    await settle(900);
+    const resumed = h.log.codexProcs.find(c => c.sent.some(m => m.method === 'thread/resume'));
+    facts.codexLimit.after = { resume: resumed.sent.find(m => m.method === 'thread/resume').params.threadId,
+                               prompt: resumed.sent.find(m => m.method === 'turn/start').params.input[0].text,
+                               turns: h.log.codexTurns, state: p1.view().state, paused: h.runner.paused };
+  }
+
+  // Codex failing: a failed turn; a refused request; no Codex at all
+  {
+    const failing = [note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }),
+                     coItem('completed', { type: 'agentMessage', id: 'a1', text: '先提取句子。' }),
+                     turnDone({ status: 'failed', error: { message: 'stream disconnected before completion',
+                                                           codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 502 } } } })];
+    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [failing] } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await h.runner.annotate([h.item1]);
+    await settle(400);
+    facts.codexFailed = { entries: p.view().entries.slice(-2), state: p.view().state, kind: p.view().stateKind, paused: h.runner.paused,
+                          notices: h.log.notices.map(notice) };
+  }
+  {
+    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex', 'extensions.scholium-bridge.codexModel': 'gpt-9' },
+                        codex: { fail: 'thread/start', failMessage: 'model gpt-9 is not available' } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await h.runner.annotate([h.item1]);
+    await settle(400);
+    facts.codexRefused = { last: p.view().entries.at(-1), state: p.view().state, killed: h.log.codexProcs.at(-1).killed, turns: h.log.codexTurns };
+  }
+  {
+    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { versions: {} } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.annotate([h.item1]);
+    await settle(100);
+    facts.noCodex = { codexCalls: h.log.codexCalls.length, last: p.view().entries.at(-1), state: p.view().state, models: p.view().models,
+                      labels: p.view().modelLabels };
+  }
+
+  // the latest log is shown, whichever agent wrote it
+  {
+    const codexLog = [CODEX_INIT].concat(CODEX_SCRIPT.filter(l => l.includes('item/')), [CODEX_RESULT]).join('');
+    const claudeLog = SCRIPT.slice(0, 4).concat([LAST, RESULT]).join('');
+    const shown = {};
+    for (const [name, times] of [['codex', { claude: 1, codex: 2 }], ['claude', { claude: 3, codex: 2 }]]) {
+      const h = harness({ logs: { '/data/tmp/scholium/ATT1/claude-run.jsonl': claudeLog, '/data/tmp/scholium/ATT1/codex-run.jsonl': codexLog },
+                          logTimes: { '/data/tmp/scholium/ATT1/claude-run.jsonl': times.claude, '/data/tmp/scholium/ATT1/codex-run.jsonl': times.codex } });
+      h.runner.start('x');
+      const p = await h.pane(h.item1);
+      p.pane().log.click();
+      shown[name] = { first: p.view().entries[0], count: p.view().entries.length, state: p.view().state, session: h.runner.sessions.get('ATT1'),
+                      revealed: h.log.revealed[0] };
+    }
+    facts.latestLog = shown;
+  }
+
   process.stdout.write(JSON.stringify(facts));
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
@@ -937,6 +1333,8 @@ def facts(tmp_path_factory):
 
 CLAUDE = "/appdata/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 SUMMARY = "高亮 28 条（核心 12 条），页边批注 9 条，笔记《Deep latent》，无剩余警告。"
+BRIEF = "高亮 28 条（核心 12 条）\n页边批注 9 条\n无剩余警告"   # the summary in a notice
+DONE_NOTICE = ["完成 · 1 分钟"] + BRIEF.split("\n")
 DONE_STATE = "完成 · 6 分钟 · 26 轮 · 257 万 token"
 TOKEN_DETAIL = "输入 52 · 缓存写入 11.1 万 · 缓存读取 241 万 · 输出 4.7 万"
 STARTED = "已在后台开始，通常需要 10–20 分钟。过程和进度见条目侧栏的 Scholium 区块。"
@@ -1032,7 +1430,7 @@ def test_section_is_styled_by_its_stylesheet(facts):
                              "scholium-composer"]
     assert look["buttons"] == ["scholium-button primary", "scholium-button", "scholium-button", "scholium-button quiet",
                                "scholium-button quiet danger", "scholium-button quiet", "scholium-button primary small"]
-    assert look["selects"] == ["scholium-select", "scholium-select"] and look["input"] == "scholium-input"
+    assert look["selects"] == ["scholium-select"] * 3 and look["input"] == "scholium-input"
     assert look["tool"] == [["span", "scholium-bullet"], ["span", "scholium-content"]] and look["name"] == ["b", "text"]
     rules = css_rules()
     for cls in ["scholium-pane", "scholium-settings", "scholium-field", "scholium-select", "scholium-actions", "scholium-spacer",
@@ -1106,7 +1504,7 @@ def test_section_shows_the_transcript_like_claude_code(facts):
 def test_corner_notices_close_by_themselves(facts):
     assert facts["notices"] == [
         {"closeOnClick": True, "errors": 0, "descriptions": [STARTED], "closeTimer": 6000, "shown": True},
-        {"closeOnClick": True, "errors": 0, "descriptions": ["完成 · 1 分钟\n" + SUMMARY], "closeTimer": 6000, "shown": True},
+        {"closeOnClick": True, "errors": 0, "descriptions": DONE_NOTICE, "closeTimer": 6000, "shown": True},
     ]
     assert facts["failure"]["notices"][-1]["errors"] == 1 and facts["failure"]["notices"][-1]["closeTimer"] == 12000
     assert facts["cancel"]["notices"][-1]["closeTimer"] == 12000
@@ -1135,7 +1533,17 @@ def test_section_shows_running_and_finished_state(facts):
     assert w["entries"] == TRANSCRIPT[:3]
     assert facts["otherRunning"] == {"state": "正在批注另一篇：Paper ITEM1", "kind": "scholium-state info"}
     f = facts["finished"]
-    assert f["notifications"] == [{"title": "批注完成：Paper ITEM1", "body": SUMMARY}]
+    assert f["notifications"] == [{"title": "批注完成：Paper ITEM1", "body": BRIEF}]
+
+
+def test_notices_put_each_part_of_the_last_line_on_its_own_line(facts):
+    assert facts["brief"] == [
+        "高亮 47 条（核心 13 条）\n页边批注 24 条\n剩余警告：附件未包含补充材料",
+        "28 highlights (12 core)\n9 margin notes\nthe note title\nremaining warnings: none",
+        "第 5 页的译文已缩短\n无剩余警告",
+        "a" * 39 + "…",
+        "",
+    ]
 
 
 def test_existing_annotations_need_confirmation(facts):
@@ -1170,26 +1578,34 @@ def test_papers_run_one_after_another_without_duplicates(facts):
     assert facts["raceDone"] == 2
 
 
-def test_delete_removes_only_the_tools_annotations_after_a_confirmation(facts):
+def test_delete_removes_only_the_tools_annotations_and_notes_after_a_confirmation(facts):
     d = facts["deleted"]
-    assert d["removed"] == 2 and d["erased"] == ["E0", "E1"]
+    assert d["removed"] == 4 and d["erased"] == ["E0", "E1"]
     assert d["remaining"] == ["E2", "E3", "E4"]
-    assert d["confirms"] == ["将永久删除 1 篇论文上的 2 条 Scholium 批注（带 zotero-scholium 标签的批注）。"
-                             "你自己的批注和阅读笔记都保留。删除会同步，不能撤销。继续吗？"]
-    assert d["notice"] == {"closeOnClick": True, "errors": 0, "descriptions": ["已删除 1 篇论文上的 2 条 Scholium 批注。"],
+    # the tool's notes go to the trash; the user's stay
+    assert d["trashed"] == ["N0", "N3"] and d["notesLeft"] == ["N1", "N2"]
+    assert d["confirms"] == ["将删除 1 篇论文上带 zotero-scholium 标签的 2 条批注和 2 篇阅读笔记。"
+                             "批注永久删除，不能撤销；笔记移到回收站，可以恢复。你自己的批注和笔记都保留。删除会同步。继续吗？"]
+    assert d["notice"] == {"closeOnClick": True, "errors": 0, "descriptions": ["已删除 1 篇论文上的 2 条 Scholium 批注，2 篇笔记已移到回收站。"],
                            "closeTimer": 6000, "shown": True}
-    assert facts["deleteNothingLeft"] == {"removed": 0, "alerts": ["所选论文没有 Scholium 批注。"]}
+    assert facts["deleteNothingLeft"] == {"removed": 0, "alerts": ["所选论文没有 Scholium 批注或笔记。"]}
+    n = facts["deleteNoteOnly"]
+    assert n["removed"] == 1 and n["trashed"] == ["N0"] and n["erased"] == []
+    assert n["confirms"] == ["This deletes 0 annotations and 1 reading notes tagged zotero-scholium on 1 papers. The annotations are "
+                             "deleted for good; the notes go to the trash, where they can be restored. Your own annotations and notes "
+                             "are kept. The deletion syncs. Continue?"]
+    assert n["notice"] == ["Deleted 0 Scholium annotations on 1 papers; 1 notes moved to the trash."]
     assert facts["deleteRefused"] == {"removed": 0, "erased": [], "remaining": 1}
     f = facts["deleteFails"]
     assert f["removed"] == 0 and f["notice"]["errors"] == 1
-    assert f["notice"]["descriptions"] == ["删除失败：library is read-only\n已删除 0 篇论文上的 0 条 Scholium 批注。"]
+    assert f["notice"]["descriptions"] == ["删除失败：library is read-only", "已删除 0 篇论文上的 0 条 Scholium 批注。"]
     assert f["state"] == "删除失败：library is read-only" and f["kind"] == "scholium-state error"
 
 
 def test_delete_skips_a_paper_being_annotated(facts):
     r = facts["deleteWhileRunning"]
-    assert r["removed"] == 0 and r["erased"] == []
-    assert r["alerts"] == ["所选论文没有 Scholium 批注。\n\n1 篇论文正在批注或排队，不会删除。"]
+    assert r["removed"] == 0 and r["erased"] == [] and r["trashed"] == []
+    assert r["alerts"] == ["所选论文没有 Scholium 批注或笔记。\n\n1 篇论文正在批注或排队，不会删除。"]
     assert r["paneButtons"] == {"annotate": True, "remove": True}
 
 
@@ -1392,3 +1808,149 @@ def test_usage_limit_pauses_the_queue_and_continues_after_the_reset(facts):
     assert a["calls"] == 2 and a["resume"] == "S1" and a["waits"] == [] and a["paused"] is None
     assert a["state1"] == DONE_STATE and a["state2"] == "批注完成：Paper ITEM1"
     assert facts["pauseCancelled"] == {"queue": 0, "paused": None, "waits": [], "calls": 1}
+
+
+CODEX_APP = "/localappdata/OpenAI/Codex/bin/h1/codex.exe"
+CODEX_NPM = "/appdata/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe"
+CODEX_LEVELS = ["low", "medium", "high", "xhigh", "max", "ultra"]
+CODEX_TRANSCRIPT = [
+    ["scholium-entry info", "模型: gpt-6-luna"],
+    ["scholium-entry text", "⏺ 先提取句子。"],
+    ["scholium-entry tool", "⏺ Shell(python C:/skills/scholium.py extract --pdf x.pdf --sentences s.json)"],
+    ["scholium-entry result", "⎿ 412 sentences -> s.json\n1\n2\n3\n… +2"],
+    ["scholium-entry tool", "⏺ Shell(Get-Content D:\\Zotero\\tmp\\scholium\\ATT1\\sentences.txt)"],
+    ["scholium-entry result", "⎿ [1] First sentence."],
+    ["scholium-entry tool", "⏺ Edit(D:\\Zotero\\tmp\\scholium\\ATT1\\config.json)"],
+    ["scholium-entry tool", "⏺ Shell(python C:/skills/scholium.py --config c.json)"],
+    ["scholium-entry result error", "⎿ style_warnings: 1"],
+    ["scholium-entry tool", "⏺ Shell(python C:/skills/scholium.py --config c.json --apply)"],
+    ["scholium-entry result", '⎿ {"applied": true}'],
+    ["scholium-entry text", "⏺ Done.\n" + SUMMARY],
+]
+
+
+def test_codex_is_the_newest_copy_found(facts):
+    f = facts["codexFound"]
+    assert f["path"] == CODEX_APP and f["npmNewer"] == CODEX_NPM
+    assert f["asked"] == [CODEX_APP, "/localappdata/OpenAI/Codex/bin/codex.exe",
+                          "/appdata/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe",
+                          "/home/u/.cargo/bin/codex.exe", "/home/u/.local/bin/codex.exe"]
+    assert facts["codexConfigured"] == {"path": "/custom/codex.exe", "asked": 0} and facts["codexConfiguredMissing"] is None
+    assert facts["codexNewer"] == [True, False, True, False, True, False]
+    assert facts["shellCommands"] == ["python a.py", "ls -la", "Get-Content x", "python a.py", "\"C:\\x\\other.exe\" -c 'x'", "it's"]
+    assert facts["codexReset"] == [None, None, 200000, None]
+
+
+def test_codex_models_come_from_its_app_server(facts):
+    m = facts["codexModels"]
+    assert m["agent"] == "codex" and m["shown"] == "codex" and m["otherShown"] == "codex"
+    assert m["agents"] == [["claude", "Claude Code"], ["codex", "Codex"]]
+    assert m["call"] == {"command": CODEX_APP, "args": ["app-server"], "workdir": "/data"}
+    assert m["sent"] == ["initialize", "initialized", "model/list", "config/read"] and m["killed"] is True
+    assert m["hello"]["clientInfo"]["name"] == "scholium-bridge" and m["secretKept"] is False and m["calls"] == 1
+    assert m["models"] == ["", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna", "gpt-5.5"] and m["model"] == ""
+    assert m["labels"] == ["Codex 默认（GPT-6-Astra）", "GPT-6.1-Sol", "GPT-6-Astra", "GPT-6-Luna", "GPT-5.5"]
+    assert m["efforts"] == CODEX_LEVELS and m["effort"] == "medium"
+    assert m["legacy"] == {"efforts": ["low", "medium", "high", "xhigh"], "effort": "medium"}
+    assert m["chosen"] == {"model": "gpt-6-luna", "effort": "high", "claudeModel": None, "claudeEffort": None, "otherModel": "gpt-6-luna"}
+    assert m["back"] == {"model": "opus", "effort": "medium", "labels": ["Claude Code 默认（Fable 5.1）", "Opus 5.5"]}
+    assert m["again"] == {"model": "gpt-6-luna", "effort": "high", "calls": 1}
+
+
+def test_codex_runs_the_skill_in_a_sandbox_through_its_app_server(facts):
+    r = facts["codexRun"]
+    assert r["call"] == {"command": CODEX_APP, "args": ["app-server"], "workdir": "/data/tmp/scholium",
+                         "env": {"PYTHONIOENCODING": "utf-8"}, "append": True}
+    assert r["methods"] == ["initialize", "initialized", "skills/list", "skills/list", "skills/extraRoots/set", "thread/start", "turn/start"]
+    assert r["skillLists"] == [["/data/tmp/scholium"], ["/data"]] and r["roots"] == ["/data/.agents/skills"]
+    assert r["thread"] == {"cwd": "/data/tmp/scholium", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
+                           "sandbox": "workspace-write", "serviceName": "scholium-bridge", "model": "gpt-6-luna"}
+    roots = ["/data/tmp/scholium", "/data/zotero-scholium", "/appdata/zotero-scholium"]
+    assert r["turn"] == {"threadId": "T1", "model": "gpt-6-luna", "effort": "high",
+                         "input": [{"type": "text", "elements": []},
+                                   {"type": "skill", "name": "zotero-scholium", "path": "/data/.agents/skills/zotero-scholium/SKILL.md"}],
+                         "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": roots, "networkAccess": True,
+                                           "excludeTmpdirEnvVar": False, "excludeSlashTmp": False}}
+    assert all(d in r["dirs"] for d in roots)
+    assert "附件 key：ATT1" in r["prompt"] and "不要向用户提问" in r["prompt"]
+    # questions that reach the plugin are declined: nobody is there to answer
+    assert r["answers"] == [{"id": "q1", "result": {"decision": "decline"}}, {"id": "q2", "result": {"answers": {}}},
+                            {"id": "q3", "error": {"code": -32601, "message": "not handled by scholium-bridge"}}]
+    assert r["killed"] is True and r["session"] == {"agent": "codex", "id": "T1"} and r["claudeCalls"] == 0
+
+
+def test_codex_transcript_state_and_log_read_like_claude_codes(facts):
+    r = facts["codexRun"]
+    assert r["entries"] == CODEX_TRANSCRIPT
+    assert r["state"] == "完成 · 6 分钟 · 3 轮 · 265 万 token"
+    assert r["stateTitle"] == "输入 19 万 · 缓存写入 0 · 缓存读取 241 万 · 输出 4.7 万"
+    # deltas and start-up chatter stay out of the log; the run starts and ends as Claude Code's does
+    assert not any(m.endswith("Delta") or m.endswith("delta") or "startupStatus" in m for m in r["logged"])
+    assert r["logged"][0] == "system" and r["logged"][-1] == "result" and "item/commandExecution/requestApproval" in r["logged"]
+    assert r["init"] == {"type": "system", "subtype": "init", "agent": "codex", "model": "gpt-6-luna", "session_id": "T1"}
+    assert r["result"] == {"type": "result", "agent": "codex", "subtype": "success", "is_error": False, "result": "Done.\n" + SUMMARY,
+                           "session_id": "T1", "duration_ms": 376500, "num_turns": 3,
+                           "usage": {"input_tokens": 190000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 2410000,
+                                     "output_tokens": 46778}}
+    assert r["notices"][-1]["descriptions"] == DONE_NOTICE
+    assert r["sendShown"] is True and r["revealed"] == ["/data/tmp/scholium/ATT1/codex-run.jsonl"]
+    latest = facts["latestLog"]
+    assert latest["codex"] == {"first": ["scholium-entry info", "模型: gpt-6-luna"], "count": len(CODEX_TRANSCRIPT),
+                               "state": "上次：完成 · 6 分钟 · 3 轮 · 265 万 token", "session": {"agent": "codex", "id": "T1"},
+                               "revealed": "/data/tmp/scholium/ATT1/codex-run.jsonl"}
+    assert latest["claude"]["first"] == ["scholium-entry info", "模型: claude-opus-5-5"]
+    assert latest["claude"]["session"] == {"agent": "claude", "id": "S1"}
+    assert latest["claude"]["revealed"] == "/data/tmp/scholium/ATT1/claude-run.jsonl"
+
+
+def test_codex_follow_up_continues_its_thread_whatever_agent_is_chosen(facts):
+    f = facts["codexFollowUp"]
+    assert f["claudeCalls"] == 0
+    assert f["methods"] == ["initialize", "initialized", "thread/resume", "turn/start"]
+    assert f["resume"] == {"threadId": "T1", "cwd": "/data/tmp/scholium", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
+                           "sandbox": "workspace-write", "serviceName": "scholium-bridge", "model": "gpt-6-luna"}
+    assert len(f["input"]) == 1 and f["input"][0]["text"].endswith("第 5 页那条译文改短\n\n结束时最后一行只写一句：改了什么，剩余警告。")
+    assert f["effort"] == "high"
+    # only this run's calls and tokens: the thread's totals include the earlier turn
+    assert f["state"] == "完成 · 1 分钟 · 1 轮 · 40.3 万 token"
+    assert f["entries"] == [["scholium-entry text", "⏺ Done.\n" + SUMMARY], ["scholium-entry prompt", "第 5 页那条译文改短"],
+                            ["scholium-entry info", "模型: gpt-6-luna"], ["scholium-entry text", "⏺ 改好了：第 5 页的译文已缩短。"]]
+    assert f["results"] == 2 and f["markers"] == ["第 5 页那条译文改短"]
+
+
+def test_codex_steps_and_cancel(facts):
+    c = facts["codexCancel"]
+    assert c["during"] == "第 2/6 步 提取句子 · 已用 1 分钟"
+    assert c["interrupt"] == {"threadId": "T1", "turnId": "U1"} and c["killed"] is True
+    assert c["last"] == ["scholium-entry final error", "已取消"] and c["state"] == "已取消 · 1 分钟"
+    assert c["results"] == 0 and c["waits"] == [] and c["current"] is None and c["shutdown"] is True
+    assert c["begun"] == "第 1/6 步 加载技能 · 已用 1 分钟"
+    s = facts["codexSkillFound"]
+    assert s["/data/tmp/scholium"]["methods"] == ["skills/list"]
+    assert s["/data/tmp/scholium"]["input"] == [{"type": "skill", "name": "zotero-scholium", "path": "/home/u/.codex/skills/zotero-scholium/SKILL.md"}]
+    assert s["none"] == {"methods": ["skills/list", "skills/list"], "input": [], "model": False}
+
+
+def test_codex_usage_limit_waits_for_the_reset(facts):
+    l = facts["codexLimit"]
+    assert l["clock"] == l["expected"] and l["known"] is True
+    assert l["queue"] == [["ATT1", "codex", "T1"], ["ATT2", "codex", None]]
+    assert l["notifications"] == ["Codex 额度已用完"]
+    assert l["last"] == ["scholium-entry final error", "You've hit your usage limit. Try again at 9:00 PM."]
+    a = l["after"]
+    assert a["resume"] == "T1" and a["prompt"] == "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。"
+    assert a["turns"] == 3 and a["paused"] is None and a["state"] == "完成 · 1 分钟 · 1 轮 · 40.3 万 token"
+
+
+def test_codex_failures_are_reported(facts):
+    f = facts["codexFailed"]
+    assert f["entries"] == [["scholium-entry text", "⏺ 先提取句子。"], ["scholium-entry final error", "stream disconnected before completion"]]
+    assert f["state"].startswith("失败") and f["kind"] == "scholium-state error" and f["paused"] is None
+    assert f["notices"][-1]["descriptions"] == ["失败 · stream disconnected before completion"]
+    r = facts["codexRefused"]
+    assert r["last"] == ["scholium-entry final error", "model gpt-9 is not available"] and r["state"].startswith("失败")
+    assert r["killed"] is True and r["turns"] == 0
+    n = facts["noCodex"]
+    assert n["codexCalls"] == 0 and n["state"] == "失败"
+    assert n["last"] == ["scholium-entry final error", "找不到 Codex（codex.exe）。请在 about:config 中设置 extensions.scholium-bridge.codexPath。"]
+    assert n["models"] == [""] and n["labels"] == ["Codex 默认"]
