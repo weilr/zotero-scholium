@@ -105,6 +105,11 @@ notification reports the run's last line or the error. Both show the last line a
 (counts, remaining warnings), without the note's title.
 Neither appears while a Scholium section is on screen in the focused Zotero window.
 
+When a run fails on the connection to the agent's service (a timeout, a lost connection, an
+overloaded or failing server) before the agent has used any tool, the paper is tried once more after
+30 seconds; it waits at the head of the queue meanwhile, and **Cancel** ends the wait. The transcript
+and the log keep the failed try.
+
 When the agent reports that the usage limit is reached, the queue waits: the interrupted paper
 stays at its head, the state line and a notice give the reset time, and a minute after the reset the
 paper continues its conversation where it stopped, followed by the rest of the queue. Without a reset

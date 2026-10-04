@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- A run that fails on the connection to Claude Code's or Codex's service before the agent used any
+  tool is tried once more after 30 seconds; **Cancel** ends the wait.
+
 ## 0.1.5 (2026-10-04)
 
 - The Scholium section also runs Codex: **Agent** chooses Claude Code or Codex, and the model list and

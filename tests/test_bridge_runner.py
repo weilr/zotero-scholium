@@ -487,6 +487,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
   });
   vm.runInContext(source, context);
   const runner = context.ScholiumRunner;
+  runner.NET_RETRY_MS = 40;
   // the item pane section as Zotero drives it: onItemChange, onRender, onAsyncRender
   const pane = async (item) => {
     const section = log.sections[0];
@@ -1269,6 +1270,8 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
   {
     const failing = [note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }),
                      coItem('completed', { type: 'agentMessage', id: 'a1', text: '先提取句子。' }),
+                     shell('c1', 'python C:/skills/scholium.py extract --pdf x.pdf'),
+                     shell('c1', 'python C:/skills/scholium.py extract --pdf x.pdf', { output: '412 sentences' }),
                      turnDone({ status: 'failed', error: { message: 'stream disconnected before completion',
                                                            codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 502 } } } })];
     const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [failing] } });
@@ -1277,7 +1280,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     await h.runner.annotate([h.item1]);
     await settle(400);
     facts.codexFailed = { entries: p.view().entries.slice(-2), state: p.view().state, kind: p.view().stateKind, paused: h.runner.paused,
-                          notices: h.log.notices.map(notice) };
+                          notices: h.log.notices.map(notice), turns: h.log.codexTurns, queue: h.runner.queue.length };
   }
   {
     const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex', 'extensions.scholium-bridge.codexModel': 'gpt-9' },
@@ -1297,6 +1300,80 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     await settle(100);
     facts.noCodex = { codexCalls: h.log.codexCalls.length, last: p.view().entries.at(-1), state: p.view().state, models: p.view().models,
                       labels: p.view().modelLabels };
+  }
+
+  // the connection fails before the agent used a tool: one more try after a wait, then success or failure
+  {
+    const ROUTING = [note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }),
+                     turnDone({ status: 'failed', error: { message: 'workspace routing discovery timed out', codexErrorInfo: 'other' } })];
+    const DISCONNECTED = [note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }),
+                          turnDone({ status: 'failed', error: { message: 'stream disconnected before completion',
+                                                                codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 502 } } } })];
+    const retry = {};
+    for (const [name, first, second] of [['ok', ROUTING, CODEX_SCRIPT], ['again', DISCONNECTED, ROUTING]]) {
+      const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [first, second] } });
+      h.runner.NET_RETRY_MS = 60000;
+      h.runner.start('x');
+      const p = await h.pane(h.item1);
+      await h.runner.annotate([h.item1], { extra: '只标注方法部分' });
+      await settle(400);
+      const v = p.view();
+      const waiting = { state: v.state, kind: v.stateKind, last: v.entries.slice(-2), cancelShown: !v.cancelHidden, queue: h.runner.queue.map(j => [j.att.key, !!j.retried]),
+                        job: h.runner.job, notices: h.log.notices.length, notifications: h.log.notifications.length, turns: h.log.codexTurns };
+      h.runner.queue[0].retryAt = 0;
+      await new Promise(r => setTimeout(r, 60));
+      await settle(600);
+      const lines = h.log.writes['/data/tmp/scholium/ATT1/codex-run.jsonl'].trim().split('\n').map(l => JSON.parse(l));
+      retry[name] = { waiting, turns: h.log.codexTurns, state: p.view().state, queue: h.runner.queue.length,
+                      marks: lines.filter(l => l.type === 'scholium').map(l => l.subtype), inits: lines.filter(l => l.type === 'system').length,
+                      entries: p.view().entries.slice(0, 4), notifications: h.log.notifications.map(n => n.title) };
+    }
+    // cancelling while the paper waits for its second try
+    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [ROUTING] } });
+    h.runner.NET_RETRY_MS = 60000;
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await h.runner.annotate([h.item1]);
+    await settle(400);
+    p.pane().cancel.click();
+    await new Promise(r => setTimeout(r, 30));
+    await settle(200);
+    retry.cancelled = { queue: h.runner.queue.length, turns: h.log.codexTurns, state: p.view().state, draining: h.runner.draining };
+    // a refusal is not the connection: no second try
+    const refused = [note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }),
+                     turnDone({ status: 'failed', error: { message: 'unauthorized', codexErrorInfo: 'unauthorized' } })];
+    const h2 = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [refused] } });
+    h2.runner.start('x');
+    await h2.runner.annotate([h2.item1]);
+    await new Promise(r => setTimeout(r, 60));
+    await settle(400);
+    retry.refused = { turns: h2.log.codexTurns, queue: h2.runner.queue.length };
+    // Claude Code: an API connection error before any tool, then a run
+    const h3 = harness({ scripts: [[SCRIPT[0], ev({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: Connection error.', session_id: 'S1' })],
+                                   SCRIPT.concat([LAST, RESULT])] });
+    h3.runner.NET_RETRY_MS = 60000;
+    h3.runner.start('x');
+    const p3 = await h3.pane(h3.item1);
+    await h3.runner.annotate([h3.item1]);
+    await settle(300);
+    const claudeWaiting = { state: p3.view().state, calls: h3.log.calls.length };
+    h3.runner.queue[0].retryAt = 0;
+    await new Promise(r => setTimeout(r, 60));
+    await settle(500);
+    retry.claude = { waiting: claudeWaiting, calls: h3.log.calls.length, state: p3.view().state,
+                     resumed: h3.log.calls[1].opts.arguments.includes('--resume'), prompts: h3.log.stdin.length };
+    // Claude Code had used a tool: no second try
+    const h4 = harness({ scripts: [SCRIPT.slice(0, 4).concat([ev({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: Connection error.' })])] });
+    h4.runner.start('x');
+    await h4.runner.annotate([h4.item1]);
+    await new Promise(r => setTimeout(r, 60));
+    await settle(400);
+    retry.claudeActed = { calls: h4.log.calls.length, queue: h4.runner.queue.length };
+    facts.retry2 = retry;
+    facts.transient = [['workspace routing discovery timed out', 'other'], ['x', { httpConnectionFailed: { httpStatusCode: null } }],
+                       ['API Error: 529 overloaded', null], ['API Error: 500 Internal server error', null], ['error sending request for url', null],
+                       ['unauthorized', 'unauthorized'], ['style_warnings remain', null], ['exit 1', null]]
+      .map(([m, i]) => h.runner.transient(m, i));
   }
 
   // the latest log is shown, whichever agent wrote it
@@ -1944,8 +2021,9 @@ def test_codex_usage_limit_waits_for_the_reset(facts):
 
 def test_codex_failures_are_reported(facts):
     f = facts["codexFailed"]
-    assert f["entries"] == [["scholium-entry text", "⏺ 先提取句子。"], ["scholium-entry final error", "stream disconnected before completion"]]
+    assert f["entries"] == [["scholium-entry result", "⎿ 412 sentences"], ["scholium-entry final error", "stream disconnected before completion"]]
     assert f["state"].startswith("失败") and f["kind"] == "scholium-state error" and f["paused"] is None
+    assert f["turns"] == 1 and f["queue"] == 0   # a tool had run: no second try
     assert f["notices"][-1]["descriptions"] == ["失败 · stream disconnected before completion"]
     r = facts["codexRefused"]
     assert r["last"] == ["scholium-entry final error", "model gpt-9 is not available"] and r["state"].startswith("失败")
@@ -1954,3 +2032,32 @@ def test_codex_failures_are_reported(facts):
     assert n["codexCalls"] == 0 and n["state"] == "失败"
     assert n["last"] == ["scholium-entry final error", "找不到 Codex（codex.exe）。请在 about:config 中设置 extensions.scholium-bridge.codexPath。"]
     assert n["models"] == [""] and n["labels"] == ["Codex 默认"]
+
+
+def test_a_failed_connection_gets_one_more_try(facts):
+    r = facts["retry2"]
+    w = r["ok"]["waiting"]
+    assert w["state"] == "连接失败，30 秒后自动重试一次" and w["kind"] == "scholium-state paused"
+    assert w["last"] == [["scholium-entry final error", "workspace routing discovery timed out"],
+                         ["scholium-entry info", "连接失败，30 秒后自动重试一次"]]
+    assert w["cancelShown"] is True and w["queue"] == [["ATT1", True]] and w["job"] is None
+    assert w["notices"] == 1 and w["notifications"] == 0 and w["turns"] == 1   # only the start notice so far
+    ok = r["ok"]
+    assert ok["turns"] == 2 and ok["queue"] == 0 and ok["state"] == "完成 · 6 分钟 · 3 轮 · 265 万 token"
+    # one log, the first try kept: two starts, the retry line between them
+    assert ok["marks"] == ["prompt", "retry"] and ok["inits"] == 2   # the extra instructions are logged once
+    assert ok["entries"][:4] == [["scholium-entry prompt", "附加要求：只标注方法部分"], ["scholium-entry info", "模型: gpt-6-astra"],
+                                 ["scholium-entry final error", "workspace routing discovery timed out"],
+                                 ["scholium-entry info", "连接失败，30 秒后自动重试一次"]]
+    assert ok["notifications"] == ["批注完成：Paper ITEM1"]
+    again = r["again"]
+    assert again["turns"] == 2 and again["queue"] == 0 and again["state"].startswith("失败")
+    assert again["marks"] == ["prompt", "retry"] and again["notifications"] == ["批注失败：Paper ITEM1"]
+    assert again["waiting"]["last"][0] == ["scholium-entry final error", "stream disconnected before completion"]
+    assert r["cancelled"] == {"queue": 0, "turns": 1, "state": "已取消", "draining": False}
+    assert r["refused"] == {"turns": 1, "queue": 0}
+    c = r["claude"]
+    assert c["waiting"] == {"state": "连接失败，30 秒后自动重试一次", "calls": 1}
+    assert c["calls"] == 2 and c["state"] == DONE_STATE and c["resumed"] is False and c["prompts"] == 2
+    assert r["claudeActed"] == {"calls": 1, "queue": 0}
+    assert facts["transient"] == [True, True, True, True, True, False, False, False]

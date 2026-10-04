@@ -437,6 +437,7 @@ var ScholiumRunner = {
   logs: new Map(),          // attachment key -> the log of its latest run
   paused: null,             // { until, known, timer } while the usage limit holds the queue
   RETRY_MS: 10 * 60000,     // the wait when the agent names no reset time
+  NET_RETRY_MS: 30000,      // the wait before the second try of a run whose connection failed
   pref: "extensions.scholium-bridge.",
   STEPS: ["skill", "extract", "reading", "writing", "dryRun", "applying"],
   TICK_MS: 30000,
@@ -543,6 +544,7 @@ var ScholiumRunner = {
       sendHint: key => zh ? `${key}+Enter 发送` : `${key}+Enter to send`,
       extraLabel: zh ? "附加要求：" : "Extra instructions: ",
       continued: zh ? "额度已恢复，接着中断的地方继续" : "The usage limit has reset; continuing where the run stopped",
+      retrying: zh ? "连接失败，30 秒后自动重试一次" : "The connection failed; trying once more in 30 seconds",
       continuing: zh ? "接着上次的对话" : "continuing the conversation",
       continuedNotice: zh ? "已在后台接着上次的对话处理。" : "Continuing the conversation in the background.",
       resumeNow: zh ? "现在继续" : "Continue now",
@@ -886,6 +888,7 @@ var ScholiumRunner = {
     }
     if (event.type === "scholium" && event.subtype === "prompt") out.push({ kind: "prompt", text: String(event.text || "") });
     if (event.type === "scholium" && event.subtype === "continue") out.push({ kind: "info", text: this.text("continued") });
+    if (event.type === "scholium" && event.subtype === "retry") out.push({ kind: "info", text: this.text("retrying") });
     // a successful result repeats Claude's last message; only a failed run's result is shown
     if (event.type === "result" && (event.is_error || (event.subtype && event.subtype !== "success"))) {
       out.push({ kind: "final", text: String(event.result || event.subtype || "").trim(), error: true });
@@ -1760,6 +1763,9 @@ var ScholiumRunner = {
       if (running) {
         lines.push(this.runningState());
         kind = "running";
+      } else if (queuedAt >= 0 && this.queue[queuedAt].retryAt > Date.now()) {
+        lines.push(this.text("retrying"));
+        kind = "paused";
       } else if (queuedAt >= 0) {
         if (!(paused && queuedAt === 0)) lines.push(this.text("queuedThis", queuedAt + (this.job ? 1 : 0)));
         if (paused) { lines.push(paused); kind = "paused"; }
@@ -1880,6 +1886,10 @@ var ScholiumRunner = {
 
   // take papers out of the queue; when nothing is left, a pause ends
   dequeue(keys) {
+    // a paper waiting for its second try ends as cancelled
+    for (const j of this.queue) {
+      if (j.retried && keys.includes(j.att.key)) this.notes.set(j.att.key, { text: this.text("cancelled"), error: true, at: Date.now() });
+    }
     this.queue = this.queue.filter(j => !keys.includes(j.att.key));
     if (!this.queue.length && this.paused) {
       clearTimeout(this.paused.timer);
@@ -1894,6 +1904,9 @@ var ScholiumRunner = {
     this.draining = true;
     try {
       while (this.queue.length && !this.paused) {
+        // a paper whose connection failed waits for its second try at the head of the queue
+        const wait = (this.queue[0].retryAt || 0) - Date.now();
+        if (wait > 0) { await Zotero.Promise.delay(Math.min(wait, 1000)); continue; }
         const job = this.queue.shift();
         let outcome = null;
         try { outcome = await this.run(job); }
@@ -1906,6 +1919,10 @@ var ScholiumRunner = {
           this.log("run failed: " + e);
         }
         if (outcome && outcome.limited) this.pause(job, outcome);
+        if (outcome && outcome.retry) {
+          this.queue.unshift(Object.assign({}, job, { retried: true, retryAt: Date.now() + this.NET_RETRY_MS }));
+          this.refresh();
+        }
       }
     } finally {
       this.draining = false;
@@ -1984,8 +2001,9 @@ var ScholiumRunner = {
     const agent = job.agent === "codex" ? "codex" : "claude";
     this.job = { title: job.title, key, libraryID: job.att.libraryID, started, agent, step: job.resume ? "continuing" : "starting" };
     const running = this.job;
-    // a continued conversation keeps its transcript; a new run starts afresh
-    this.transcript = job.resume ? ((await this.readLog(key, agent)) || { entries: [] }).entries : [];
+    // a continued conversation, and a second try, keep the transcript; a new run starts afresh
+    const keep = !!(job.resume || job.retried);
+    this.transcript = keep ? ((await this.readLog(key, agent)) || { entries: [] }).entries : [];
     this.transcriptKey = key;
     const logPath = this.logPath(key, agent);
     this.logs.set(key, logPath);
@@ -2002,9 +2020,11 @@ var ScholiumRunner = {
       return;
     }
     await IOUtils.makeDirectory(this.outDir(key), { createAncestors: true, ignoreExisting: true });
-    if (!job.resume || !(await this.exists(logPath))) await IOUtils.writeUTF8(logPath, "");
-    // the user's words, or an automatic continuation, go into the log as the plugin's own lines
-    const mark = job.say || job.extra ? { type: "scholium", subtype: "prompt", text: job.say || this.text("extraLabel") + job.extra }
+    if (!keep || !(await this.exists(logPath))) await IOUtils.writeUTF8(logPath, "");
+    // the user's words, or an automatic continuation, go into the log as the plugin's own lines; a
+    // second try has them already
+    const mark = job.retried ? null
+      : job.say || job.extra ? { type: "scholium", subtype: "prompt", text: job.say || this.text("extraLabel") + job.extra }
       : job.resume ? { type: "scholium", subtype: "continue" } : null;
     if (mark) {
       await IOUtils.writeUTF8(logPath, JSON.stringify(mark) + "\n", { mode: "append" });
@@ -2033,10 +2053,28 @@ var ScholiumRunner = {
     } else {
       message = (summary || ctx.stderr.trim().split("\n").pop() || `exit ${exitCode}`).slice(0, 300);
       if (!(result && this.entries(result).length)) this.appendEntries([{ kind: "final", text: message, error: true }]);
+      // the connection failed before the agent used a tool, so nothing was written: one more try
+      if (!job.retried && !ctx.acted && this.transient(message, ctx.errorInfo)) {
+        const mark = { type: "scholium", subtype: "retry" };
+        await IOUtils.writeUTF8(logPath, JSON.stringify(mark) + "\n", { mode: "append" });
+        this.appendEntries(this.entries(mark));
+        if (this.job === running) this.job = null;
+        return { exitCode, result, retry: true };
+      }
       this.notice(job, `${this.text("failed")} · ${message}`, true);
     }
     this.finish(job, ok, message, this.outcome(result, current.cancelled, started), this.tokenDetail(result));
     return { exitCode, result };
+  },
+
+  // whether a failure is the connection to the agent's service (a timeout, a lost connection, an
+  // overloaded or failing server), which a second try may not meet
+  transient(message, info) {
+    const kind = info && typeof info === "object" ? Object.keys(info)[0] : info;
+    if (["httpConnectionFailed", "responseStreamConnectionFailed", "responseStreamDisconnected", "responseTooManyFailedAttempts",
+         "serverOverloaded", "internalServerError"].includes(kind)) return true;
+    return /timed? ?out|timeout|connection|network|socket|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|error sending request|overloaded|API Error: 5\d\d/i
+      .test(String(message || ""));
   },
 
   // the running paper reached a step; steps only go forward
@@ -2078,6 +2116,7 @@ var ScholiumRunner = {
           this.sessions.set(key, { agent: "claude", id: ctx.session });
         }
         if (event.type === "result") ctx.result = event;
+        if (event.type === "assistant" && ((event.message && event.message.content) || []).some(c => c && c.type === "tool_use")) ctx.acted = true;
         if (event.type === "rate_limit_event" && event.rate_limit_info) {
           const info = event.rate_limit_info;
           if (info.status === "rejected") ctx.limit = { until: info.resetsAt > 0 ? info.resetsAt * 1000 : null };
@@ -2246,6 +2285,7 @@ var ScholiumRunner = {
         if (msg.method === "account/rateLimits/updated" && p.rateLimits) state.limits = p.rateLimits;
         if (msg.method === "turn/completed" && p.turn && (!state.turn || p.turn.id === state.turn)) { state.done = p.turn; ended(); }
         this.appendEntries(this.entries(msg));
+        if (msg.method === "item/started" && !["userMessage", "agentMessage", "reasoning", "plan", "hookPrompt"].includes(item.type)) ctx.acted = true;
         this.advance(ctx, this.codexStep(msg));
       }
     });
@@ -2307,6 +2347,7 @@ var ScholiumRunner = {
     }
     const failed = turn.status !== "completed";
     const error = turn.error || {};
+    ctx.errorInfo = error.codexErrorInfo || null;
     if (failed && (error.codexErrorInfo === "usageLimitExceeded" || error.codexErrorInfo === "rateLimitExceeded")) {
       ctx.limit = { until: this.codexReset(state.limits) };
     }
