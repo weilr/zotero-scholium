@@ -766,6 +766,8 @@ var ScholiumRunner = {
     if (home) args.push("--add-dir", PathUtils.join(home, ".claude", "skills", "zotero-scholium"));
     const outRoot = PathUtils.join(Zotero.DataDirectory.dir, "tmp", "scholium").replace(/\\/g, "/");
     args.push("--allowedTools", "Skill", "Read", `Write(${outRoot}/**)`, `Edit(${outRoot}/**)`);
+    // the user's MCP servers and hooks stay out of the run; their skills stay
+    args.push("--strict-mcp-config", "--settings", JSON.stringify({ disableAllHooks: true }));
     const model = this.modelPref("claude");
     if (model) args.push("--model", model);
     const effort = this.effort("claude");
@@ -2233,6 +2235,27 @@ var ScholiumRunner = {
     return { name: skill.name, path: skill.path };
   },
 
+  // what keeps the user's own Codex setup out of a run: their MCP servers, switched off for the thread,
+  // and their installed plugins, disabled for its turns; config.toml is not changed, and of the
+  // configuration only the servers' names are kept
+  async codexQuiet(rpc) {
+    const quiet = { config: null, plugins: [] };
+    try {
+      const read = await rpc.request("config/read", {});
+      const names = Object.keys((read && read.config && read.config.mcp_servers) || {});
+      if (names.length) quiet.config = { mcp_servers: Object.fromEntries(names.map(name => [name, { enabled: false }])) };
+    } catch (e) { this.log("config/read failed: " + e); }
+    try {
+      const installed = await rpc.request("plugin/installed", {});
+      for (const market of (installed && installed.marketplaces) || []) {
+        for (const plugin of (market && market.plugins) || []) {
+          if (plugin && plugin.id && plugin.installed && plugin.enabled) quiet.plugins.push(plugin.id);
+        }
+      }
+    } catch (e) { this.log("plugin/installed failed: " + e); }
+    return quiet;
+  },
+
   // where a Codex turn may write: the output folders, the profile folder, and the folder of the local
   // API key that scholium.py keeps (%APPDATA% or ~/.config); it may reach Zotero's local server
   codexRoots() {
@@ -2306,6 +2329,8 @@ var ScholiumRunner = {
       const settings = { cwd, approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandbox: "workspace-write",
                          serviceName: "scholium-bridge" };
       if (model) settings.model = model;
+      const quiet = await this.codexQuiet(rpc);
+      if (quiet.config) settings.config = quiet.config;
       const skill = job.resume ? null : await this.codexSkill(rpc, cwd);
       const opened = job.resume ? await rpc.request("thread/resume", Object.assign({ threadId: job.resume }, settings))
                                 : await rpc.request("thread/start", settings);
@@ -2322,6 +2347,7 @@ var ScholiumRunner = {
       const params = { threadId: thread, input, sandboxPolicy: { type: "workspaceWrite", writableRoots: roots, networkAccess: true,
                                                                  excludeTmpdirEnvVar: false, excludeSlashTmp: false } };
       if (model) params.model = model;
+      if (quiet.plugins.length) params.disabledPluginIds = quiet.plugins;
       const effort = this.effort("codex");
       if (effort) params.effort = effort;
       if (!ctx.current.cancelled) {

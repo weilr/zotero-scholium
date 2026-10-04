@@ -311,6 +311,10 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
           .concat(co.skillAt === cwd ? [{ name: 'zotero-scholium', path: cwd === '/data' ? '/data/.agents/skills/zotero-scholium/SKILL.md'
                                                                                       : '/home/u/.codex/skills/zotero-scholium/SKILL.md', enabled: true }] : []) })) });
         case 'skills/extraRoots/set': return answer({});
+        case 'plugin/installed': return answer({ marketplaces: [{ name: 'm', plugins: [
+          { id: 'superpowers@m', installed: true, enabled: true }, { id: 'off@m', installed: true, enabled: false },
+          { id: 'offered@m', installed: false, enabled: false }] }, { name: 'remote', plugins: [{ id: 'zotero@remote', installed: true, enabled: true }] }],
+          marketplaceLoadErrors: [] });
         case 'thread/start': return answer({ thread: { id: 'T1' }, model: p.model || 'gpt-6-astra' });
         case 'thread/resume': return answer({ thread: { id: p.threadId }, model: p.model || 'gpt-6-astra' });
         case 'turn/start': {
@@ -1199,6 +1203,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     facts.codexFollowUp = { claudeCalls: h.log.calls.length, methods: sent2.filter(m => typeof m.method === 'string').map(m => m.method),
                             resume: sent2.find(m => m.method === 'thread/resume').params, input: sent2.find(m => m.method === 'turn/start').params.input,
                             effort: sent2.find(m => m.method === 'turn/start').params.effort, state: p.view().state,
+                            disabled: sent2.find(m => m.method === 'turn/start').params.disabledPluginIds,
                             entries: p.view().entries.slice(-4), results: lines().filter(l => l.type === 'result').length,
                             markers: lines().filter(l => l.type === 'scholium').map(l => l.text) };
   }
@@ -1547,6 +1552,8 @@ def test_claude_is_started_headless_in_the_data_directory(facts):
     assert args[args.index("--add-dir") + 1] == "/home/u/.claude/skills/zotero-scholium"
     i = args.index("--allowedTools")
     assert args[i + 1:i + 5] == ["Skill", "Read", "Write(/data/tmp/scholium/**)", "Edit(/data/tmp/scholium/**)"]
+    # the user's MCP servers and hooks stay out of the run
+    assert "--strict-mcp-config" in args and json.loads(args[args.index("--settings") + 1]) == {"disableAllHooks": True}
 
 
 def test_prompt_names_the_paper_and_the_unattended_rules(facts):
@@ -1938,12 +1945,15 @@ def test_codex_runs_the_skill_in_a_sandbox_through_its_app_server(facts):
     r = facts["codexRun"]
     assert r["call"] == {"command": CODEX_APP, "args": ["app-server"], "workdir": "/data/tmp/scholium",
                          "env": {"PYTHONIOENCODING": "utf-8"}, "append": True}
-    assert r["methods"] == ["initialize", "initialized", "skills/list", "skills/list", "skills/extraRoots/set", "thread/start", "turn/start"]
+    assert r["methods"] == ["initialize", "initialized", "config/read", "plugin/installed", "skills/list", "skills/list",
+                            "skills/extraRoots/set", "thread/start", "turn/start"]
     assert r["skillLists"] == [["/data/tmp/scholium"], ["/data"]] and r["roots"] == ["/data/.agents/skills"]
+    # the user's MCP servers and installed plugins stay out of the thread
     assert r["thread"] == {"cwd": "/data/tmp/scholium", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
-                           "sandbox": "workspace-write", "serviceName": "scholium-bridge", "model": "gpt-6-luna"}
+                           "sandbox": "workspace-write", "serviceName": "scholium-bridge", "model": "gpt-6-luna",
+                           "config": {"mcp_servers": {"s": {"enabled": False}}}}
     roots = ["/data/tmp/scholium", "/data/zotero-scholium", "/appdata/zotero-scholium"]
-    assert r["turn"] == {"threadId": "T1", "model": "gpt-6-luna", "effort": "high",
+    assert r["turn"] == {"threadId": "T1", "model": "gpt-6-luna", "effort": "high", "disabledPluginIds": ["superpowers@m", "zotero@remote"],
                          "input": [{"type": "text", "elements": []},
                                    {"type": "skill", "name": "zotero-scholium", "path": "/data/.agents/skills/zotero-scholium/SKILL.md"}],
                          "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": roots, "networkAccess": True,
@@ -1983,9 +1993,11 @@ def test_codex_transcript_state_and_log_read_like_claude_codes(facts):
 def test_codex_follow_up_continues_its_thread_whatever_agent_is_chosen(facts):
     f = facts["codexFollowUp"]
     assert f["claudeCalls"] == 0
-    assert f["methods"] == ["initialize", "initialized", "thread/resume", "turn/start"]
+    assert f["methods"] == ["initialize", "initialized", "config/read", "plugin/installed", "thread/resume", "turn/start"]
     assert f["resume"] == {"threadId": "T1", "cwd": "/data/tmp/scholium", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
-                           "sandbox": "workspace-write", "serviceName": "scholium-bridge", "model": "gpt-6-luna"}
+                           "sandbox": "workspace-write", "serviceName": "scholium-bridge", "model": "gpt-6-luna",
+                           "config": {"mcp_servers": {"s": {"enabled": False}}}}
+    assert f["disabled"] == ["superpowers@m", "zotero@remote"]
     assert len(f["input"]) == 1 and f["input"][0]["text"].endswith("第 5 页那条译文改短\n\n结束时最后一行只写一句：改了什么，剩余警告。")
     assert f["effort"] == "high"
     # only this run's calls and tokens: the thread's totals include the earlier turn

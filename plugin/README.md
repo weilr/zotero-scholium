@@ -41,6 +41,8 @@ Each Claude Code run:
 - works in the Zotero data directory with `claude -p --output-format stream-json`, the permission
   mode `auto`, file writes pre-approved only inside `<data dir>/tmp/scholium/`, and the skill
   directory added;
+- runs without the user's MCP servers and hooks (`--strict-mcp-config`, `disableAllHooks`); the
+  user's skills stay;
 - logs every event to `<data dir>/tmp/scholium/<attachment key>/claude-run.jsonl`.
 
 Each Codex run:
@@ -48,6 +50,8 @@ Each Codex run:
 - talks to `codex app-server` over JSON-RPC, in a new thread or, for a follow-up, in the paper's
   thread, with `<data dir>/tmp/scholium/` as working directory and the zotero-scholium skill
   attached to the message;
+- runs without the user's MCP servers and installed plugins, switched off for the thread only;
+  Codex's `config.toml` is not changed;
 - runs in Codex's `workspace-write` sandbox: commands may write only inside `<data dir>/tmp/scholium/`,
   `<data dir>/zotero-scholium/` and `%APPDATA%/zotero-scholium/` (`~/.config/zotero-scholium/` on
   macOS and Linux), and may use the network, which the skill needs for Zotero's local server;

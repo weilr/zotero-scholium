@@ -4,6 +4,8 @@
 
 - A run that fails on the connection to Claude Code's or Codex's service before the agent used any
   tool is tried once more after 30 seconds; **Cancel** ends the wait.
+- One-click runs leave out the user's MCP servers and hooks (Claude Code) and the user's MCP servers
+  and installed plugins (Codex, for the run's thread only); the user's skills stay.
 
 ## 0.1.5 (2026-10-04)
 
