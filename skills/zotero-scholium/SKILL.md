@@ -29,15 +29,15 @@ Run `python <skill dir>/scripts/scholium.py …` from any directory. Use a separ
 
 ### 0. Profile
 
-Read `<Zotero data dir>/zotero-scholium/profile.md` (`scholium.py profile --path` prints the location). Its `## User's rules (always win)` section overrides the learned statistics, and both override the defaults above. If the file does not exist, run `scholium.py profile --from-library`, complete the draft with the user, and record their corrections in that section. Details: `references/profile.md`.
+Read `<Zotero data dir>/zotero-scholium/profile.md` (`scholium.py profile --path` prints the location). Its `## User's rules (always win)` section overrides the learned statistics, and both override the defaults above. If the file does not exist, run `scholium.py profile --from-library`, complete the draft with the user, and record their corrections in that section. Details: `references/profile.md`. When the profile or the user asks to follow the style of earlier annotations, `scholium.py samples [KEY …] [--query WORDS] --exclude <this paper's key>` prints a few highlights, margin texts and the start of the reading note of each such paper; do not dump annotations or notes through the API.
 
 ### 1. Locate the item and the PDF (read-only)
 
+```bash
+python <skill dir>/scripts/scholium.py status --query "<title words>"   # matching items and their keys
+python <skill dir>/scripts/scholium.py status <ITEM_KEY>                # the paper's current state
 ```
-GET http://localhost:23119/api/users/0/items?q=<title words>        -> item key
-GET http://localhost:23119/api/users/0/items/<ITEM_KEY>/children   -> PDF attachment key and filename
-```
-The file is `<Zotero data dir>/storage/<ATTACHMENT_KEY>/<filename>`. Prefer the published version over a preprint. No response: Zotero is not running; ask the user to start it.
+`status` lists the item's PDF attachments with their file paths, the annotations already on each (the tool's own by type and colour, and the user's), and the notes under the item (title, length, whether the tool wrote them). Prefer the published version over a preprint. An error saying Zotero does not answer: ask the user to start it.
 
 ### 2. Read the paper once, then write the configuration
 
@@ -66,8 +66,10 @@ First run without `--apply`. Review the report and correct the configuration bef
 - `missed`: unknown ids, or phrases not found (each with the closest passage, `closest`).
 - `style_warnings`: formatting, banned phrases, duplicate or overlapping highlights, core count or note math issues; kinds are listed in `references/configuration.md`.
 - `translation_warnings`: a comment with terms or numbers absent from the sentence, or much longer or shorter than it. Correct the translation or extend the highlight to cover its source.
-- `layout_warnings`: a margin box without free space; move the note to a neighbouring paragraph or drop it. Open a preview PNG only for this, and only that page.
+- `layout_warnings`: a margin box without free space: move the note to a neighbouring paragraph or drop it. A top or bottom band without room: the warning gives how many characters fit at its font size and, when one exists, a smaller font size that fits all of it; shorten the text to that length or set that font size. Open a preview PNG only for a margin box, and only that page.
 - `colors`, `ambiguous_matches`, `existing_annotations`, `pdf_sha256`, `now_in_zotero`: `references/configuration.md`.
+
+The report names each problem and what to change; reading `scholium.py`'s source is not needed.
 
 After successful apply, ask the user to close and reopen the PDF. `applied: false` names the cause in `apply_error` (`references/backends.md`). If a write partially succeeded or read-back failed, run `--list` to reconcile the stored items before retrying. Do not re-read `annotations.json` or the configuration: the comments are already in your context.
 
@@ -89,4 +91,4 @@ A content review, when the user asks for one, runs in a fresh sub-agent with the
 - **Reading note**: paragraphs rather than labelled bullet lists; concrete figures; first-person assessments and open questions; limitations in the authors' words and the reader's own; the citation and code link at the end, no sign-off. No stock phrases, em-dash asides, emoji, or aphoristic closing sentences.
 - Before applying, read every requested output once more: comments must stay faithful to the source; reader judgements and questions belong in margin notes and reading notes.
 
-For configuration fields, defaults and report details, read `references/configuration.md`. For annotation data formats, read `references/zotero-annotations.md`.
+For configuration fields, defaults and report details, read `references/configuration.md`. Read `references/zotero-annotations.md` (annotation data formats) only when investigating a write problem.

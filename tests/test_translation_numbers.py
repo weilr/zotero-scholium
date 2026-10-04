@@ -33,6 +33,9 @@ def translation_warnings(source, translated):
     ("Time is 5ms.", "时间为 5 s。"),
     ("The value is 1.5widgets.", "数值为 1。"),
     ("Latency is 5 ms.", "延迟为5秒。"),
+    ("The whole MP-­3 took 8 min.", "整个 MP-4 用时 8 min。"),
+    ("It uses a 2.4-GHz access point.", "它使用 2.4 MHz 接入点。"),
+    ("Values of 10-20 ms.", "取值 10-20 s。"),
 ])
 def test_warns_when_translation_changes_number_meaning(source, translated):
     warnings = translation_warnings(source, translated)
@@ -63,6 +66,11 @@ def test_warns_when_translation_changes_number_meaning(source, translated):
     ("Latency is 5 us.", "延迟为5微秒。"),
     ("Latency is 5 μs.", "延迟为5微秒。"),
     ("Latency is 5 ns.", "延迟为5纳秒。"),
+    # PDF text: soft hyphens, Unicode hyphens, a hyphen between a number and its unit
+    ("The whole MP-­3 took 8 min.", "整个 MP-3 用时 8 min。"),
+    ("Phase MP‑1 maps the area.", "阶段 MP-1 绘制该区域地图。"),
+    ("It uses a 2.4-GHz access point.", "它使用 2.4 GHz 接入点。"),
+    ("A 5‑ms delay.", "5 ms 的延迟。"),
 ])
 def test_accepts_equivalent_numeric_notation(source, translated):
     assert translation_warnings(source, translated) == []

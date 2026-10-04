@@ -175,6 +175,8 @@ pip install .                            # 提供 `scholium` 命令
 3. **生成、检查、写入。** 首先不带 `--apply` 运行，检查下述四类报告并修正配置，再写入。
 
    ```bash
+   scholium status ITEM_KEY                 # 这篇论文的 PDF、其上已有的注释和笔记（--query 关键词：查找条目）
+   scholium samples --exclude ITEM_KEY      # 以往运行的几条高亮、页边批注和笔记开头，作为风格参考
    scholium extract --pdf paper.pdf --sentences out/sentences.json --out out/sentences.txt   # 带编号的句子，供阅读与选句
    scholium --config config.json            # 生成并报告，不写入
    scholium --config config.json --apply    # 生成、检查、写入 Zotero、回读（Zotero 10 首次运行需确认授权对话框）

@@ -22,7 +22,7 @@ Usage:    scholium --config config.json [--apply] [--list] [--backend auto|api|b
 """
 import argparse
 import difflib, glob, hashlib, json, os, sys, re, time, datetime, collections
-import urllib.request, urllib.error
+import urllib.request, urllib.error, urllib.parse
 from decimal import Decimal
 import pymupdf
 
@@ -431,6 +431,52 @@ def _summary_annotation(pi, sp, rect, warning=None):
     return ann
 
 
+MIN_BAND_FONT = 7.0      # the smallest font size a band's warning proposes (pt)
+EDGE_MARGIN = 2.0        # distance between a band in the strip above the first line and the page edge (pt)
+
+
+def top_strip(pi, occupied, text_lines, x0, x1):
+    """The widest free piece of the strip between the page edge and the first text line within x0..x1, beside a logo
+    or another figure there: (x0, x1, y_top, y_bottom) in PDF space, or None when nothing useful is free."""
+    tops = [r[3] for r in text_lines if r[0] < x1 and r[2] > x0]
+    y_top, y_bottom = pi.H - EDGE_MARGIN, (max(tops) if tops else 0.7 * pi.H) + 2.0
+    if y_top - y_bottom < 10:
+        return None
+    blocked = sorted((max(r[0], x0), min(r[2], x1)) for r in occupied
+                     if r[1] < y_top and r[3] > y_bottom and r[0] < x1 and r[2] > x0)
+    free, at = [], x0
+    for a, b in blocked:
+        if a - 3 > at:
+            free.append((at, a - 3))
+        at = max(at, b + 3)
+    if x1 > at:
+        free.append((at, x1))
+    best = max(free, key=lambda f: f[1] - f[0], default=None)
+    return (best[0], best[1], y_top, y_bottom) if best and best[1] - best[0] >= 60 else None
+
+
+def band_warning(sp, fits):
+    """The warning of a top or bottom band that has no room: how many characters of its text fit at its font size, and
+    the font size (down to MIN_BAND_FONT) at which all of it fits; `fits(sp)` says whether a band has room."""
+    end = sp["place"]
+    other = "bottom" if end == "top" else "top"
+    text = TAG_RE.sub("", sp["text"])
+    lo, hi = 0, len(text)
+    while lo < hi:                                     # the longest beginning of the text that fits
+        mid = (lo + hi + 1) // 2
+        if fits(dict(sp, text=text[:mid])):
+            lo = mid
+        else:
+            hi = mid - 1
+    if not lo:
+        return f"no free space at the {end} of the page; use place: {other}"
+    smaller = next((f for f in (sp["font_size"] - 0.5 * k for k in range(1, 40)) if f >= MIN_BAND_FONT
+                    and fits(dict(sp, font_size=f))), None)
+    return (f"no room at the {end} of the page for all of this text: about {lo} of its {len(text)} characters fit at "
+            f"font_size {sp['font_size']:g}" + (f" (all of it at font_size {smaller:g})" if smaller else "")
+            + "; shorten it" + (", set that font_size" if smaller else "") + f", or use place: {other}")
+
+
 def layout_page_summaries(pi, specs, page_obstacles, missed):
     """Lay out one page's summaries and return their annotations.
 
@@ -452,17 +498,17 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
     # 2. bands across the text column
     bx0, bx1 = pi.body_x0, pi.body_x1
     for sp in [s for s in specs if not s["rect"] and s["kind"] == "text" and s["place"] in ("top", "bottom")]:
-        h = _box_height(sp, bx1 - bx0)
         occ = [(r[1], r[3]) for r in occupied + text_lines if r[0] < bx1 and r[2] > bx0]
-        if sp["place"] == "top":
-            blk = {"y_top": pi.H - BAND_MARGIN, "h": h}
-            place_blocks([blk], occ, floor=0.7 * pi.H, ceiling=pi.H - BAND_MARGIN)
-            warn = "no free space at the top of the page; shorten the text or use place: bottom"
-        else:
-            # the footer (page number, running line) is any text line inside the column within 8 % of the page bottom;
-            # the band goes between the text and the footer, or, when that gap is too small, beneath the footer
-            footer = [r for r in text_lines if r[0] < bx1 and r[2] > bx0 and r[3] < 0.08 * pi.H]
-            footer_top = max((r[3] for r in footer), default=0.0)
+        # the footer (page number, running line) is any text line inside the column within 8 % of the page bottom;
+        # a bottom band goes between the text and the footer, or, when that gap is too small, beneath the footer
+        footer = [r for r in text_lines if r[0] < bx1 and r[2] > bx0 and r[3] < 0.08 * pi.H]
+        footer_top = max((r[3] for r in footer), default=0.0)
+
+        def place(h, top=sp["place"] == "top"):
+            if top:
+                blk = {"y_top": pi.H - BAND_MARGIN, "h": h}
+                place_blocks([blk], occ, floor=0.7 * pi.H, ceiling=pi.H - BAND_MARGIN)
+                return blk
             blk = {"y_top": max(BAND_MARGIN, footer_top + 3.0) + h, "h": h}
             place_blocks([blk], occ + ([(0.0, footer_top)] if footer else []), floor=BAND_MARGIN, ceiling=0.3 * pi.H)
             if blk.get("layout_warning") and footer:
@@ -470,9 +516,24 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
                 place_blocks([below], occ, floor=BAND_MARGIN, ceiling=min(r[1] for r in footer) - 3.0)
                 if not below.get("layout_warning"):
                     blk = below
-            warn = "no free space at the bottom of the page; shorten the text or use place: top"
-        rect = [bx0, blk["y_top"] - h, bx1, blk["y_top"]]
-        anns.append(_summary_annotation(pi, sp, rect, warn if blk.get("layout_warning") else None)); occupied.append(rect)
+            return blk
+
+        # a top band without room across the column goes into the strip above the first line, beside a logo there
+        strip = top_strip(pi, occupied, text_lines, bx0, bx1) if sp["place"] == "top" else None
+
+        def in_strip(v):
+            return bool(strip) and _box_height(v, strip[1] - strip[0]) <= strip[2] - strip[3]
+
+        h = _box_height(sp, bx1 - bx0)
+        blk = place(h)
+        rect, warn = [bx0, blk["y_top"] - h, bx1, blk["y_top"]], None
+        if blk.get("layout_warning"):
+            if in_strip(sp):
+                hs = _box_height(sp, strip[1] - strip[0])
+                rect = [strip[0], strip[2] - hs, strip[1], strip[2]]
+            else:
+                warn = band_warning(sp, lambda v: in_strip(v) or not place(_box_height(v, bx1 - bx0)).get("layout_warning"))
+        anns.append(_summary_annotation(pi, sp, rect, warn)); occupied.append(rect)
     # 3. margin boxes and sticky notes beside their anchors (a sticky note ignores `place`)
     groups = {}
     for sp in [s for s in specs if not s["rect"] and (s["kind"] == "note" or s["place"] == "margin")]:
@@ -618,6 +679,9 @@ def build(cfg, obstacles=None):
         # existing annotations and figures are occupied space for every summary on the page
         page_obstacles = list((obstacles or {}).get(p, [])) + page_figure_rects(doc[p])
         out.extend(layout_page_summaries(pi, page_specs, page_obstacles, missed))
+    for a in out:   # soft hyphens and zero-width spaces copied from the PDF into a comment are left out
+        if a.get("comment"):
+            a["comment"] = INVISIBLE_RE.sub("", a["comment"])
     os.makedirs(cfg["out_dir"], exist_ok=True)
     for pg in cfg["preview_pages"]:
         p = int(pg) - 1
@@ -655,12 +719,13 @@ def build(cfg, obstacles=None):
 
 
 CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
+INVISIBLE_RE = re.compile("[\u00ad\u200b]")   # soft hyphen, zero-width space
 NUMBER_RE = re.compile(
     r"(?<![A-Za-z0-9_.])(?P<value>[+−-]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)"
     r"(?:[eE][+-]?\d+)?)"
     r"(?:\s*(?P<scale>[kK](?![A-Za-z])|[千万亿]))?"
     r"(?:\s*(?P<percent>[%％]))?"
-    r"(?:\s*(?P<unit>[kmgt]i?b|[numμ]?s|[kmg]?hz|毫秒|微秒|纳秒|秒)(?![A-Za-z]))?"
+    r"(?:\s*-?\s*(?P<unit>[kmgt]i?b|[numμ]?s|[kmg]?hz|毫秒|微秒|纳秒|秒)(?![A-Za-z]))?"
     r"(?![A-Za-z0-9_]|\.\d|,\d)"
 )
 
@@ -669,6 +734,8 @@ def _tokens(s):
     """Latin words (3+ characters) and numbers, lower-cased; hyphenation across lines is joined first,
     and both the joined form and its two halves count as terms."""
     s = "".join(LIG.get(c, c) for c in s)  # expand ligatures so that "preﬁx" and "prefix" are the same term
+    # PDF text carries soft hyphens and zero-width spaces ("MP-­1") and Unicode hyphens; the comment has plain ones
+    s = re.sub("[‐‑‒]", "-", INVISIBLE_RE.sub("", s))
     toks = set()
     for m in re.finditer(r"([A-Za-z]{2,})-\s+([A-Za-z]{2,})", s):
         toks.update(part.lower() for part in m.groups() if len(part) >= 3)
@@ -1765,6 +1832,147 @@ def pick_backend(requested, cfg):
     return None, None, "no backend available"
 
 
+def _get(path):
+    """A read of the local API (Zotero 7 and later), as JSON."""
+    s, _, t = http("GET", "/api/users/0" + path)
+    if s != 200:
+        raise RuntimeError(f"GET {path}: HTTP {s}: {t[:160]}" if s else "Zotero does not answer on 127.0.0.1:23119; is it running?")
+    return json.loads(t)
+
+
+def _own(row):
+    return bool({t["tag"] for t in row["data"].get("tags", [])} & OWN_TAGS)
+
+
+def _plain(html):
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html or "")).strip()
+
+
+def _paper(key):
+    """The regular item and its PDF attachment rows, from an item key or a PDF attachment key."""
+    row = _get(f"/items/{urllib.parse.quote(key)}")
+    if row["data"]["itemType"] == "attachment":
+        parent = row["data"].get("parentItem")
+        if not parent:
+            return None, [row], []
+        item = _get(f"/items/{parent}")
+    else:
+        item = row
+    kids = _get(f"/items/{item['key']}/children")
+    pdfs = [k for k in kids if k["data"]["itemType"] == "attachment" and k["data"].get("contentType") == "application/pdf"]
+    return item, pdfs, [k for k in kids if k["data"]["itemType"] == "note"]
+
+
+def paper_status(key):
+    """What a paper already has: each PDF with its file and the annotations on it (the tool's own counted by type and
+    colour, the user's counted), and the notes under the item (title, length, whether the tool wrote them)."""
+    item, pdfs, notes = _paper(key)
+    data_dir = zotero_data_dir()
+    out = []
+    for p in pdfs:
+        d = p["data"]
+        path = os.path.join(data_dir, "storage", p["key"], d["filename"]) if d.get("filename") else (d.get("path") or "")
+        anns = _get(f"/items/{p['key']}/children?itemType=annotation")
+        own = [a for a in anns if _own(a)]
+        out.append({"key": p["key"], "file": path, "exists": bool(path) and os.path.exists(path),
+                    "own": len(own), "others": len(anns) - len(own),
+                    "own_by_type": dict(collections.Counter(a["data"]["annotationType"] for a in own)),
+                    "own_by_color": dict(collections.Counter(a["data"].get("annotationColor") for a in own))})
+    return {"item": {"key": item["key"], "title": item["data"].get("title", "")[:200], "year": (item["data"].get("date") or "")[:4]}
+            if item else None,
+            "pdfs": out,
+            "notes": [{"key": n["key"], "title": note_title_from_html(n["data"].get("note", ""))[:100], "own": _own(n),
+                       "characters": len(_plain(n["data"].get("note", ""))), "modified": n["data"].get("dateModified", "")[:10]}
+                      for n in notes],
+            "profile": os.path.join(profile_dir(), "profile.md")}
+
+
+def status_main(argv):
+    """`scholium status KEY` prints what a paper already has, before a configuration is written: its PDF attachments
+    with their files, the annotations on each, and the notes under the item. `scholium status --query WORDS` lists
+    the matching items."""
+    ap = argparse.ArgumentParser(prog="scholium status", description=status_main.__doc__)
+    ap.add_argument("key", nargs="?", help="item key or PDF attachment key")
+    ap.add_argument("--query", help="title words: list the matching items")
+    a = ap.parse_args(argv)
+    if not a.key and not a.query:
+        ap.error("give a key or --query")
+    try:
+        if a.query:
+            rows = _get(f"/items/top?q={urllib.parse.quote(a.query)}&limit=10")
+            out = {"matches": [{"key": r["key"], "title": r["data"].get("title", "")[:150], "year": (r["data"].get("date") or "")[:4],
+                                "type": r["data"]["itemType"]} for r in rows]}
+        else:
+            out = paper_status(a.key)
+    except RuntimeError as e:
+        out = {"error": str(e)}
+    print(json.dumps(out, ensure_ascii=False, indent=1))
+    return 1 if "error" in out else 0
+
+
+def paper_samples(item, pdfs, notes, per_kind):
+    """A few of the tool's annotations on one paper and the start of its reading note, evenly spread over the paper."""
+    anns = []
+    for p in pdfs:
+        anns += [a for a in _get(f"/items/{p['key']}/children?itemType=annotation") if _own(a)]
+    anns.sort(key=lambda a: a["data"].get("annotationSortIndex", ""))
+
+    def spread(rows):     # first, last and evenly between
+        if len(rows) <= per_kind or per_kind < 2:
+            return rows[:per_kind]
+        return [rows[round(i * (len(rows) - 1) / (per_kind - 1))] for i in range(per_kind)]
+    highlights = [a for a in anns if a["data"]["annotationType"] in ("highlight", "underline") and a["data"].get("annotationComment")]
+    texts = [a for a in anns if a["data"]["annotationType"] in ("text", "note")]
+    note = max((n for n in notes if _own(n)), key=lambda n: n["data"].get("dateModified", ""), default=None)
+    return {"item": item["key"] if item else None, "title": (item or {}).get("data", {}).get("title", "")[:120],
+            "highlights": [{"page": a["data"].get("annotationPageLabel"), "color": a["data"].get("annotationColor"),
+                            "text": (a["data"].get("annotationText") or "")[:160], "comment": a["data"]["annotationComment"][:240]}
+                           for a in spread(highlights)],
+            "margin_and_page_texts": [{"page": a["data"].get("annotationPageLabel"), "text": (a["data"].get("annotationComment") or "")[:240]}
+                                      for a in spread(texts)],
+            "note_start": _plain(note["data"].get("note", ""))[:700] if note else None}
+
+
+def samples_main(argv):
+    """`scholium samples` prints short examples of the tool's earlier annotations in this library, as a reference
+    for their style: for each paper a few highlights with their comments, margin and page texts, and the start of the
+    reading note. Without keys it takes the papers annotated most recently."""
+    ap = argparse.ArgumentParser(prog="scholium samples", description=samples_main.__doc__)
+    ap.add_argument("keys", nargs="*", help="item or PDF attachment keys")
+    ap.add_argument("--query", help="title words of the papers to take")
+    ap.add_argument("--exclude", action="append", default=[], help="an item or attachment key to leave out (the paper being annotated)")
+    ap.add_argument("--papers", type=int, default=2, help="how many papers (default 2)")
+    ap.add_argument("--per-kind", type=int, default=4, help="examples of each kind per paper (default 4)")
+    a = ap.parse_args(argv)
+    try:
+        keys = list(a.keys)
+        if a.query:
+            keys += [r["key"] for r in _get(f"/items/top?q={urllib.parse.quote(a.query)}&limit=10")]
+        if not keys:     # the attachments of the most recently changed annotations of the tool, a page at a time
+            for start in range(0, 2000, 100):
+                rows = _get(f"/items?itemType=annotation&tag={TAG}&sort=dateModified&direction=desc&limit=100&start={start}")
+                keys = list(dict.fromkeys(keys + [r["data"]["parentItem"] for r in rows if r["data"].get("parentItem")]))
+                if len(rows) < 100 or len(set(keys) - set(a.exclude)) > a.papers:
+                    break
+        out, seen = [], set(a.exclude)
+        for key in keys:
+            if len(out) >= a.papers:
+                break
+            item, pdfs, notes = _paper(key)
+            ident = {item["key"] if item else None} | {p["key"] for p in pdfs}
+            if ident & seen:
+                continue
+            seen |= ident
+            sample = paper_samples(item, pdfs, notes, a.per_kind)
+            if sample["highlights"] or sample["margin_and_page_texts"] or sample["note_start"]:
+                out.append(sample)
+        result = {"papers": out}
+    except RuntimeError as e:
+        result = {"error": str(e)}
+    print(json.dumps(result, ensure_ascii=False, indent=1))
+    return 1 if "error" in result else 0
+
+
 def main(argv=None):
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -1775,6 +1983,10 @@ def main(argv=None):
         return profile_main(argv[1:])
     if argv and argv[0] == "extract":
         return extract_main(argv[1:])
+    if argv and argv[0] == "status":
+        sys.exit(status_main(argv[1:]))
+    if argv and argv[0] == "samples":
+        sys.exit(samples_main(argv[1:]))
     ap = argparse.ArgumentParser(prog="scholium", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", required=True, help="path of the JSON configuration file (see README)")
     ap.add_argument("--apply", action="store_true", help="write the annotations into Zotero using the backend selected by --backend")

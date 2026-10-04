@@ -49,11 +49,14 @@ Ids require an exact text match. If a sentence also appears inside another sente
 | sticky notes instead of margin text | `"summary_kind": "note"` (per item: `kind`) |
 | the summary in the reading note rather than on the page | `note_html` |
 
-A top band sits 6 pt below the page edge and moves down past a header line into the gap above the title, within the top 30 % of the page. A bottom band goes between the last line of text and the footer, or beneath the footer when that gap is too small, within the bottom 30 % of the page. Both avoid figures and existing annotations; a `layout_warning` means the page has no free space at that end.
+A top band sits 6 pt below the page edge and moves down past a header line into the gap above the title, within the top 30 % of the page. When that gap is too small, it goes into the strip between the page edge (2 pt) and the first line, beside a logo or another figure there. A bottom band goes between the last line of text and the footer, or beneath the footer when that gap is too small, within the bottom 30 % of the page. Both avoid figures and existing annotations. A band without room keeps its requested position and gets a `layout_warning` that gives how many of its characters fit at its font size and, when one exists, the font size (7 pt or more) at which all of it fits.
 
 ## Commands
 
 ```bash
+scholium.py status <ITEM_OR_PDF_KEY>               # the paper's PDFs, annotations and notes, before a configuration exists
+scholium.py status --query "<title words>"         # matching items
+scholium.py samples [KEY …] [--query W] [--exclude KEY] [--papers 2] [--per-kind 4]   # style examples of earlier runs
 scholium.py extract --pdf <pdf> [--pages N-M] [--keep-references] [--sentences sentences.json] [--out file]
 scholium.py --config <config.json>                 # build and report only
 scholium.py --config <config.json> --apply         # build, report, write, read back

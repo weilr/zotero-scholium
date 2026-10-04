@@ -1,5 +1,5 @@
 """Tests against a synthetic two-column PDF generated at run time (no third-party content)."""
-import json, os
+import json, os, re
 import pymupdf
 import pytest
 
@@ -457,6 +457,52 @@ def test_top_band_that_does_not_fit_is_reported(tmp_path):
     a = out[0]; _, y0, _, y1 = a["position"]["rects"][0]
     assert "no free space at the top" in a["layout_warning"]
     assert y1 == 792 - cli.BAND_MARGIN, "the band keeps its requested position"
+
+
+def test_top_band_that_is_too_long_says_how_much_fits(tmp_path):
+    """A gap above the title too small for the whole text: the warning gives the characters that fit and a font size
+    at which all of it fits, and each of them is enough."""
+    pdf = _page_pdf(tmp_path / "gap.pdf", lambda pg: (pg.insert_text((100, 70), "A Title Line", fontsize=16),
+                                                     pg.insert_textbox(pymupdf.Rect(55, 100, 543, 700), LEFT * 4, fontsize=10, fontname="helv")))
+    text = " ".join(["The method fits a surrogate model to the measured field and reports its error."] * 5)
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text, font_size=9))
+    warning = out[0]["layout_warning"]
+    m = re.search(r"about (\d+) of its (\d+) characters fit at font_size 9 \(all of it at font_size ([\d.]+)\)", warning)
+    assert m and int(m[2]) == len(text) and "place: bottom" in warning, warning
+    fit, font = int(m[1]), float(m[3])
+    assert 0 < fit < len(text) and cli.MIN_BAND_FONT <= font < 9
+    for item in ({"text": text[:fit], "font_size": 9}, {"text": text, "font_size": font}):
+        out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", **item))
+        assert "layout_warning" not in out[0], item
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text[:fit + 60], font_size=9))
+    assert "layout_warning" in out[0], "the count is close to the limit"
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text, font_size=font + 0.5))
+    assert "layout_warning" in out[0], "the font size is the largest that fits"
+
+
+def _crowded_first_page(pg):
+    """A journal's first page: a logo at the top right, a header line 28 pt below the edge, the title right under it."""
+    pg.draw_rect(pymupdf.Rect(480, 6, 560, 20), color=(0, 0, 0), fill=(0.2, 0.2, 0.6))
+    pg.insert_text((55, 38), "JOURNAL OF EXAMPLES | RESEARCH ARTICLE", fontsize=10)
+    pg.insert_text((55, 60), "A Title Line", fontsize=16)
+    pg.insert_textbox(pymupdf.Rect(55, 70, 543, 700), LEFT * 4, fontsize=10, fontname="helv")
+
+
+def test_top_band_without_room_goes_into_the_strip_beside_the_logo(tmp_path):
+    pdf = _page_pdf(tmp_path / "logo.pdf", _crowded_first_page)
+    if not cli.page_figure_rects(pymupdf.open(pdf)[0]):
+        pytest.skip("this PyMuPDF does not report drawings as figures")
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text="One line of summary.", font_size=9))
+    a = out[0]; x0, y0, x1, y1 = a["position"]["rects"][0]
+    assert "layout_warning" not in a
+    assert y1 == 792 - cli.EDGE_MARGIN and y0 >= 792 - 28, "between the page edge and the header line"
+    assert x1 <= 480 - 3, "beside the logo, not over it"
+    # too long for the strip: the warning says how much fits, and that much does fit
+    text = "The method fits a surrogate model to the measured field and reports its error. " * 6
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text, font_size=9))
+    fit = int(re.search(r"about (\d+) of", out[0]["layout_warning"])[1])
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text[:fit], font_size=9))
+    assert "layout_warning" not in out[0] and out[0]["position"]["rects"][0][3] == 792 - cli.EDGE_MARGIN
 
 
 def test_bottom_band_sits_above_the_page_number(tmp_path):

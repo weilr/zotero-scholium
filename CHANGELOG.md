@@ -6,6 +6,14 @@
   tool is tried once more after 30 seconds; **Cancel** ends the wait.
 - One-click runs leave out the user's MCP servers and hooks (Claude Code) and the user's MCP servers
   and installed plugins (Codex, for the run's thread only); the user's skills stay.
+- `scholium status KEY` shows a paper's PDFs, the annotations on them and its notes before a
+  configuration is written (`--query` finds the item); `scholium samples` shows a few highlights,
+  margin texts and note openings of earlier runs as a style reference.
+- A top band without room across the text column goes into the strip above the first line, beside a
+  logo there; a band that still has no room reports how many characters fit and the font size at which
+  all of it fits.
+- The translation check no longer reports soft hyphens, Unicode hyphens or a hyphen between a number
+  and its unit as added content, and comments lose soft hyphens before they are written.
 
 ## 0.1.5 (2026-10-04)
 

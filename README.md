@@ -175,6 +175,8 @@ pip install .                            # provides the `scholium` command
 3. **Generate, review, and apply.** Run without `--apply` first, review all four warning fields below and correct the configuration before applying.
 
    ```bash
+   scholium status ITEM_KEY                 # the paper's PDFs, the annotations on them and its notes (--query WORDS: find the item)
+   scholium samples --exclude ITEM_KEY      # a few highlights, margin texts and note openings of earlier runs, as a style reference
    scholium extract --pdf paper.pdf --sentences out/sentences.json --out out/sentences.txt   # numbered sentences to read and select from
    scholium --config config.json            # build and report without writing
    scholium --config config.json --apply    # build, check, write into Zotero, read back (Zotero 10: confirm the dialog once)
