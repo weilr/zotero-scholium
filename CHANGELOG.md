@@ -36,6 +36,13 @@
   `style_warnings`.
 - Margin notes keep clear of text in the margins, such as the vertical arXiv stamp; in a one-column
   paper a note takes the other margin when its own has text beside the paragraph.
+- The READMEs open with an animation of a one-click run and list the features in a table with an
+  example from that run for each, some of them animated. The command-line steps move to
+  `docs/cli.md`, which refers to the skill's reference files for configuration keys, write channels
+  and the profile; the development notes move to `CONTRIBUTING.md`; the safety and troubleshooting
+  sections are left to `docs/design.md` and the skill's references.
+  The requirements, the skill and the plugin's installation notes name the Zotero setting that turns
+  on the local API.
 
 ## 0.1.5 (2026-10-04)
 

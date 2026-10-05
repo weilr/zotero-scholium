@@ -166,7 +166,8 @@ annotations and notes, and can delete only annotations that carry the tool's tag
 
 In Zotero, open Tools → Plugins, click the gear icon, choose *Install Plugin From File…*, and select
 `scholium-bridge.xpi` (available from the GitHub release, or built locally as described below). No
-restart is required.
+restart is required. One-click runs read the library through Zotero's local API: turn it on in
+Settings → Advanced → *Allow other applications on this computer to communicate with Zotero*.
 
 ## Build
 

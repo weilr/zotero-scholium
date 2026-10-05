@@ -5,11 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zotero-scholium"
 version = "0.1.5"
-description = "Write reading results, human or model-generated, back into Zotero as native annotations: highlights with comments, margin text notes, and child notes. No plugin required on Zotero 10 and later."
+description = "Let Claude Code or Codex read a paper and annotate it in Zotero: key sentences highlighted with translations, margin notes and a reading note, all as native Zotero annotations."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.9"
-keywords = ["zotero", "annotations", "pdf", "research", "llm", "claude-code"]
+keywords = ["zotero", "annotations", "pdf", "research", "llm", "claude-code", "codex", "agent-skills"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
