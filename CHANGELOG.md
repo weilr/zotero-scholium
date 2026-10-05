@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.6 (2026-10-05)
 
 - A run that fails on the connection to Claude Code's or Codex's service before the agent used any
   tool is tried once more after 30 seconds; **Cancel** ends the wait.

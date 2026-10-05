@@ -26,7 +26,7 @@ import urllib.request, urllib.error, urllib.parse
 from decimal import Decimal
 import pymupdf
 
-__version__ = "0.1.5"
+__version__ = "0.1.6"
 
 TAG = "zotero-scholium"     # tag applied to every annotation and note created by this tool
 LEGACY_TAGS = {"zotero-marginalia", "zotero-paper-annotate"}   # tags written by earlier versions; still recognised as belonging to this tool

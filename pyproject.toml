@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zotero-scholium"
-version = "0.1.5"
+version = "0.1.6"
 description = "Let Claude Code or Codex read a paper and annotate it in Zotero: key sentences highlighted with translations, margin notes and a reading note, all as native Zotero annotations."
 readme = "README.md"
 license = { text = "MIT" }
