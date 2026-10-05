@@ -61,6 +61,30 @@ DEFAULTS = {
 LIG = {"ﬁ": "fi", "ﬂ": "fl", "ﬀ": "ff", "ﬃ": "ffi", "ﬄ": "ffl", "’": "'", "‘": "'", "“": '"', "”": '"'}
 TAG_RE = re.compile(r"</?[a-zA-Z][^>]*>")     # the reader accepts <b> <i> <sub> <sup> in comments
 MATH_RE = re.compile(r"\$\$[^$]*\$\$|\$[^$\n]+\$|\\\([^()]*\\\)|\\[a-zA-Z]+")
+# text annotations on the page show tags literally: <sub>/<sup> become Unicode scripts where every character has one
+SUB_CHARS = dict(zip("0123456789+-−=()aehijklmnoprstuvxβγρφχ", "₀₁₂₃₄₅₆₇₈₉₊₋₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓᵦᵧᵨᵩᵪ"))
+SUP_CHARS = dict(zip("0123456789+-−=()abcdefghijklmnoprstuvwxyzβγδθφχ", "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁻⁼⁽⁾ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻᵝᵞᵟᶿᵠᵡ"))
+SCRIPT_RE = re.compile(r"<(sub|sup)\b[^<>]*>(.*?)</\1\s*>", re.S | re.I)
+FORMAT_TAG_RE = re.compile(r"</?(?:b|i|u|em|strong|span|br)\b[^<>]*>", re.I)   # not "p<q and q>r"
+SCRIPT_TAG_RE = re.compile(r"</?su[bp]\b[^<>]*>", re.I)
+
+
+def page_text(s):
+    """Margin text as the page shows it: <sub>/<sup> in Unicode (d<sub>k</sub> -> dₖ, x<sup>2</sup> -> x²), or
+    with _ and ^ when a character has no script form (π<sub>ref</sub> -> π_ref); primes and stars stay as they are;
+    other formatting tags are dropped. A <sub> or <sup> without its closing tag stays, and check_style reports it."""
+    def script(m):
+        kind = m.group(1).lower()
+        table, mark = (SUB_CHARS, "_") if kind == "sub" else (SUP_CHARS, "^")
+        inner = FORMAT_TAG_RE.sub("", m.group(2))
+        if inner and all(c in table for c in inner):
+            return "".join(table[c] for c in inner)
+        if kind == "sup" and inner and all(c in "*∗′'" for c in inner):
+            return inner
+        return mark + inner if len(inner) <= 1 or inner.isalnum() else f"{mark}({inner})"
+    return FORMAT_TAG_RE.sub("", SCRIPT_RE.sub(script, s))
+
+
 SPAN_SEP = re.compile(r"\s*(?:…|\.\.\.)\s*")  # separates the start and end anchors of a highlight span
 
 
@@ -182,6 +206,19 @@ class PageIndex:
                 rects.append([x0, self.H - y1, x1, self.H - y0])
         return rects
 
+    def margin_text_rects(self):
+        """Rectangles (PDF space, y upward) of the text lines in any direction that lie in a margin beside the
+        text column: a vertical preprint stamp, line numbers, marginal headings."""
+        rects = []
+        for block in self.page.get_text("dict").get("blocks", []):
+            for line in block.get("lines", []):
+                x0, y0, x1, y1 = line["bbox"]
+                if x1 - x0 <= 0 or y1 - y0 <= 0 or not "".join(s.get("text", "") for s in line.get("spans", [])).strip():
+                    continue
+                if x1 <= self.body_x0 + 1 or x0 >= self.body_x1 - 1:
+                    rects.append([x0, self.H - y1, x1, self.H - y0])
+        return rects
+
     def margin_box(self, para_rect, side="auto"):
         """(x0, x1) of the margin box beside a paragraph. `auto`: its own side in two-column layouts, otherwise the
         wider margin; `left` and `right` force the side."""
@@ -268,6 +305,7 @@ KINDS = ("text", "note")
 BAND_MARGIN = 6.0        # distance between a top/bottom band and the page edge (pt)
 NOTE_ICON = 22.0         # side of a sticky-note icon in the Zotero reader (pt)
 MIN_BOX_WIDTH = 30.0     # narrowest usable text box (pt)
+ROTATED_PAGE = "the page is rotated; annotations on rotated pages are not supported yet, so nothing is written there"
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
@@ -327,6 +365,8 @@ def normalise_summary(item, cfg, page_sizes):
     anchor = str(item.get("anchor") or "").strip() or None
     if rect is None and (place == "margin" or kind == "note") and not anchor:
         raise ValueError("anchor is required for margin placement and for sticky notes")
+    if kind == "text":
+        text = page_text(text)
     return {"page": page, "text": text, "place": place, "side": side, "kind": kind, "color": color,
             "font_size": font_size, "rect": rect, "anchor": anchor,
             "occurrence": int(item.get("occurrence") or 0) or None}
@@ -366,7 +406,8 @@ def place_blocks(blocks, occupied, floor, ceiling, gap=3.0):
 
     Blocks are processed from the top of the page downward. A block that collides with something is moved
     below it; if that would push it into the footer it is moved upward instead. When neither direction has
-    room the block keeps its requested position and is marked with `layout_warning`.
+    room the block keeps its requested position and is marked with `layout_warning`; so is a block taller than
+    the room between `floor` and `ceiling`, which is placed at the ceiling.
     """
     occ = sorted(occupied)
 
@@ -375,6 +416,12 @@ def place_blocks(blocks, occupied, floor, ceiling, gap=3.0):
 
     for b in sorted(blocks, key=lambda b: -b["y_top"]):
         h = b["h"]
+        if h > ceiling - floor:
+            b["y_top"] = ceiling
+            b["layout_warning"] = "the box is taller than the page leaves room for; shorten the text"
+            occ.append((ceiling - h, ceiling))
+            occ.sort()
+            continue
         desired = min(max(b["y_top"], floor + h), ceiling)  # a paragraph near the page bottom must not push the box into the footer
         cand, ok = desired, False
         for _ in range(64):
@@ -482,7 +529,8 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
 
     Order: explicit rectangles (never moved; an overlap is only reported), then top/bottom bands across the text
     column, then margin boxes and sticky notes beside their anchors. Every placed box joins the obstacle set of the
-    following groups. Bands avoid the page's text lines; margin boxes lie outside the text column by construction.
+    following groups. Bands avoid the page's text lines; margin boxes lie outside the text column by construction
+    and avoid the text in the margins.
     """
     p = pi.page.number
     anns, occupied = [], list(page_obstacles)
@@ -534,7 +582,9 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
             else:
                 warn = band_warning(sp, lambda v: in_strip(v) or not place(_box_height(v, bx1 - bx0)).get("layout_warning"))
         anns.append(_summary_annotation(pi, sp, rect, warn)); occupied.append(rect)
-    # 3. margin boxes and sticky notes beside their anchors (a sticky note ignores `place`)
+    # 3. margin boxes and sticky notes beside their anchors (a sticky note ignores `place`); text in the margins
+    # is occupied space, and in a one-column layout a box takes the other margin when its own has text beside it
+    margin_text = pi.margin_text_rects()
     groups = {}
     for sp in [s for s in specs if not s["rect"] and (s["kind"] == "note" or s["place"] == "margin")]:
         occ = sp.get("occurrence")
@@ -551,15 +601,25 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
             sp["occurrences"] = n
         r = pi.line_rects(ws)[0]
         mx0, mx1 = pi.margin_box(r, sp["side"])
+        y_top = pi.H - r.y0 + 1
+        if sp["side"] == "auto" and not pi.two_col and sp["kind"] != "note":
+            ox0, ox1 = pi.margin_box(r, "right" if mx1 <= pi.body_x0 else "left")
+            if (_intersects([mx0, y_top - _box_height(sp, mx1 - mx0), mx1, y_top], margin_text)
+                    and not _intersects([ox0, y_top - _box_height(sp, ox1 - ox0), ox1, y_top], margin_text)):
+                mx0, mx1 = ox0, ox1
         if sp["kind"] == "note":  # the icon hugs the text column
             mx0, mx1 = (mx1 - NOTE_ICON, mx1) if mx1 <= pi.body_x0 else (mx0, mx0 + NOTE_ICON)
-        groups.setdefault((mx0, mx1), []).append(({"y_top": pi.H - r.y0 + 1, "h": _box_height(sp, mx1 - mx0)}, sp))
+        groups.setdefault((mx0, mx1), []).append(({"y_top": y_top, "h": _box_height(sp, mx1 - mx0)}, sp))
     for (mx0, mx1), items in groups.items():
-        occ = [(r[1], r[3]) for r in occupied if r[0] < mx1 and r[2] > mx0]
+        occ = [(r[1], r[3]) for r in occupied + margin_text if r[0] < mx1 and r[2] > mx0]
         place_blocks([b for b, _ in items], occ, floor=28.0, ceiling=pi.H - 20.0)
+        # a margin narrower than the narrowest box: the box reaches into the text column
+        narrow = mx0 < pi.body_x1 - 1 and mx1 > pi.body_x0 + 1
         for b, sp in items:
             rect = [mx0, b["y_top"] - b["h"], mx1, b["y_top"]]
-            anns.append(_summary_annotation(pi, sp, rect, b.get("layout_warning"))); occupied.append(rect)
+            warn = b.get("layout_warning") or (f"the margin beside this paragraph is narrower than {MIN_BOX_WIDTH:.0f} pt and the box "
+                                               "covers the text; use place: top or bottom, or drop the note" if narrow else None)
+            anns.append(_summary_annotation(pi, sp, rect, warn)); occupied.append(rect)
     return anns
 
 
@@ -601,6 +661,17 @@ def build(cfg, obstacles=None):
                 raise ValueError("sentence id text cannot be matched exactly; re-run `scholium extract --sentences` or use page and text")
             if not item.get("occurrence") and matches > 1 and (len(recs) != 1 or matches != recs[0]["same_text_count"]):
                 raise ValueError(f"ambiguous sentence id: {matches} passages match; set occurrence explicitly after checking the page")
+            if len(recs) > 1:   # the matched span must start and end where the first and the last sentence stand
+                pg = page_index(recs[0]["page"] - 1)
+
+                def own(rec):
+                    return pg.match(rec["text"], rec["occurrence"]) if pg.count(rec["text"]) == rec["same_text_count"] else None
+                start, end = own(recs[0]), own(recs[-1])
+                at = pg.match(text, int(item.get("occurrence") or 1))
+                if not start or not end or not at or start[0] != at[0] or end[-1] != at[-1]:
+                    raise ValueError(f"sentences {ids[0]}–{ids[-1]} do not run from sentence {ids[0]} to sentence {ids[-1]} at their own "
+                                     "places on the page (text between them was left out of the extraction, or the text repeats); "
+                                     "highlight them one by one or use page and text")
         except (KeyError, ValueError, TypeError, FileNotFoundError) as e:
             missed.append({"kind": kind, "id": item.get("id", item.get("ids")), "reason": str(e).strip("'")})
             return None
@@ -614,6 +685,9 @@ def build(cfg, obstacles=None):
         if h is None:
             continue
         p = int(h["page"]) - 1
+        if 0 <= p < len(doc) and doc[p].rotation % 360:
+            missed.append({"kind": "highlight", "page": p + 1, "text": h["text"][:60], "reason": ROTATED_PAGE})
+            continue
         pi = page_index(p)
         occ = int(h.get("occurrence") or 0) or None   # 1-based; None: the first occurrence, ambiguity is reported
         ws, reason, snapped = pi.match(h["text"], occ or 1), None, None
@@ -675,6 +749,9 @@ def build(cfg, obstacles=None):
     for sp in specs:
         by_page.setdefault(sp["page"], []).append(sp)
     for p, page_specs in by_page.items():
+        if doc[p].rotation % 360:
+            missed.extend({"kind": "summary", "page": p + 1, "anchor": sp["anchor"], "reason": ROTATED_PAGE} for sp in page_specs)
+            continue
         pi = page_index(p)
         # existing annotations and figures are occupied space for every summary on the page
         page_obstacles = list((obstacles or {}).get(p, [])) + page_figure_rects(doc[p])
@@ -831,20 +908,25 @@ def _existing_rects(listing, keep_own=False):
     return rects
 
 
-def _text_defects(s):
-    """(kind, reason) pairs for display defects in a comment or margin text."""
+def _text_defects(s, page=False):
+    """(kind, reason) pairs for display defects in a comment or margin text; `page`: text shown on the page, where
+    page_text has already written scripts without a Unicode form with ^."""
     found = []
     if MATH_RE.search(s):
         found.append(("latex", "raw LaTeX; write mathematics with Unicode symbols and <sub>/<sup>"))
-    if MATH_FORMAT_RE.search(s):
+    if MATH_FORMAT_RE.search(s.replace("^", "") if page else s):
         found.append(("math_format", "exponent or subscript written with ^, _{ or a bare minus; use <sup>/<sub>"))
     tags = [m.group(1).lower() for m in re.finditer(r"</?([a-zA-Z][a-zA-Z0-9]*)[^>]*>", s)]
     bad = sorted(set(tags) - READER_TAGS)
     if bad:
         found.append(("tag", "tags the reader does not render: " + ", ".join(bad)))
-    unbalanced = [t for t in READER_TAGS if s.count(f"<{t}>") != s.count(f"</{t}>")]
-    if unbalanced:
-        found.append(("tag", "unclosed tag: " + ", ".join(sorted(unbalanced))))
+    if page:   # page_text has turned every complete <sub>/<sup> into text
+        if SCRIPT_TAG_RE.search(s):
+            found.append(("tag", "<sub> or <sup> without its closing tag; close it or write the script in Unicode"))
+    else:
+        unbalanced = [t for t in READER_TAGS if s.count(f"<{t}>") != s.count(f"</{t}>")]
+        if unbalanced:
+            found.append(("tag", "unclosed tag: " + ", ".join(sorted(unbalanced))))
     if "\n" in s:
         found.append(("line_break", "hard line break"))
     return found
@@ -871,7 +953,7 @@ def check_style(annotations, cfg, listing=None, note_html=None):
     for a in annotations:
         is_mark = a["type"] in ("highlight", "underline")
         comment = a.get("comment", "")
-        for kind, reason in _text_defects(comment):
+        for kind, reason in _text_defects(comment, page=a["type"] == "text"):
             warn(kind, a, reason)
         if not is_mark and LABEL_RE.match(comment):
             warn("label", a, "label-colon form; write a sentence")
@@ -1513,9 +1595,9 @@ def render_js(cfg, out):
     return f"""// Usage: in Zotero, open Tools -> Developer -> Run JavaScript, enable "Run as async function",
 // paste the entire content of this file, and click Run.
 // Effect (all changes are made in the Zotero database; the PDF file is not modified):
-//   (0) {'delete annotations carrying a current or legacy tool tag on the attachment;' if cfg.get('cleanup', True) else 'keep every existing annotation (cleanup disabled);'}
+//   (0) {'delete annotations carrying a current or legacy tool tag on the attachment, once the new ones are saved (step 2);' if cfg.get('cleanup', True) else 'keep every existing annotation (cleanup disabled);'}
 //   (1) {"create a child note (if a note with the same title exists, the new note receives a versioned title; no note is deleted);" if html else "(no child note in this run)"}
-//   (2) create {n_h} highlight/underline annotations and {n_t} margin text annotations.
+//   (2) create {n_h} highlight/underline annotations and {n_t} margin text annotations; a failure leaves the old ones.
 var ITEM_KEY = {json.dumps(cfg['item_key'])}, ATT_KEY = {json.dumps(cfg['attachment_key'])}, TAG = {json.dumps(TAG)};
 var OWN_TAGS = {json.dumps(sorted(OWN_TAGS))};
 var CLEANUP = {json.dumps(bool(cfg.get('cleanup', True)))};
@@ -1529,11 +1611,11 @@ var att = Zotero.Items.getByLibraryAndKey(libraryID, ATT_KEY);
 if (!parent) throw new Error("item not found: " + ITEM_KEY);
 if (!att) throw new Error("attachment not found: " + ATT_KEY);
 
-var removed = 0, kept = 0;
+var old = [], kept = 0;
 for (let a of (CLEANUP ? att.getAnnotations(true) : [])) {{
   let tags = a.getTags().map(t => t.tag);
   let mine = tags.some(t => OWN_TAGS.includes(t));
-  if (mine) {{ await a.eraseTx(); removed++; }} else {{ kept++; }}
+  if (mine) {{ old.push(a); }} else {{ kept++; }}
 }}
 
 var noteCreated = false;
@@ -1554,7 +1636,7 @@ if (NOTE_HTML) {{
   noteCreated = true;
 }}
 
-var created = {{highlight: 0, text: 0, note: 0}};
+var created = {{highlight: 0, underline: 0, text: 0, note: 0}};
 await Zotero.DB.executeTransaction(async function () {{
   for (let a of ANNOTATIONS) {{
     let ann = new Zotero.Item("annotation");
@@ -1563,7 +1645,7 @@ await Zotero.DB.executeTransaction(async function () {{
     let type = a.type;
     try {{ ann.annotationType = type; }}
     catch (e) {{ type = "note"; ann.annotationType = type; }}  // Zotero without text annotations: fall back to a sticky note
-    if (type === "highlight") ann.annotationText = a.text;
+    if (type === "highlight" || type === "underline") ann.annotationText = a.text;
     ann.annotationComment = a.comment;
     ann.annotationColor = a.color;
     ann.annotationPageLabel = a.pageLabel;
@@ -1575,9 +1657,10 @@ await Zotero.DB.executeTransaction(async function () {{
     await ann.save();
     created[type]++;
   }}
+  for (let a of old) await a.erase();
 }});
-return "removed " + removed + " old annotations (kept " + kept + " of yours); note: " + (NOTE_HTML ? (noteCreated ? "created" : "not created") : "none") +
-  "; created " + created.highlight + " highlights, " + created.text + " margin texts" + (created.note ? ", " + created.note + " sticky notes" : "") + ". Close and reopen the PDF to see them.";
+return "removed " + old.length + " old annotations (kept " + kept + " of yours); note: " + (NOTE_HTML ? (noteCreated ? "created" : "not created") : "none") +
+  "; created " + created.highlight + " highlights, " + (created.underline ? created.underline + " underlines, " : "") + created.text + " margin texts" + (created.note ? ", " + created.note + " sticky notes" : "") + ". Close and reopen the PDF to see them.";
 """
 
 
@@ -1988,13 +2071,13 @@ def main(argv=None):
     if argv and argv[0] == "samples":
         sys.exit(samples_main(argv[1:]))
     ap = argparse.ArgumentParser(prog="scholium", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--config", required=True, help="path of the JSON configuration file (see README)")
+    ap.add_argument("--config", required=True, help="path of the JSON configuration file (see references/configuration.md in the skill)")
     ap.add_argument("--apply", action="store_true", help="write the annotations into Zotero using the backend selected by --backend")
     ap.add_argument("--list", action="store_true", help="list the attachment's current annotations and notes without writing")
     ap.add_argument("--full", action="store_true", help="with --list: print every annotation with text, comment and position")
     ap.add_argument("--backend", default="auto", choices=["auto", "api", "bridge", "js"])
     ap.add_argument("--allow-missed", action="store_true", help="apply even if some phrases could not be located in the PDF")
-    ap.add_argument("--allow-warnings", action="store_true", help="apply even if style warnings are reported")
+    ap.add_argument("--allow-warnings", action="store_true", help="apply even if style or layout warnings are reported")
     ap.add_argument("--ignore-existing", action="store_true",
                     help="do not read the attachment's existing annotations before laying out margin notes (they may then be overlapped)")
     ap.add_argument("--version", action="version", version=f"scholium {__version__}")
@@ -2052,6 +2135,8 @@ def main(argv=None):
             blockers.append("some phrases could not be located; correct them or pass --allow-missed")
         if report["style_warnings"] and not args.allow_warnings:
             blockers.append("style warnings are reported; correct them or pass --allow-warnings")
+        if report["layout_warnings"] and not args.allow_warnings:
+            blockers.append("layout warnings are reported; move, shorten or drop those notes, or pass --allow-warnings")
         if blockers:
             report["applied"] = False
             report["apply_error"] = "; ".join(blockers)

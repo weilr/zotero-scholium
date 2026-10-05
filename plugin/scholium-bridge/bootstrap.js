@@ -82,17 +82,18 @@ var ScholiumBridge = {
                                 : (att.parentID ? Zotero.Items.get(att.parentID) : null);
     const anns = Array.isArray(data.annotations) ? data.annotations : [];
 
-    // (0) cleanup: annotations tagged by this tool.
-    //     Also remove external (PDF-imported, locked) annotations when data.cleanupExternal is true.
+    // (0) cleanup: annotations tagged by this tool, and external (PDF-imported, locked) annotations when
+    //     data.cleanupExternal is true. They are removed in (2), after the new annotations are saved.
     const tag = data.tag || "";
     const ownTags = new Set([tag].concat(data.legacyTags || []).filter(Boolean));
-    let removed = 0, kept = 0;
+    const old = [];
+    let kept = 0;
     if (data.cleanup !== false) {
       for (const a of att.getAnnotations(true)) {
         const tags = a.getTags().map(t => t.tag);
         const mine = tags.some(t => ownTags.has(t)) ||
                      (data.cleanupExternal && a.annotationIsExternal);
-        if (mine) { await a.eraseTx(); removed++; } else { kept++; }
+        if (mine) old.push(a); else kept++;
       }
     }
 
@@ -122,7 +123,7 @@ var ScholiumBridge = {
       }
     }
 
-    // (2) annotations
+    // (2) annotations, then the old ones go, in one transaction: a failure leaves the attachment as it was
     const created = { highlight: 0, underline: 0, text: 0, note: 0 };
     const allowed = new Set(["highlight", "underline", "text", "note"]);
     await Zotero.DB.executeTransaction(async () => {
@@ -146,8 +147,9 @@ var ScholiumBridge = {
         await ann.save();
         created[type]++;
       }
+      for (const a of old) await a.erase();
     });
-    return { ok: true, removed, kept, noteCreated, noteSkipped, notesRemoved, created };
+    return { ok: true, removed: old.length, kept, noteCreated, noteSkipped, notesRemoved, created };
   },
 
   register() {
@@ -1575,11 +1577,18 @@ var ScholiumRunner = {
       .catch(e => this.log("follow-up failed: " + e));
   },
 
-  // the message box grows with its text, up to its maximum height
+  // the message box grows with its text, up to its maximum height; an empty box is as tall as its placeholder
   fitInput(pane) {
     try {
-      pane.input.style.height = "auto";
-      pane.input.style.height = pane.input.scrollHeight + "px";
+      const input = pane.input;
+      input.style.height = "auto";
+      let height = input.scrollHeight;
+      if (!input.value && input.placeholder) {
+        input.value = input.placeholder;
+        height = input.scrollHeight;
+        input.value = "";
+      }
+      input.style.height = height + "px";
     } catch (e) {}
     this.paintSend(pane);
   },
@@ -1693,6 +1702,7 @@ var ScholiumRunner = {
         const list = pane.list;
         const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
         for (const entry of added) list.append(this.entryNode(pane.doc, entry));
+        while (list.children.length > this.MAX_ENTRIES) list.children[0].remove();   // as many as the transcript keeps
         if (atBottom) list.scrollTop = list.scrollHeight;
       } catch (e) {}
     }
@@ -1797,7 +1807,7 @@ var ScholiumRunner = {
       this.show(pane.send, !!session);
       this.show(pane.sendRow, !!session);
       pane.input.placeholder = this.text(session ? "followPlaceholder" : "extraPlaceholder");
-      this.paintSend(pane);
+      this.fitInput(pane);
     } catch (e) {}
   },
 
@@ -2014,6 +2024,7 @@ var ScholiumRunner = {
     this.refresh();
     this.tick(running).catch(() => {});
     const program = agent === "codex" ? await this.findCodex() : await this.findClaude();
+    if (this.job !== running) return;   // the plugin stopped while the program was looked up
     if (!program) {
       const missing = this.text(agent === "codex" ? "noCodex" : "noClaude");
       this.appendEntries([{ kind: "final", text: missing, error: true }]);
@@ -2036,9 +2047,11 @@ var ScholiumRunner = {
     // conversation, the exit code and the end of stderr
     const ctx = { job, key, logPath, running, lastStep: -1, result: null, limit: null, session: job.resume || null,
                   exitCode: null, stderr: "", current: null };
+    if (this.job !== running) return;   // the plugin stopped while the folder and the log were prepared
     if (agent === "codex") await this.runCodex(program, ctx);
     else await this.runClaude(program, ctx);
     this.current = null;
+    if (this.job !== running) return;   // the plugin stopped during the run: nothing more to report
     const { result, current, exitCode, limit, session } = ctx;
     const summary = result && typeof result.result === "string" ? result.result.trim().split("\n").pop() : "";
     let ok = false, message;
@@ -2095,38 +2108,49 @@ var ScholiumRunner = {
       command: claude, arguments: this.args(job), workdir: Zotero.DataDirectory.dir, stderr: "pipe",
       environment: { PYTHONIOENCODING: "utf-8" }, environmentAppend: true,
     });
+    if (this.job !== ctx.running) {   // the plugin stopped while the process was being created
+      try { proc.kill(); } catch (e) {}
+      ctx.current = { key, proc, cancelled: true };
+      return;
+    }
     this.current = ctx.current = { key, proc, cancelled: false };
     this.refresh();
-    await proc.stdin.write(this.prompt(job, job.own));
-    await proc.stdin.close();
     const drainErr = (async () => {
       for (;;) { const s = await proc.stderr.readString(); if (!s) break; ctx.stderr = (ctx.stderr + s).slice(-2000); }
     })().catch(() => {});
     let buffer = "";
-    for (;;) {
-      const chunk = await proc.stdout.readString();
-      if (!chunk) break;
-      buffer += chunk;
-      const lines = buffer.split("\n");
-      buffer = lines.pop();
-      if (lines.length) await IOUtils.writeUTF8(logPath, lines.join("\n") + "\n", { mode: "append" });
-      for (const raw of lines) {
-        let event;
-        try { event = JSON.parse(raw); } catch (e) { continue; }
-        if (typeof event.session_id === "string" && event.session_id) {
-          ctx.session = event.session_id;
-          this.sessions.set(key, { agent: "claude", id: ctx.session });
+    try {
+      await proc.stdin.write(this.prompt(job, job.own));
+      await proc.stdin.close();
+      for (;;) {
+        const chunk = await proc.stdout.readString();
+        if (!chunk) break;
+        buffer += chunk;
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        if (lines.length) await IOUtils.writeUTF8(logPath, lines.join("\n") + "\n", { mode: "append" });
+        for (const raw of lines) {
+          let event;
+          try { event = JSON.parse(raw); } catch (e) { continue; }
+          if (typeof event.session_id === "string" && event.session_id) {
+            ctx.session = event.session_id;
+            this.sessions.set(key, { agent: "claude", id: ctx.session });
+          }
+          if (event.type === "result") ctx.result = event;
+          if (event.type === "assistant" && ((event.message && event.message.content) || []).some(c => c && c.type === "tool_use")) ctx.acted = true;
+          if (event.type === "rate_limit_event" && event.rate_limit_info) {
+            const info = event.rate_limit_info;
+            if (info.status === "rejected") ctx.limit = { until: info.resetsAt > 0 ? info.resetsAt * 1000 : null };
+          }
+          if (event.type === "assistant" && event.error === "rate_limit" && !ctx.limit) ctx.limit = { until: null };
+          this.appendEntries(this.entries(event));
+          this.advance(ctx, this.step(event));
         }
-        if (event.type === "result") ctx.result = event;
-        if (event.type === "assistant" && ((event.message && event.message.content) || []).some(c => c && c.type === "tool_use")) ctx.acted = true;
-        if (event.type === "rate_limit_event" && event.rate_limit_info) {
-          const info = event.rate_limit_info;
-          if (info.status === "rejected") ctx.limit = { until: info.resetsAt > 0 ? info.resetsAt * 1000 : null };
-        }
-        if (event.type === "assistant" && event.error === "rate_limit" && !ctx.limit) ctx.limit = { until: null };
-        this.appendEntries(this.entries(event));
-        this.advance(ctx, this.step(event));
       }
+    } catch (e) {
+      // the run is reported as failed: Claude Code must not go on writing to Zotero meanwhile
+      try { proc.kill(); } catch (e2) {}
+      throw e;
     }
     await drainErr;
     ctx.exitCode = (await proc.wait()).exitCode;
@@ -2152,38 +2176,47 @@ var ScholiumRunner = {
     const errors = (async () => {
       for (;;) { const s = await proc.stderr.readString(); if (!s) break; rpc.stderr = (rpc.stderr + s).slice(-2000); }
     })().catch(() => {});
+    // however reading ends, no request is left waiting; a failure here also ends the server
     rpc.done = (async () => {
-      let buffer = "";
-      for (;;) {
-        const chunk = await proc.stdout.readString();
-        if (!chunk) break;
-        buffer += chunk;
-        const lines = buffer.split("\n");
-        buffer = lines.pop();
-        const messages = [];
-        for (const raw of lines) {
-          let msg;
-          try { msg = JSON.parse(raw); } catch (e) { continue; }
-          if (!msg || typeof msg !== "object") continue;
-          const id = msg.id;
-          if (id !== undefined && id !== null && typeof msg.method !== "string") {
-            const waiting = rpc.pending.get(id);
-            if (waiting) {
-              rpc.pending.delete(id);
-              if (msg.error) waiting.reject(new Error(String(msg.error.message || JSON.stringify(msg.error))));
-              else waiting.resolve(msg.result);
+      let failure = null;
+      try {
+        let buffer = "";
+        for (;;) {
+          const chunk = await proc.stdout.readString();
+          if (!chunk) break;
+          buffer += chunk;
+          const lines = buffer.split("\n");
+          buffer = lines.pop();
+          const messages = [];
+          for (const raw of lines) {
+            let msg;
+            try { msg = JSON.parse(raw); } catch (e) { continue; }
+            if (!msg || typeof msg !== "object") continue;
+            const id = msg.id;
+            if (id !== undefined && id !== null && typeof msg.method !== "string") {
+              const waiting = rpc.pending.get(id);
+              if (waiting) {
+                rpc.pending.delete(id);
+                if (msg.error) waiting.reject(new Error(String(msg.error.message || JSON.stringify(msg.error))));
+                else waiting.resolve(msg.result);
+              }
+              continue;
             }
-            continue;
+            if (id !== undefined && id !== null) send(Object.assign({ id }, this.codexAnswer(msg))).catch(() => {});
+            messages.push([msg, raw]);
           }
-          if (id !== undefined && id !== null) send(Object.assign({ id }, this.codexAnswer(msg))).catch(() => {});
-          messages.push([msg, raw]);
+          if (onMessage && messages.length) await onMessage(messages);
         }
-        if (onMessage && messages.length) await onMessage(messages);
+      } catch (e) {
+        failure = e;
+        rpc.close();
+      } finally {
+        await errors;
+        const tail = rpc.stderr.trim().split("\n").pop() || "";
+        for (const waiting of rpc.pending.values()) waiting.reject(failure || new Error("codex app-server exited" + (tail ? ": " + tail : "")));
+        rpc.pending.clear();
       }
-      await errors;
-      const tail = rpc.stderr.trim().split("\n").pop() || "";
-      for (const waiting of rpc.pending.values()) waiting.reject(new Error("codex app-server exited" + (tail ? ": " + tail : "")));
-      rpc.pending.clear();
+      if (failure) throw failure;
     })();
     return rpc;
   },
@@ -2291,6 +2324,7 @@ var ScholiumRunner = {
     let ended;
     const over = new Promise(resolve => { ended = resolve; });
     const counts = ["inputTokens", "cachedInputTokens", "cacheWriteInputTokens", "outputTokens"];
+    let failure = "";
     const rpc = await this.codexServer(codex, cwd, async messages => {
       const lines = messages.filter(([msg]) => !this.codexNoise(msg)).map(([, raw]) => raw);
       if (lines.length) await IOUtils.writeUTF8(logPath, lines.join("\n") + "\n", { mode: "append" });
@@ -2312,7 +2346,12 @@ var ScholiumRunner = {
         this.advance(ctx, this.codexStep(msg));
       }
     });
-    rpc.done.then(ended, ended);
+    if (this.job !== ctx.running) {   // the plugin stopped while the server was being started
+      rpc.close();
+      ctx.current = { key, proc: rpc.proc, cancelled: true };
+      return;
+    }
+    rpc.done.then(ended, e => { failure = failure || String((e && e.message) || e); ended(); });
     // cancelling interrupts the turn, so that the conversation records it; the server goes when the
     // turn has ended, or after a few seconds
     const stop = () => {
@@ -2322,7 +2361,6 @@ var ScholiumRunner = {
     };
     this.current = ctx.current = { key, proc: rpc.proc, cancelled: false, stop };
     this.refresh();
-    let failure = "";
     try {
       await this.codexHello(rpc);
       const model = this.modelPref("codex");

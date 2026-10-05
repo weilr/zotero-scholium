@@ -14,7 +14,7 @@
 | `note_html`, `note_title_prefix` | | HTML file of the child note; the prefix identifies an existing note with the same title, which then gets a versioned title |
 | `core_color`, `other_color`, `text_color` | | defaults `#ff6666`, `#ffd400`, `#1a73e8` |
 | `font_size` | | margin text size in points (default 8) |
-| `margin_side` | | `auto` (default: the paragraph's side, or the wider margin), `left`, `right` |
+| `margin_side` | | `auto` (default: the paragraph's side, or the wider margin; in one column the other margin when text such as a vertical preprint stamp sits beside the paragraph), `left`, `right`. Margin boxes keep clear of text in the margins |
 | `summary_kind` | | `text` (default: visible margin text) or `note` (sticky notes) |
 | `preview_pages` | | pages rendered as PNG previews (default `[1]`) |
 | `snap` | | accept phrases matching at similarity ≥ 0.95 and report them under `snapped` (default false) |
@@ -63,7 +63,7 @@ scholium.py --config <config.json> --apply         # build, report, write, read 
 scholium.py --config <config.json> --list [--full] # what is currently stored on the attachment
 ```
 
-Run without `--apply` first and review `missed`, `style_warnings`, `translation_warnings` and `layout_warnings`; correct the configuration before applying. `--apply` refuses to write while `missed` or `style_warnings` is non-empty (`--allow-missed`, `--allow-warnings` override). `--backend auto|api|bridge|js` selects the write channel; `--ignore-existing` skips reading the attachment's annotations before layout. `--list` prints the counts by type and colour, the annotations that are not the tool's own, and the note titles; `--list --full` prints every annotation with text, comment and position.
+Run without `--apply` first and review `missed`, `style_warnings`, `translation_warnings` and `layout_warnings`; correct the configuration before applying. `--apply` refuses to write while `missed`, `style_warnings` or `layout_warnings` is non-empty (`--allow-missed`, `--allow-warnings` override). `--backend auto|api|bridge|js` selects the write channel; `--ignore-existing` skips reading the attachment's annotations before layout. `--list` prints the counts by type and colour, the annotations that are not the tool's own, and the note titles; `--list --full` prints every annotation with text, comment and position.
 
 ## Report fields
 
@@ -71,16 +71,16 @@ Run without `--apply` first and review `missed`, `style_warnings`, `translation_
 |---|---|
 | `highlights`, `underlines`, `margin_texts`, `sticky_notes` | counts |
 | `colors` | highlights per colour |
-| `missed` | entries that could not be placed: an unknown `id`, a phrase not found (with `closest`, `similarity`, and a page `hint` when the closest passage is on a neighbouring page), or an invalid summary (`reason`) |
+| `missed` | entries that could not be placed: an unknown `id`, a phrase not found (with `closest`, `similarity`, and a page `hint` when the closest passage is on a neighbouring page), an invalid summary, or an item on a rotated page, where nothing is written (`reason`) |
 | `style_warnings` | `{kind, page, text, reason}`; kinds `latex`, `math_format`, `tag`, `label`, `symbol`, `line_break`, `banned_phrase`, `duplicate`, `overlap`, `user_overlap`, `core_count`, `note_math` |
 | `translation_warnings` | comments with terms or numbers absent from the highlighted text, or a CJK-per-word ratio far outside the usual range |
 | `snapped` | phrases accepted at similarity ≥ 0.95 (`snap: true`) |
 | `ambiguous_matches` | phrases and anchors that occur more than once on their page; the first occurrence is used unless `occurrence` is set |
-| `layout_warnings` | margin boxes for which no free space was found |
+| `layout_warnings` | margin boxes without free space, taller than the page allows, or in a margin narrower than a box (30 pt); top and bottom bands without room |
 | `existing_annotations` | how many annotations were read from Zotero and how many rectangles were avoided, or why they were unavailable |
 | `pdf_sha256` | the file's hash before and after the run and `unchanged` |
 | `js`, `previews` | paths of the generated JavaScript file and preview PNGs |
 | `applied`, `backend`, `result`, `now_in_zotero`, `apply_error`, `fallback` | with `--apply`: the channel used, the numbers removed and created, a read-back, or the cause of failure and the manual fallback |
 | `verification` | API read-back: `missing_annotations` and `missing_notes` list newly returned keys that were not found |
 
-The API's `result.createdKeys` and `result.noteKeys` identify newly written annotations and notes; `result.failed` records reported creation failures. API cleanup runs only after all new items are created successfully. The apply flow checks returned keys against a fresh read-back; missing keys or failed read-back leave `applied: false`. An HTTP exception may leave no `result`. A failure may follow partial writes: inspect any available result and run `--list` before retrying.
+The API's `result.createdKeys` and `result.noteKeys` identify newly written annotations and notes; `result.failed` records reported creation failures. Every channel removes the old annotations only after all new items are created; the bridge and the generated JavaScript do both in one transaction, so a failure leaves the old ones. The apply flow checks returned keys against a fresh read-back; missing keys or failed read-back leave `applied: false`. An HTTP exception may leave no `result`. A failure may follow partial writes: inspect any available result and run `--list` before retrying.

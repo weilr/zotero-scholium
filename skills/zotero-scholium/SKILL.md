@@ -37,7 +37,7 @@ Read `<Zotero data dir>/zotero-scholium/profile.md` (`scholium.py profile --path
 python <skill dir>/scripts/scholium.py status --query "<title words>"   # matching items and their keys
 python <skill dir>/scripts/scholium.py status <ITEM_KEY>                # the paper's current state
 ```
-`status` lists the item's PDF attachments with their file paths, the annotations already on each (the tool's own by type and colour, and the user's), and the notes under the item (title, length, whether the tool wrote them). Prefer the published version over a preprint. An error saying Zotero does not answer: ask the user to start it.
+`status` lists the item's PDF attachments with their file paths, the annotations already on each (the tool's own by type and colour, and the user's), and the notes under the item (title, length, whether the tool wrote them). Prefer the published version over a preprint. An error saying Zotero does not answer: ask the user to start it; "Local API is not enabled": ask the user to turn on Settings → Advanced → *Allow other applications on this computer to communicate with Zotero*.
 
 ### 2. Read the paper once, then write the configuration
 
@@ -61,7 +61,7 @@ Write one configuration from `examples/config.template.json`, including only req
 python <skill dir>/scripts/scholium.py --config <config.json>
 python <skill dir>/scripts/scholium.py --config <config.json> --apply
 ```
-First run without `--apply`. Review the report and correct the configuration before running with `--apply`; this is a quality check, not another request for write permission. `--apply` resolves ids, lays out annotations, checks, writes and reads back. It refuses to write while `missed` or `style_warnings` is non-empty.
+First run without `--apply`. Review the report and correct the configuration before running with `--apply`; this is a quality check, not another request for write permission. `--apply` resolves ids, lays out annotations, checks, writes and reads back. It refuses to write while `missed`, `style_warnings` or `layout_warnings` is non-empty.
 
 - `missed`: unknown ids, or phrases not found (each with the closest passage, `closest`).
 - `style_warnings`: formatting, banned phrases, duplicate or overlapping highlights, core count or note math issues; kinds are listed in `references/configuration.md`.
@@ -87,7 +87,7 @@ A content review, when the user asks for one, runs in a fresh sub-agent with the
 
 - **Translations**: comments contain only a faithful translation of the highlighted sentence, without reader judgements or questions. Expand fragments to a full sentence when needed. Preserve numbers and model names. The full Chinese translation prompt is in `references/style-zh.md`; for other languages, translate naturally with technical precision.
 - **Margin notes**: complete sentences; no `label: content` form, arrows, circled numbers or bracketed tags. Reactions, questions and cross-references are appropriate; no filler; usually 15–40 words.
-- **Mathematics**: in comments and margin notes use Unicode and `<sub>`/`<sup>` (`d<sub>k</sub>`, `x<sup>2</sup>`, √, ×, ≤, α); the reader renders only `<b> <i> <sub> <sup>`. In the reading note use the editor's math nodes, rendered with KaTeX: `<span class="math">$d_k$</span>` inline, `<pre class="math">$$…$$</pre>` for a display equation.
+- **Mathematics**: in comments use Unicode and `<sub>`/`<sup>` (`d<sub>k</sub>`, `x<sup>2</sup>`, √, ×, ≤, α); the reader renders only `<b> <i> <sub> <sup>`. Margin text on the page shows no tags: the tool writes `<sub>`/`<sup>` there as Unicode (dₖ, x²) or with `_`/`^` (π_ref). In the reading note use the editor's math nodes, rendered with KaTeX: `<span class="math">$d_k$</span>` inline, `<pre class="math">$$…$$</pre>` for a display equation.
 - **Reading note**: paragraphs rather than labelled bullet lists; concrete figures; first-person assessments and open questions; limitations in the authors' words and the reader's own; the citation and code link at the end, no sign-off. No stock phrases, em-dash asides, emoji, or aphoristic closing sentences.
 - Before applying, read every requested output once more: comments must stay faithful to the source; reader judgements and questions belong in margin notes and reading notes.
 

@@ -14,6 +14,28 @@
   all of it fits.
 - The translation check no longer reports soft hyphens, Unicode hyphens or a hyphen between a number
   and its unit as added content, and comments lose soft hyphens before they are written.
+- An empty message box in the Scholium section is as tall as its placeholder, which no longer runs
+  into the line below it.
+- The bridge plugin (Zotero 7–9) and the generated Run-JavaScript file remove the tool's earlier
+  annotations in the same transaction as, and after, the new ones: a failed write leaves them in
+  place. The Run-JavaScript file writes the text of underlines.
+- A run whose prompt or log cannot be written stops Claude Code; a failure while reading Codex's
+  messages ends its server and fails the run instead of leaving it waiting. When the plugin stops
+  before a run's process is running, the run does not start, and a process being created at that
+  moment is stopped at once.
+- The transcript box keeps no more entries than the transcript (3000).
+- A margin box taller than the page allows, or in a margin narrower than a box (30 pt), gets a
+  `layout_warning`, and `--apply` refuses to write while `layout_warnings` is non-empty, as for
+  `style_warnings` (`--allow-warnings`). Highlights and margin notes on rotated pages are reported under
+  `missed` and not written.
+- A sentence range (`ids`) must start and end where its first and last sentences stand on the page;
+  otherwise it is reported under `missed` instead of highlighting the same text elsewhere.
+- Margin text on the page carries no tags: `<sub>` and `<sup>` (in any case, with or without attributes)
+  become Unicode sub- and superscripts (dₖ, x²), or `_` and `^` where a character has none (π_ref); other
+  formatting tags are dropped, and a `<sub>` or `<sup>` without its closing tag is reported under
+  `style_warnings`.
+- Margin notes keep clear of text in the margins, such as the vertical arXiv stamp; in a one-column
+  paper a note takes the other margin when its own has text beside the paragraph.
 
 ## 0.1.5 (2026-10-04)
 

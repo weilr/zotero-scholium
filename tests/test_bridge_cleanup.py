@@ -26,6 +26,7 @@ let existing = input.existing.map(a => ({
   annotationIsExternal: !!a.external,
   getTags: () => (a.tags || []).map(tag => ({ tag })),
   async eraseTx() { existing = existing.filter(item => item.key !== this.key); },
+  async erase() { existing = existing.filter(item => item.key !== this.key); },
 }));
 const attachment = { id: 1, key: 'ATTACH01', getAnnotations: () => existing };
 const context = vm.createContext({ Zotero: {
@@ -138,3 +139,44 @@ def test_generated_js_cleanup_uses_ownership_tags_only(cleanup):
         remaining += ["current", "legacy"]
     assert output["remaining"] == remaining
     assert len(output["saved"]) == 2
+
+
+def run_failing_apply(data, existing, script=None):
+    """Like run_apply, but the second annotation fails to save; returns the error and what is left."""
+    harness = RUN_APPLY.replace(
+        "async save() { saved.push(this); }",
+        "async save() { if (saved.length) throw Error('simulated save failure'); saved.push(this); }",
+    ).replace(
+        ".catch(error => { console.error(error); process.exitCode = 1; });",
+        ".catch(error => { process.stdout.write(JSON.stringify({ error: error.message, remaining: existing.map(a => a.key) })); });",
+    )
+    completed = subprocess.run(
+        [NODE, "-e", harness, str(BRIDGE)],
+        input=json.dumps({"data": data, "existing": existing, "script": script}),
+        text=True, capture_output=True, check=True, timeout=15,
+    )
+    return json.loads(completed.stdout)
+
+
+@pytest.mark.parametrize("channel", ["bridge", "generated-js"])
+def test_a_failed_write_keeps_the_old_annotations(channel):
+    annotations = [{"type": "highlight", "comment": "", "text": f"new {i}", "color": "#ffd400", "pageLabel": "1",
+                    "sortIndex": "0", "position": {"pageIndex": 0, "rects": [[1, 1, 5, 5]]}} for i in range(2)]
+    existing = [{"key": "OLD_OWN", "comment": "old output", "tags": ["zotero-scholium"]}, {"key": "USER", "comment": "mine"}]
+    if channel == "bridge":
+        data = {"attachmentKey": "ATTACH01", "tag": "zotero-scholium", "annotations": annotations}
+        output = run_failing_apply(data, existing)
+    else:
+        cfg = {"item_key": "PARENT01", "attachment_key": "ATTACH01", "cleanup": True}
+        output = run_failing_apply({}, existing, cli.render_js(cfg, annotations))
+    assert output == {"error": "simulated save failure", "remaining": ["OLD_OWN", "USER"]}
+
+
+def test_generated_js_writes_the_text_of_underlines():
+    cfg = {"item_key": "PARENT01", "attachment_key": "ATTACH01", "cleanup": True}
+    underline = {"type": "underline", "comment": "", "text": "The selected sentence.", "color": "#ffd400", "pageLabel": "1",
+                 "sortIndex": "0", "position": {"pageIndex": 0, "rects": [[1, 1, 5, 5]]}}
+    output = run_apply({}, [], cli.render_js(cfg, [underline]))
+    assert output["saved"][0]["annotationType"] == "underline"
+    assert output["saved"][0]["annotationText"] == "The selected sentence."
+    assert "1 underlines" in output["result"]

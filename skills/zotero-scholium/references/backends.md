@@ -14,7 +14,7 @@ Do not write to `zotero.sqlite` directly (the database is locked while Zotero is
 
 `apply_error` names the cause:
 
-- `missed` or `style_warnings` non-empty: correct the configuration and run again.
+- `missed`, `style_warnings` or `layout_warnings` non-empty: correct the configuration and run again.
 - Zotero 7–9 without the plugin: guide the installation, then run again.
 - No write channel: let the user run `create_annotations.js` (path in `fallback`).
 - An HTTP error from the local API: report it verbatim; a renewed authorisation dialog after reinstalling Zotero or moving the data directory is expected, since keys are bound to the instance's `Zotero-Server-ID`.

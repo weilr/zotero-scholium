@@ -228,7 +228,7 @@ class El {
 
 function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, exitCode = 0, script = null, claudeExists = true, gateFirst = false,
                    home = 'dirsvc', eraseFails = false, logs = {}, models = 'ok', claudeAt = CLAUDE, scripts = [], readFails = false,
-                   writeFails = false, codex = {}, logTimes = {}, notes = [], secondPdf = false } = {}) {
+                   writeFails = false, codex = {}, logTimes = {}, notes = [], secondPdf = false, failLogWrites = null, stdinFails = false, holdDirs = false } = {}) {
   const log = { calls: [], stdin: [], notices: [], alerts: [], confirms: [], kills: 0, menus: [], unregistered: [], listeners: [],
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
                 ftl: [], tabs: [], selected: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
@@ -248,7 +248,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
   };
   class Proc {
     constructor() { this.chunks = chunksFor(log.calls.length); this.killed = false; this.gate = null; }
-    get stdin() { return { write: async s => { log.stdin.push(s); }, close: async () => {} }; }
+    get stdin() { return { write: async s => { if (stdinFails) throw Error('EPIPE'); log.stdin.push(s); }, close: async () => {} }; }
     get stdout() {
       const self = this;
       return { readString: async () => {
@@ -303,6 +303,8 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       const answer = result => this.emit([ev({ id: msg.id, result })]);
       const p = msg.params || {};
       if (co.fail === msg.method) return this.emit([ev({ id: msg.id, error: { code: -32600, message: co.failMessage } })]);
+      // a notification ahead of the answer: the request is still waiting while it is handled
+      if (co.noticeBefore === msg.method) this.emit([ev({ method: 'thread/started', params: { thread: { id: 'T1' } } })]);
       switch (msg.method) {
         case 'initialize': return answer({ userAgent: 'scholium-bridge/0.160.0', codexHome: '/home/u/.codex' });
         case 'model/list': return answer({ data: CODEX_MODELS, nextCursor: null });
@@ -473,7 +475,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     }, parent: p => p.replace(/\/[^/]*$/, '') },
     IOUtils: {
       exists: async p => files.has(p) || p in log.writes,
-      makeDirectory: async p => { log.madeDirs.push(p); },
+      makeDirectory: async p => { log.madeDirs.push(p); if (holdDirs && p.includes('/tmp/scholium/')) await new Promise(r => { log.releaseDir = r; }); },
       getChildren: async p => { if (p !== CODEX_BIN) throw Error('NotFoundError'); return [CODEX_BIN + '/h0', CODEX_BIN + '/h1']; },
       stat: async p => { if (!(p in log.writes)) throw Error('NotFoundError'); return { lastModified: log.mtimes[p] || 0 }; },
       readUTF8: async p => {
@@ -483,6 +485,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       },
       writeUTF8: async (p, t, o) => {
         if (writeFails && p === PROFILE_PATH) throw Error('NotAllowedError');
+        if (failLogWrites && /-run\.jsonl$/.test(p) && String(t).includes(failLogWrites)) throw Error('NotWritableError');
         log.writes[p] = (o && o.mode === 'append' ? (log.writes[p] || '') : '') + t;
         log.mtimes[p] = ++log.clock;
       },
@@ -685,6 +688,130 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     h.see(true);
     const removed = await h.runner.removeAnnotations([h.item1]);
     facts.deleteInView = { removed, notices: h.log.notices.length, state: p.view().state, kind: p.view().stateKind };
+  }
+
+  // during a run, the transcript box holds no more entries than the transcript keeps
+  {
+    const h = harness({ gateFirst: true });
+    h.runner.MAX_ENTRIES = 4;
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.annotate([h.item1]);
+    await settle(300);
+    facts.boundedLog = { running: !!h.runner.current, kept: h.runner.transcript.length, nodes: p.pane().list.children.length };
+    h.log.calls[0].proc.kill();
+    await settle(100);
+  }
+
+  // the prompt cannot be handed to Claude Code: the run fails and the process is stopped
+  {
+    const h = harness({ stdinFails: true });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.annotate([h.item1]);
+    await settle(300);
+    facts.stdinFails = { kills: h.log.kills, running: !!h.runner.current, state: p.view().state, last: p.view().entries.at(-1) };
+  }
+
+  // the plugin stops while the program is looked up: no process is started afterwards
+  {
+    const h = harness();
+    h.runner.start('x');
+    await h.pane(h.item1);
+    await settle(40);
+    const find = h.runner.findClaude.bind(h.runner);
+    let release = null;
+    h.runner.findClaude = async () => { await new Promise(r => { release = r; }); return find(); };
+    const queued = h.runner.annotate([h.item1]);
+    for (let i = 0; i < 200 && !release; i++) await tick();
+    const looking = !!(release && h.runner.job && !h.runner.current);
+    h.runner.stop();
+    if (release) release();
+    await queued;
+    await settle(200);
+    facts.stopWhileLooking = { looking, calls: h.log.calls.length };
+  }
+
+  // the plugin stops while the run's folder is prepared: no process is started
+  {
+    const h = harness({ holdDirs: true });
+    h.runner.start('x');
+    await h.pane(h.item1);
+    await settle(40);
+    const queued = h.runner.annotate([h.item1]);
+    for (let i = 0; i < 200 && !h.log.releaseDir; i++) await tick();
+    const preparing = !!h.log.releaseDir;
+    h.runner.stop();
+    if (h.log.releaseDir) h.log.releaseDir();
+    await queued;
+    await settle(200);
+    facts.stopWhilePreparing = { preparing, calls: h.log.calls.length };
+  }
+
+  // the plugin stops while Claude Code's process or Codex's server is created: it is stopped at once
+  for (const agent of ['claude', 'codex']) {
+    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': agent } });
+    h.runner.start('x');
+    await h.pane(h.item1);
+    await settle(200);
+    const real = h.runner.subprocess();
+    const count = () => agent === 'codex' ? [h.log.codexCalls.length, h.log.codexKills] : [h.log.calls.length, h.log.kills];
+    const before = count();   // Codex's model list has started and closed a server already
+    let release = null;
+    h.runner.subprocess = () => ({ call: async opts => {
+      if (opts.arguments[0] !== '--version') await new Promise(r => { release = r; });
+      return real.call(opts);
+    } });
+    const queued = h.runner.annotate([h.item1]);
+    for (let i = 0; i < 200 && !release; i++) await tick();
+    const creating = !!release;
+    h.runner.stop();
+    const told = h.log.notices.length + h.log.notifications.length;
+    if (release) release();
+    await queued;
+    await settle(300);
+    const after = count();
+    facts['stopWhileCreating_' + agent] = { creating, started: after[0] - before[0], stopped: after[1] - before[1], turns: h.log.codexTurns,
+                                            toldAfterStop: h.log.notices.length + h.log.notifications.length - told };
+  }
+
+  // a run log that cannot be written: the run fails, and the agent is stopped rather than left running
+  {
+    const h = harness({ failLogWrites: '"session_id"' });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.annotate([h.item1]);
+    await settle(400);
+    facts.claudeLogFails = { kills: h.log.kills, running: !!h.runner.current, state: p.view().state, last: p.view().entries.at(-1) };
+  }
+  {
+    const h = harness({ failLogWrites: '"thread/started"', prefs: { 'extensions.scholium-bridge.agent': 'codex' },
+                        codex: { noticeBefore: 'thread/start' } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(200);
+    await h.runner.annotate([h.item1]);
+    await settle(500);
+    facts.codexLogFails = { kills: h.log.codexKills, running: !!h.runner.current, state: p.view().state, last: p.view().entries.at(-1) };
+  }
+
+  // an empty message box is as tall as its placeholder (two lines here), a typed line as tall as the text
+  {
+    const h = harness({ locale: 'en-US' });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    const input = p.pane().input;
+    Object.defineProperty(input, 'scrollHeight', { get() { return Math.max(1, Math.ceil(String(this.value).length / 40)) * 24; } });
+    h.runner.paintPanes();
+    const empty = input.style.height;
+    input.type('short');
+    const typed = input.style.height;
+    input.type('');
+    facts.inputHeight = { placeholder: input.placeholder, empty, typed, cleared: input.style.height, value: input.value };
   }
 
   // extra instructions with a new run, then a follow-up that continues its conversation
@@ -1844,6 +1971,35 @@ def test_plugin_ships_the_section_icons_and_localization():
     for lang in ("en-US", "zh-CN"):
         ftl = (PLUGIN / "locale" / lang / "scholium-bridge.ftl").read_text(encoding="utf8")
         assert "scholium-section =\n    .label = Scholium" in ftl and "scholium-sidenav =\n    .tooltiptext = Scholium" in ftl
+
+
+def test_the_transcript_box_is_bounded_like_the_transcript(facts):
+    assert facts["boundedLog"] == {"running": True, "kept": 4, "nodes": 4}
+
+
+def test_a_failed_prompt_write_stops_claude_code(facts):
+    f = facts["stdinFails"]
+    assert f["kills"] == 1 and not f["running"] and f["state"].startswith("失败") and "EPIPE" in f["last"][1]
+
+
+def test_no_run_starts_after_the_plugin_stopped(facts):
+    assert facts["stopWhileLooking"] == {"looking": True, "calls": 0}
+    assert facts["stopWhilePreparing"] == {"preparing": True, "calls": 0}
+    assert facts["stopWhileCreating_claude"] == {"creating": True, "started": 1, "stopped": 1, "turns": 0, "toldAfterStop": 0}
+    assert facts["stopWhileCreating_codex"] == {"creating": True, "started": 1, "stopped": 1, "turns": 0, "toldAfterStop": 0}
+
+
+def test_a_failed_log_write_stops_the_agent(facts):
+    claude, codex = facts["claudeLogFails"], facts["codexLogFails"]
+    assert claude["kills"] == 1 and not claude["running"] and claude["state"].startswith("失败")
+    assert "NotWritableError" in claude["last"][1]
+    assert codex["kills"] >= 1 and not codex["running"] and codex["state"].startswith("失败")
+    assert "NotWritableError" in codex["last"][1]
+
+
+def test_an_empty_message_box_fits_its_placeholder(facts):
+    assert facts["inputHeight"] == {"placeholder": "Extra instructions (optional), sent with Annotate",
+                                    "empty": "48px", "typed": "24px", "cleared": "48px", "value": ""}
 
 
 def test_extra_instructions_and_follow_ups_continue_the_conversation(facts):

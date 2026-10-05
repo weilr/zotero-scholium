@@ -104,3 +104,29 @@ def test_extract_creates_both_output_parent_directories(tmp_path, numbered):
     assert "The model improves the result." in listing.read_text(encoding="utf8")
     if numbered:
         assert json.loads(cache.read_text(encoding="utf8"))["sentences"][0]["id"] == 1
+
+
+def test_a_sentence_range_starts_at_its_first_sentence(tmp_path):
+    """Sentences 1 and 2 are parted by a heading; the same pair runs on elsewhere on the page."""
+    pdf, cache = tmp_path / "paper.pdf", tmp_path / "sentences.json"
+    make_pdf(pdf, ["Alpha beta gamma.", "Results", "Delta epsilon zeta.", "Alpha beta gamma. Delta epsilon zeta."])
+    rows = [{"id": 1, "page": 1, "text": "Alpha beta gamma."}, {"heading": "Results", "page": 1},
+            {"id": 2, "page": 1, "text": "Delta epsilon zeta."},
+            {"id": 3, "page": 1, "text": "Alpha beta gamma."}, {"id": 4, "page": 1, "text": "Delta epsilon zeta."}]
+    cache.write_text(json.dumps({"pdf_sha256": hashlib.sha256(pdf.read_bytes()).hexdigest(), "sentences": rows}), encoding="utf8")
+    output, missed = cli.build(config(pdf, cache, highlights=[{"ids": [1, 2]}]))
+    assert output == [] and "own" in missed[0]["reason"], "the pair further down is not sentences 1 and 2"
+    output, missed = cli.build(config(pdf, cache, highlights=[{"ids": [3, 4]}]))
+    assert missed == [] and len(output) == 1
+    assert output[0]["position"]["rects"][0][3] < 792 - 450, "the pair at its own place, in the last paragraph"
+
+
+def test_a_sentence_range_ends_at_its_last_sentence(tmp_path):
+    """Sentence 1, then a heading with the same words as sentence 2, then sentence 2 itself."""
+    pdf, cache = tmp_path / "paper.pdf", tmp_path / "sentences.json"
+    make_pdf(pdf, ["Alpha beta gamma.", "Delta epsilon zeta.", "Delta epsilon zeta."])
+    rows = [{"id": 1, "page": 1, "text": "Alpha beta gamma."}, {"heading": "Delta epsilon zeta.", "page": 1},
+            {"id": 2, "page": 1, "text": "Delta epsilon zeta."}]
+    cache.write_text(json.dumps({"pdf_sha256": hashlib.sha256(pdf.read_bytes()).hexdigest(), "sentences": rows}), encoding="utf8")
+    output, missed = cli.build(config(pdf, cache, highlights=[{"ids": [1, 2]}]))
+    assert output == [] and "sentence 2" in missed[0]["reason"], "the heading is not sentence 2"

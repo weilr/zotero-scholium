@@ -316,6 +316,73 @@ def test_margin_boxes_avoid_figures(tmp_path):
         assert "layout_warning" not in a
 
 
+@pytest.mark.parametrize("given, shown", [
+    ("d<sub>k</sub> and x<sup>2</sup>", "dₖ and x²"),
+    ("π<sub>ref</sub> and π<sup>*</sup>", "π_ref and π*"),
+    ("π<sup>SFT</sup>, y<sub>w</sub> and y<sub>l</sub>", "π^SFT, y_w and yₗ"),
+    ("e<sup>-x</sup>, a<sub>i,j</sub>", "e⁻ˣ, a_(i,j)"),
+    ("<b>bold</b> and <i>slanted</i>", "bold and slanted"),
+    ("if p<q and q>r, then p<r", "if p<q and q>r, then p<r"),
+    ("x<SUP>2</SUP>, H<SUB>2</SUB>O", "x², H₂O"),
+    ('x<sup class="exponent">2</sup> and y<sub >k</sub >', "x² and yₖ"),
+    ("an unclosed x<sup>2 stays", "an unclosed x<sup>2 stays"),
+])
+def test_page_text_writes_scripts_without_tags(given, shown):
+    assert cli.page_text(given) == shown
+
+
+def test_an_unconverted_script_tag_in_margin_text_is_reported(tmp_path):
+    pdf = _page_pdf(tmp_path / "t.pdf", lambda pg: pg.insert_textbox(pymupdf.Rect(108, 72, 504, 700), LEFT * 3, fontsize=10, fontname="helv"))
+    cfg = _cfg(pdf=pdf, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+               summaries=[{"page": 1, "anchor": "Foundation models have transformed", "text": "The loss grows as x<SUP>2 here."}])
+    out, missed = cli.build(cfg)
+    assert missed == [] and out[0]["comment"] == "The loss grows as x<SUP>2 here."
+    assert [w["kind"] for w in cli.check_style(out, cfg)] == ["tag"]
+
+
+def test_margin_text_on_the_page_carries_no_tags(tmp_path):
+    pdf = _page_pdf(tmp_path / "t.pdf", lambda pg: pg.insert_textbox(pymupdf.Rect(108, 72, 504, 700), LEFT * 3, fontsize=10, fontname="helv"))
+    cfg = _cfg(pdf=pdf, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+               summaries=[{"page": 1, "anchor": "Foundation models have transformed", "text": "The reward is β log π<sub>θ</sub>/π<sub>ref</sub>, with π<sup>SFT</sup> as reference."},
+                          {"page": 1, "place": "top", "text": "A summary with d<sub>k</sub> and x<sup>2</sup>."}])
+    out, missed = cli.build(cfg)
+    assert missed == [] and [a["comment"] for a in out] == ["A summary with dₖ and x².", "The reward is β log π_θ/π_ref, with π^SFT as reference."]
+    assert cli.check_style(out, cfg) == []
+
+
+def _stamped_page(tmp_path):
+    """One column with a vertical preprint stamp in the left margin, beside the first paragraphs."""
+    return _page_pdf(tmp_path / "stamp.pdf", lambda pg: (
+        pg.insert_textbox(pymupdf.Rect(108, 72, 520, 760), LEFT * 12, fontsize=10, fontname="helv"),
+        pg.insert_text((30, 430), "arXiv:2305.18290v3 [cs.LG] 29 Jul 2024", fontsize=20, rotate=90)))
+
+
+def test_margin_text_rects_find_a_vertical_stamp(tmp_path):
+    doc = pymupdf.open(_stamped_page(tmp_path))
+    pi = cli.PageIndex(doc[0])
+    rects = pi.margin_text_rects()
+    assert any(r[2] <= pi.body_x0 and r[3] - r[1] > 200 for r in rects), "the stamp is margin text"
+    assert all(r[2] <= pi.body_x0 + 1 or r[0] >= pi.body_x1 - 1 for r in rects), "no body line is margin text"
+
+
+def test_margin_note_gives_way_to_a_stamp(tmp_path):
+    pdf = _stamped_page(tmp_path)
+    doc = pymupdf.open(pdf)
+    pi = cli.PageIndex(doc[0])
+    stamp = [r for r in pi.margin_text_rects() if r[2] <= pi.body_x0]
+    anchor = "Foundation models have transformed"
+    left = {"page": 1, "anchor": anchor, "text": "a note beside the first paragraph"}
+    out, missed = cli.build(_cfg(pdf=pdf, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+                                 summaries=[dict(left, side="auto")]))
+    assert missed == []
+    x0, y0, x1, y1 = out[0]["position"]["rects"][0]
+    assert x0 >= pi.body_x1, "with the stamp beside the paragraph, the note takes the right margin"
+    out, _ = cli.build(_cfg(pdf=pdf, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+                            summaries=[dict(left, side="left")]))
+    rect = out[0]["position"]["rects"][0]
+    assert rect[2] <= pi.body_x0 and not cli._intersects(rect, stamp), "a forced left note moves clear of the stamp"
+
+
 def test_place_blocks_keeps_boxes_out_of_footer_and_header():
     low = [{"y_top": 40.0, "h": 60.0, "text": "paragraph at the page bottom"}]
     cli.place_blocks(low, [], floor=28.0, ceiling=772.0)
@@ -812,3 +879,45 @@ def test_compact_listing_counts_and_details_only_others():
     assert c["by_type"] == {"highlight": 2, "text": 1} and c["by_color"] == {"#ff6666": 1, "#1a73e8": 1, "#ffd400": 1}
     assert c["others_detail"] == [{"key": "U1", "type": "highlight", "color": "#ffd400", "page": "3", "text": "user's own"}]
     assert c["notes"] == [{"key": "N1", "title": "T"}] and c["backend"] == "api"
+
+
+def test_a_box_taller_than_the_room_is_reported():
+    b = {"y_top": 750.0, "h": 800.0}
+    cli.place_blocks([b], [], floor=28.0, ceiling=772.0)
+    assert b["y_top"] == 772.0 and "taller" in b["layout_warning"]
+
+
+def test_a_margin_narrower_than_a_box_is_reported(tmp_path):
+    pdf = _page_pdf(tmp_path / "narrow.pdf", lambda pg: pg.insert_textbox(pymupdf.Rect(20, 72, 604, 760), LEFT * 14, fontsize=10, fontname="helv"))
+    cfg = _cfg(pdf=pdf, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+               summaries=[{"page": 1, "anchor": "Foundation models have transformed", "text": "A note."}])
+    out, missed = cli.build(cfg)
+    assert missed == [] and "covers the text" in out[0]["layout_warning"]
+
+
+def test_nothing_is_written_on_a_rotated_page(tmp_path):
+    def draw(pg):
+        pg.insert_textbox(pymupdf.Rect(72, 72, 540, 700), LEFT * 3, fontsize=10, fontname="helv")
+        pg.set_rotation(90)
+    pdf = _page_pdf(tmp_path / "rotated.pdf", draw)
+    cfg = _cfg(pdf=pdf, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+               highlights=[{"page": 1, "text": "Foundation models have transformed"}],
+               summaries=[{"page": 1, "anchor": "Foundation models have transformed", "text": "A note."}])
+    out, missed = cli.build(cfg)
+    assert out == [] and [m["kind"] for m in missed] == ["highlight", "summary"]
+    assert all("rotated" in m["reason"] for m in missed)
+
+
+def test_layout_warnings_block_apply(tmp_path, capsys):
+    pdf = _page_pdf(tmp_path / "narrow.pdf", lambda pg: pg.insert_textbox(pymupdf.Rect(20, 72, 604, 760), LEFT * 14, fontsize=10, fontname="helv"))
+    cp = tmp_path / "config.json"
+    json.dump({"pdf": pdf, "item_key": "I", "attachment_key": "A", "out_dir": str(tmp_path), "preview_pages": [],
+               "summaries": [{"page": 1, "anchor": "Foundation models have transformed", "text": "A note."}]}, open(cp, "w", encoding="utf8"))
+    with pytest.raises(SystemExit):
+        cli.main(["--config", str(cp), "--apply", "--backend", "js", "--ignore-existing"])
+    rep = json.loads(capsys.readouterr().out)
+    assert rep["layout_warnings"] and rep["applied"] is False and "layout warnings" in rep["apply_error"] and "backend" not in rep
+    with pytest.raises(SystemExit):
+        cli.main(["--config", str(cp), "--apply", "--backend", "js", "--ignore-existing", "--allow-warnings"])
+    rep = json.loads(capsys.readouterr().out)
+    assert rep["backend"] == "js" and "layout warnings" not in (rep.get("apply_error") or "")
