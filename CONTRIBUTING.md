@@ -12,6 +12,7 @@ Bug reports and pull requests are welcome.
 pip install -e ".[dev]"
 pytest                                      # tests use a synthetic PDF; no third-party content
 python scripts/check_skill_script_sync.py   # the skill bundles a copy of cli.py that must stay identical
+python scripts/check_versions.py [vX.Y.Z]   # one version in the package, the tool and the plugins (and the tag)
 python scripts/check_skill_frontmatter.py   # SKILL.md front matter must be strict YAML
 python scripts/measure_context.py           # token size of the skill files (--pdf: and of a paper's extraction; --max-skill-tokens: the CI limit)
 python scripts/session_usage.py FILE...     # model calls and tokens of Codex rollouts or Claude Code transcripts
@@ -22,4 +23,4 @@ After changing `src/zotero_scholium/cli.py`, run `python scripts/sync_skill_scri
 
 ## Building the plugin
 
-The plugin is packaged by the release workflow. To build it locally, archive `manifest.json`, `bootstrap.js` and the `content/` and `locale/` folders from `plugin/scholium-bridge/` at the root of a zip file named `scholium-bridge.xpi`.
+The plugin is packaged by the release workflow, after the checks of `ci.yml` pass and the tag matches the versions. To build it locally, archive `manifest.json`, `bootstrap.js` and the `content/` and `locale/` folders from `plugin/scholium-bridge/` at the root of a zip file named `scholium-bridge.xpi`.

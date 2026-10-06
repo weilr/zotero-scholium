@@ -96,7 +96,8 @@ def test_failed_creation_reports_failure_and_preserves_previous_annotations(tmp_
     assert result["noteCreated"] is (fail_type != "note")
 
 
-def run_main(tmp_path, monkeypatch, capsys, api, with_note=False):
+def run_main(tmp_path, monkeypatch, capsys, api, with_note=False, args=("--ignore-existing",)):
+    """A run of `scholium --apply`; with `api` None the backend is picked as usual."""
     pdf = tmp_path / "paper.pdf"
     with pymupdf.open() as doc:
         page = doc.new_page()
@@ -110,11 +111,12 @@ def run_main(tmp_path, monkeypatch, capsys, api, with_note=False):
         note.write_text("<h1>Paper</h1><p>A reading note.</p>", encoding="utf8")
         cfg["note_html"] = str(note)
     path = tmp_path / "config.json"
-    path.write_text(json.dumps(cfg), encoding="utf8")
-    monkeypatch.setattr(cli, "pick_backend", lambda *args: ("api", api, "test API"))
+    path.write_text(json.dumps(dict(cfg, data_dir=str(tmp_path))), encoding="utf8")
+    if api is not None:
+        monkeypatch.setattr(cli, "pick_backend", lambda *args: ("api", api, "test API"))
     code = 0
     try:
-        cli.main(["--config", str(path), "--apply", "--ignore-existing"])
+        cli.main(["--config", str(path), "--apply", *args])
     except SystemExit as exc:
         code = exc.code
     return code, json.loads(capsys.readouterr().out)
@@ -148,3 +150,25 @@ def test_main_reports_verified_annotation_and_note(tmp_path, monkeypatch, capsys
     assert report["verification"] == {"missing_annotations": [], "missing_notes": []}
     assert report["now_in_zotero"]["annotations"] == 1
     assert report["result"]["noteCreated"] is True
+
+
+@pytest.mark.parametrize("with_note", [False, True])
+def test_a_bridge_run_reuses_the_listing_of_each_connection_check(tmp_path, monkeypatch, capsys, with_note):
+    """Backend check and existing annotations, backend check and write, read-back: five listings, note or not."""
+    (tmp_path / "scholium-bridge.token").write_text("TOKEN", encoding="utf8")
+    calls = []
+
+    def http(method, path, body=None, headers=None, timeout=60):
+        if not path.startswith("/scholium-bridge/"):   # the local API's version check
+            return 0, {}, "refused"
+        calls.append(path)
+        assert headers["X-Annotate-Token"] == "TOKEN"
+        if path == "/scholium-bridge/apply":
+            assert (body["note"] is not None) is with_note
+            return 200, {}, json.dumps({"ok": True})
+        return 200, {}, json.dumps({"ok": True, "annotations": [], "notes": [{"key": "N", "title": "Paper"}]})
+
+    monkeypatch.setattr(cli, "http", http)
+    code, report = run_main(tmp_path, monkeypatch, capsys, None, with_note, ("--backend", "bridge"))
+    assert code == 0 and report["applied"] is True and report["backend"] == "bridge"
+    assert calls == ["/scholium-bridge/list"] * 4 + ["/scholium-bridge/apply", "/scholium-bridge/list"]

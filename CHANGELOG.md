@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- A configuration without margin notes reads only the pages it highlights; the column extents of the
+  whole document were read for every run.
+- A write through the bridge plugin lists the attachment 5 times instead of 7 (9 with a reading
+  note): the listing that answers the connection check is used.
+- The Scholium section parses a paper's log again only when the file has changed (time or size);
+  every selection of the paper read the whole log, which a continued conversation keeps extending.
+- When a later batch of a local API write fails (an HTTP error, or a new authorisation that is
+  refused), the report keeps the keys created by the batches before it (`result.createdKeys`),
+  and `result.failed` names the items from the failed batch on.
+- The release workflow runs the CI checks first and stops when the tag differs from the version in
+  the package, the tool or the plugins (`scripts/check_versions.py`); CI tests Python 3.9 and 3.12.
+
 ## 0.1.6 (2026-10-05)
 
 - A run that fails on the connection to Claude Code's or Codex's service before the agent used any

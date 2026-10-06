@@ -150,6 +150,16 @@ def test_levels_and_underline(pdf_path, tmp_path):
     assert out[1]["type"] == "highlight" and out[1]["color"] == "#123456"
 
 
+def test_highlights_alone_leave_the_other_pages_unread(pdf_path, tmp_path, monkeypatch):
+    """The document's column extents are for margin notes; a run without them reads only the pages it highlights."""
+    monkeypatch.setattr(cli, "column_bounds", lambda doc: pytest.fail("column extents computed without margin notes"))
+    cfg = dict(cli.DEFAULTS)
+    cfg.update({"pdf": pdf_path, "item_key": "I", "attachment_key": "A", "out_dir": str(tmp_path), "preview_pages": [],
+                "highlights": [{"page": 1, "text": "harmonic analysis", "comment": "def"}]})
+    out, missed = cli.build(cfg)
+    assert missed == [] and len(out) == 1
+
+
 def test_profile_markdown_renders_without_newlines_in_samples():
     prof = {"annotations_analysed": 10, "annotated_papers": 2, "annotations_per_paper_median": 5, "language": "zh",
             "types": {"highlight": 0.6, "text": 0.4}, "uses_margin_text": True, "uses_underline": False, "uses_sticky_notes": False,

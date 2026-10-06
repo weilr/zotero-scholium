@@ -5,12 +5,17 @@ on:
     tags: ["v*"]
 
 jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
   xpi:
+    needs: checks
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: the tag names the version of the package, the tool and the plugins
+        run: python scripts/check_versions.py "${{ github.ref_name }}"
       - name: build scholium-bridge.xpi
         run: |
           cd plugin/scholium-bridge

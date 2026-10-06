@@ -477,7 +477,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       exists: async p => files.has(p) || p in log.writes,
       makeDirectory: async p => { log.madeDirs.push(p); if (holdDirs && p.includes('/tmp/scholium/')) await new Promise(r => { log.releaseDir = r; }); },
       getChildren: async p => { if (p !== CODEX_BIN) throw Error('NotFoundError'); return [CODEX_BIN + '/h0', CODEX_BIN + '/h1']; },
-      stat: async p => { if (!(p in log.writes)) throw Error('NotFoundError'); return { lastModified: log.mtimes[p] || 0 }; },
+      stat: async p => { if (!(p in log.writes)) throw Error('NotFoundError'); return { lastModified: log.mtimes[p] || 0, size: log.writes[p].length }; },
       readUTF8: async p => {
         if (readFails && p === PROFILE_PATH) throw Error('NotReadableError');
         if (!(p in log.writes)) throw Error('missing');
@@ -1525,6 +1525,21 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     facts.latestLog = shown;
   }
 
+  // an unchanged log is parsed once; one that grew is parsed again
+  {
+    const path = '/data/tmp/scholium/ATT1/claude-run.jsonl';
+    const h = harness({ logs: { [path]: SCRIPT.slice(0, 4).concat([LAST, RESULT]).join('') }, logTimes: { [path]: 1 } });
+    h.runner.start('x');
+    let parsed = 0;
+    const entries = h.runner.entries.bind(h.runner);
+    h.runner.entries = event => { parsed++; return entries(event); };
+    const first = (await h.runner.readLog('ATT1')).entries.length, once = parsed;
+    const again = (await h.runner.readLog('ATT1')).entries.length, unchanged = parsed - once;
+    h.log.writes[path] += said('one more');   // the same time stamp: the size tells
+    const after = (await h.runner.readLog('ATT1')).entries.length;
+    facts.logCache = { first, again, unchanged, after, reparsed: parsed - once - unchanged };
+  }
+
   process.stdout.write(JSON.stringify(facts));
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
@@ -2144,6 +2159,12 @@ def test_codex_transcript_state_and_log_read_like_claude_codes(facts):
     assert latest["claude"]["first"] == ["scholium-entry info", "模型: claude-opus-5-5"]
     assert latest["claude"]["session"] == {"agent": "claude", "id": "S1"}
     assert latest["claude"]["revealed"] == "/data/tmp/scholium/ATT1/claude-run.jsonl"
+
+
+def test_an_unchanged_log_is_parsed_once(facts):
+    c = facts["logCache"]
+    assert c["first"] == c["again"] and c["unchanged"] == 0
+    assert c["after"] == c["first"] + 1 and c["reparsed"] == 7
 
 
 def test_codex_follow_up_continues_its_thread_whatever_agent_is_chosen(facts):

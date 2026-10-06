@@ -28,9 +28,29 @@ def test_create_does_not_retry_when_commit_outcome_is_unknown(api, monkeypatch, 
 
     monkeypatch.setattr(cli, "http", exchange)
     item = {"itemType": "note", "note": "<p>Keep just one copy.</p>"}
-    with pytest.raises(RuntimeError, match=f"HTTP {status}"):
-        api.create([item])
+    keys, failed = api.create([item])
+    assert keys == [] and f"HTTP {status}" in failed[0]["message"]
     assert stored == [item], "an uncertain response must not duplicate the committed item"
+
+
+@pytest.mark.parametrize("second", [(500, "server error"), (401, "expired key")])
+def test_a_failed_batch_keeps_the_keys_of_the_batches_before_it(api, monkeypatch, second):
+    """A server error, or an expired key whose new authorisation is refused, on the second batch."""
+    batches = []
+
+    def exchange(method, path, body=None, headers=None, timeout=60):
+        if path == "/api/local/authorize":
+            return 403, {}, "denied"
+        batches.append(len(body))
+        if len(batches) == 2:
+            return second[0], {}, second[1]
+        return 200, {}, json.dumps({"successful": {str(i): {"key": f"K{i}"} for i in range(len(body))}, "failed": {}})
+
+    monkeypatch.setattr(cli, "http", exchange)
+    keys, failed = api.create([{"itemType": "annotation"}] * 51)
+    assert batches == [50, 1]
+    expected = "HTTP 500" if second[0] == 500 else "authorization failed (HTTP 403)"
+    assert len(keys) == 50 and failed[0]["items"] == "51-51 of 51" and expected in failed[0]["message"]
 
 
 @pytest.mark.parametrize("status", [0, 500, 503])

@@ -437,6 +437,7 @@ var ScholiumRunner = {
   notes: new Map(),         // attachment key -> { text, error, at, title }: the latest outcome, shown in its section
   sessions: new Map(),      // attachment key -> { agent, id }: the conversation of its latest run, which a follow-up continues
   logs: new Map(),          // attachment key -> the log of its latest run
+  parsedLogs: new Map(),    // log path -> { at, size, entries, session, result }: a log read before, while it is unchanged
   paused: null,             // { until, known, timer } while the usage limit holds the queue
   RETRY_MS: 10 * 60000,     // the wait when the agent names no reset time
   NET_RETRY_MS: 30000,      // the wait before the second try of a run whose connection failed
@@ -1615,22 +1616,33 @@ var ScholiumRunner = {
       }
     }
     if (!path || !(await this.exists(path))) return null;
-    let text;
-    try { text = await IOUtils.readUTF8(path); } catch (e) { return null; }
-    const entries = [];
-    let session = null, result = null;
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      let event;
-      try { event = JSON.parse(line); } catch (e) { continue; }
-      if (typeof event.session_id === "string" && event.session_id) session = event.session_id;
-      if (event.type === "system" && event.subtype === "init") result = null;
-      if (event.type === "result") result = event;
-      this.addEntries(entries, this.entries(event));
+    // a continued conversation appends to its log, so an unchanged one (same time and size) is not parsed again
+    let stat = null;
+    try { stat = await IOUtils.stat(path); } catch (e) {}
+    let log = this.parsedLogs.get(path);
+    if (!log || !stat || log.at !== stat.lastModified || log.size !== stat.size) {
+      let text;
+      try { text = await IOUtils.readUTF8(path); } catch (e) { return null; }
+      const entries = [];
+      let session = null, result = null;
+      for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        let event;
+        try { event = JSON.parse(line); } catch (e) { continue; }
+        if (typeof event.session_id === "string" && event.session_id) session = event.session_id;
+        if (event.type === "system" && event.subtype === "init") result = null;
+        if (event.type === "result") result = event;
+        this.addEntries(entries, this.entries(event));
+      }
+      log = { at: stat && stat.lastModified, size: stat && stat.size, entries: entries.slice(-this.MAX_ENTRIES), session, result };
+      this.parsedLogs.delete(path);
+      if (stat) this.parsedLogs.set(path, log);
+      if (this.parsedLogs.size > 20) this.parsedLogs.delete(this.parsedLogs.keys().next().value);   // the oldest
     }
+    const { session, result } = log;
     if (session && !this.sessions.has(key)) this.sessions.set(key, { agent, id: session });
     if (!this.logs.has(key)) this.logs.set(key, path);
-    return { entries: entries.slice(-this.MAX_ENTRIES), session, result };
+    return { entries: log.entries.slice(), session, result };
   },
 
   // the saved log of an earlier run, when the paper has one and nothing newer is shown

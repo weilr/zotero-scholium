@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:   # release.yml runs these checks before it builds
 
 jobs:
   test:
@@ -11,7 +12,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python: ["3.10", "3.12"]
+        python: ["3.9", "3.12"]   # the oldest supported (requires-python) and a recent one
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,6 +20,7 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: pip install -e ".[dev]"
       - run: python scripts/check_skill_script_sync.py
+      - run: python scripts/check_versions.py
       - run: python scripts/check_skill_frontmatter.py
       - run: python scripts/measure_context.py --max-skill-tokens 3000
       - run: pytest -q

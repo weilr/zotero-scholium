@@ -630,7 +630,8 @@ def build(cfg, obstacles=None):
     existing_obstacles); margin boxes are laid out around them and around the page's figures.
     """
     doc = pymupdf.open(cfg["pdf"])
-    bounds = column_bounds(doc)
+    # the column extents only matter for margin notes; without them only the highlighted pages are read
+    bounds = column_bounds(doc) if cfg.get("summaries") else None
     idx = {}
     def page_index(p):
         if p not in idx:
@@ -734,7 +735,7 @@ def build(cfg, obstacles=None):
         if n > 1 and not occ:                     # the first occurrence was highlighted without being asked for
             ann["occurrences"] = n
         out.append(ann)
-    page_sizes = [(pg.rect.width, pg.rect.height) for pg in doc]
+    page_sizes = [(pg.rect.width, pg.rect.height) for pg in doc] if cfg.get("summaries") else []
     specs = []
     for s in cfg.get("summaries", []):
         s = resolve(s, "summary") if isinstance(s, dict) else s
@@ -1363,12 +1364,19 @@ class LocalApi:
         return json.loads(t)
 
     def create(self, items):
+        """Keys created and failures, in batches of 50. A batch that fails ends the run; the keys of the batches
+        before it are kept, and its failure names the items from that batch on, which may or may not exist."""
         created, failed = [], []
         for i in range(0, len(items), 50):
-            s, h, t = self.write("POST", "/api/users/0/items", items[i:i + 50])
-            if s != 200:
-                raise RuntimeError(f"create failed (HTTP {s}): {t[:300]}")
-            d = json.loads(t)
+            try:   # a 401 whose new authorisation fails raises
+                s, h, t = self.write("POST", "/api/users/0/items", items[i:i + 50])
+                reason = None if s == 200 else f"create failed (HTTP {s}): {t[:300]}"
+                d = json.loads(t) if s == 200 else {}
+            except Exception as e:
+                reason = f"create failed: {e}"
+            if reason:
+                failed.append({"message": reason, "items": f"{i + 1}-{len(items)} of {len(items)}"})
+                break
             created += [v["key"] for v in d.get("successful", {}).values()]
             failed += list(d.get("failed", {}).values())
         return created, failed
@@ -1533,6 +1541,8 @@ def legacy_profile_dir():
 
 
 def bridge_connect(cfg):
+    """(token, the attachment's listing) once the plugin answers; (None, reason) otherwise. The connection
+    check is the list request itself, so the listing comes with it ({"ok": False, "error": ...} when it failed)."""
     token = None
     for d in _data_dir_candidates(cfg):
         tok_path = os.path.join(d, "scholium-bridge.token")
@@ -1549,31 +1559,28 @@ def bridge_connect(cfg):
         return None, "token mismatch or token file not found (scholium-bridge.token in the Zotero data directory; set data_dir in the config)"
     if not token:
         return None, "token file not found (looked in: %s)" % ", ".join(_data_dir_candidates(cfg))
-    return token, json.loads(t) if t.startswith("{") else {}
+    res = json.loads(t) if s == 200 else {}
+    if not res.get("ok"):
+        return token, {"ok": False, "error": "list failed (HTTP %s): %s" % (s, t[:200])}
+    res["backend"] = "bridge"
+    return token, res
 
 
 def bridge_list(cfg):
-    token, info = bridge_connect(cfg)
+    token, res = bridge_connect(cfg)
     if not token:
-        return None, info
-    s, h, t = http("POST", "/scholium-bridge/list", {"attachmentKey": cfg["attachment_key"]}, {"X-Annotate-Token": token})
-    res = json.loads(t) if s == 200 else {}
-    if not res.get("ok"):
-        return None, "list failed (HTTP %s): %s" % (s, t[:200])
-    res["backend"] = "bridge"
-    return res, None
+        return None, res
+    return (res, None) if res["ok"] else (None, res["error"])
 
 
 def bridge_apply(cfg, out):
-    token, info = bridge_connect(cfg)
+    token, lst = bridge_connect(cfg)
     if not token:
-        return None, info
+        return None, lst
     html = open(cfg["note_html"], encoding="utf8").read() if cfg.get("note_html") else None
     prefix = cfg.get("note_title_prefix") or cfg.get("note_title") or ""
     if html and not cfg.get("note_replace"):
-        lst, _ = bridge_list(cfg)
-        if lst:
-            html, prefix = version_note(html, prefix, [n["title"] for n in lst.get("notes", [])])
+        html, prefix = version_note(html, prefix, [n["title"] for n in lst.get("notes", [])])
     payload = {"itemKey": cfg["item_key"], "attachmentKey": cfg["attachment_key"],
                "cleanup": bool(cfg.get("cleanup", True)), "cleanupExternal": bool(cfg.get("cleanup_external")), "tag": TAG, "legacyTags": sorted(LEGACY_TAGS), "annotations": out,
                "note": {"html": html, "titlePrefix": prefix, "replace": bool(cfg.get("note_replace", False))} if html else None}
