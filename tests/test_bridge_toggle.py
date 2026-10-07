@@ -151,8 +151,8 @@ class ReaderManager {
   }
 }
 
-function boot(locale, prefs = {}) {
-  const Reader = new ReaderManager();
+// a copy of the plugin in its own sandbox; `Reader` is shared when two copies run at once
+function boot(locale, prefs = {}, Reader = new ReaderManager()) {
   const store = new Map(Object.entries(prefs));
   const full = name => { if (!name.startsWith('extensions.scholium-bridge.')) throw Error('unexpected preference ' + name); };
   const context = vm.createContext({ Zotero: {
@@ -293,6 +293,41 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
     listeners = [];
   }
 
+  // Zotero's update handlers do not wait for each other: the running copy can be started a second
+  // time, or left running beside the new one; either way each reader keeps one button
+  {
+    const ID = 'scholium-bridge@zotero-scholium';
+    const { Reader, toggle } = boot('en-US');
+    toggle.start(ID); toggle.start(ID);
+    const tab = Reader.open(newAttachment());
+    await settle();
+    facts.startedTwice = { buttons: buttons(tab).length, listeners: listeners.length, view: sorted(tab.view) };
+    toggle.stop();
+    facts.startedTwiceStopped = listeners.length;
+    listeners = [];
+
+    const old = boot('en-US', {}, Reader), fresh = boot('en-US', {}, Reader);
+    old.toggle.start(ID); fresh.toggle.start(ID);
+    const second = Reader.open(newAttachment());
+    await settle();
+    facts.twoCopies = { buttons: buttons(second).length, oldActive: old.toggle.active, listeners: listeners.length,
+                        view: sorted(second.view) };
+    fresh.toggle.stop();
+    listeners = [];
+
+    // a copy from 0.1.6 or earlier cannot be stopped; its button is the one shown
+    Reader.registerEventListener('renderToolbar', e => {
+      const b = e.doc.createElement('button'); b.className = 'toolbar-button scholium-toggle'; e.append(b);
+    }, ID);
+    const current = boot('en-US', {}, Reader);
+    current.toggle.start(ID);
+    const third = Reader.open(newAttachment());
+    await settle();
+    facts.besideLegacy = buttons(third).length;
+    current.toggle.stop();
+    listeners = [];
+  }
+
   facts.writes = writes;
   process.stdout.write(JSON.stringify(facts));
 })().catch(error => { console.error(error); process.exitCode = 1; });
@@ -377,3 +412,11 @@ def test_user_annotations_stay_visible_and_no_item_is_written(facts):
     for view in views:
         assert set(USER) <= set(view)
     assert facts["writes"] == []
+
+
+def test_a_second_start_or_a_second_copy_leaves_one_button(facts):
+    """After a plugin update the toolbar showed two eye buttons until Zotero restarted."""
+    assert facts["startedTwice"] == {"buttons": 1, "listeners": 1, "view": USER}
+    assert facts["startedTwiceStopped"] == 0
+    assert facts["twoCopies"] == {"buttons": 1, "oldActive": False, "listeners": 1, "view": USER}
+    assert facts["besideLegacy"] == 1

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- After a plugin update the reader toolbar could show two eye buttons until Zotero restarted:
+  Zotero's update handlers do not wait for each other, so the running copy could be started again
+  or left running beside the new one. The copy that starts last now stops the one before it, and a
+  toolbar gets one button even beside a copy of 0.1.6 or earlier.
 - A configuration without margin notes reads only the pages it highlights; the column extents of the
   whole document were read for every run.
 - A write through the bridge plugin lists the attachment 5 times instead of 7 (9 with a reading

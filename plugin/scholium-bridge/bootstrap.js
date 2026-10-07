@@ -351,6 +351,9 @@ var ScholiumToggle = {
     const { reader, doc, append } = event;
     if (!this.active || !reader || !doc) return;
     if (!this.proto && this.patch(reader)) this.hideLoaded(reader);
+    // the section was emptied before this event: a button here comes from a copy of 0.1.6 or earlier
+    // that a plugin update left running (see start)
+    if (doc.querySelector(".toolbar .scholium-toggle")) return;
     append(this.button(doc));
   },
 
@@ -371,6 +374,12 @@ var ScholiumToggle = {
   start(pluginID) {
     const R = Zotero.Reader;
     if (!R || typeof R.registerEventListener !== "function") return;
+    // Zotero's handlers for a plugin update do not wait for each other: the running copy can be started
+    // again, or left running beside the new one. The copy that starts last stops the one before it.
+    if (R.scholiumToggle && R.scholiumToggle.active) {
+      try { R.scholiumToggle.stop(); } catch (e) { this.log("previous toggle not stopped: " + e); }
+    }
+    R.scholiumToggle = this;
     this.shown = this.readPref();
     this.active = true;
     this.handler = event => {
@@ -392,6 +401,8 @@ var ScholiumToggle = {
     try { R.unregisterEventListener("renderToolbar", this.handler); } catch (e) {}
     this.unhook();
     if (this.proto && this.proto._getAnnotation === this.wrapper) this.proto._getAnnotation = this.original;
+    this.proto = this.original = this.wrapper = null;   // a later start patches again
+    if (R.scholiumToggle === this) delete R.scholiumToggle;
     for (const reader of readers) {
       try {
         const doc = reader._iframeWindow && reader._iframeWindow.document;
