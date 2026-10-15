@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.7 (2026-10-15)
 
 - The Scholium section sets the agent's messages as Markdown (headings, lists, tables, code, quotes)
   instead of showing the source. The transcript can be selected and copied, without its bullets, and
