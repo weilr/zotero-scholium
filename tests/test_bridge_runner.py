@@ -233,7 +233,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
                 ftl: [], tabs: [], selected: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
                 madeDirs: [], trashed: [], versionCalls: [], codexCalls: [], codexProcs: [], codexKills: 0, codexTurns: 0,
-                mtimes: Object.assign({}, logTimes), clock: 10 };
+                mtimes: Object.assign({}, logTimes), clock: 10, copied: [] };
   const co = Object.assign({ versions: CODEX_VERSIONS, scripts: [], skillAt: '/data', fail: null, failMessage: '' }, codex);
   const files = new Set((claudeExists ? [claudeAt] : []).concat(Object.keys(co.versions)));
   // 97-character chunks split JSON lines; 'WAIT' holds the stream open until the process is killed
@@ -427,6 +427,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     Zotero: {
       debug() {}, locale, DataDirectory: { dir: '/data' },
       Libraries: { userLibraryID: 1 },
+      Utilities: { Internal: { copyTextToClipboard: text => log.copied.push(text) } },
       Prefs: { get: (n, g) => store.get(n), set: (n, v, g) => store.set(n, v) },
       Items: {
         get: id => (Array.isArray(id) ? id.map(i => items.get(i)).filter(Boolean) : items.get(id) || null),
@@ -844,6 +845,27 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
                        inits: lines.filter(l => l.type === 'system' && l.subtype === 'init').length, state: p.view().state,
                        withoutSession: await h.runner.followUp(h.att2, 'x'), calls2: h.log.calls.length };
   }
+  {
+    // the agent's answer in a continued conversation is Markdown: set as such, with a button that copies its source
+    const reply = ['## 改动', '', '- 第 5 页译文改为 **更短** 的一句', '', '| 页 | 条数 |', '|:--|--:|', '| 5 | 1 |'].join('\n');
+    const h = harness({ scripts: [SCRIPT.concat([LAST, RESULT]),
+                                  [SCRIPT[0], said(reply), ev({ type: 'result', subtype: 'success', is_error: false, result: reply, session_id: 'S1' })]] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.annotate([h.item1]);
+    await settle(300);
+    await h.runner.followUp(h.att1, '第 5 页那条译文改短');
+    await settle(300);
+    const last = pane => pane.pane().list.children.filter(c => c.className === 'scholium-entry text').at(-1);
+    const node = last(p);
+    const copy = node.children[2];
+    copy.click();
+    const done = [copy.className, copy.title, h.live()];
+    h.fire();
+    facts.markdownReply = { reply, tree: tree(node), copied: h.log.copied.slice(), done, reset: [copy.className, copy.title],
+                            rerendered: JSON.stringify(tree(last(await h.pane(h.item1)))) === JSON.stringify(tree(node)) };
+  }
 
   // the usage limit: the queue waits, and the interrupted paper continues its conversation after the reset
   {
@@ -1021,6 +1043,11 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
                     '## Rules', '', '1. first', '2. second', '   - nested `#ff6666` red', '     continued', '- other list', '  1. inner ordered', '',
                     '> quote **q**', '', '```', '<script>alert(1)</script> **not bold**', '```', '', '---', '3. starts at three', '<b>raw</b>'].join('\r\n');
     facts.markdown = h.runner.renderMarkdown(h.paneDoc, sample).map(tree);
+    // tables: the colons align, an escaped bar stays, a short row is filled and a long one cut; bars without
+    // a rule of as many cells under them stay text
+    const table = ['Before', '| a | b \\| c | d |', '| :-: | --- | ---: |', '| `x` | 2 |', '| 1 | 2 | 3 | 4 |', '',
+                   'x | y', 'no rule', '', 'p | q', '|---|---|---|'].join('\n');
+    facts.markdownTable = h.runner.renderMarkdown(h.paneDoc, table).map(tree);
   }
   {
     // a profile that cannot be read is not overwritten; a failed save keeps the sheet and the text
@@ -1659,16 +1686,24 @@ def test_section_is_styled_by_its_stylesheet(facts):
     rules = css_rules()
     for cls in ["scholium-pane", "scholium-settings", "scholium-field", "scholium-select", "scholium-actions", "scholium-spacer",
                 "scholium-button", "scholium-state", "scholium-caption", "scholium-log", "scholium-entry", "scholium-bullet",
-                "scholium-content", "scholium-composer", "scholium-input", "scholium-send-row", "scholium-hint"]:
+                "scholium-content", "scholium-composer", "scholium-input", "scholium-send-row", "scholium-hint", "scholium-copy",
+                "scholium-markdown"]:
         assert any(re.search(r"\." + re.escape(cls) + r"(?![\w-])", sel) for sel in rules), cls
     log = rules[".scholium-log"]
     for part in ("background: var(--material-background)", "color: var(--fill-primary)", "border: var(--material-border-quarternary)",
-                 "resize: vertical", "overflow: auto", "min-height: 80px"):
+                 "resize: vertical", "overflow: auto", "min-height: 80px", "user-select: text"):
         assert part in log, part
+    # the transcript can be selected, without its bullets and buttons; a message's copy button shows over the message
+    assert "user-select: none" in rules[".scholium-bullet"] and "user-select: none" in rules[".scholium-copy"]
+    assert 'url("copy16.svg")' in rules[".scholium-copy"] and 'url("check16.svg")' in rules[".scholium-copy.done"]
+    assert all((PLUGIN / "content" / name).exists() for name in ("copy16.svg", "check16.svg"))
+    assert "opacity: 0" in rules[".scholium-copy"]
+    assert "opacity: 1" in rules[".scholium-entry:hover .scholium-copy, .scholium-copy:focus-visible, .scholium-copy.done"]
+    assert "font-size: 1.2em" in rules[".scholium-log .scholium-markdown h1"]
     assert "display: none !important" in rules[".scholium-pane [hidden]"]
     assert "var(--accent-green)" in rules[".scholium-entry.tool .scholium-bullet"]
     assert [sel for sel, body in rules.items() if "monospace" in body] == [".scholium-entry.tool, .scholium-entry.result", "#scholium-profile-sheet .scholium-editor",
-                                                                               "#scholium-profile-sheet .scholium-preview code"]
+                                                                               ".scholium-markdown code"]
     assert "var(--accent-blue10)" in rules[".scholium-entry.prompt"] and "auto" in rules[".scholium-entry.prompt"]
     assert "var(--accent-blue)" in rules[".scholium-button.primary"] and "var(--accent-red)" in rules[".scholium-button.danger"]
     assert "border-color: var(--accent-blue)" in rules[".scholium-composer:focus-within"]
@@ -1859,7 +1894,7 @@ def test_personal_profile_is_edited_as_markdown_over_the_zotero_window(facts):
     assert f["button"] == {"text": "个人配置 ↗", "cls": "scholium-button quiet"}
     assert f["root"] == ["scholium-sheet-backdrop", "scholium-profile-sheet"] and f["box"] == ["scholium-sheet", "dialog", "个人配置"]
     assert f["title"] == ["scholium-sheet-title", "个人配置"]
-    assert f["panes"] == ["scholium-editor-panes", "scholium-editor", "scholium-preview"] and f["previewed"] == 8
+    assert f["panes"] == ["scholium-editor-panes", "scholium-editor", "scholium-preview scholium-markdown"] and f["previewed"] == 8
     assert f["head"][0][0] == "scholium-editor-about" and "Interpretation 和 User's rules 两节保持不变" in f["head"][0][1]
     assert f["head"][1] == ["scholium-editor-path", "/data/zotero-scholium/profile.md"]
     assert f["pathTitle"] == "/data/zotero-scholium/profile.md"
@@ -1916,6 +1951,31 @@ def test_markdown_preview_builds_elements_and_never_markup(facts):
         ["hr"],
         ["ol[start=3]", ["li", "starts at three\n<b>raw</b>"]],
     ]
+    assert facts["markdownTable"] == [
+        ["p", "Before"],
+        ["table", ["thead", ["tr", ["th[text-align: center]", "a"], ["th", "b | c"], ["th[text-align: right]", "d"]]],
+                  ["tbody", ["tr", ["td[text-align: center]", ["code", "x"]], ["td", "2"], ["td[text-align: right]"]],
+                            ["tr", ["td[text-align: center]", "1"], ["td", "2"], ["td[text-align: right]", "3"]]]],
+        ["p", "x | y\nno rule"],
+        ["p", "p | q\n|---|---|---|"],
+    ]
+
+
+def test_the_agents_markdown_is_set_and_its_source_copied(facts):
+    r = facts["markdownReply"]
+    assert r["tree"] == [
+        "div.scholium-entry text", ["span.scholium-bullet", "⏺ "],
+        ["div.scholium-content scholium-markdown",
+         ["h2", "改动"],
+         ["ul", ["li", "第 5 页译文改为 ", ["strong", "更短"], " 的一句"]],
+         ["table", ["thead", ["tr", ["th[text-align: left]", "页"], ["th[text-align: right]", "条数"]]],
+                   ["tbody", ["tr", ["td[text-align: left]", "5"], ["td[text-align: right]", "1"]]]]],
+        ["button.scholium-copy[title=复制这条回复（Markdown）]"],
+    ]
+    assert r["copied"] == [r["reply"]]
+    assert r["done"][:2] == ["scholium-copy done", "已复制"] and 1500 in r["done"][2]
+    assert r["reset"] == ["scholium-copy", "复制这条回复（Markdown）"]
+    assert r["rerendered"] is True
 
 
 def test_missing_profile_starts_as_the_template_and_is_written_on_saving(facts):

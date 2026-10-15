@@ -426,7 +426,8 @@ var ScholiumToggle = {
  * beyond that; a question that still reaches the plugin is declined, since no one is there to answer.
  * The section chooses the agent, the model, from the list the agent reports, and the effort; it
  * starts, cancels and deletes, shows the state of the paper, and shows the transcript live: the
- * agent's text, each tool call and its result; for an earlier run it shows the saved log. A box below
+ * agent's text set as Markdown, each message with a button that copies its source, each tool call and
+ * its result; the text can be selected; for an earlier run it shows the saved log. A box below
  * the transcript takes extra instructions for a new run, or continues the paper's latest conversation,
  * with the agent that held it. The section opens the annotation profile
  * (<data dir>/zotero-scholium/profile.md), which every run follows, as plain text beside a live
@@ -503,6 +504,8 @@ var ScholiumRunner = {
       deleteThis: zh ? "删除批注" : "Delete annotations",
       logButton: zh ? "打开日志" : "Show log",
       transcriptCaption: zh ? "运行过程" : "Transcript",
+      copyMessage: zh ? "复制这条回复（Markdown）" : "Copy this message (Markdown)",
+      copiedMessage: zh ? "已复制" : "Copied",
       profileOpen: zh ? "个人配置 ↗" : "Personal profile ↗",
       profileTitle: zh ? "个人配置" : "Personal profile",
       profileAbout: zh ? "每次批注都遵循这份画像。重新统计文库只改写开头的统计，Interpretation 和 User's rules 两节保持不变。"
@@ -1333,7 +1336,7 @@ var ScholiumRunner = {
       this.paintPreview(ed);
     });
     ed.input.addEventListener("scroll", () => { this.syncPreview(ed); });
-    ed.preview = el("div", "scholium-preview");
+    ed.preview = el("div", "scholium-preview scholium-markdown");
     const panes = el("div", "scholium-editor-panes");
     panes.append(ed.input, ed.preview);
     ed.status = el("span", "scholium-hint");
@@ -1481,9 +1484,12 @@ var ScholiumRunner = {
         out.push(quote);
       } else if (listItem.test(line)) {
         i = this.markdownList(doc, lines, i, out);
+      } else if (this.markdownTableStart(lines, i)) {
+        i = this.markdownTable(doc, lines, i, out);
       } else {
         const body = [];
-        for (; i < lines.length && lines[i].trim() && !this.markdownBlock(lines[i]) && !listItem.test(lines[i]); i++) body.push(lines[i].trim());
+        for (; i < lines.length && lines[i].trim() && !this.markdownBlock(lines[i]) && !listItem.test(lines[i])
+               && !this.markdownTableStart(lines, i); i++) body.push(lines[i].trim());
         const para = doc.createElement("p");
         this.inlineMarkdown(doc, para, body.join("\n"));
         out.push(para);
@@ -1495,6 +1501,48 @@ var ScholiumRunner = {
   markdownRule(line) { return /^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line); },
 
   markdownBlock(line) { return /^\s{0,3}(#{1,6}\s|>|```|~~~)/.test(line) || this.markdownRule(line); },
+
+  // a table starts with a row of cells over a row of dashes, one for each cell
+  markdownTableStart(lines, i) {
+    const rule = lines[i + 1];
+    return lines[i].includes("|") && rule !== undefined && rule.includes("|")
+      && /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(rule)
+      && this.markdownCells(lines[i]).length === this.markdownCells(rule).length;
+  },
+
+  // the cells of a table row, split at the bars that are not escaped
+  markdownCells(line) {
+    return line.trim().replace(/^\|/, "").replace(/(?<!\\)\|$/, "").split(/(?<!\\)\|/).map(c => c.trim().replace(/\\\|/g, "|"));
+  },
+
+  // the table from line i, its rows running to a blank line; returns the line after it
+  markdownTable(doc, lines, i, out) {
+    const align = this.markdownCells(lines[i + 1]).map(c => (c.endsWith(":") ? (c.startsWith(":") ? "center" : "right") : c.startsWith(":") ? "left" : ""));
+    const row = (line, tag) => {
+      const tr = doc.createElement("tr");
+      const cells = this.markdownCells(line);
+      align.forEach((a, k) => {
+        const cell = doc.createElement(tag);
+        if (a) cell.setAttribute("style", "text-align: " + a);
+        this.inlineMarkdown(doc, cell, cells[k] || "");
+        tr.append(cell);
+      });
+      return tr;
+    };
+    const table = doc.createElement("table");
+    const head = doc.createElement("thead");
+    head.append(row(lines[i], "th"));
+    table.append(head);
+    const rows = [];
+    for (i += 2; i < lines.length && lines[i].trim() && lines[i].includes("|") && !this.markdownBlock(lines[i]); i++) rows.push(row(lines[i], "td"));
+    if (rows.length) {
+      const body = doc.createElement("tbody");
+      body.append(...rows);
+      table.append(body);
+    }
+    out.push(table);
+    return i;
+  },
 
   // a list from line i and the lists nested in it by indentation; returns the line after it
   markdownList(doc, lines, i, out) {
@@ -1702,6 +1750,14 @@ var ScholiumRunner = {
       span.textContent = bullet;
       node.append(span);
     }
+    if (entry.kind === "text") {
+      // the agent writes Markdown: set as the profile's preview sets it, with a button that copies the source
+      const content = doc.createElement("div");
+      content.className = "scholium-content scholium-markdown";
+      content.append(...this.renderMarkdown(doc, entry.text));
+      node.append(content, this.copyButton(doc, entry.text));
+      return node;
+    }
     const content = doc.createElement("span");
     content.className = "scholium-content";
     if (entry.kind === "tool" && entry.name && entry.text.startsWith(entry.name)) {
@@ -1713,6 +1769,29 @@ var ScholiumRunner = {
     }
     node.append(content);
     return node;
+  },
+
+  // a button that copies the text, and shows for a moment that it did
+  copyButton(doc, text) {
+    const button = doc.createElement("button");
+    button.className = "scholium-copy";
+    button.title = this.text("copyMessage");
+    button.addEventListener("click", () => {
+      try {
+        Zotero.Utilities.Internal.copyTextToClipboard(text);
+      } catch (e) {
+        this.log("copy failed: " + e);
+        return;
+      }
+      button.className = "scholium-copy done";
+      button.title = this.text("copiedMessage");
+      clearTimeout(button.reset);
+      button.reset = setTimeout(() => {
+        button.className = "scholium-copy";
+        button.title = this.text("copyMessage");
+      }, 1500);
+    });
+    return button;
   },
 
   appendEntries(entries) {

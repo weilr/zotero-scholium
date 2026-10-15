@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The Scholium section sets the agent's messages as Markdown (headings, lists, tables, code, quotes)
+  instead of showing the source. The transcript can be selected and copied, without its bullets, and
+  each message has a button that copies its Markdown source. The profile preview reads tables too.
 - After a plugin update the reader toolbar could show two eye buttons until Zotero restarted:
   Zotero's update handlers do not wait for each other, so the running copy could be started again
   or left running beside the new one. The copy that starts last now stops the one before it, and a
