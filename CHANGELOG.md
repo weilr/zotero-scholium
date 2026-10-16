@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.8 (2026-10-16)
 
 - The Scholium section shows the agent's messages as they are written (Claude Code's partial
   messages, Codex's message deltas); the log keeps only the whole messages. Text selected in a
