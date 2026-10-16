@@ -1,5 +1,44 @@
 # Changelog
 
+## Unreleased
+
+- The Scholium section shows the agent's messages as they are written (Claude Code's partial
+  messages, Codex's message deltas); the log keeps only the whole messages. Text selected in a
+  message being written stays selected.
+- Formulas in the agent's messages (`\( \)`, `$ $`, and set apart `\[ \]`, `$$ $$`) are typeset:
+  KaTeX 0.18.11, bundled with the plugin (MIT, `content/katex`), turns their TeX into MathML, which
+  Zotero sets. A formula KaTeX cannot read stays as written, and a price such as $5 stays text.
+  Backslash escapes (`\*`, `\$`) are read as Markdown has them.
+- A message sent in a conversation runs before the papers waiting for their first run, after a paper
+  that the usage limit or a failed connection interrupted.
+- A question in a conversation is answered without the closing line that a change of annotations
+  ends with; its notices say "Answered" and give the answer's first line.
+- A message with a code block or a wide table no longer widens Zotero's item pane, which pushed the
+  right edge of the Scholium section, the copy buttons included, under the side navigation (0.1.7);
+  such blocks scroll inside the transcript. Words in table cells are no longer split.
+- A paper selected again during its run shows its transcript at the latest entry and follows it; the
+  transcript opened at the top and stayed there.
+- A message containing a line or paragraph separator (U+2028, U+2029), which text quoted from a PDF
+  can hold, hung Zotero or left the Scholium section empty (0.1.7), each time the paper was shown
+  while its log held the message. A message that still cannot be set as Markdown shows its source.
+- The progress line counts a command that extracts sentences and then writes to Zotero as a write,
+  and recognises the `scholium` command as well as `scholium.py`.
+- After a plugin update that left the old copy running, the section keeps the new version's
+  stylesheet and labels; it kept the old version's, and lost both when the old copy stopped.
+- Times read as Claude Code and Codex give them (45s, 6m 05s, 1h 02m 05s), and a running paper's
+  time so far counts up each second; it was given in whole minutes, a run under one as one minute.
+- While a paper runs, its delete button is out of the way, so that the section's buttons keep to one
+  row.
+- What a cancelled or failed run showed of a message it did not finish stays in the transcript and
+  the log, marked as unfinished and before the failure.
+- Words typed in a section's message box and not sent stay with their item while another is shown.
+- `scholium.py` reports a refused connection to Zotero (Zotero closed, or its server off) at once;
+  it tried three times over 20 seconds. A request that times out is still tried again.
+- `--backend js` no longer asks Zotero for its version first; with Zotero's local server not
+  answering, it waited about 20 seconds before writing the Run-JavaScript file.
+- The message box no longer takes Zotero's look for text boxes: no line under the text while it has
+  the focus, no grey ground under the pointer. The box around it shows the focus.
+
 ## 0.1.7 (2026-10-15)
 
 - The Scholium section sets the agent's messages as Markdown (headings, lists, tables, code, quotes)

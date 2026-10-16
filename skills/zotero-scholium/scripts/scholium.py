@@ -1253,7 +1253,8 @@ def http(method, path, body=None, headers=None, timeout=60):
     A busy Zotero can leave a request hanging until the socket times out, which
     surfaces as status 0. GET is safe to repeat, so a read is retried a few times
     before giving up; every other method is returned to the caller as-is, because
-    a POST that timed out may still have been committed.
+    a POST that timed out may still have been committed. A refused connection
+    (nothing listens: Zotero is closed or its server is off) is reported at once.
     """
     data = json.dumps(body, ensure_ascii=False).encode("utf8") if body is not None else None
     attempts = GET_ATTEMPTS if method.upper() == "GET" else 1
@@ -1269,7 +1270,7 @@ def http(method, path, body=None, headers=None, timeout=60):
         except urllib.error.HTTPError as e:
             return e.code, dict(e.headers), e.read().decode("utf8", "ignore")
         except Exception as e:
-            if attempt == attempts - 1:
+            if attempt == attempts - 1 or isinstance(getattr(e, "reason", e), ConnectionRefusedError):
                 return 0, {}, str(e)
             time.sleep(5 * (attempt + 1))
     return 0, {}, "unreachable"
@@ -1898,7 +1899,7 @@ def _sha256(path):
 
 def pick_backend(requested, cfg):
     """Return (name, handle, reason)."""
-    ver, sid = zotero_version()
+    ver, sid = zotero_version() if requested in ("auto", "api") else (None, None)
     if requested in ("auto", "api"):
         if ver and sid:
             try:

@@ -426,18 +426,19 @@ var ScholiumToggle = {
  * beyond that; a question that still reaches the plugin is declined, since no one is there to answer.
  * The section chooses the agent, the model, from the list the agent reports, and the effort; it
  * starts, cancels and deletes, shows the state of the paper, and shows the transcript live: the
- * agent's text set as Markdown, each message with a button that copies its source, each tool call and
- * its result; the text can be selected; for an earlier run it shows the saved log. A box below
- * the transcript takes extra instructions for a new run, or continues the paper's latest conversation,
- * with the agent that held it. The section opens the annotation profile
- * (<data dir>/zotero-scholium/profile.md), which every run follows, as plain text beside a live
- * Markdown preview in an editor sheet over the Zotero window. The state line shows the turns and
- * tokens of a run; when the usage limit is reached, the queue waits and the interrupted paper
- * continues its conversation after the reset. The section's look is content/scholium.css, linked
- * into each main window. Short notices at the start and the end close by themselves, and a system
- * notification reports the end; both are left out while a Scholium section is on screen in the
- * focused window. Every event is logged to <data dir>/tmp/scholium/<attachment key>/claude-run.jsonl
- * or codex-run.jsonl.
+ * agent's text set as Markdown as it is written (its formulas as MathML, by KaTeX in content/katex,
+ * which Zotero sets), each message with a button that copies its source,
+ * each tool call and its result; the text can be selected; for an earlier run it shows the saved log.
+ * A box below the transcript takes extra instructions for a new run, or continues the paper's latest
+ * conversation, with the agent that held it, before the papers still waiting. The section opens the
+ * annotation profile (<data dir>/zotero-scholium/profile.md), which every run follows, as plain
+ * text beside a live Markdown preview in an editor sheet over the Zotero window. The state line shows
+ * the turns and tokens of a run; when the usage limit is reached, the queue waits and the interrupted
+ * paper continues its conversation after the reset. The section's look is content/scholium.css,
+ * linked into each main window. Short notices at the start and the end close by themselves, and a
+ * system notification reports the end; both are left out while a Scholium section is on screen in the
+ * focused window. Every event but the pieces of a message being written is logged to
+ * <data dir>/tmp/scholium/<attachment key>/claude-run.jsonl or codex-run.jsonl.
  */
 var ScholiumRunner = {
   pluginID: null,
@@ -450,16 +451,22 @@ var ScholiumRunner = {
   sessions: new Map(),      // attachment key -> { agent, id }: the conversation of its latest run, which a follow-up continues
   logs: new Map(),          // attachment key -> the log of its latest run
   parsedLogs: new Map(),    // log path -> { at, size, entries, session, result }: a log read before, while it is unchanged
+  unsent: new Map(),        // "<library>/<item key>" -> the words in a section's message box, not yet sent
+  katexLib: undefined,      // KaTeX once loaded (null when it cannot be), for the formulas in messages
+  mathCache: new Map(),     // "D"/"I" + TeX -> its MathML, or null when KaTeX cannot read it
   paused: null,             // { until, known, timer } while the usage limit holds the queue
   RETRY_MS: 10 * 60000,     // the wait when the agent names no reset time
   NET_RETRY_MS: 30000,      // the wait before the second try of a run whose connection failed
   pref: "extensions.scholium-bridge.",
   STEPS: ["skill", "extract", "reading", "writing", "dryRun", "applying"],
-  TICK_MS: 30000,
+  TICK_MS: 1000,            // the running paper's state line, with its time so far, is set again this often
   KEEP_DONE_MS: 10 * 60000,
   NOTICE_MS: 6000,
   transcript: [],           // display entries of the running or latest paper
   transcriptKey: null,      // attachment whose run the transcript belongs to
+  draft: null,              // { text, block }: the message the agent is writing, until the whole message arrives
+  draftTimer: null,
+  DRAFT_MS: 80,             // the draft is set again at most this often
   MAX_ENTRIES: 3000,
   paneID: null,
   panes: new Map(),         // item pane section body -> { doc, keys, list, state, buttons, shownKey, seen }
@@ -548,11 +555,12 @@ var ScholiumRunner = {
       done: zh ? "完成" : "done",
       failed: zh ? "失败" : "failed",
       cancelled: zh ? "已取消" : "cancelled",
-      minutes: m => zh ? `${m} 分钟` : `${m} min`,
+      unfinished: zh ? "（这条回复没有写完）" : "(this message was not finished)",
       stepOf: (i, n, label) => zh ? `第 ${i}/${n} 步 ${label}` : `step ${i}/${n} ${label}`,
       running: (step, time) => zh ? `${step} · 已用 ${time}` : `${step} · ${time} so far`,
       queued: n => zh ? `另有 ${n} 篇排队` : `${n} more queued`,
       finished: title => zh ? `批注完成：${title}` : `Finished: ${title}`,
+      answered: title => zh ? `已回答：${title}` : `Answered: ${title}`,
       failedLine: title => zh ? `批注失败：${title}` : `Failed: ${title}`,
       cancelJob: zh ? "取消批注" : "Cancel the annotation",
       send: zh ? "发送" : "Send",
@@ -760,24 +768,27 @@ var ScholiumRunner = {
                 : "The usage limit has reset. Continue the task above from where it stopped; the rules are unchanged.";
     }
     return (zh ? [
-      "下面是用户在 Zotero 里针对这篇论文的批注发来的后续要求。仍是无人值守：不要向用户提问，不要启动子代理；要改批注时按技能的流程修改配置，再写入 Zotero。",
+      "下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
+        + "只是提问就直接回答；要改批注时按技能的流程修改配置，再写入 Zotero。",
       "",
       job.say,
       "",
-      "结束时最后一行只写一句：改了什么，剩余警告。",
+      "改了批注时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。",
     ] : [
-      "Below is a follow-up request about this paper's annotations, sent from Zotero. It is still unattended: do not ask the user anything and do not start sub-agents; to change annotations, edit the configuration as the skill describes and write it to Zotero again.",
+      "Below is a follow-up message about this paper and its annotations, sent from Zotero. It is still unattended: do not ask the user anything and do not start sub-agents. "
+        + "Answer a question directly; to change annotations, edit the configuration as the skill describes and write it to Zotero again.",
       "",
       job.say,
       "",
-      "End with one line only: what changed, remaining warnings.",
+      "When annotations changed, end with one line only: what changed, remaining warnings. Leave that line out when only answering.",
     ]).join("\n");
   },
 
   outDir(key) { return PathUtils.join(Zotero.DataDirectory.dir, "tmp", "scholium", key); },
 
   args(job) {
-    const args = ["-p", "--output-format", "stream-json", "--verbose",
+    // the text arrives as it is written (stream events), and each whole message after it
+    const args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
                   "--permission-mode", this.getPref("claudePermissionMode") || "auto"];
     const home = this.home();
     if (home) args.push("--add-dir", PathUtils.join(home, ".claude", "skills", "zotero-scholium"));
@@ -803,13 +814,21 @@ var ScholiumRunner = {
       const cmd = String(input.command || "");
       const file = String(input.file_path || "");
       if (c.name === "Skill") step = "skill";
-      else if (/scholium\.py/.test(cmd) && /\bextract\b/.test(cmd)) step = "extract";
-      else if (/scholium\.py/.test(cmd) && /--apply/.test(cmd)) step = "applying";
-      else if (/scholium\.py/.test(cmd) && /--config/.test(cmd)) step = "dryRun";
+      else if (this.commandStep(cmd)) step = this.commandStep(cmd);
       else if (c.name === "Read" && /sentences\.txt$/i.test(file)) step = "reading";
       else if ((c.name === "Write" || c.name === "Edit") && /scholium/i.test(file.replace(/\\/g, "/"))) step = "writing";
     }
     return step;
+  },
+
+  // the step of a command of the tool (scholium.py, or the scholium command), the furthest when one line
+  // holds several: a write to Zotero, a dry run, extracting sentences
+  commandStep(cmd) {
+    if (!/\bscholium(?:\.py)?\b/.test(cmd)) return null;
+    if (/--apply\b/.test(cmd)) return "applying";
+    if (/--config\b/.test(cmd)) return "dryRun";
+    if (/\bextract\b/.test(cmd)) return "extract";
+    return null;
   },
 
   // map one Codex notification to a progress step: its shell commands, and its file changes in the
@@ -822,9 +841,7 @@ var ScholiumRunner = {
     }
     if (item.type !== "commandExecution") return null;
     const cmd = String(item.command || "");
-    if (/scholium\.py/.test(cmd) && /\bextract\b/.test(cmd)) return "extract";
-    if (/scholium\.py/.test(cmd) && /--apply/.test(cmd)) return "applying";
-    if (/scholium\.py/.test(cmd) && /--config/.test(cmd)) return "dryRun";
+    if (this.commandStep(cmd)) return this.commandStep(cmd);
     if (/sentences\.txt/i.test(cmd)) return "reading";
     if (/SKILL\.md/.test(cmd)) return "skill";
     return null;
@@ -841,7 +858,13 @@ var ScholiumRunner = {
     return inner;
   },
 
-  elapsed(started) { return this.text("minutes", Math.max(1, Math.round((Date.now() - started) / 60000))); },
+  // a length of time as Claude Code and Codex give it: 45s, 6m 05s, 1h 02m 05s
+  duration(ms) {
+    const all = Math.max(0, Math.round(ms / 1000));
+    const h = Math.floor(all / 3600), m = Math.floor((all % 3600) / 60), s = all % 60;
+    const two = n => String(n).padStart(2, "0");
+    return h ? `${h}h ${two(m)}m ${two(s)}s` : m ? `${m}m ${two(s)}s` : `${s}s`;
+  },
 
   stepText(step) {
     const i = this.STEPS.indexOf(step);
@@ -851,7 +874,7 @@ var ScholiumRunner = {
 
   // the running paper's state line: its step, the time so far, and the papers waiting
   runningState() {
-    let line = this.text("running", this.stepText(this.job.step), this.elapsed(this.job.started));
+    let line = this.text("running", this.stepText(this.job.step), this.duration(Date.now() - this.job.started));
     if (this.queue.length) line += " · " + this.text("queued", this.queue.length);
     return line;
   },
@@ -868,11 +891,15 @@ var ScholiumRunner = {
     try { if (win.MozXULElement) win.MozXULElement.insertFTLIfNeeded("scholium-bridge.ftl"); } catch (e) {}
     try {
       const doc = win.document;
-      if (!doc.getElementById("scholium-bridge-style")) {
-        const link = doc.createElementNS("http://www.w3.org/1999/xhtml", "link");
+      const href = this.chrome + "scholium.css";
+      let link = doc.getElementById("scholium-bridge-style");
+      // another version's sheet, left by a copy that a plugin update left running (see ScholiumToggle.start)
+      if (link && link.getAttribute("href") !== href) { link.remove(); link = null; }
+      if (!link) {
+        link = doc.createElementNS("http://www.w3.org/1999/xhtml", "link");
         link.id = "scholium-bridge-style";
         link.setAttribute("rel", "stylesheet");
-        link.setAttribute("href", this.chrome + "scholium.css");
+        link.setAttribute("href", href);
         doc.documentElement.append(link);
       }
     } catch (e) { this.log("stylesheet failed: " + e); }
@@ -880,8 +907,14 @@ var ScholiumRunner = {
 
   removeFromWindow(win) {
     if (this.editor && this.editor.doc === win.document) this.closeProfile(this.editor, false);
-    try { const link = win.document.querySelector('[href="scholium-bridge.ftl"]'); if (link) link.remove(); } catch (e) {}
-    try { const style = win.document.getElementById("scholium-bridge-style"); if (style) style.remove(); } catch (e) {}
+    try {
+      // a newer copy that replaced this copy's sheet keeps its sheet and its labels
+      const style = win.document.getElementById("scholium-bridge-style");
+      if (style && style.getAttribute("href") !== this.chrome + "scholium.css") return;
+      if (style) style.remove();
+      const link = win.document.querySelector('[href="scholium-bridge.ftl"]');
+      if (link) link.remove();
+    } catch (e) {}
   },
 
   // one stream-json event as display entries, in the manner of Claude Code's transcript
@@ -906,6 +939,9 @@ var ScholiumRunner = {
       }
     }
     if (event.type === "scholium" && event.subtype === "prompt") out.push({ kind: "prompt", text: String(event.text || "") });
+    if (event.type === "scholium" && event.subtype === "unfinished" && String(event.text || "").trim()) {
+      out.push({ kind: "text", text: String(event.text).trim(), unfinished: true });
+    }
     if (event.type === "scholium" && event.subtype === "continue") out.push({ kind: "info", text: this.text("continued") });
     if (event.type === "scholium" && event.subtype === "retry") out.push({ kind: "info", text: this.text("retrying") });
     // a successful result repeats Claude's last message; only a failed run's result is shown
@@ -1228,7 +1264,7 @@ var ScholiumRunner = {
     const actions = div("scholium-actions");
     pane.annotate = this.paneButton(doc, this.text("annotateThis"), () => {
       const extra = String(pane.input.value || "").trim();
-      this.annotate([item], { extra }).then(n => { if (n && extra) { pane.input.value = ""; this.fitInput(pane); } })
+      this.annotate([item], { extra }).then(n => { if (n && extra) this.clearInput(pane); })
         .catch(e => this.log("annotate failed: " + e));
     }, "primary");
     pane.cancel = this.paneButton(doc, this.text("cancelJob"), () => {
@@ -1258,7 +1294,14 @@ var ScholiumRunner = {
     pane.input = doc.createElement("textarea");
     pane.input.className = "scholium-input";
     pane.input.setAttribute("rows", "1");
-    pane.input.addEventListener("input", () => { this.fitInput(pane); });
+    // without Zotero's look for text boxes (a line under the text on focus, a grey ground on hover): the
+    // box around it shows the focus
+    pane.input.setAttribute("no-native", "true");
+    pane.input.value = this.unsent.get(this.unsentKey(pane)) || "";   // what was typed here before and not sent
+    pane.input.addEventListener("input", () => {
+      this.keepUnsent(pane);
+      this.fitInput(pane);
+    });
     pane.input.addEventListener("keydown", e => {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !pane.send.hidden) {
         e.preventDefault();
@@ -1277,6 +1320,8 @@ var ScholiumRunner = {
     if (this.transcriptKey && keys.includes(this.transcriptKey)) {
       pane.shownKey = this.transcriptKey;
       for (const entry of this.transcript) pane.list.append(this.entryNode(doc, entry));
+      if (this.draft) this.paintDraft();
+      pane.list.scrollTop = pane.list.scrollHeight;   // at the latest, so that what follows is followed
     }
     this.paintPane(pane);
     this.loadModels().catch(() => {});
@@ -1451,12 +1496,14 @@ var ScholiumRunner = {
   // forms; the text only ever becomes text, so nothing in it is run or loaded
   renderMarkdown(doc, text) {
     const out = [];
-    const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+    // the line and paragraph separators (U+2028, U+2029) end lines too: `.` in the patterns below does not cross them
+    const lines = String(text || "").replace(/\r\n?|[\u2028\u2029]/g, "\n").split("\n");
     const listItem = /^\s*([-*+]|\d{1,9}[.)])\s+/;
     let i = 0;
     while (i < lines.length) {
       const line = lines[i];
-      let m;
+      const start = i;
+      let m, next;
       if (!line.trim()) {
         i++;
       } else if ((m = /^\s{0,3}(```|~~~)/.exec(line))) {
@@ -1484,16 +1531,19 @@ var ScholiumRunner = {
         out.push(quote);
       } else if (listItem.test(line)) {
         i = this.markdownList(doc, lines, i, out);
+      } else if ((next = this.markdownMath(doc, lines, i, out)) > i) {
+        i = next;
       } else if (this.markdownTableStart(lines, i)) {
         i = this.markdownTable(doc, lines, i, out);
       } else {
-        const body = [];
-        for (; i < lines.length && lines[i].trim() && !this.markdownBlock(lines[i]) && !listItem.test(lines[i])
+        const body = [line.trim()];
+        for (i++; i < lines.length && lines[i].trim() && !this.markdownBlock(lines[i]) && !listItem.test(lines[i])
                && !this.markdownTableStart(lines, i); i++) body.push(lines[i].trim());
         const para = doc.createElement("p");
         this.inlineMarkdown(doc, para, body.join("\n"));
         out.push(para);
       }
+      if (i <= start) i = start + 1;   // each block takes at least one line, so that the text always comes to an end
     }
     return out;
   },
@@ -1506,7 +1556,7 @@ var ScholiumRunner = {
   markdownTableStart(lines, i) {
     const rule = lines[i + 1];
     return lines[i].includes("|") && rule !== undefined && rule.includes("|")
-      && /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(rule)
+      && /^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?$/.test(rule.trim())
       && this.markdownCells(lines[i]).length === this.markdownCells(rule).length;
   },
 
@@ -1558,7 +1608,7 @@ var ScholiumRunner = {
         blank = false;
       } else if (!line.trim()) {
         blank = true;
-      } else if (width(/^\s*/.exec(line)[0]) >= 2 || (!blank && !this.markdownBlock(line))) {
+      } else if (items.length && (width(/^\s*/.exec(line)[0]) >= 2 || (!blank && !this.markdownBlock(line)))) {
         items[items.length - 1].text.push(line.trim());   // the item's text goes on
         blank = false;
       } else {
@@ -1590,15 +1640,134 @@ var ScholiumRunner = {
     return i;
   },
 
-  // `code` (a colour code with a swatch of its colour), **bold**, *italics*, and [links](…) as their text with
-  // the address as tooltip, so that nothing in the preview leaves the window
+  // a formula set apart from line i: $$ … $$ or \[ … \], on one line or several; returns the line after
+  // it, or i when none starts there
+  markdownMath(doc, lines, i, out) {
+    const m = /^\s{0,3}(\$\$|\\\[)(.*)$/.exec(lines[i]);
+    if (!m) return i;
+    const close = m[1] === "$$" ? "$$" : "\\]";
+    const body = [];
+    for (let j = i; j < lines.length; j++) {
+      const text = j === i ? m[2] : lines[j];
+      const end = text.indexOf(close);
+      if (end < 0) {
+        if (j > i && !text.trim()) return i;   // a blank line before its end: no formula
+        body.push(text);
+        continue;
+      }
+      if (text.slice(end + close.length).trim()) return i;   // text after it: a paragraph
+      body.push(text.slice(0, end));
+      const tex = body.join("\n").trim();
+      if (!tex) return i;
+      const box = doc.createElement("div");
+      box.className = "scholium-math";
+      const math = this.mathNode(doc, tex, true);
+      if (math) box.append(math);
+      else {   // the source, when KaTeX cannot read it
+        const code = doc.createElement("code");
+        code.textContent = lines.slice(i, j + 1).join("\n").trim();
+        box.append(code);
+      }
+      out.push(box);
+      return j + 1;
+    }
+    return i;
+  },
+
+  // KaTeX (content/katex/katex.min.js), loaded when the first formula is set; null when it cannot be
+  katex() {
+    if (this.katexLib === undefined) {
+      this.katexLib = null;
+      try {
+        const scope = { module: { exports: {} } };
+        scope.exports = scope.module.exports;
+        Services.scriptloader.loadSubScript(this.chrome + "katex/katex.min.js", scope);
+        if (typeof scope.module.exports.renderToString === "function") this.katexLib = scope.module.exports;
+      } catch (e) { this.log("KaTeX not loaded: " + e); }
+    }
+    return this.katexLib;
+  },
+
+  // a formula in TeX as MathML, which Zotero sets itself; null when KaTeX cannot read it. KaTeX runs
+  // untrusted (no links, pictures or classes from the TeX), and of what it writes only MathML elements
+  // and attributes are kept.
+  mathNode(doc, tex, display) {
+    const key = (display ? "D" : "I") + tex;
+    let node = this.mathCache.get(key);
+    if (node === undefined) {
+      node = null;
+      const katex = this.katex();
+      const win = doc.defaultView;
+      if (katex && win && win.DOMParser) {
+        try {
+          const markup = katex.renderToString(tex, { output: "mathml", displayMode: display, throwOnError: true, trust: false, strict: "ignore" });
+          const math = new win.DOMParser().parseFromString(markup, "text/html").querySelector("math");
+          if (math) node = this.cleanMath(math);
+        } catch (e) {}
+      }
+      this.mathCache.set(key, node);
+      if (this.mathCache.size > 500) this.mathCache.delete(this.mathCache.keys().next().value);   // the oldest
+    }
+    return node ? doc.importNode(node, true) : null;
+  },
+
+  MATH_TAGS: new Set(["math", "semantics", "annotation", "mrow", "mi", "mn", "mo", "ms", "mtext", "mspace", "msub", "msup", "msubsup",
+                      "munder", "mover", "munderover", "mfrac", "msqrt", "mroot", "mstyle", "mpadded", "mphantom", "menclose",
+                      "mtable", "mtr", "mtd", "mlabeledtr", "merror", "mmultiscripts", "mprescripts", "none"]),
+  MATH_ATTRS: new Set(["xmlns", "display", "encoding", "mathvariant", "mathcolor", "mathbackground", "mathsize", "stretchy", "fence",
+                       "separator", "lspace", "rspace", "minsize", "maxsize", "symmetric", "largeop", "movablelimits", "accent",
+                       "accentunder", "form", "linethickness", "columnalign", "rowalign", "columnspacing", "rowspacing", "columnlines",
+                       "rowlines", "frame", "framespacing", "equalrows", "equalcolumns", "displaystyle", "scriptlevel", "width",
+                       "height", "depth", "voffset", "notation"]),
+
+  // only MathML elements and attributes: anything else KaTeX might write is left out
+  cleanMath(el) {
+    for (const name of el.getAttributeNames()) if (!this.MATH_ATTRS.has(name)) el.removeAttribute(name);
+    for (const child of [...el.children]) {
+      if (this.MATH_TAGS.has(child.localName)) this.cleanMath(child);
+      else child.remove();
+    }
+    return el;
+  },
+
+  // `code` (a colour code with a swatch of its colour), formulas (\( \), $ $, and set apart \[ \], $$ $$),
+  // backslash escapes, **bold**, *italics*, and [links](…) as their text with the address as tooltip, so
+  // that nothing in the preview leaves the window. A $ opens a formula before a non-space and closes one
+  // after a non-space that no digit follows, so that prices stay text.
   inlineMarkdown(doc, parent, text) {
-    const re = /`([^`\n]+)`|\*\*([^*\n]+?)\*\*|\*([^*\s][^*\n]*?)\*|\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+    const re = new RegExp([
+      "`([^`\\n]+)`",                                  // 1 code
+      "\\$\\$([^$]+?)\\$\\$",                          // 2 formula set apart
+      "\\\\\\[([\\s\\S]+?)\\\\\\]",                    // 3 formula set apart
+      "\\\\\\(([\\s\\S]+?)\\\\\\)",                    // 4 formula
+      "\\$(?=[^\\s$])([^$\\n]*?[^\\s$\\\\])\\$(?!\\d)", // 5 formula
+      "\\\\([!-/:-@[-`{-~])",                          // 6 an escaped punctuation mark
+      "\\*\\*([^*\\n]+?)\\*\\*",                       // 7 bold
+      "\\*([^*\\s][^*\\n]*?)\\*",                      // 8 italics
+      "\\[([^\\]\\n]+)\\]\\(([^)\\s]+)\\)",            // 9, 10 link
+    ].join("|"), "g");
     let at = 0;
     let m;
     while ((m = re.exec(text))) {
       if (m.index > at) parent.append(doc.createTextNode(text.slice(at, m.index)));
       at = re.lastIndex;
+      if (m[2] !== undefined || m[3] !== undefined || m[4] !== undefined || m[5] !== undefined) {
+        const display = m[2] !== undefined || m[3] !== undefined;
+        const math = this.mathNode(doc, (m[2] ?? m[3] ?? m[4] ?? m[5]).trim(), display);
+        if (!math) parent.append(doc.createTextNode(m[0]));   // the source, when KaTeX cannot read it
+        else if (!display) parent.append(math);
+        else {
+          const box = doc.createElement("span");
+          box.className = "scholium-math";
+          box.append(math);
+          parent.append(box);
+        }
+        continue;
+      }
+      if (m[6] !== undefined) {
+        parent.append(doc.createTextNode(m[6]));
+        continue;
+      }
       if (m[1] !== undefined) {
         const code = doc.createElement("code");
         if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(m[1])) {
@@ -1609,19 +1778,19 @@ var ScholiumRunner = {
         }
         code.append(doc.createTextNode(m[1]));
         parent.append(code);
-      } else if (m[2] !== undefined) {
+      } else if (m[7] !== undefined) {
         const strong = doc.createElement("strong");
-        this.inlineMarkdown(doc, strong, m[2]);
+        this.inlineMarkdown(doc, strong, m[7]);
         parent.append(strong);
-      } else if (m[3] !== undefined) {
+      } else if (m[8] !== undefined) {
         const em = doc.createElement("em");
-        this.inlineMarkdown(doc, em, m[3]);
+        this.inlineMarkdown(doc, em, m[8]);
         parent.append(em);
       } else {
         const link = doc.createElement("span");
         link.className = "scholium-link";
-        link.title = m[5];
-        this.inlineMarkdown(doc, link, m[4]);
+        link.title = m[10];
+        this.inlineMarkdown(doc, link, m[9]);
         parent.append(link);
       }
     }
@@ -1633,8 +1802,24 @@ var ScholiumRunner = {
     const say = String(pane.input.value || "").trim();
     const att = pane.shownKey && Zotero.Items.getByLibraryAndKey(pane.item.libraryID, pane.shownKey);
     if (!say || !att) return;
-    this.followUp(att, say).then(sent => { if (sent) { pane.input.value = ""; this.fitInput(pane); } })
+    this.followUp(att, say).then(sent => { if (sent) this.clearInput(pane); })
       .catch(e => this.log("follow-up failed: " + e));
+  },
+
+  // the words in a message box are kept for its item until they are sent, across the section's renders
+  unsentKey(pane) { return pane.item ? `${pane.item.libraryID}/${pane.item.key}` : ""; },
+
+  keepUnsent(pane) {
+    const key = this.unsentKey(pane);
+    if (!key) return;
+    if (String(pane.input.value || "").trim()) this.unsent.set(key, pane.input.value);
+    else this.unsent.delete(key);
+  },
+
+  clearInput(pane) {
+    pane.input.value = "";
+    this.keepUnsent(pane);
+    this.fitInput(pane);
   },
 
   // the message box grows with its text, up to its maximum height; an empty box is as tall as its placeholder
@@ -1707,7 +1892,9 @@ var ScholiumRunner = {
   // the saved log of an earlier run, when the paper has one and nothing newer is shown
   async loadHistory(body) {
     const pane = this.panes.get(body);
-    if (!pane || pane.shownKey) return;
+    if (!pane) return;
+    // the running paper's transcript, rendered before the section was laid out: at the latest again
+    if (pane.shownKey) { pane.list.scrollTop = pane.list.scrollHeight; return; }
     for (const key of pane.keys) {
       const log = await this.readLog(key);
       if (!log) continue;
@@ -1742,7 +1929,7 @@ var ScholiumRunner = {
   // user's words in a bubble on the right
   entryNode(doc, entry) {
     const node = doc.createElement("div");
-    node.className = `scholium-entry ${entry.kind}${entry.error ? " error" : ""}`;
+    node.className = `scholium-entry ${entry.kind}${entry.error ? " error" : ""}${entry.draft ? " draft" : ""}`;
     const bullet = { text: "⏺ ", tool: "⏺ ", result: "⎿ " }[entry.kind];
     if (bullet) {
       const span = doc.createElement("span");
@@ -1751,11 +1938,23 @@ var ScholiumRunner = {
       node.append(span);
     }
     if (entry.kind === "text") {
-      // the agent writes Markdown: set as the profile's preview sets it, with a button that copies the source
+      // the agent writes Markdown: set as the profile's preview sets it, with a button that copies the
+      // source once the message is whole
       const content = doc.createElement("div");
       content.className = "scholium-content scholium-markdown";
-      content.append(...this.renderMarkdown(doc, entry.text));
-      node.append(content, this.copyButton(doc, entry.text));
+      try { content.append(...this.renderMarkdown(doc, entry.text)); }
+      catch (e) {
+        content.textContent = entry.text;   // the source rather than a section that does not render
+        this.log("markdown failed: " + e);
+      }
+      if (entry.unfinished) {
+        const note = doc.createElement("div");
+        note.className = "scholium-unfinished";
+        note.textContent = this.text("unfinished");
+        content.append(note);
+      }
+      node.append(content);
+      if (!entry.draft) node.append(this.copyButton(doc, entry.text));
       return node;
     }
     const content = doc.createElement("span");
@@ -1803,8 +2002,63 @@ var ScholiumRunner = {
       try {
         const list = pane.list;
         const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+        if (pane.draft) pane.draft.node.remove();   // the draft stays last
         for (const entry of added) list.append(this.entryNode(pane.doc, entry));
+        if (pane.draft) list.append(pane.draft.node);
         while (list.children.length > this.MAX_ENTRIES) list.children[0].remove();   // as many as the transcript keeps
+        if (atBottom) list.scrollTop = list.scrollHeight;
+      } catch (e) {}
+    }
+  },
+
+  // a piece of the message the agent is writing: block names the message part it belongs to; the
+  // panes show it a moment later, together with the pieces that follow
+  growDraft(piece, block) {
+    if (!piece) return;
+    if (!this.draft) this.draft = { text: "", block };
+    else if (this.draft.block !== block) this.draft.text += "\n\n";
+    this.draft.text += piece;
+    this.draft.block = block;
+    if (!this.draftTimer) this.draftTimer = setTimeout(() => { this.draftTimer = null; this.paintDraft(); }, this.DRAFT_MS);
+  },
+
+  // what a run showed of a message it ended before finishing (cancelled, failed), as the plugin's line for
+  // the log; null when no message was being written. The draft goes.
+  unfinished() {
+    const text = this.draft ? this.draft.text.trim() : "";
+    this.dropDraft();
+    return text ? { type: "scholium", subtype: "unfinished", text } : null;
+  },
+
+  dropDraft() {
+    if (!this.draft) return;
+    this.draft = null;
+    clearTimeout(this.draftTimer);
+    this.draftTimer = null;
+    this.paintDraft();
+  },
+
+  // the draft at the end of each pane that shows the running paper's transcript, set as Markdown
+  paintDraft() {
+    for (const pane of this.panes.values()) {
+      try {
+        if (!this.draft || pane.shownKey !== this.transcriptKey) {
+          if (pane.draft) pane.draft.node.remove();
+          pane.draft = null;
+          continue;
+        }
+        const list = pane.list;
+        const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+        if (!pane.draft) {
+          const node = this.entryNode(pane.doc, { kind: "text", text: "", draft: true });
+          list.append(node);
+          pane.draft = { node, content: node.children[1] };
+        }
+        // text selected in the draft stays selected: the draft is set again once the selection is gone
+        const win = pane.doc.defaultView;
+        const sel = win && typeof win.getSelection === "function" ? win.getSelection() : null;
+        if (sel && !sel.isCollapsed && sel.containsNode(pane.draft.node, true)) continue;
+        pane.draft.content.replaceChildren(...this.renderMarkdown(pane.doc, this.draft.text));
         if (atBottom) list.scrollTop = list.scrollHeight;
       } catch (e) {}
     }
@@ -1817,6 +2071,7 @@ var ScholiumRunner = {
       pane.shownKey = key;
       pane.history = false;
       pane.past = null;
+      pane.draft = null;
       try {
         pane.list.replaceChildren(...this.transcript.map(e => this.entryNode(pane.doc, e)));
         pane.list.scrollTop = pane.list.scrollHeight;
@@ -1828,11 +2083,11 @@ var ScholiumRunner = {
     return !!result && !result.is_error && (!result.subtype || result.subtype === "success");
   },
 
-  // 完成 · 6 分钟 · 29 轮 · 257 万 token
+  // 完成 · 6m 17s · 29 轮 · 257 万 token
   outcome(result, cancelled = false, started = 0) {
     const parts = [this.text(cancelled ? "cancelled" : this.succeeded(result) ? "done" : "failed")];
     const ms = result && result.duration_ms > 0 ? result.duration_ms : started ? Date.now() - started : 0;
-    if (ms || started) parts.push(this.text("minutes", Math.max(1, Math.round(ms / 60000))));
+    if (ms || started) parts.push(this.duration(ms));
     if (result && result.num_turns > 0) parts.push(this.text("turns", result.num_turns));
     const tokens = this.tokenCounts(result).reduce((n, [, count]) => n + count, 0);
     if (tokens) parts.push(this.text("tokens", this.amount(tokens)));
@@ -1890,7 +2145,7 @@ var ScholiumRunner = {
           lines.push(`${paused} · ${this.text("queuedAll", this.queue.length)}`);
           if (!note) kind = "paused";
         } else if (!note && this.last && Date.now() - this.last.at < this.KEEP_DONE_MS) {
-          lines.push(this.text(this.last.ok ? "finished" : "failedLine", this.last.title));
+          lines.push(this.text(this.last.answered ? "answered" : this.last.ok ? "finished" : "failedLine", this.last.title));
           kind = this.last.ok ? "ok" : "error";
         }
       }
@@ -1901,6 +2156,7 @@ var ScholiumRunner = {
       const busy = !!running || queuedAt >= 0;
       pane.annotate.disabled = busy;
       pane.remove.disabled = busy;
+      this.show(pane.remove, !busy);   // out of the way while the paper runs, so that the buttons keep to one row
       this.show(pane.cancel, !!((running && this.current) || queuedAt >= 0));
       this.show(pane.resume, !!this.paused);
       pane.log.disabled = !pane.shownKey;
@@ -1984,7 +2240,11 @@ var ScholiumRunner = {
     job.agent = session.agent;
     job.resume = session.id;
     job.say = say;
-    this.enqueue([job]);
+    // before the papers still waiting for their first run: after the paper that the usage limit or a
+    // failed connection interrupted, and after the other conversations
+    let at = 0;
+    while (at < this.queue.length && (this.queue[at].resume || this.queue[at].retried || this.queue[at].interrupted)) at++;
+    this.enqueue([job], at);
     return true;
   },
 
@@ -1992,8 +2252,8 @@ var ScholiumRunner = {
     return !!(this.job && this.job.key === key) || this.queue.some(j => j.att.key === key);
   },
 
-  enqueue(jobs) {
-    this.queue.push(...jobs);
+  enqueue(jobs, at = this.queue.length) {
+    this.queue.splice(Math.min(at, this.queue.length), 0, ...jobs);
     this.refresh();
     if (!this.draining) this.drain();
   },
@@ -2027,6 +2287,7 @@ var ScholiumRunner = {
         catch (e) {
           const message = String(e && e.message || e).slice(0, 300);
           this.current = null;
+          this.dropDraft();
           this.appendEntries([{ kind: "final", text: message, error: true }]);
           this.notice(job, `${this.text("failed")} · ${message}`, true);
           this.finish(job, false, message);
@@ -2048,7 +2309,8 @@ var ScholiumRunner = {
   // conversation when the limit resets; nothing else starts meanwhile
   pause(job, { until, session }) {
     if (this.job && this.job.key === job.att.key) this.job = null;
-    this.queue.unshift(session ? Object.assign({}, job, { resume: session, say: "", extra: "" }) : job);
+    // a question stays one when its conversation continues
+    this.queue.unshift(Object.assign({}, job, session ? { resume: session, say: "", extra: "", asked: !!(job.say || job.asked) } : { interrupted: true }));
     const wait = until ? Math.max(until - Date.now(), 0) + 60000 : this.RETRY_MS;
     if (this.paused) clearTimeout(this.paused.timer);
     this.paused = { until: Date.now() + wait, known: !!until, timer: setTimeout(() => { this.resumeQueue(); }, wait) };
@@ -2085,12 +2347,12 @@ var ScholiumRunner = {
   },
 
   // record the end of one paper: its section keeps the outcome in short, the transcript has the rest
-  finish(job, ok, summary, outcome, detail) {
+  finish(job, ok, summary, outcome, detail, answered = false) {
     if (this.job && this.job.key === job.att.key) this.job = null;
-    const title = this.text(ok ? "finished" : "failedLine", job.title);
-    this.last = { ok, title: job.title, key: job.att.key, libraryID: job.att.libraryID, summary, at: Date.now() };
+    const title = this.text(answered ? "answered" : ok ? "finished" : "failedLine", job.title);
+    this.last = { ok, answered, title: job.title, key: job.att.key, libraryID: job.att.libraryID, summary, at: Date.now() };
     this.notes.set(job.att.key, { text: outcome || this.text(ok ? "done" : "failed"), error: !ok, at: Date.now(), title: detail || "" });
-    if (!this.paneInView()) this.notify(title, ok ? this.brief(summary) : summary || "");
+    if (!this.paneInView()) this.notify(title, ok && !answered ? this.brief(summary) : summary || "");
     this.refresh();
   },
 
@@ -2102,10 +2364,12 @@ var ScholiumRunner = {
       .map(part => (part.length > 40 ? part.slice(0, 39) + "…" : part)).join("\n");
   },
 
+  // the sections of the running paper, each second: their time so far
   async tick(job) {
     while (this.job === job) {
       await Zotero.Promise.delay(this.TICK_MS);
-      if (this.job === job) this.refresh();
+      if (this.job !== job) break;
+      for (const pane of this.panes.values()) if (pane.keys.includes(job.key)) this.paintPane(pane);
     }
   },
 
@@ -2153,9 +2417,19 @@ var ScholiumRunner = {
     if (agent === "codex") await this.runCodex(program, ctx);
     else await this.runClaude(program, ctx);
     this.current = null;
+    const unfinished = this.unfinished();   // a cancelled run's, which has no end of its own
     if (this.job !== running) return;   // the plugin stopped during the run: nothing more to report
+    if (unfinished) {
+      try { await IOUtils.writeUTF8(logPath, JSON.stringify(unfinished) + "\n", { mode: "append" }); }
+      catch (e) { this.log("unfinished message not logged: " + e); }
+      this.appendEntries(this.entries(unfinished));
+    }
     const { result, current, exitCode, limit, session } = ctx;
-    const summary = result && typeof result.result === "string" ? result.result.trim().split("\n").pop() : "";
+    const text = result && typeof result.result === "string" ? result.result.trim() : "";
+    // a message of the user's that wrote nothing to Zotero was a question: the notices give the answer's
+    // opening, the others the run's closing line
+    const answered = !!(job.say || job.asked) && exitCode === 0 && !!result && !result.is_error && ctx.lastStep < this.STEPS.indexOf("applying");
+    const summary = answered ? this.opening(text) : text.split("\n").pop();
     let ok = false, message;
     if (current.cancelled) {
       message = this.text("cancelled");
@@ -2164,7 +2438,7 @@ var ScholiumRunner = {
     } else if (exitCode === 0 && result && !result.is_error) {
       ok = true;
       message = summary;
-      this.notice(job, [`${this.text("done")} · ${this.elapsed(started)}`, this.brief(summary)].filter(Boolean).join("\n"));
+      this.notice(job, [`${this.text("done")} · ${this.duration(Date.now() - started)}`, answered ? summary : this.brief(summary)].filter(Boolean).join("\n"));
     } else if (limit) {
       return { exitCode, result, limited: true, until: limit.until, session };
     } else {
@@ -2180,8 +2454,21 @@ var ScholiumRunner = {
       }
       this.notice(job, `${this.text("failed")} · ${message}`, true);
     }
-    this.finish(job, ok, message, this.outcome(result, current.cancelled, started), this.tokenDetail(result));
+    this.finish(job, ok, message, this.outcome(result, current.cancelled, started), this.tokenDetail(result), answered);
     return { exitCode, result };
+  },
+
+  // the first line of an answer that says something, without its Markdown marks, for a notice; code
+  // fences and a table's rule are passed over, a table row's cells are joined
+  opening(text) {
+    for (const raw of String(text || "").split("\n")) {
+      const line = raw.trim();
+      if (/^(```|~~~)/.test(line) || /^[\s|:-]*$/.test(line)) continue;
+      const plain = line.replace(/^(#{1,6}\s+|[-*+]\s+|\d{1,9}[.)]\s+|>\s*)/, "").replace(/^\||\|$/g, "")
+        .replace(/\s*\|\s*/g, " · ").replace(/\*\*|`/g, "").trim();
+      if (plain) return plain.length > 80 ? plain.slice(0, 79) + "…" : plain;
+    }
+    return "";
   },
 
   // whether a failure is the connection to the agent's service (a timeout, a lost connection, an
@@ -2230,10 +2517,33 @@ var ScholiumRunner = {
         buffer += chunk;
         const lines = buffer.split("\n");
         buffer = lines.pop();
-        if (lines.length) await IOUtils.writeUTF8(logPath, lines.join("\n") + "\n", { mode: "append" });
+        // the lines for the log, in the order they are shown: the text as it is written stays out (the
+        // whole messages carry it), and what a failed run showed of an unfinished message goes before its end
+        const kept = [];
         for (const raw of lines) {
-          let event;
-          try { event = JSON.parse(raw); } catch (e) { continue; }
+          let event = null;
+          try { event = JSON.parse(raw); } catch (e) {}
+          if (!event || typeof event !== "object") {
+            kept.push(raw);
+            continue;
+          }
+          if (event.type === "stream_event") {
+            const e = event.event || {};
+            if (!event.parent_tool_use_id && e.type === "message_start") this.dropDraft();   // a message begun again starts afresh
+            if (!event.parent_tool_use_id && e.type === "content_block_delta" && e.delta && e.delta.type === "text_delta") {
+              this.growDraft(String(e.delta.text || ""), e.index);
+            }
+            continue;
+          }
+          if (event.type === "assistant") this.dropDraft();   // the whole message replaces its draft
+          if (event.type === "result") {
+            const unfinished = this.unfinished();
+            if (unfinished) {
+              kept.push(JSON.stringify(unfinished));
+              this.appendEntries(this.entries(unfinished));
+            }
+          }
+          kept.push(raw);
           if (typeof event.session_id === "string" && event.session_id) {
             ctx.session = event.session_id;
             this.sessions.set(key, { agent: "claude", id: ctx.session });
@@ -2248,6 +2558,7 @@ var ScholiumRunner = {
           this.appendEntries(this.entries(event));
           this.advance(ctx, this.step(event));
         }
+        if (kept.length) await IOUtils.writeUTF8(logPath, kept.join("\n") + "\n", { mode: "append" });
       }
     } catch (e) {
       // the run is reported as failed: Claude Code must not go on writing to Zotero meanwhile
@@ -2443,6 +2754,9 @@ var ScholiumRunner = {
         }
         if (msg.method === "account/rateLimits/updated" && p.rateLimits) state.limits = p.rateLimits;
         if (msg.method === "turn/completed" && p.turn && (!state.turn || p.turn.id === state.turn)) { state.done = p.turn; ended(); }
+        // the message as it is written, until the whole message replaces it
+        if (msg.method === "item/agentMessage/delta") this.growDraft(String(p.delta || ""), p.itemId);
+        if (msg.method === "item/completed" && item.type === "agentMessage") this.dropDraft();
         this.appendEntries(this.entries(msg));
         if (msg.method === "item/started" && !["userMessage", "agentMessage", "reasoning", "plan", "hookPrompt"].includes(item.type)) ctx.acted = true;
         this.advance(ctx, this.codexStep(msg));
@@ -2521,7 +2835,9 @@ var ScholiumRunner = {
                    result: failed ? String(error.message || turn.status) : state.text, session_id: state.thread,
                    duration_ms: turn.durationMs > 0 ? turn.durationMs : Date.now() - ctx.running.started, num_turns: state.calls,
                    usage: this.codexUsage(state.usage) };
-    await IOUtils.writeUTF8(logPath, JSON.stringify(ctx.result) + "\n", { mode: "append" });
+    const unfinished = this.unfinished();   // what the turn showed of a message it did not finish, before its end
+    await IOUtils.writeUTF8(logPath, (unfinished ? JSON.stringify(unfinished) + "\n" : "") + JSON.stringify(ctx.result) + "\n", { mode: "append" });
+    if (unfinished) this.appendEntries(this.entries(unfinished));
     this.appendEntries(this.entries(ctx.result));
     ctx.exitCode = 0;
   },
@@ -2614,6 +2930,11 @@ var ScholiumRunner = {
     this.queue = [];
     this.cancel();
     try { if (this.current) this.current.proc.kill(); } catch (e) {}   // without waiting for Codex to end its turn
+    clearTimeout(this.draftTimer);
+    this.draft = this.draftTimer = null;
+    this.katexLib = undefined;
+    this.mathCache.clear();
+    this.unsent.clear();
     for (const win of this.windows()) this.removeFromWindow(win);
     try { if (this.paneID) Zotero.ItemPaneManager.unregisterSection(this.paneID); } catch (e) {}
     this.paneID = null;

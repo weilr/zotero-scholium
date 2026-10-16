@@ -53,6 +53,30 @@ def test_a_failed_batch_keeps_the_keys_of_the_batches_before_it(api, monkeypatch
     assert len(keys) == 50 and failed[0]["items"] == "51-51 of 51" and expected in failed[0]["message"]
 
 
+@pytest.mark.parametrize("failure, attempts", [(ConnectionRefusedError(10061, "refused"), 1), (TimeoutError("timed out"), cli.GET_ATTEMPTS)])
+def test_a_refused_read_is_not_retried_but_a_timed_out_one_is(monkeypatch, failure, attempts):
+    """Nothing listening (Zotero closed) is final at once; a busy Zotero gets more tries."""
+    tries, waits = [], []
+
+    def urlopen(req, timeout=None):
+        tries.append(req.full_url)
+        raise cli.urllib.error.URLError(failure)
+
+    monkeypatch.setattr(cli.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(cli.time, "sleep", waits.append)
+    status, _, _ = cli.http("GET", "/api/")
+    assert status == 0 and len(tries) == attempts and len(waits) == attempts - 1
+
+
+def test_the_js_backend_does_not_ask_zotero(monkeypatch):
+    """Only the local API needs Zotero's version: a requested Run-JavaScript file waits for nothing."""
+    asked = []
+    monkeypatch.setattr(cli, "http", lambda method, path, *a, **k: asked.append(path) or (0, {}, "refused"))
+    assert cli.pick_backend("js", {})[0] == "js" and asked == []
+    cli.pick_backend("auto", {})
+    assert asked[0] == "/api/"
+
+
 @pytest.mark.parametrize("status", [0, 500, 503])
 def test_delete_still_retries_transient_errors(api, monkeypatch, status):
     attempts = []

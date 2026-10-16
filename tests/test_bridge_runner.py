@@ -209,6 +209,10 @@ class El {
   get scrollHeight() { return this.children.length * 20; }
   get textContent() { return this.children.length ? this.children.map(c => c.textContent).join('') : this._text; }
   set textContent(v) { this.children = []; this._text = String(v); }
+  get localName() { return this.tagName; }
+  getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
+  getAttributeNames() { return Object.keys(this.attrs); }
+  removeAttribute(k) { delete this.attrs[k]; }
   setAttribute(k, v) {
     this.attrs[k] = String(v);
     if (k === 'style') { const m = /(?:^|;)\s*height:\s*([^;]+)/.exec(String(v)); this.style = { height: m ? m[1].trim() : '' }; }
@@ -225,6 +229,39 @@ class El {
   closest() { return null; }
   remove() { this.removed = true; if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this); this.parent = null; }
 }
+// markup as KaTeX writes it (elements, attributes in double quotes, text in the innermost elements) as El
+class DOMParser {
+  parseFromString(markup) {
+    const root = new El('#document');
+    const stack = [root];
+    const decode = t => t.replace(/&(amp|lt|gt|quot|#x27|#39);|&#x([0-9a-f]+);|&#(\d+);/gi, (s, name, hex, dec) =>
+      hex ? String.fromCodePoint(parseInt(hex, 16)) : dec ? String.fromCodePoint(+dec)
+          : { amp: '&', lt: '<', gt: '>', quot: '"', '#x27': "'", '#39': "'" }[name]);
+    const re = /<\/([\w-]+)>|<([\w-]+)((?:\s+[\w:-]+="[^"]*")*)\s*(\/?)>|([^<]+)/g;
+    let m;
+    while ((m = re.exec(markup))) {
+      if (m[1]) stack.pop();
+      else if (m[2]) {
+        const el = new El(m[2]);
+        for (const a of m[3].matchAll(/([\w:-]+)="([^"]*)"/g)) el.setAttribute(a[1], decode(a[2]));
+        stack[stack.length - 1].append(el);
+        if (!m[4]) stack.push(el);
+      } else stack[stack.length - 1]._text += decode(m[5]);
+    }
+    const find = n => (n.tagName === 'math' ? n : n.children.map(find).find(Boolean) || null);
+    return { querySelector: () => find(root) };
+  }
+}
+const cloneEl = n => {
+  const c = new El(n.tagName);
+  c.attrs = Object.assign({}, n.attrs);
+  c._text = n._text;
+  c.className = n.className;
+  for (const child of n.children) c.append(cloneEl(child));
+  return c;
+};
+// the plugin's content folder, for Services.scriptloader (KaTeX)
+const CONTENT = require('node:path').join(require('node:path').dirname(process.argv[2]), 'content');
 
 function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, exitCode = 0, script = null, claudeExists = true, gateFirst = false,
                    home = 'dirsvc', eraseFails = false, logs = {}, models = 'ok', claudeAt = CLAUDE, scripts = [], readFails = false,
@@ -241,7 +278,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     const entries = scripts[n] || (n === 0 && gateFirst ? SCRIPT.concat(['WAIT']) : script || SCRIPT.concat([LAST, RESULT]));
     const out = [];
     for (const e of entries) {
-      if (e === 'WAIT') { out.push('WAIT'); continue; }
+      if (e === 'WAIT' || e === 'HOLD') { out.push(e); continue; }
       for (let i = 0; i < e.length; i += 97) out.push(e.slice(i, i + 97));
     }
     return out;
@@ -254,8 +291,10 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       return { readString: async () => {
         await tick();
         if (self.killed) return '';
-        const c = self.chunks.shift();
+        let c = self.chunks.shift();
         if (c === 'WAIT') { await new Promise(r => { self.gate = r; }); return ''; }
+        // 'HOLD' holds the stream open until log.release() is called
+        if (c === 'HOLD') { await new Promise(r => { log.release = r; }); c = self.killed ? '' : self.chunks.shift(); }
         return c || '';
       } };
     }
@@ -407,11 +446,12 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
   class ResizeObserver { constructor(cb) { this.cb = cb; observers.resize.push(this); } observe(el) { this.el = el; } disconnect() { this.off = true; } }
   // the profile sheet goes into the page of the pane's window, over everything; the element that had the focus before
   const lastFocus = new El('button');
-  const paneWin = { IntersectionObserver, ResizeObserver, listeners: {},
+  const paneWin = { IntersectionObserver, ResizeObserver, DOMParser, listeners: {},
                     addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); },
                     removeEventListener(t, f) { this.listeners[t] = (this.listeners[t] || []).filter(g => g !== f); },
                     dispatch(t) { for (const f of this.listeners[t] || []) f({}); } };
   const paneDoc = { createElement: tag => new El(tag), createTextNode: text => ({ textContent: text }), hasFocus: () => focused,
+                    importNode: n => cloneEl(n),
                     defaultView: paneWin, documentElement: new El('window'), activeElement: lastFocus };
   paneWin.document = paneDoc;
   const sheet = () => paneDoc.documentElement.children.find(c => c.id === 'scholium-profile-sheet') || null;
@@ -462,6 +502,11 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
         return { path: '/home/u' };
       } },
       appinfo: { OS: 'WINNT' },
+      scriptloader: { loadSubScript: (url, scope) => {
+        log.scripts = (log.scripts || 0) + 1;
+        const rel = url.replace(/^chrome:\/\/[^/]+\/content\//, '');
+        vm.runInNewContext(fs.readFileSync(require('node:path').join(CONTENT, rel), 'utf8'), scope);
+      } },
     },
     Components: {
       classes: { '@mozilla.org/alerts-service;1': { getService: () => ({
@@ -510,7 +555,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       return { model: p.model.value, models: p.model.children.map(o => o.value), modelLabels: p.model.children.map(o => o.textContent),
                effort: p.effort.value, efforts: p.effort.children.map(o => o.value), effortDisabled: p.effort.disabled,
                state: p.state.hidden ? null : p.state.textContent, stateKind: p.state.className,
-               annotateDisabled: p.annotate.disabled, removeDisabled: p.remove.disabled,
+               annotateDisabled: p.annotate.disabled, removeDisabled: p.remove.disabled, removeHidden: p.remove.hidden,
                cancelHidden: p.cancel.hidden, logDisabled: p.log.disabled, shownKey: p.shownKey, history: p.history,
                entries: p.list.children.map(c => [c.className, c.textContent]), stateTitle: p.state.title,
                resumeHidden: p.resume.hidden, stateDisplay: p.state.style.display, cancelDisplay: p.cancel.style.display,
@@ -574,7 +619,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
                    name: toolNode.children[1].children.map(c => c.tagName || 'text'),
                    buttons: [p1.annotate, p1.cancel, p1.resume, p1.profile, p1.remove, p1.log, p1.send].map(b => b.className),
                    parts: p1.body.children[0].children.map(c => c.className), selects: [p1.agent.className, p1.model.className, p1.effort.className],
-                   input: p1.input.className, sendRow: p1.sendRow.className };
+                   input: p1.input.className, inputNative: p1.input.attrs['no-native'], sendRow: p1.sendRow.className };
     const after = await h.pane(item1);              // rendered anew after the run: the transcript comes from memory
     facts.paneRerendered = after.view();
     facts.heightRerendered = after.pane().list.style.height;
@@ -866,6 +911,157 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     facts.markdownReply = { reply, tree: tree(node), copied: h.log.copied.slice(), done, reset: [copy.className, copy.title],
                             rerendered: JSON.stringify(tree(last(await h.pane(h.item1)))) === JSON.stringify(tree(node)) };
   }
+  {
+    // a question in a continued conversation: the answer shows as it is written, then as the whole message; the
+    // pieces stay out of the log, a sub-agent's are left out, and the notices give the answer's opening
+    const piece = (text, index, parent = null) => ev({ type: 'stream_event', session_id: 'S1', parent_tool_use_id: parent,
+                                                      event: { type: 'content_block_delta', index, delta: { type: 'text_delta', text } } });
+    const answer = '## 结论\n\n用的是 **SMART**，从头训练。\n\n- 32M 参数';
+    const h = harness({ scripts: [SCRIPT.concat([LAST, RESULT]),
+      [SCRIPT[0], piece('作废的开头', 0),   // a message begun again: what came before its start is dropped
+       ev({ type: 'stream_event', session_id: 'S1', parent_tool_use_id: null, event: { type: 'message_start', message: {} } }),
+       piece('## 结论\n\n用的是 **SMART**', 0), piece('，从头训练。', 0), piece('SUB', 0, 'toolu_1'), piece('- 32M 参数', 1), 'HOLD',
+       said(answer), 'HOLD', ev({ type: 'result', subtype: 'success', is_error: false, result: answer, session_id: 'S1' })]] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.annotate([h.item1]);
+    await settle(300);
+    const notified = h.log.notifications.length;
+    await h.runner.followUp(h.att1, '用的什么模型？');
+    await settle(100);
+    await new Promise(r => setTimeout(r, 150));   // the draft is set a moment after its pieces
+    const last = () => p.pane().list.children.at(-1);
+    const again = (await h.pane(h.item1)).pane();   // a pane rendered meanwhile shows it too, scrolled to it
+    const writing = { tree: tree(last()), draft: h.runner.draft && h.runner.draft.text, again: tree(again.list.children.at(-1)),
+                      againAtEnd: again.list.scrollTop === again.list.scrollHeight && again.list.scrollTop > 0 };
+    h.log.release();
+    await settle(100);
+    const drafts = () => p.pane().list.children.filter(c => c.className.includes('draft')).length;
+    const whole = { drafts: drafts(), left: h.runner.draft, running: !!h.runner.job };   // the whole message, before the run ends
+    h.log.release();
+    await settle(300);
+    const logPath = '/data/tmp/scholium/ATT1/claude-run.jsonl';
+    facts.streamed = { writing, whole, done: tree(last()), drafts: drafts(),
+                       left: h.runner.draft, streamLines: h.log.writes[logPath].split('\n').filter(l => l.includes('stream_event')).length,
+                       prompt: h.log.stdin[1], args: h.log.calls[1].opts.arguments, notifications: h.log.notifications.slice(notified) };
+  }
+  {
+    // a cancelled run keeps the part of the message it showed, marked, in the transcript and the log; the
+    // delete button is out of the way meanwhile; words typed and not sent stay with their item
+    const piece = text => ev({ type: 'stream_event', session_id: 'S1', parent_tool_use_id: null,
+                               event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } });
+    const h = harness({ scripts: [SCRIPT.concat([LAST, RESULT]), [SCRIPT[0], piece('写到一半的 **回答**'), 'WAIT']] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.annotate([h.item1]);
+    await settle(300);
+    const typeIn = (pane, text) => { pane.input.value = text; for (const f of pane.input.listeners.input) f({}); };
+    typeIn(p.pane(), '还没发出去的话');
+    await h.pane(h.item2);                              // another paper, then this one again
+    const restored = (await h.pane(h.item1)).pane().input.value;
+    const q = await h.pane(h.item1);
+    typeIn(q.pane(), '问一个问题');
+    q.pane().send.click();
+    await settle(200);
+    await new Promise(r => setTimeout(r, 150));   // the draft is set a moment after its pieces
+    const during = { removeHidden: q.view().removeHidden, inputAfterSend: q.pane().input.value,
+                     rerenderedInput: (await h.pane(h.item1)).pane().input.value };
+    h.runner.cancel();
+    await settle(300);
+    const list = q.pane().list.children;
+    const logPath = '/data/tmp/scholium/ATT1/claude-run.jsonl';
+    const logged = h.log.writes[logPath].trim().split('\n').map(l => JSON.parse(l)).filter(e => e.subtype === 'unfinished');
+    const fromLog = (await h.runner.readLog('ATT1', 'claude')).entries.filter(e => e.unfinished);
+    facts.unfinished = { restored, during, last: [tree(list.at(-2)), [list.at(-1).className, list.at(-1).textContent]],
+                         logged: logged.map(e => e.text), fromLog: fromLog.map(e => e.text), removeHiddenAfter: q.view().removeHidden,
+                         durations: [8000, 59400, 59600, 376500, 3725000].map(ms => h.runner.duration(ms)) };
+  }
+  {
+    // a run that fails inside a message: what it showed of the message comes before the failure, on screen,
+    // in the log and when the log is read again; Claude Code and Codex alike
+    const piece = text => ev({ type: 'stream_event', session_id: 'S1', parent_tool_use_id: null,
+                               event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } });
+    const order = async (h, agent) => {
+      h.runner.start('x');
+      const p = await h.pane(h.item1);
+      await settle(40);
+      await h.runner.annotate([h.item1]);
+      await settle(400);
+      const logPath = `/data/tmp/scholium/ATT1/${agent}-run.jsonl`;
+      const kinds = e => (e.unfinished ? 'unfinished' : e.kind);
+      return { shown: p.pane().list.children.slice(-2).map(c => c.className.replace('scholium-entry ', '')),
+               logged: h.log.writes[logPath].trim().split('\n').map(l => JSON.parse(l)).filter(e => e.subtype === 'unfinished' || e.type === 'result')
+                 .map(e => e.subtype === 'unfinished' ? 'unfinished' : 'result'),
+               read: (await h.runner.readLog('ATT1', agent)).entries.slice(-2).map(kinds) };
+    };
+    facts.failedInside = {
+      claude: await order(harness({ exitCode: 1, script: [SCRIPT[0], piece('写到一半'),
+        ev({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Invalid API key', session_id: 'S1' })] }), 'claude'),
+      codex: await order(harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [[
+        note('turn/started', { threadId: 'T1', turn: { id: 'TURN', status: 'inProgress' } }),
+        note('item/agentMessage/delta', { threadId: 'T1', turnId: 'TURN', itemId: 'a9', delta: '写到一半' }),
+        turnDone({ status: 'failed', error: { message: 'Invalid API key' } })]] } }), 'codex'),
+    };
+  }
+  {
+    // text selected in the draft stays selected: the draft is set again once nothing in it is selected
+    const h = harness();
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    h.runner.transcriptKey = 'ATT1';
+    p.pane().shownKey = 'ATT1';
+    h.runner.growDraft('第一段', 0);
+    h.runner.paintDraft();
+    const node = p.pane().draft.node;
+    let selected = true;
+    h.paneWin.getSelection = () => ({ isCollapsed: !selected, containsNode: (n, partly) => partly && n === node });
+    h.runner.growDraft('，第二段', 0);
+    h.runner.paintDraft();
+    const held = node.textContent;
+    selected = false;
+    h.runner.growDraft('，第三段', 0);
+    h.runner.paintDraft();
+    facts.draftSelection = { held, after: node.textContent };
+    h.runner.dropDraft();
+    delete h.paneWin.getSelection;
+  }
+  {
+    // a message sent in a conversation goes before the papers waiting for their first run
+    const h = harness();
+    h.runner.start('x');
+    h.runner.draining = true;   // the queue is only looked at
+    h.runner.sessions.set('ATT1', { agent: 'claude', id: 'S1' });
+    const order = async (queue, paused = null) => {
+      h.runner.queue = queue.map(([key, more]) => Object.assign({ att: { key }, title: key }, more));
+      h.runner.paused = paused;
+      await h.runner.followUp(h.att1, '再短一点');
+      const keys = h.runner.queue.map(j => j.att.key + (j.say ? ':' + j.say : ''));
+      h.runner.queue = [];
+      h.runner.paused = null;
+      return keys;
+    };
+    const paused = { until: Date.now() + 60000, known: true, timer: null };
+    facts.followUpOrder = {
+      fresh: await order([['ATT2'], ['ATT3']]),
+      afterTalk: await order([['ATT2', { resume: 'S2', say: '早先的问题' }], ['ATT3']]),
+      afterRetry: await order([['ATT2', { retried: true, retryAt: Date.now() + 30000 }], ['ATT3']]),
+      afterPause: await order([['ATT2', { interrupted: true }], ['ATT3']], paused),
+      pausedHeadCancelled: await order([['ATT2'], ['ATT3']], paused),   // the interrupted paper was taken out
+      alone: await order([]),
+    };
+    // what the usage limit leaves at the head of the queue: a question goes on as a question
+    const limited = (job, session) => {
+      h.runner.pause(Object.assign({ att: { key: 'ATT2' }, title: 'B' }, job), { until: null, session });
+      const head = h.runner.queue[0];
+      clearTimeout(h.runner.paused.timer);
+      h.runner.queue = [];
+      h.runner.paused = null;
+      return { say: head.say, asked: !!head.asked, resume: head.resume || null, interrupted: !!head.interrupted };
+    };
+    facts.pausedJobs = { question: limited({ say: '为什么？' }, 'S2'), run: limited({ extra: '只标方法' }, 'S2'), noSession: limited({}, null) };
+  }
 
   // the usage limit: the queue waits, and the interrupted paper continues its conversation after the reset
   {
@@ -1048,6 +1244,93 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const table = ['Before', '| a | b \\| c | d |', '| :-: | --- | ---: |', '| `x` | 2 |', '| 1 | 2 | 3 | 4 |', '',
                    'x | y', 'no rule', '', 'p | q', '|---|---|---|'].join('\n');
     facts.markdownTable = h.runner.renderMarkdown(h.paneDoc, table).map(tree);
+    // text that once looped for ever or threw: the line and paragraph separators; a rule line after many
+    // spaces; a message that cannot be set shows its source
+    facts.markdownSeparators = ['## 结论\u2028更多', '- 一项\u2028续行', '1. 一\u2029二'].map(t => h.runner.renderMarkdown(h.paneDoc, t).map(tree));
+    const t0 = Date.now();
+    h.runner.renderMarkdown(h.paneDoc, '| a | b |\n' + ' '.repeat(30000) + '|x');
+    facts.markdownSpacesMs = Date.now() - t0;
+    const render = h.runner.renderMarkdown;
+    h.runner.renderMarkdown = () => { throw Error('broken'); };
+    facts.markdownFallback = tree(h.runner.entryNode(h.paneDoc, { kind: 'text', text: '**原文**' }));
+    h.runner.renderMarkdown = render;
+    // the step of a command: the furthest of several, scholium.py or the scholium command
+    const commands = ['python C:/s/scholium.py extract --pdf a.pdf && python C:/s/scholium.py --config c.json --apply',
+                      'scholium --config c.json --apply', 'scholium --config c.json', 'python scholium.py extract --pdf x.pdf',
+                      'Get-Content D:/x/zotero-scholium/SKILL.md'];
+    facts.steps = {
+      claude: commands.map(c => h.runner.step({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'PowerShell', input: { command: c } }] } })),
+      codex: commands.map(c => h.runner.codexStep({ method: 'item/started', params: { item: { type: 'commandExecution', command: c } } })),
+    };
+    facts.openings = ['```python\nprint(1)\n```', '| 页 | 条数 |\n|---|---|\n| 5 | 1 |', '## 结论\n内容', '\n\n**粗体** 开头', '---\n'].map(t => h.runner.opening(t));
+  }
+  {
+    // formulas: TeX set as MathML by KaTeX (the plugin's copy); prices, escapes and code stay text; what KaTeX
+    // cannot read stays as written; only MathML elements and attributes are kept
+    const h = harness();
+    const texOf = n => (n.tagName === 'annotation' ? n._text : n.children.map(c => (c.tagName ? texOf(c) : '')).join(''));
+    const mtree = n => (n && n.tagName === 'math' ? 'math' + (n.attrs.display === 'block' ? '[block]' : '') + ':' + texOf(n)
+      : n && n.tagName ? [n.tagName + (n.className ? '.' + n.className : ''), ...(n.children.length ? n.children.map(mtree) : n._text ? [n._text] : [])]
+      : n.textContent);
+    const r = t => h.runner.renderMarkdown(h.paneDoc, t).map(mtree);
+    const names = (n, out = new Set()) => { if (n.tagName) { out.add(n.tagName); n.getAttributeNames().forEach(a => out.add('@' + a)); n.children.forEach(c => names(c, out)); } return out; };
+    facts.formulas = {
+      inline: r('a $x^2$ b'),
+      parens: r('复杂度 \\(O(n \\log n)\\)'),
+      block: r('$$\n\\frac{a}{b}\n$$'),
+      brackets: r('\\[ \\sum_{i=1}^n i \\]'),
+      inParagraph: r('see $$E=mc^2$$ here'),
+      text: r('price $5 and $10, \\$3, \\*not em\\*, `$x$`'),
+      unreadable: r('bad $\\frac{a}{$ end'),
+      unclosed: r('$$\nx\n\ntext'),
+      structure: tree(h.runner.renderMarkdown(h.paneDoc, '$x^2$')[0].children[0]),
+      href: [...names(h.runner.renderMarkdown(h.paneDoc, '$\\href{javascript:alert(1)}{y}$')[0])].sort(),
+      loads: h.log.scripts,
+    };
+    const katex = h.runner.katex();
+    const render = katex.renderToString;
+    let renders = 0;
+    katex.renderToString = (...a) => { renders++; return render.apply(katex, a); };
+    const one = h.runner.mathNode(h.paneDoc, 'z^3', false), again = h.runner.mathNode(h.paneDoc, 'z^3', false);
+    facts.formulas.cached = { distinct: one !== again, same: JSON.stringify(tree(one)) === JSON.stringify(tree(again)), loads: h.log.scripts, renders };
+    // what KaTeX writes passes through the cleaning
+    katex.renderToString = () => '<span class="katex"><math onclick="x()"><mi>x</mi><a href="javascript:x()">y</a></math></span>';
+    const dirty = h.runner.mathNode(h.paneDoc, 'dirty', false);
+    facts.formulas.dirty = { attrs: dirty.attrs, children: dirty.children.map(c => c.tagName) };
+    katex.renderToString = render;
+    // what is not MathML is left out
+    const math = new El('math');
+    math.setAttribute('display', 'block');
+    math.setAttribute('onclick', 'x()');
+    const mi = new El('mi');
+    mi.setAttribute('mathvariant', 'normal');
+    mi.setAttribute('style', 'color: red');
+    const link = new El('a');
+    link.setAttribute('href', 'javascript:x()');
+    math.append(mi, link);
+    h.runner.cleanMath(math);
+    facts.formulas.cleaned = { attrs: math.attrs, children: math.children.map(c => [c.tagName, c.attrs]) };
+    // without KaTeX the source stays
+    h.runner.katexLib = null;
+    h.runner.mathCache.clear();
+    facts.formulas.withoutKatex = r('a $y^2$ b');
+  }
+  {
+    // another version's sheet, left by a copy that a plugin update left running, is replaced; a copy that
+    // stops leaves the sheet and the labels of a newer one
+    const h = harness();
+    const doc = h.runner.windows()[0].document;
+    const old = doc.createElementNS('', 'link');
+    old.id = 'scholium-bridge-style';
+    old.setAttribute('href', 'chrome://scholium-bridge-0-1-6/content/scholium.css');
+    doc.documentElement.append(old);
+    h.runner.start('x');
+    const sheets = () => doc.documentElement.children.filter(c => c.id === 'scholium-bridge-style').map(c => c.attrs.href);
+    const replaced = sheets();
+    doc.documentElement.children.find(c => c.id === 'scholium-bridge-style').setAttribute('href', 'chrome://scholium-bridge-0-1-9/content/scholium.css');
+    const ftl = h.log.ftl.length;
+    h.runner.stop();
+    facts.sheets = { replaced, oldRemoved: old.removed, afterStop: sheets(), labelsRemoved: h.log.ftl.slice(ftl).includes('removed') };
   }
   {
     // a profile that cannot be read is not overwritten; a failed save keeps the sheet and the text
@@ -1323,8 +1606,12 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const p = await h.pane(h.item1);
     await settle(200);
     const before = h.log.codexCalls.length;
+    const grown = [];   // the pieces of messages as Codex writes them
+    const grow = h.runner.growDraft;
+    h.runner.growDraft = function (piece, block) { grown.push([piece, block]); return grow.call(this, piece, block); };
     await h.runner.annotate([h.item1]);
     await settle(500);
+    facts.codexDraft = { grown, left: h.runner.draft };
     const call = h.log.codexCalls[before];
     const sent = h.log.codexProcs[before].sent;
     const req = m => sent.find(x => x.method === m);
@@ -1585,8 +1872,21 @@ def facts(tmp_path_factory):
 CLAUDE = "/appdata/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 SUMMARY = "高亮 28 条（核心 12 条），页边批注 9 条，笔记《Deep latent》，无剩余警告。"
 BRIEF = "高亮 28 条（核心 12 条）\n页边批注 9 条\n无剩余警告"   # the summary in a notice
-DONE_NOTICE = ["完成 · 1 分钟"] + BRIEF.split("\n")
-DONE_STATE = "完成 · 6 分钟 · 26 轮 · 257 万 token"
+CLOSING = "改了批注时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。"   # the end of a follow-up's prompt
+DONE_NOTICE = ["完成 · Ns"] + BRIEF.split("\n")   # a harness run's own time, read through run_time
+DONE_STATE = "完成 · 6m 17s · 26 轮 · 257 万 token"
+
+
+def run_time(value):
+    """A harness run's own time (a fraction of a second, which a slow machine may round up) as Ns, in a string
+    or in the strings of a list or dict; a time taken from a result, such as 6m 17s, stays."""
+    if isinstance(value, str):
+        return re.sub(r"(?<!m )(?<![\d.])\d+s\b", "Ns", value)
+    if isinstance(value, list):
+        return [run_time(v) for v in value]
+    if isinstance(value, dict):
+        return {k: run_time(v) for k, v in value.items()}
+    return value
 TOKEN_DETAIL = "输入 52 · 缓存写入 11.1 万 · 缓存读取 241 万 · 输出 4.7 万"
 STARTED = "已在后台开始，通常需要 10–20 分钟。过程和进度见条目侧栏的 Scholium 区块。"
 LEVELS = ["low", "medium", "high", "xhigh", "max"]
@@ -1682,6 +1982,7 @@ def test_section_is_styled_by_its_stylesheet(facts):
     assert look["buttons"] == ["scholium-button primary", "scholium-button", "scholium-button", "scholium-button quiet",
                                "scholium-button quiet danger", "scholium-button quiet", "scholium-button primary small"]
     assert look["selects"] == ["scholium-select"] * 3 and look["input"] == "scholium-input"
+    assert look["inputNative"] == "true"   # Zotero's text-box look (a line under the text on focus) stays off
     assert look["tool"] == [["span", "scholium-bullet"], ["span", "scholium-content"]] and look["name"] == ["b", "text"]
     rules = css_rules()
     for cls in ["scholium-pane", "scholium-settings", "scholium-field", "scholium-select", "scholium-actions", "scholium-spacer",
@@ -1691,7 +1992,7 @@ def test_section_is_styled_by_its_stylesheet(facts):
         assert any(re.search(r"\." + re.escape(cls) + r"(?![\w-])", sel) for sel in rules), cls
     log = rules[".scholium-log"]
     for part in ("background: var(--material-background)", "color: var(--fill-primary)", "border: var(--material-border-quarternary)",
-                 "resize: vertical", "overflow: auto", "min-height: 80px", "user-select: text"):
+                 "resize: vertical", "overflow: auto", "min-height: 80px", "user-select: text", "contain: inline-size"):
         assert part in log, part
     # the transcript can be selected, without its bullets and buttons; a message's copy button shows over the message
     assert "user-select: none" in rules[".scholium-bullet"] and "user-select: none" in rules[".scholium-copy"]
@@ -1700,6 +2001,7 @@ def test_section_is_styled_by_its_stylesheet(facts):
     assert "opacity: 0" in rules[".scholium-copy"]
     assert "opacity: 1" in rules[".scholium-entry:hover .scholium-copy, .scholium-copy:focus-visible, .scholium-copy.done"]
     assert "font-size: 1.2em" in rules[".scholium-log .scholium-markdown h1"]
+    assert "word-break: normal" in rules[".scholium-markdown :is(th, td)"]
     assert "display: none !important" in rules[".scholium-pane [hidden]"]
     assert "var(--accent-green)" in rules[".scholium-entry.tool .scholium-bullet"]
     assert [sel for sel, body in rules.items() if "monospace" in body] == [".scholium-entry.tool, .scholium-entry.result", "#scholium-profile-sheet .scholium-editor",
@@ -1725,7 +2027,7 @@ def test_claude_is_started_headless_in_the_data_directory(facts):
     assert call["workdir"] == "/data"
     assert call["env"] == {"PYTHONIOENCODING": "utf-8"} and call["append"] is True
     args = call["args"]
-    assert args[:6] == ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto"]
+    assert args[:7] == ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "auto"]
     assert args[args.index("--add-dir") + 1] == "/home/u/.claude/skills/zotero-scholium"
     i = args.index("--allowedTools")
     assert args[i + 1:i + 5] == ["Skill", "Read", "Write(/data/tmp/scholium/**)", "Edit(/data/tmp/scholium/**)"]
@@ -1763,7 +2065,7 @@ def test_section_shows_the_transcript_like_claude_code(facts):
 
 
 def test_corner_notices_close_by_themselves(facts):
-    assert facts["notices"] == [
+    assert run_time(facts["notices"]) == [
         {"closeOnClick": True, "errors": 0, "descriptions": [STARTED], "closeTimer": 6000, "shown": True},
         {"closeOnClick": True, "errors": 0, "descriptions": DONE_NOTICE, "closeTimer": 6000, "shown": True},
     ]
@@ -1785,11 +2087,11 @@ def test_a_section_on_screen_replaces_the_notices(facts):
 
 def test_section_shows_running_and_finished_state(facts):
     q = facts["queueWhileFirstRuns"]
-    assert q["pane1"]["state"] == "第 6/6 步 写入 Zotero · 已用 1 分钟 · 另有 1 篇排队"
+    assert run_time(q["pane1"]["state"]) == "第 6/6 步 写入 Zotero · 已用 Ns · 另有 1 篇排队"
     assert q["pane1"]["stateKind"] == "scholium-state running" and q["pane1"]["cancelHidden"] is False
     assert q["pane2"]["state"] == "排队中，前面还有 1 篇" and q["pane2"]["annotateDisabled"] is True
     w = facts["whileRunning"]["view"]
-    assert w["state"] == "第 1/6 步 加载技能 · 已用 1 分钟" and w["stateKind"] == "scholium-state running"
+    assert run_time(w["state"]) == "第 1/6 步 加载技能 · 已用 Ns" and w["stateKind"] == "scholium-state running"
     assert (w["cancelHidden"], w["annotateDisabled"], w["removeDisabled"]) == (False, True, True)
     assert w["entries"] == TRANSCRIPT[:3]
     assert facts["otherRunning"] == {"state": "正在批注另一篇：Paper ITEM1", "kind": "scholium-state info"}
@@ -1818,12 +2120,12 @@ def test_failure_and_cancel_are_reported(facts):
     f = facts["failure"]
     assert f["last"] == ["scholium-entry final error", "scholium.py: style_warnings remain"]
     assert f["notifications"] == [{"title": "批注失败：Paper ITEM1", "body": "scholium.py: style_warnings remain"}]
-    assert f["state"] == "失败 · 1 分钟" and f["kind"] == "scholium-state error"
+    assert run_time(f["state"]) == "失败 · Ns" and f["kind"] == "scholium-state error"
     c = facts["cancel"]
     assert c["kills"] == 1 and c["current"] is None
     assert c["last"] == ["scholium-entry final error", "已取消"]
     assert c["view"]["cancelHidden"] is True and c["view"]["annotateDisabled"] is False
-    assert c["state"] == "已取消 · 1 分钟"
+    assert run_time(c["state"]) == "已取消 · Ns"
     assert c["notifications"] == ["批注失败：Paper ITEM1"]
 
 
@@ -1961,6 +2263,58 @@ def test_markdown_preview_builds_elements_and_never_markup(facts):
     ]
 
 
+def test_markdown_that_once_hung_or_threw_now_renders(facts):
+    assert facts["markdownSeparators"] == [
+        [["h2", "结论"], ["p", "更多"]],
+        [["ul", ["li", "一项\n续行"]]],
+        [["ol", ["li", "一\n二"]]],
+    ]
+    assert facts["markdownSpacesMs"] < 300
+    assert facts["markdownFallback"] == ["div.scholium-entry text", ["span.scholium-bullet", "⏺ "],
+                                         ["div.scholium-content scholium-markdown", "**原文**"],
+                                         ["button.scholium-copy[title=复制这条回复（Markdown）]"]]
+
+
+def test_formulas_are_set_as_mathml_and_the_rest_stays_text(facts):
+    f = facts["formulas"]
+    assert f["inline"] == [["p", "a ", "math:x^2", " b"]]
+    assert f["parens"] == [["p", "复杂度 ", "math:O(n \\log n)"]]
+    assert f["block"] == [["div.scholium-math", "math[block]:\\frac{a}{b}"]]
+    assert f["brackets"] == [["div.scholium-math", "math[block]:\\sum_{i=1}^n i"]]
+    assert f["inParagraph"] == [["p", "see ", ["span.scholium-math", "math[block]:E=mc^2"], " here"]]
+    # prices are text; escaped marks are themselves; code is code
+    assert f["text"] == [["p", "price $5 and $10, ", "$", "3, ", "*", "not em", "*", ", ", ["code", "$x$"]]]
+    assert f["unreadable"] == [["p", "bad ", "$\\frac{a}{$", " end"]]
+    assert f["unclosed"] == [["p", "$$\nx"], ["p", "text"]]
+    assert f["structure"] == ["math", ["semantics", ["mrow", ["msup", ["mi", "x"], ["mn", "2"]]], ["annotation", "x^2"]]]
+    # \href in untrusted TeX: no link, only MathML
+    elements = {n for n in f["href"] if not n.startswith("@")}
+    assert "math" in elements and elements <= {"p", "math", "semantics", "mrow", "mstyle", "mtext", "annotation", "mi", "mo", "mn"}
+    assert "@href" not in f["href"]
+    assert f["loads"] == 1 and f["cached"] == {"distinct": True, "same": True, "loads": 1, "renders": 1}
+    assert f["dirty"] == {"attrs": {}, "children": ["mi"]}
+    assert f["cleaned"] == {"attrs": {"display": "block"}, "children": [["mi", {"mathvariant": "normal"}]]}
+    assert f["withoutKatex"] == [["p", "a ", "$y^2$", " b"]]
+
+
+def test_the_plugin_carries_katex_and_its_license():
+    katex = PLUGIN / "content" / "katex"
+    assert 'version:"0.18.11"' in (katex / "katex.min.js").read_text(encoding="utf8")
+    assert (katex / "LICENSE").read_text(encoding="utf8").startswith("The MIT License (MIT)")
+
+
+def test_steps_and_notice_openings(facts):
+    assert facts["steps"] == {"claude": ["applying", "applying", "dryRun", "extract", None],
+                              "codex": ["applying", "applying", "dryRun", "extract", "skill"]}
+    assert facts["openings"] == ["print(1)", "页 · 条数", "结论", "粗体 开头", ""]
+
+
+def test_a_newer_copy_keeps_its_stylesheet_and_labels(facts):
+    s = facts["sheets"]
+    assert s["replaced"] == ["chrome://scholium-bridge/content/scholium.css"] and s["oldRemoved"] is True
+    assert s["afterStop"] == ["chrome://scholium-bridge-0-1-9/content/scholium.css"] and s["labelsRemoved"] is False
+
+
 def test_the_agents_markdown_is_set_and_its_source_copied(facts):
     r = facts["markdownReply"]
     assert r["tree"] == [
@@ -1976,6 +2330,68 @@ def test_the_agents_markdown_is_set_and_its_source_copied(facts):
     assert r["done"][:2] == ["scholium-copy done", "已复制"] and 1500 in r["done"][2]
     assert r["reset"] == ["scholium-copy", "复制这条回复（Markdown）"]
     assert r["rerendered"] is True
+
+
+def test_a_reply_shows_as_it_is_written_and_a_question_is_answered(facts):
+    s = facts["streamed"]
+    md = ["div.scholium-content scholium-markdown", ["h2", "结论"], ["p", "用的是 ", ["strong", "SMART"], "，从头训练。"],
+          ["ul", ["li", "32M 参数"]]]
+    w = s["writing"]
+    # two parts of one message, a blank line between them; a sub-agent's piece is left out
+    assert w["draft"] == "## 结论\n\n用的是 **SMART**，从头训练。\n\n- 32M 参数"
+    assert w["tree"] == w["again"] == ["div.scholium-entry text draft", ["span.scholium-bullet", "⏺ "], md]
+    assert w["againAtEnd"] is True
+    assert s["whole"] == {"drafts": 0, "left": None, "running": True}   # the whole message replaces the draft at once
+    assert s["done"] == ["div.scholium-entry text", ["span.scholium-bullet", "⏺ "], md, ["button.scholium-copy[title=复制这条回复（Markdown）]"]]
+    assert s["drafts"] == 0 and s["left"] is None and s["streamLines"] == 0
+    assert "--include-partial-messages" in s["args"] and s["args"][s["args"].index("--resume") + 1] == "S1"
+    assert s["prompt"].endswith("\n\n用的什么模型？\n\n" + CLOSING)
+    # nothing was written to Zotero: the notice gives the answer's opening, not a closing line
+    assert s["notifications"] == [{"title": "已回答：Paper ITEM1", "body": "结论"}]
+    c = facts["codexDraft"]
+    assert c["grown"] == [["先", "a1"]] and c["left"] is None
+
+
+def test_a_cancelled_message_stays_marked_and_typed_words_stay_with_their_item(facts):
+    u = facts["unfinished"]
+    assert u["restored"] == "还没发出去的话"
+    assert u["during"] == {"removeHidden": True, "inputAfterSend": "", "rerenderedInput": ""}
+    assert u["last"][0] == ["div.scholium-entry text", ["span.scholium-bullet", "⏺ "],
+                            ["div.scholium-content scholium-markdown", ["p", "写到一半的 ", ["strong", "回答"]],
+                             ["div.scholium-unfinished", "（这条回复没有写完）"]],
+                            ["button.scholium-copy[title=复制这条回复（Markdown）]"]]
+    assert u["last"][1] == ["scholium-entry final error", "已取消"]
+    assert u["logged"] == u["fromLog"] == ["写到一半的 **回答**"]
+    assert u["removeHiddenAfter"] is False
+    assert u["durations"] == ["8s", "59s", "1m 00s", "6m 17s", "1h 02m 05s"]
+
+
+def test_an_unfinished_message_comes_before_the_failure(facts):
+    for agent in ("claude", "codex"):
+        f = facts["failedInside"][agent]
+        assert f["shown"] == ["text", "final error"], agent
+        assert f["logged"] == ["unfinished", "result"], agent
+        assert f["read"] == ["unfinished", "final"], agent
+
+
+def test_a_selection_in_the_draft_holds_it_still(facts):
+    assert facts["draftSelection"] == {"held": "⏺ 第一段", "after": "⏺ 第一段，第二段，第三段"}
+
+
+def test_a_message_in_a_conversation_goes_before_waiting_papers(facts):
+    assert facts["followUpOrder"] == {
+        "fresh": ["ATT1:再短一点", "ATT2", "ATT3"],
+        "afterTalk": ["ATT2:早先的问题", "ATT1:再短一点", "ATT3"],
+        "afterRetry": ["ATT2", "ATT1:再短一点", "ATT3"],
+        "afterPause": ["ATT2", "ATT1:再短一点", "ATT3"],
+        "pausedHeadCancelled": ["ATT1:再短一点", "ATT2", "ATT3"],
+        "alone": ["ATT1:再短一点"],
+    }
+    assert facts["pausedJobs"] == {
+        "question": {"say": "", "asked": True, "resume": "S2", "interrupted": False},
+        "run": {"say": "", "asked": False, "resume": "S2", "interrupted": False},
+        "noSession": {"asked": False, "resume": None, "interrupted": True},   # the same paper again, from the start
+    }
 
 
 def test_missing_profile_starts_as_the_template_and_is_written_on_saving(facts):
@@ -2089,8 +2505,9 @@ def test_extra_instructions_and_follow_ups_continue_the_conversation(facts):
     assert e["typed"] == {"placeholder": follow, "sendHidden": False, "sendDisabled": False, "sendRowHidden": False}
     f = facts["followUp"]
     assert f["calls"] == 2 and f["resume"] == "S1" and f["prevented"] is True and f["cleared"] == ""
-    assert f["prompt"].startswith("下面是用户在 Zotero 里针对这篇论文的批注发来的后续要求。仍是无人值守：不要向用户提问，不要启动子代理")
-    assert "\n\n第 5 页那条译文改短\n\n结束时最后一行只写一句：改了什么，剩余警告。" in f["prompt"]
+    assert f["prompt"].startswith("下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
+                                  "只是提问就直接回答；要改批注时按技能的流程修改配置，再写入 Zotero。")
+    assert f["prompt"].endswith("\n\n第 5 页那条译文改短\n\n" + CLOSING)
     assert f["prompts"] == ["附加要求：只标注方法部分", "第 5 页那条译文改短"]
     assert f["entries"] == 2 * (1 + len(TRANSCRIPT))
     assert f["markers"] == ["附加要求：只标注方法部分", "第 5 页那条译文改短"] and f["inits"] == 2
@@ -2200,7 +2617,7 @@ def test_codex_runs_the_skill_in_a_sandbox_through_its_app_server(facts):
 def test_codex_transcript_state_and_log_read_like_claude_codes(facts):
     r = facts["codexRun"]
     assert r["entries"] == CODEX_TRANSCRIPT
-    assert r["state"] == "完成 · 6 分钟 · 3 轮 · 265 万 token"
+    assert r["state"] == "完成 · 6m 17s · 3 轮 · 265 万 token"
     assert r["stateTitle"] == "输入 19 万 · 缓存写入 0 · 缓存读取 241 万 · 输出 4.7 万"
     # deltas and start-up chatter stay out of the log; the run starts and ends as Claude Code's does
     assert not any(m.endswith("Delta") or m.endswith("delta") or "startupStatus" in m for m in r["logged"])
@@ -2210,11 +2627,11 @@ def test_codex_transcript_state_and_log_read_like_claude_codes(facts):
                            "session_id": "T1", "duration_ms": 376500, "num_turns": 3,
                            "usage": {"input_tokens": 190000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 2410000,
                                      "output_tokens": 46778}}
-    assert r["notices"][-1]["descriptions"] == DONE_NOTICE
+    assert run_time(r["notices"][-1]["descriptions"]) == DONE_NOTICE
     assert r["sendShown"] is True and r["revealed"] == ["/data/tmp/scholium/ATT1/codex-run.jsonl"]
     latest = facts["latestLog"]
     assert latest["codex"] == {"first": ["scholium-entry info", "模型: gpt-6-luna"], "count": len(CODEX_TRANSCRIPT),
-                               "state": "上次：完成 · 6 分钟 · 3 轮 · 265 万 token", "session": {"agent": "codex", "id": "T1"},
+                               "state": "上次：完成 · 6m 17s · 3 轮 · 265 万 token", "session": {"agent": "codex", "id": "T1"},
                                "revealed": "/data/tmp/scholium/ATT1/codex-run.jsonl"}
     assert latest["claude"]["first"] == ["scholium-entry info", "模型: claude-opus-5-5"]
     assert latest["claude"]["session"] == {"agent": "claude", "id": "S1"}
@@ -2235,10 +2652,10 @@ def test_codex_follow_up_continues_its_thread_whatever_agent_is_chosen(facts):
                            "sandbox": "workspace-write", "serviceName": "scholium-bridge", "model": "gpt-6-luna",
                            "config": {"mcp_servers": {"s": {"enabled": False}}}}
     assert f["disabled"] == ["superpowers@m", "zotero@remote"]
-    assert len(f["input"]) == 1 and f["input"][0]["text"].endswith("第 5 页那条译文改短\n\n结束时最后一行只写一句：改了什么，剩余警告。")
+    assert len(f["input"]) == 1 and f["input"][0]["text"].endswith("第 5 页那条译文改短\n\n" + CLOSING)
     assert f["effort"] == "high"
     # only this run's calls and tokens: the thread's totals include the earlier turn
-    assert f["state"] == "完成 · 1 分钟 · 1 轮 · 40.3 万 token"
+    assert f["state"] == "完成 · 1m 05s · 1 轮 · 40.3 万 token"
     assert f["entries"] == [["scholium-entry text", "⏺ Done.\n" + SUMMARY], ["scholium-entry prompt", "第 5 页那条译文改短"],
                             ["scholium-entry info", "模型: gpt-6-luna"], ["scholium-entry text", "⏺ 改好了：第 5 页的译文已缩短。"]]
     assert f["results"] == 2 and f["markers"] == ["第 5 页那条译文改短"]
@@ -2246,11 +2663,11 @@ def test_codex_follow_up_continues_its_thread_whatever_agent_is_chosen(facts):
 
 def test_codex_steps_and_cancel(facts):
     c = facts["codexCancel"]
-    assert c["during"] == "第 2/6 步 提取句子 · 已用 1 分钟"
+    assert run_time(c["during"]) == "第 2/6 步 提取句子 · 已用 Ns"
     assert c["interrupt"] == {"threadId": "T1", "turnId": "U1"} and c["killed"] is True
-    assert c["last"] == ["scholium-entry final error", "已取消"] and c["state"] == "已取消 · 1 分钟"
+    assert c["last"] == ["scholium-entry final error", "已取消"] and run_time(c["state"]) == "已取消 · Ns"
     assert c["results"] == 0 and c["waits"] == [] and c["current"] is None and c["shutdown"] is True
-    assert c["begun"] == "第 1/6 步 加载技能 · 已用 1 分钟"
+    assert run_time(c["begun"]) == "第 1/6 步 加载技能 · 已用 Ns"
     s = facts["codexSkillFound"]
     assert s["/data/tmp/scholium"]["methods"] == ["skills/list"]
     assert s["/data/tmp/scholium"]["input"] == [{"type": "skill", "name": "zotero-scholium", "path": "/home/u/.codex/skills/zotero-scholium/SKILL.md"}]
@@ -2265,7 +2682,7 @@ def test_codex_usage_limit_waits_for_the_reset(facts):
     assert l["last"] == ["scholium-entry final error", "You've hit your usage limit. Try again at 9:00 PM."]
     a = l["after"]
     assert a["resume"] == "T1" and a["prompt"] == "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。"
-    assert a["turns"] == 3 and a["paused"] is None and a["state"] == "完成 · 1 分钟 · 1 轮 · 40.3 万 token"
+    assert a["turns"] == 3 and a["paused"] is None and a["state"] == "完成 · 1m 05s · 1 轮 · 40.3 万 token"
 
 
 def test_codex_failures_are_reported(facts):
@@ -2292,7 +2709,7 @@ def test_a_failed_connection_gets_one_more_try(facts):
     assert w["cancelShown"] is True and w["queue"] == [["ATT1", True]] and w["job"] is None
     assert w["notices"] == 1 and w["notifications"] == 0 and w["turns"] == 1   # only the start notice so far
     ok = r["ok"]
-    assert ok["turns"] == 2 and ok["queue"] == 0 and ok["state"] == "完成 · 6 分钟 · 3 轮 · 265 万 token"
+    assert ok["turns"] == 2 and ok["queue"] == 0 and ok["state"] == "完成 · 6m 17s · 3 轮 · 265 万 token"
     # one log, the first try kept: two starts, the retry line between them
     assert ok["marks"] == ["prompt", "retry"] and ok["inits"] == 2   # the extra instructions are logged once
     assert ok["entries"][:4] == [["scholium-entry prompt", "附加要求：只标注方法部分"], ["scholium-entry info", "模型: gpt-6-astra"],

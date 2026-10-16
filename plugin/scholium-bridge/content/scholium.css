@@ -216,7 +216,10 @@
   font-size: 11px;
 }
 
+/* the box takes the section's width: a line that cannot wrap (code, a wide table) scrolls inside it
+   instead of widening Zotero's item pane */
 .scholium-log {
+  contain: inline-size;
   box-sizing: border-box;
   min-height: 80px;
   padding: 8px 10px;
@@ -304,6 +307,18 @@
   color: var(--accent-green);
 }
 
+/* a message still being written */
+.scholium-entry.draft .scholium-bullet {
+  animation: scholium-pulse 1.4s ease-in-out infinite;
+}
+
+/* the note under a message that a cancelled or failed run left unfinished */
+.scholium-unfinished {
+  margin-top: 2px;
+  color: var(--fill-secondary);
+  font-size: 11.5px;
+}
+
 .scholium-entry.result {
   padding-inline-start: 1.2em;
   color: var(--fill-secondary);
@@ -346,6 +361,7 @@
 }
 
 .scholium-input {
+  appearance: none;
   display: block;
   box-sizing: border-box;
   width: 100%;
@@ -576,6 +592,19 @@
   border-top: 1px solid var(--fill-quinary);
 }
 
+/* formulas: the MathML that KaTeX writes from a message's TeX, set by Zotero itself; one set apart
+   scrolls when it is wider than the box */
+.scholium-markdown math {
+  font-size: 1.1em;
+}
+
+.scholium-math {
+  display: block;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 /* a table wider than its box scrolls by itself */
 .scholium-markdown table {
   display: block;
@@ -585,10 +614,13 @@
   border-collapse: collapse;
 }
 
+/* words in a cell stay whole (the transcript breaks them anywhere): a table too wide scrolls instead */
 .scholium-markdown :is(th, td) {
   padding: 3px 8px;
   border: 1px solid var(--fill-quarternary);
   vertical-align: top;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
 .scholium-markdown th {
