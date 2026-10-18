@@ -708,7 +708,7 @@ def build(cfg, obstacles=None):
             text = " ".join(r["text"] for r in recs)
             matches = page_index(recs[0]["page"] - 1).count(text)
             if not matches:
-                raise ValueError("sentence id text cannot be matched exactly; re-run `scholium extract --sentences` or use page and text")
+                raise ValueError(_unmatched_ids(page_index(recs[0]["page"] - 1), ids, recs))
             if not item.get("occurrence") and matches > 1 and (len(recs) != 1 or matches != recs[0]["same_text_count"]):
                 raise ValueError(f"ambiguous sentence id: {matches} passages match; set occurrence explicitly after checking the page")
             if len(recs) > 1:   # the matched span must start and end where the first and the last sentence stand
@@ -1356,14 +1356,30 @@ def _load_sentences(cfg):
     if not data.get("pdf_sha256") or data["pdf_sha256"] != _sha256(cfg["pdf"]):
         raise ValueError("sentence cache has no matching PDF fingerprint; re-run `scholium extract --sentences`")
     counts = collections.Counter((it["page"], norm_str(it["text"])) for it in data.get("sentences", []) if "id" in it)
-    seen, table = collections.Counter(), {}
+    heads = [(h.get("para", 0), h.get("heading", "")) for h in data.get("headings", [])]
+    seen, table, para = collections.Counter(), {}, 0
     for it in data.get("sentences", []):
         if "id" not in it:
             continue
         key = (it["page"], norm_str(it["text"]))
         seen[key] += 1
-        table[int(it["id"])] = dict(it, occurrence=seen[key], same_text_count=counts[key])
+        # the heading between this sentence and the one before it, if any
+        between = [h for p, h in heads if para < p < it.get("para", 0)]
+        para = it.get("para", 0)
+        table[int(it["id"])] = dict(it, occurrence=seen[key], same_text_count=counts[key], heading_before=between[-1] if between else None)
     return table
+
+
+def _unmatched_ids(pg, ids, recs):
+    """Why the text of sentence ids is not found on their page, and what to do instead."""
+    if len(recs) > 1:
+        for a, b in zip(recs, recs[1:]):
+            if pg.count(a["text"]) and pg.count(b["text"]) and not pg.count(a["text"] + " " + b["text"]):
+                what = f"the heading “{b['heading_before']}”" if b.get("heading_before") else "other text (a heading, caption or footnote)"
+                return (f"sentences {ids[0]}–{ids[-1]} are not one passage: {what} stands between sentence {a['id']} and sentence "
+                        f"{b['id']}; split the range there")
+        return f"the text of sentences {ids[0]}–{ids[-1]} is not found on the page as one passage; highlight them one by one or use page and text"
+    return f"the text of sentence {ids[0]} is not found on the page as extracted; use page and text"
 
 
 def extract_main(argv):

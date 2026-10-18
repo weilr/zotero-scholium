@@ -93,6 +93,28 @@ def test_build_resolves_ids_ranges_and_summary_ids(tmp_path):
     assert sorted(m.get("id") for m in missed) == [4242, 9999] and all("unknown sentence id" in m["reason"] for m in missed)
 
 
+def test_a_range_across_a_heading_names_the_heading_and_where_to_split(tmp_path):
+    fp = tmp_path / "paper.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_textbox(pymupdf.Rect(72, 110, 540, 200), "The dataset consists of many hulls with different shapes. "
+                        "It is the only dataset that is in water.", fontsize=10, fontname="helv")
+    page.insert_text((72, 230), "Data Generation.", fontsize=13)
+    page.insert_textbox(pymupdf.Rect(72, 250, 540, 400), "Samples are solved as steady RANS on a finite-volume solver.",
+                        fontsize=10, fontname="helv")
+    doc.save(str(fp)); doc.close()
+    sfile = tmp_path / "sentences.json"
+    cli.extract_main(["--pdf", str(fp), "--sentences", str(sfile)])
+    sents = [i for i in json.loads(sfile.read_text(encoding="utf8"))["sentences"] if "id" in i]
+    assert len(sents) == 3
+    cfg = dict(cli.DEFAULTS, pdf=str(fp), item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[], sentences=str(sfile),
+               highlights=[{"ids": [1, 3], "comment": "x"}, {"ids": [1, 2], "comment": "y"}])
+    out, missed = cli.build(cfg)
+    assert len(out) == 1 and [m["id"] for m in missed] == [[1, 3]]
+    assert missed[0]["reason"] == ("sentences 1–3 are not one passage: the heading “Data Generation.” stands between sentence 2 and "
+                                   "sentence 3; split the range there")
+
+
 def test_apply_is_blocked_by_style_warnings_and_reports_pdf_hash(tmp_path, capsys):
     fp = tmp_path / "paper.pdf"; _three_page_pdf(str(fp))
     cfg = {"pdf": str(fp), "item_key": "I", "attachment_key": "A", "out_dir": str(tmp_path), "preview_pages": [],

@@ -40,6 +40,8 @@
 - `extract` and the dry run read a page's text without decoding its images: a paper of many figures that
   took 15 seconds per pass takes under one. Text inside figures may be grouped into fewer lines; the
   sentences and headings of the paper are unchanged.
+- A sentence range that crosses a heading names the heading and the sentence after which to split it.
+  A sentence whose text is not found on its page no longer suggests running `extract` again.
 
 ## 0.1.8 (2026-10-16)
 
