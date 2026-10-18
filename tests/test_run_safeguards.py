@@ -271,3 +271,17 @@ def test_extract_says_how_long_the_listing_is(paper, capsys):
     assert f"{text.count(chr(10))} lines, {len(text)} characters" in line
 
 
+def test_text_lines_are_read_without_decoding_the_pages_images(tmp_path):
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), SENTENCE)
+    page.insert_image(pymupdf.Rect(72, 100, 272, 300), pixmap=pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 400, 400), 0))
+    page.insert_text((72, 330), "Figure 1: a caption under the image.")
+    with_images = page.get_text("dict")["blocks"]
+    assert any("image" in b for b in with_images)
+    blocks = cli.text_lines(page)
+    assert not any("image" in b for b in blocks)
+    lines = lambda bs: sorted(("".join(s["text"] for s in l["spans"]), tuple(l["bbox"])) for b in bs for l in b.get("lines", []))
+    assert lines(blocks) == lines(with_images)
+    index = cli.PageIndex(page)
+    assert index.blocks() is index.blocks()   # read once per page

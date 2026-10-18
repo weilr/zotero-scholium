@@ -37,6 +37,9 @@
   should have. Numbers written as words ("eight", "below one", "unit variance"), "11.60 thousand" given as
   11.60 with 千 elsewhere, "Figure.2", and "1/8" for "8x fewer" are read too. SKILL.md: a faithful
   translation is not changed to silence a warning.
+- `extract` and the dry run read a page's text without decoding its images: a paper of many figures that
+  took 15 seconds per pass takes under one. Text inside figures may be grouped into fewer lines; the
+  sentences and headings of the paper are unchanged.
 
 ## 0.1.8 (2026-10-16)
 

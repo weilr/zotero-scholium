@@ -111,11 +111,21 @@ def norm_str(s):
     return "".join(out)
 
 
+def text_lines(page):
+    """The page's text blocks and lines as PyMuPDF's "dict" gives them, without the pixel data of its images
+    (decoding every image took seconds on a page of figures; only the lines are read)."""
+    flags = getattr(pymupdf, "TEXTFLAGS_DICT", None)
+    if flags is None:
+        return page.get_text("dict").get("blocks", [])
+    return page.get_text("dict", flags=flags & ~pymupdf.TEXT_PRESERVE_IMAGES).get("blocks", [])
+
+
 class PageIndex:
     """Word-level index of one page together with an approximate model of its column geometry."""
 
     def __init__(self, page, doc_bounds=None):
         self.page = page
+        self._blocks = None
         self.W, self.H = page.rect.width, page.rect.height
         self.words = page.get_text("words")  # x0, y0, x1, y1, word, block, line, wordno
         text, wmap = [], []
@@ -203,11 +213,16 @@ class PageIndex:
             lines[k] = lines[k] | r if k in lines else r
         return [lines[k] for k in sorted(lines)]
 
+    def blocks(self):
+        if self._blocks is None:
+            self._blocks = text_lines(self.page)
+        return self._blocks
+
     def text_line_rects(self):
         """Rectangles (PDF space, y upward) of the page's horizontal text lines. Lines written in another
         direction (vertical preprint stamps in the margin) are dropped."""
         rects = []
-        for block in self.page.get_text("dict").get("blocks", []):
+        for block in self.blocks():
             for line in block.get("lines", []):
                 dx, dy = line.get("dir", (1, 0))
                 if abs(dx - 1) > 0.01 or abs(dy) > 0.01:
@@ -222,7 +237,7 @@ class PageIndex:
         """Rectangles (PDF space, y upward) of the text lines in any direction that lie in a margin beside the
         text column: a vertical preprint stamp, line numbers, marginal headings."""
         rects = []
-        for block in self.page.get_text("dict").get("blocks", []):
+        for block in self.blocks():
             for line in block.get("lines", []):
                 x0, y0, x1, y1 = line["bbox"]
                 if x1 - x0 <= 0 or y1 - y0 <= 0 or not "".join(s.get("text", "") for s in line.get("spans", [])).strip():
@@ -1200,7 +1215,7 @@ def extract_paragraphs(pdf_path, pages=None, keep_references=False):
     page_rows, weighted = [], []
     for p in sel:
         rows = []
-        for bi, block in enumerate(doc[p].get_text("dict").get("blocks", [])):
+        for bi, block in enumerate(text_lines(doc[p])):
             for line in block.get("lines", []):
                 dx, dy = line.get("dir", (1, 0))
                 if abs(dx - 1) > 0.01 or abs(dy) > 0.01:
