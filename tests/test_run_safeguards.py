@@ -188,6 +188,8 @@ def test_accept_lets_a_deliberate_exception_through_and_core_count_only_informs(
     ({"highlights": [{"page": 1, "text": SENTENCE, "type": "squiggly"}]}, "highlights[0]: type must be highlight or underline"),
     ({"summaries": [{"page": 1, "place": "top", "text": "t", "fontsize": 9}]}, "unknown key 'fontsize' in summaries[0] (did you mean 'font_size'?)"),
     ({"author": "Me"}, "the 'author' key is not supported"),
+    ({"band_min_font_size": 0}, "band_min_font_size must be a number between 4 and 36"),
+    ({"band_min_font_size": "8"}, "band_min_font_size must be a number between 4 and 36"),
 ])
 def test_configuration_mistakes_are_refused(paper, monkeypatch, capsys, config, fragment):
     code, out = run(paper, monkeypatch, capsys, config)

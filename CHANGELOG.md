@@ -27,6 +27,9 @@
 - SKILL.md: the new defaults and options; files are written with the file tool into `out_dir`;
   `--apply` may follow small corrections directly; the description covers redoing, extending and
   correcting annotations.
+- A top or bottom band without room at its font size is set smaller in steps of 0.5 pt down to
+  `band_min_font_size` (default 8, between 4 and 36) and listed under `fitted`. When even that is too
+  small, the warning gives how many characters fit, the words they end with, and how many to cut.
 
 ## 0.1.8 (2026-10-16)
 

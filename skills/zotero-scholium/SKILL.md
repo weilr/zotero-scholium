@@ -66,7 +66,7 @@ First run without `--apply`. Review the report and correct the configuration; th
 - `missed`: unknown ids, or phrases not found (each with the closest passage, `closest`).
 - `style_warnings`: formatting, banned phrases, duplicate or overlapping highlights, text the tool already wrote on the page (`duplicate_existing`), note math; kinds in `references/configuration.md`. `core_count` only informs. For a deliberate exception the user asked for, `--accept KIND` lets that kind through.
 - `translation_warnings`: a comment with terms or numbers absent from the sentence, or much longer or shorter than it. Correct the translation or extend the highlight to cover its source.
-- `layout_warnings`: a margin box without free space: move the note to a neighbouring paragraph or drop it. A top or bottom band without room: the warning gives how many characters fit at its font size and, when one exists, a smaller font size that fits all of it; shorten the text to that length or set that font size. Open a preview PNG only for a margin box, and only that page.
+- `layout_warnings`: a margin box without free space: move the note to a neighbouring paragraph or drop it; open a preview PNG only for a margin box, and only that page. A top or bottom band without room is set smaller, down to 8 pt, and listed under `fitted`; when even that is too small, the warning says how many characters fit and where they end: shorten the text by at least the excess in one edit and keep its place.
 - `colors`, `ambiguous_matches`, `existing_annotations`, `pdf_sha256`, `now_in_zotero`: `references/configuration.md`.
 
 The report names each problem and what to change; reading `scholium.py`'s source is not needed.

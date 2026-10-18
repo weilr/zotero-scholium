@@ -61,6 +61,7 @@ DEFAULTS = {
     "cleanup": False,           # True: a complete redo; the tool's earlier annotations on the attachment are deleted once the new
                                 # ones are written. False: keep every existing annotation (the tool's own included); only add
     "cleanup_external": False,  # bridge backend only: additionally delete annotations Zotero imported from the PDF file
+    "band_min_font_size": 8,    # a top or bottom band without room at its font size is set smaller, down to this size
     "core_range": None,         # [low, high]: expected number of highlights in core_color; outside it an advisory style warning
     "banned_phrases": [],       # strings that must not occur in comments, margin texts or the note (reported as style warnings)
     "sentences": None,          # sentences.json written by `extract --sentences` (default: <out_dir>/sentences.json)
@@ -355,6 +356,12 @@ def normalise_summary(item, cfg, page_sizes):
         raise ValueError("font_size must be a number")
     if not 4 <= font_size <= 36:
         raise ValueError("font_size must lie between 4 and 36")
+    try:
+        min_font_size = float(cfg.get("band_min_font_size", DEFAULTS["band_min_font_size"]))
+    except (TypeError, ValueError):
+        raise ValueError("band_min_font_size must be a number")
+    if not 4 <= min_font_size <= 36:
+        raise ValueError("band_min_font_size must lie between 4 and 36")
     rect = item.get("rect")
     if rect is not None:
         if not isinstance(rect, (list, tuple)) or len(rect) != 4:
@@ -379,7 +386,7 @@ def normalise_summary(item, cfg, page_sizes):
     if kind == "text":
         text = page_text(text)
     return {"page": page, "text": text, "place": place, "side": side, "kind": kind, "color": color,
-            "font_size": font_size, "rect": rect, "anchor": anchor,
+            "font_size": font_size, "min_font_size": min_font_size, "rect": rect, "anchor": anchor,
             "occurrence": int(item.get("occurrence") or 0) or None}
 
 
@@ -486,11 +493,12 @@ def _summary_annotation(pi, sp, rect, warning=None):
         ann["layout_warning"] = warning
     if sp.get("occurrences"):
         ann["occurrences"] = sp["occurrences"]
+    if sp.get("fitted_from"):
+        ann["fitted"] = {"from": sp["fitted_from"], "to": sp["font_size"]}
     return ann
 
 
-MIN_BAND_FONT = 7.0      # the smallest font size a band's warning proposes (pt)
-EDGE_MARGIN = 2.0        # distance between a band in the strip above the first line and the page edge (pt)
+EDGE_MARGIN = 2.0      # distance between a band in the strip above the first line and the page edge (pt)
 
 
 def top_strip(pi, occupied, text_lines, x0, x1):
@@ -513,9 +521,19 @@ def top_strip(pi, occupied, text_lines, x0, x1):
     return (best[0], best[1], y_top, y_bottom) if best and best[1] - best[0] >= 60 else None
 
 
+def smaller_sizes(sp):
+    """Font sizes below the band's own, in steps of 0.5 pt, down to its min_font_size."""
+    floor = sp.get("min_font_size", DEFAULTS["band_min_font_size"])
+    sizes, f = [], sp["font_size"] - 0.5
+    while f > floor:
+        sizes.append(f)
+        f -= 0.5
+    return sizes + ([floor] if floor < sp["font_size"] else [])
+
+
 def band_warning(sp, fits):
-    """The warning of a top or bottom band that has no room: how many characters of its text fit at its font size, and
-    the font size (down to MIN_BAND_FONT) at which all of it fits; `fits(sp)` says whether a band has room."""
+    """The warning of a top or bottom band that has no room even at its smallest font size: how many characters of its
+    text fit there and where they end; `fits(sp)` says whether a band has room."""
     end = sp["place"]
     other = "bottom" if end == "top" else "top"
     text = TAG_RE.sub("", sp["text"])
@@ -528,11 +546,9 @@ def band_warning(sp, fits):
             hi = mid - 1
     if not lo:
         return f"no free space at the {end} of the page; use place: {other}"
-    smaller = next((f for f in (sp["font_size"] - 0.5 * k for k in range(1, 40)) if f >= MIN_BAND_FONT
-                    and fits(dict(sp, font_size=f))), None)
-    return (f"no room at the {end} of the page for all of this text: about {lo} of its {len(text)} characters fit at "
-            f"font_size {sp['font_size']:g}" + (f" (all of it at font_size {smaller:g})" if smaller else "")
-            + "; shorten it" + (", set that font_size" if smaller else "") + f", or use place: {other}")
+    return (f"no room at the {end} of the page for all of this text at font_size {sp['font_size']:g}: the first {lo} of its "
+            f"{len(text)} characters fit, ending with “{text[max(0, lo - 12):lo]}”; shorten the text by at least "
+            f"{len(text) - lo} characters in one edit")
 
 
 def layout_page_summaries(pi, specs, page_obstacles, missed):
@@ -583,6 +599,13 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
         def in_strip(v):
             return bool(strip) and _box_height(v, strip[1] - strip[0]) <= strip[2] - strip[3]
 
+        def fits(v):
+            return in_strip(v) or not place(_box_height(v, bx1 - bx0)).get("layout_warning")
+
+        if not fits(sp):   # without room at its own font size the band is set smaller, down to min_font_size
+            smaller = next((f for f in smaller_sizes(sp) if fits(dict(sp, font_size=f))), None)
+            sp = dict(sp, font_size=smaller, fitted_from=sp["font_size"]) if smaller else \
+                dict(sp, font_size=min(sp["font_size"], sp.get("min_font_size", sp["font_size"])))
         h = _box_height(sp, bx1 - bx0)
         blk = place(h)
         rect, warn = [bx0, blk["y_top"] - h, bx1, blk["y_top"]], None
@@ -591,7 +614,7 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
                 hs = _box_height(sp, strip[1] - strip[0])
                 rect = [strip[0], strip[2] - hs, strip[1], strip[2]]
             else:
-                warn = band_warning(sp, lambda v: in_strip(v) or not place(_box_height(v, bx1 - bx0)).get("layout_warning"))
+                warn = band_warning(sp, fits)
         anns.append(_summary_annotation(pi, sp, rect, warn)); occupied.append(rect)
     # 3. margin boxes and sticky notes beside their anchors (a sticky note ignores `place`); text in the margins
     # is occupied space, and in a one-column layout a box takes the other margin when its own has text beside it
@@ -2218,6 +2241,10 @@ def config_problems(raw):
     for k in ("pdf", "item_key", "attachment_key", "out_dir"):
         if not raw.get(k):
             problems.append(f"missing required key: {k}")
+    if "band_min_font_size" in raw:
+        v = raw["band_min_font_size"]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 4 <= v <= 36:
+            problems.append("band_min_font_size must be a number between 4 and 36")
     levels = raw.get("levels") or {}
     for i, h in enumerate(raw.get("highlights") or []):
         if not isinstance(h, dict):
@@ -2323,6 +2350,8 @@ def main(argv=None):
               "snapped": [{"page": a["pageLabel"], "text": a["text"][:60], "similarity": a["snapped"]} for a in out if a.get("snapped")],
               "ambiguous_matches": [{"page": a["pageLabel"], "text": (a.get("text") or a.get("comment", ""))[:60], "occurrences": a["occurrences"], "used": 1} for a in out if a.get("occurrences")],
               "layout_warnings": [{"page": a["pageLabel"], "text": a["comment"][:60], "reason": a["layout_warning"]} for a in out if a.get("layout_warning")],
+              "fitted": [{"page": a["pageLabel"], "text": a["comment"][:60], "font_size": f"{a['fitted']['from']:g} -> {a['fitted']['to']:g}"}
+                         for a in out if a.get("fitted")],
               "existing_annotations": existing_info, "js": js_path,
               "previews": [os.path.join(cfg["out_dir"], f"preview_p{p}.png") for p in cfg["preview_pages"]]}
 

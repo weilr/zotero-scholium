@@ -50,7 +50,7 @@ Ids require an exact text match. If a sentence also appears inside another sente
 | sticky notes instead of margin text | `"summary_kind": "note"` (per item: `kind`) |
 | the summary in the reading note rather than on the page | `note_html` |
 
-A top band sits 6 pt below the page edge and moves down past a header line into the gap above the title, within the top 30 % of the page. When that gap is too small, it goes into the strip between the page edge (2 pt) and the first line, beside a logo or another figure there. A bottom band goes between the last line of text and the footer, or beneath the footer when that gap is too small, within the bottom 30 % of the page. Both avoid figures and existing annotations. A band without room keeps its requested position and gets a `layout_warning` that gives how many of its characters fit at its font size and, when one exists, the font size (7 pt or more) at which all of it fits.
+A top band sits 6 pt below the page edge and moves down past a header line into the gap above the title, within the top 30 % of the page. When that gap is too small, it goes into the strip between the page edge (2 pt) and the first line, beside a logo or another figure there. A bottom band goes between the last line of text and the footer, or beneath the footer when that gap is too small, within the bottom 30 % of the page. Both avoid figures and existing annotations. A band without room at its font size is set smaller in steps of 0.5 pt, down to `band_min_font_size`, and listed under `fitted`. When even that size has no room, it keeps its requested position and gets a `layout_warning` with how many of its characters fit at that size and the last words that fit.
 
 ## Commands
 
@@ -79,6 +79,7 @@ Run without `--apply` first and review `missed`, `style_warnings`, `translation_
 | `snapped` | phrases accepted at similarity ≥ 0.95 (`snap: true`) |
 | `ambiguous_matches` | phrases and anchors that occur more than once on their page; the first occurrence is used unless `occurrence` is set |
 | `layout_warnings` | margin boxes without free space, taller than the page allows, or in a margin narrower than a box (30 pt); top and bottom bands without room |
+| `fitted` | bands set smaller to fit, with the font sizes before and after |
 | `existing_annotations` | how many annotations were read from Zotero and how many rectangles were avoided, or why they were unavailable |
 | `pdf_sha256` | the file's hash before and after the run and `unchanged` |
 | `js`, `previews` | paths of the generated JavaScript file and preview PNGs |

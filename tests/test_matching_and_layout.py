@@ -438,7 +438,7 @@ def test_normalise_summary_resolves_defaults_from_cfg():
     sp = cli.normalise_summary({"page": 1, "anchor": "a phrase", "text": "note"}, _cfg(font_size=9, text_color="#123456"),
                                [(612.0, 792.0)])
     assert sp == {"page": 0, "text": "note", "place": "margin", "side": "auto", "kind": "text", "color": "#123456",
-                  "font_size": 9.0, "rect": None, "anchor": "a phrase", "occurrence": None}
+                  "font_size": 9.0, "min_font_size": 8.0, "rect": None, "anchor": "a phrase", "occurrence": None}
     sp = cli.normalise_summary({"page": 1, "place": "top", "text": "band", "color": "#ff0000", "font_size": 10, "side": "left"},
                                _cfg(margin_side="right", summary_kind="text"), [(612.0, 792.0)])
     assert sp["place"] == "top" and sp["anchor"] is None and sp["side"] == "left" and sp["color"] == "#ff0000" and sp["font_size"] == 10.0
@@ -500,10 +500,11 @@ def _page_pdf(path, draw):
     return str(path)
 
 
-def _band_cfg(pdf, out_dir, **item):
+def _band_cfg(pdf, out_dir, band_min_font_size=8, **item):
     entry = {"page": 1, "text": "A short summary of the paper written by the reader."}
     entry.update(item)
-    return _cfg(pdf=pdf, item_key="I", attachment_key="A", out_dir=str(out_dir), preview_pages=[], summaries=[entry])
+    return _cfg(pdf=pdf, item_key="I", attachment_key="A", out_dir=str(out_dir), preview_pages=[], summaries=[entry],
+                band_min_font_size=band_min_font_size)
 
 
 def test_top_band_sits_above_the_title(tmp_path):
@@ -536,25 +537,70 @@ def test_top_band_that_does_not_fit_is_reported(tmp_path):
     assert y1 == 792 - cli.BAND_MARGIN, "the band keeps its requested position"
 
 
-def test_top_band_that_is_too_long_says_how_much_fits(tmp_path):
-    """A gap above the title too small for the whole text: the warning gives the characters that fit and a font size
-    at which all of it fits, and each of them is enough."""
-    pdf = _page_pdf(tmp_path / "gap.pdf", lambda pg: (pg.insert_text((100, 70), "A Title Line", fontsize=16),
-                                                     pg.insert_textbox(pymupdf.Rect(55, 100, 543, 700), LEFT * 4, fontsize=10, fontname="helv")))
-    text = " ".join(["The method fits a surrogate model to the measured field and reports its error."] * 5)
+def _gap_pdf(tmp_path):
+    """A first page with a gap above the title too small for a long band at 9 pt."""
+    return _page_pdf(tmp_path / "gap.pdf", lambda pg: (pg.insert_text((100, 70), "A Title Line", fontsize=16),
+                                                      pg.insert_textbox(pymupdf.Rect(55, 100, 543, 700), LEFT * 4, fontsize=10, fontname="helv")))
+
+
+BAND_SENTENCE = "The method fits a surrogate model to the measured field and reports its error."
+
+
+def test_a_band_without_room_is_set_smaller_down_to_the_minimum(tmp_path):
+    """Too long at 9 pt but not at 8 pt: the band takes the largest size in steps of 0.5 pt that fits, and says so."""
+    pdf = _gap_pdf(tmp_path)
+    words = " ".join([BAND_SENTENCE] * 9).split()
+    for n in range(10, len(words), 3):           # the shortest text that no longer fits at 9 pt
+        text = " ".join(words[:n])
+        out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text, font_size=9))
+        if out[0].get("fitted"):
+            break
+    a = out[0]
+    assert "layout_warning" not in a and a["fitted"]["from"] == 9 and 8 <= a["fitted"]["to"] < 9
+    assert a["position"]["fontSize"] == a["fitted"]["to"]
+    bigger = a["fitted"]["to"] + 0.5
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text, font_size=bigger, band_min_font_size=bigger))
+    assert "layout_warning" in out[0], "the size taken is the largest that fits"
+    # a band that fits at its own size keeps it
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=BAND_SENTENCE, font_size=9))
+    assert "fitted" not in out[0] and out[0]["position"]["fontSize"] == 9
+
+
+def test_a_band_too_long_even_at_the_minimum_says_where_to_cut(tmp_path):
+    """The warning gives how many characters fit at the smallest size and how they end; that many fit."""
+    pdf = _gap_pdf(tmp_path)
+    text = " ".join([BAND_SENTENCE] * 9)
     out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text, font_size=9))
     warning = out[0]["layout_warning"]
-    m = re.search(r"about (\d+) of its (\d+) characters fit at font_size 9 \(all of it at font_size ([\d.]+)\)", warning)
-    assert m and int(m[2]) == len(text) and "place: bottom" in warning, warning
-    fit, font = int(m[1]), float(m[3])
-    assert 0 < fit < len(text) and cli.MIN_BAND_FONT <= font < 9
-    for item in ({"text": text[:fit], "font_size": 9}, {"text": text, "font_size": font}):
-        out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", **item))
-        assert "layout_warning" not in out[0], item
+    m = re.search(r"at font_size 8: the first (\d+) of its (\d+) characters fit, ending with “(.*?)”; shorten the text by at "
+                  r"least (\d+) characters", warning)
+    assert m and int(m[2]) == len(text), warning
+    fit = int(m[1])
+    assert 0 < fit < len(text) and text[:fit].endswith(m[3]) and int(m[4]) == len(text) - fit
+    assert "place: bottom" not in warning, "moving to the bottom is no cure for a long text"
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text[:fit], font_size=9))
+    assert "layout_warning" not in out[0] and out[0]["fitted"]["to"] == 8
     out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text[:fit + 60], font_size=9))
     assert "layout_warning" in out[0], "the count is close to the limit"
-    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text, font_size=font + 0.5))
-    assert "layout_warning" in out[0], "the font size is the largest that fits"
+    # band_min_font_size sets the smallest size
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text, font_size=9, band_min_font_size=9))
+    assert "at font_size 9:" in out[0]["layout_warning"] and "fitted" not in out[0]
+
+
+def test_the_report_lists_bands_set_smaller(tmp_path, capsys):
+    pdf = _gap_pdf(tmp_path)
+    words = " ".join([BAND_SENTENCE] * 9).split()
+    text = next(t for t in (" ".join(words[:n]) for n in range(10, len(words), 3))
+                if cli.build(_band_cfg(pdf, tmp_path, place="top", text=t, font_size=9))[0][0].get("fitted"))
+    cfg = _band_cfg(pdf, tmp_path, place="top", text=text, font_size=9)
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({k: v for k, v in cfg.items() if k in cli.CONFIG_KEYS}), encoding="utf8")
+    try:
+        cli.main(["--config", str(path), "--ignore-existing"])
+    except SystemExit:
+        pass
+    report = json.loads(capsys.readouterr().out)
+    assert report["layout_warnings"] == [] and report["fitted"][0]["font_size"].startswith("9 -> ")
 
 
 def _crowded_first_page(pg):
@@ -577,7 +623,7 @@ def test_top_band_without_room_goes_into_the_strip_beside_the_logo(tmp_path):
     # too long for the strip: the warning says how much fits, and that much does fit
     text = "The method fits a surrogate model to the measured field and reports its error. " * 6
     out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text, font_size=9))
-    fit = int(re.search(r"about (\d+) of", out[0]["layout_warning"])[1])
+    fit = int(re.search(r"the first (\d+) of", out[0]["layout_warning"])[1])
     out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text[:fit], font_size=9))
     assert "layout_warning" not in out[0] and out[0]["position"]["rects"][0][3] == 792 - cli.EDGE_MARGIN
 
