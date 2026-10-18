@@ -82,10 +82,11 @@ controls and the process of the selected paper:
   panes.
 - **Annotate**, **Cancel** and **Delete annotations** act on the selected paper; **Cancel** also takes
   a queued paper out of the queue. **Show log** above the transcript shows the log file.
-- A state line shows the step of six and the elapsed time while the paper runs, its place in the
+- A state line shows the step of six and the elapsed time while the paper runs (and, while the agent
+  has lost its connection and tries again, the attempt, until it answers again), its place in the
   queue, its latest outcome with the minutes, turns and tokens of the run (the tooltip splits the
-  tokens into input, cache and output), or the deletion, and the paper being annotated when it is
-  another one. For a paper run earlier, the outcome comes from the saved log.
+  tokens into input, cache and output), or the deletion; other papers' runs are not shown there. For a
+  paper run earlier, the outcome comes from the saved log.
 - The process is shown as Claude Code shows it: the agent's text, each tool call with its command or
   file, and the first lines of each result (errors in red); a failed run ends with its error. A
   running paper is shown live; for a paper run earlier the latest saved log, of either agent, is

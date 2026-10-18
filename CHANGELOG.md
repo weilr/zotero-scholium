@@ -49,6 +49,10 @@
   `note_replace` is not done and `result.noteReplace` says so.
 - Scholium section: web addresses and `zotero://` links in a message and in the profile preview open
   on a click or with Enter.
+- Scholium section: a paper's state line shows only that paper's run, place in the queue and outcome,
+  and its notices are left out only while that paper's section is on screen. While the agent has lost
+  its connection and tries again (Claude Code's `api_retry`, Codex's "Reconnecting… 2/5"), the state
+  line says so until the agent answers again.
 
 ## 0.1.8 (2026-10-16)
 

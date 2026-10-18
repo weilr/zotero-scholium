@@ -468,7 +468,6 @@ var ScholiumRunner = {
   pref: "extensions.scholium-bridge.",
   STEPS: ["skill", "extract", "reading", "writing", "dryRun", "applying"],
   TICK_MS: 1000,            // the running paper's state line, with its time so far, is set again this often
-  KEEP_DONE_MS: 10 * 60000,
   NOTICE_MS: 6000,
   transcript: [],           // display entries of the running or latest paper
   transcriptKey: null,      // attachment whose run the transcript belongs to
@@ -539,7 +538,6 @@ var ScholiumRunner = {
       profileFailed: msg => zh ? `保存失败：${msg}` : `The profile could not be saved: ${msg}`,
       noHistory: zh ? "这篇还没有运行记录。" : "This paper has not been run yet.",
       queuedThis: n => zh ? `排队中，前面还有 ${n} 篇` : `Queued, ${n} ahead`,
-      otherRunning: title => zh ? `正在批注另一篇：${title}` : `Annotating another paper: ${title}`,
       deleteTitle: zh ? "删除 Scholium 批注和笔记" : "Delete Scholium annotations and notes",
       deleteConfirm: (n, notes, m) => zh
         ? `将删除 ${m} 篇论文上带 zotero-scholium 标签的 ${n} 条批注${notes ? `和 ${notes} 篇阅读笔记` : ""}。`
@@ -566,7 +564,7 @@ var ScholiumRunner = {
       unfinished: zh ? "（这条回复没有写完）" : "(this message was not finished)",
       stepOf: (i, n, label) => zh ? `第 ${i}/${n} 步 ${label}` : `step ${i}/${n} ${label}`,
       running: (step, time) => zh ? `${step} · 已用 ${time}` : `${step} · ${time} so far`,
-      queued: n => zh ? `另有 ${n} 篇排队` : `${n} more queued`,
+      reconnecting: (n, max) => zh ? `连接中断，正在重试${n && max ? `（${n}/${max}）` : ""}` : `connection lost, retrying${n && max ? ` (${n}/${max})` : ""}`,
       finished: title => zh ? `批注完成：${title}` : `Finished: ${title}`,
       answered: title => zh ? `已回答：${title}` : `Answered: ${title}`,
       failedLine: title => zh ? `批注失败：${title}` : `Failed: ${title}`,
@@ -584,7 +582,6 @@ var ScholiumRunner = {
       limitTitle: name => zh ? `${name} 额度已用完` : `${name} usage limit reached`,
       pausedState: time => zh ? `额度已用完，${time} 重置后自动继续` : `Usage limit reached; continues by itself after ${time}`,
       pausedRetry: time => zh ? `额度已用完，${time} 自动重试` : `Usage limit reached; retries by itself at ${time}`,
-      queuedAll: n => zh ? `${n} 篇排队` : `${n} queued`,
       lastRun: zh ? "上次：" : "Last run: ",
       turns: n => zh ? `${n} 轮` : `${n} turns`,
       tokens: amount => zh ? `${amount} token` : `${amount} tokens`,
@@ -880,11 +877,11 @@ var ScholiumRunner = {
     return step && step !== "starting" ? this.text(step) : this.text("starting", this.agentName(this.job && this.job.agent));
   },
 
-  // the running paper's state line: its step, the time so far, and the papers waiting
+  // the running paper's state line: its step and the time so far
   runningState() {
-    let line = this.text("running", this.stepText(this.job.step), this.duration(Date.now() - this.job.started));
-    if (this.queue.length) line += " · " + this.text("queued", this.queue.length);
-    return line;
+    const retry = this.job.retry;
+    const step = this.stepText(this.job.step) + (retry ? " · " + this.text("reconnecting", retry.attempt, retry.max) : "");
+    return this.text("running", step, this.duration(Date.now() - this.job.started));
   },
 
   windows() {
@@ -2182,7 +2179,8 @@ var ScholiumRunner = {
     return this.zh() ? `${d.getMonth() + 1}月${d.getDate()}日 ${hm}` : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
   },
 
-  // the state line: this paper running, queued or paused, its latest outcome, or another paper's run
+  // the state line: this paper running, queued or paused, or its latest outcome; other papers' runs are
+  // not shown here
   paintPane(pane) {
     try {
       const running = this.job && pane.keys.includes(this.job.key);
@@ -2200,16 +2198,10 @@ var ScholiumRunner = {
       } else if (queuedAt >= 0) {
         if (!(paused && queuedAt === 0)) lines.push(this.text("queuedThis", queuedAt + (this.job ? 1 : 0)));
         if (paused) { lines.push(paused); kind = "paused"; }
-      } else {
-        if (note) { lines.push(note.text); kind = note.error ? "error" : "ok"; title = note.title || ""; }
-        if (this.job) lines.push(this.text("otherRunning", this.job.title));
-        else if (paused) {
-          lines.push(`${paused} · ${this.text("queuedAll", this.queue.length)}`);
-          if (!note) kind = "paused";
-        } else if (!note && this.last && Date.now() - this.last.at < this.KEEP_DONE_MS) {
-          lines.push(this.text(this.last.answered ? "answered" : this.last.ok ? "finished" : "failedLine", this.last.title));
-          kind = this.last.ok ? "ok" : "error";
-        }
+      } else if (note) {
+        lines.push(note.text);
+        kind = note.error ? "error" : "ok";
+        title = note.title || "";
       }
       pane.state.className = `scholium-state ${kind}`;
       pane.state.textContent = lines.join("\n");
@@ -2220,7 +2212,7 @@ var ScholiumRunner = {
       pane.remove.disabled = busy;
       this.show(pane.remove, !busy);   // out of the way while the paper runs, so that the buttons keep to one row
       this.show(pane.cancel, !!((running && this.current) || queuedAt >= 0));
-      this.show(pane.resume, !!this.paused);
+      this.show(pane.resume, !!this.paused && queuedAt >= 0);
       pane.log.disabled = !pane.shownKey;
       const session = pane.shownKey ? this.sessions.get(pane.shownKey) : null;
       pane.busy = busy;
@@ -2238,13 +2230,13 @@ var ScholiumRunner = {
     }
   },
 
-  // whether a Scholium section is on screen in the focused window; it then shows what a corner notice
-  // or the system notification would say
-  paneInView() {
+  // whether the Scholium section of the paper with this key is on screen in the focused window; it then
+  // shows what a corner notice or the system notification would say
+  paneInView(key) {
     for (const [body, pane] of this.panes) {
       try {
         const win = pane.doc.defaultView;
-        if (!pane.seen || body.isConnected === false || !win || !win.document.hasFocus()) continue;
+        if (!pane.seen || !pane.keys.includes(key) || body.isConnected === false || !win || !win.document.hasFocus()) continue;
         if (typeof body.checkVisibility === "function" && !body.checkVisibility({ visibilityProperty: true })) continue;
         return true;
       } catch (e) {}
@@ -2378,7 +2370,7 @@ var ScholiumRunner = {
     this.paused = { until: Date.now() + wait, known: !!until, timer: setTimeout(() => { this.resumeQueue(); }, wait) };
     const line = this.text(until ? "pausedState" : "pausedRetry", this.clock(this.paused.until));
     this.notice(job, line, true);
-    if (!this.paneInView()) this.notify(this.text("limitTitle", this.agentName(job.agent, true)), line);
+    if (!this.paneInView(job.att.key)) this.notify(this.text("limitTitle", this.agentName(job.agent, true)), line);
     this.refresh();
   },
 
@@ -2390,10 +2382,10 @@ var ScholiumRunner = {
     if (!this.draining && this.queue.length) this.drain();
   },
 
-  // a short notice in the corner of the window that closes by itself; left out while a Scholium
-  // section is on screen, whose state line says the same
+  // a short notice in the corner of the window that closes by itself; left out while the paper's
+  // Scholium section is on screen, whose state line says the same
   notice(job, text, error = false) {
-    if (this.paneInView()) return;
+    if (this.paneInView(job.att && job.att.key)) return;
     try {
       const pw = new Zotero.ProgressWindow({ closeOnClick: true });
       pw.changeHeadline(this.text("headline"));
@@ -2412,9 +2404,8 @@ var ScholiumRunner = {
   finish(job, ok, summary, outcome, detail, answered = false) {
     if (this.job && this.job.key === job.att.key) this.job = null;
     const title = this.text(answered ? "answered" : ok ? "finished" : "failedLine", job.title);
-    this.last = { ok, answered, title: job.title, key: job.att.key, libraryID: job.att.libraryID, summary, at: Date.now() };
     this.notes.set(job.att.key, { text: outcome || this.text(ok ? "done" : "failed"), error: !ok, at: Date.now(), title: detail || "" });
-    if (!this.paneInView()) this.notify(title, ok && !answered ? this.brief(summary) : summary || "");
+    if (!this.paneInView(job.att.key)) this.notify(title, ok && !answered ? this.brief(summary) : summary || "");
     this.refresh();
   },
 
@@ -2552,6 +2543,19 @@ var ScholiumRunner = {
     this.refresh();
   },
 
+  // the agent lost its connection and tries again: attempt n of max, when it says, on the state line
+  reconnecting(ctx, attempt, max) {
+    ctx.running.retry = { attempt: Number(attempt) || null, max: Number(max) || null };
+    this.refresh();
+  },
+
+  // the agent answers again
+  reconnected(ctx) {
+    if (!ctx.running.retry) return;
+    ctx.running.retry = null;
+    this.refresh();
+  },
+
   // Claude Code: `claude -p` with the prompt on stdin and its stream-json events on stdout
   async runClaude(claude, ctx) {
     const { job, key, logPath } = ctx;
@@ -2590,6 +2594,7 @@ var ScholiumRunner = {
             continue;
           }
           if (event.type === "stream_event") {
+            this.reconnected(ctx);
             const e = event.event || {};
             if (!event.parent_tool_use_id && e.type === "message_start") this.dropDraft();   // a message begun again starts afresh
             if (!event.parent_tool_use_id && e.type === "content_block_delta" && e.delta && e.delta.type === "text_delta") {
@@ -2617,6 +2622,8 @@ var ScholiumRunner = {
             if (info.status === "rejected") ctx.limit = { until: info.resetsAt > 0 ? info.resetsAt * 1000 : null };
           }
           if (event.type === "assistant" && event.error === "rate_limit" && !ctx.limit) ctx.limit = { until: null };
+          if (event.type === "system" && event.subtype === "api_retry") this.reconnecting(ctx, event.attempt, event.max_retries);
+          else if (["assistant", "user", "result"].includes(event.type)) this.reconnected(ctx);
           this.appendEntries(this.entries(event));
           this.advance(ctx, this.step(event));
         }
@@ -2816,6 +2823,11 @@ var ScholiumRunner = {
         }
         if (msg.method === "account/rateLimits/updated" && p.rateLimits) state.limits = p.rateLimits;
         if (msg.method === "turn/completed" && p.turn && (!state.turn || p.turn.id === state.turn)) { state.done = p.turn; ended(); }
+        // "Reconnecting... 2/5"
+        if (msg.method === "error" && p.willRetry) {
+          const n = /(\d+)\s*\/\s*(\d+)/.exec(String((p.error && p.error.message) || ""));
+          this.reconnecting(ctx, n && n[1], n && n[2]);
+        } else if (/^item\//.test(String(msg.method || ""))) this.reconnected(ctx);
         // the message as it is written, until the whole message replaces it
         if (msg.method === "item/agentMessage/delta") this.growDraft(String(p.delta || ""), p.itemId);
         if (msg.method === "item/completed" && item.type === "agentMessage") this.dropDraft();

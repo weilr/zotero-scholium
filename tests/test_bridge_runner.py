@@ -757,6 +757,14 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const removed = await h.runner.removeAnnotations([h.item1]);
     facts.deleteInView = { removed, notices: h.log.notices.length, state: p.view().state, kind: p.view().stateKind };
   }
+  {
+    const h = harness();
+    h.runner.start('x');
+    await h.pane(h.item2);
+    h.see(true);
+    await h.runner.annotate([h.item1]); await settle(300);
+    facts.otherInView = { notices: h.log.notices.length, notifications: h.log.notifications.map(n => n.title) };
+  }
 
   // during a run, the transcript box holds no more entries than the transcript keeps
   {
@@ -1083,6 +1091,16 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
       return { say: head.say, asked: !!head.asked, resume: head.resume || null, interrupted: !!head.interrupted };
     };
     facts.pausedJobs = { question: limited({ say: '为什么？' }, 'S2'), run: limited({ extra: '只标方法' }, 'S2'), noSession: limited({}, null) };
+  }
+
+  // the usage limit seen from a paper outside the queue: nothing of the pause, nothing to continue
+  {
+    const h = harness({ scripts: [SCRIPT.slice(0, 3).concat(LIMIT_HIT)] });
+    h.runner.start('x');
+    const p1 = await h.pane(h.item1), p2 = await h.pane(h.item2);
+    await h.runner.annotate([h.item1]);
+    await settle(300);
+    facts.limitOther = { paused: !!h.runner.paused, resume1: !p1.view().resumeHidden, resume2: !p2.view().resumeHidden, state2: p2.view().state };
   }
 
   // the usage limit: the queue waits, and the interrupted paper continues its conversation after the reset
@@ -1712,6 +1730,37 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     await settle(100);
   }
   {
+    // the agent's connection drops and it tries again: the state line says so until the agent answers again
+    const reconnecting = note('error', { error: { message: 'Reconnecting... 2/5', codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: null } },
+                                                  additionalDetails: 'request timed out' }, willRetry: true, threadId: 'T1', turnId: 'TURN' });
+    const states = {};
+    for (const [name, script] of [['codex', CODEX_SCRIPT.slice(0, 2).concat([reconnecting, 'WAIT'])],
+                                  ['codexBack', CODEX_SCRIPT.slice(0, 2).concat([reconnecting, CODEX_SCRIPT[3], 'WAIT'])]]) {
+      const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [script] } });
+      h.runner.start('x');
+      const p = await h.pane(h.item1);
+      await h.runner.annotate([h.item1]);
+      await settle(300);
+      states[name] = { state: p.view().state, entries: p.view().entries.map(e => e[1]) };
+      h.runner.stop();
+      await settle(100);
+    }
+    const retry = ev({ type: 'system', subtype: 'api_retry', attempt: 1, max_retries: 10, retry_delay_ms: 600, error_status: 529,
+                       error: 'overloaded', session_id: 'S1' });
+    const h = harness({ script: [SCRIPT[0], retry, 'HOLD', said('接着读全文。'), 'WAIT'] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await h.runner.annotate([h.item1]);
+    await settle(300);
+    states.claude = { state: p.view().state };
+    h.log.release();
+    await settle(200);
+    states.claudeBack = { state: p.view().state };
+    h.runner.stop();
+    await settle(100);
+    facts.reconnecting = states;
+  }
+  {
     // the skill in Codex's own skills folder: no extra root; no skill at all: the prompt alone
     const found = {};
     for (const skillAt of ['/data/tmp/scholium', null]) {
@@ -2087,7 +2136,7 @@ def test_section_shows_the_transcript_like_claude_code(facts):
     assert facts["paneRerendered"]["entries"] == TRANSCRIPT
     o = facts["otherAfter"]
     assert o["entries"] == [["scholium-entry info", "这篇还没有运行记录。"]]
-    assert o["state"] == "批注完成：Paper ITEM1" and o["stateKind"] == "scholium-state ok"
+    assert o["state"] is None and o["stateKind"] == "scholium-state info", "nothing of another paper's run"
     assert facts["logLines"] == 15
     assert facts["revealed"] == ["/data/tmp/scholium/ATT1/claude-run.jsonl"]
     h = facts["history"]
@@ -2111,24 +2160,25 @@ def test_a_section_on_screen_replaces_the_notices(facts):
     v = facts["inView"]
     assert (v["notices"], v["notifications"]) == (0, 0)
     assert v["state"] == DONE_STATE and v["kind"] == "scholium-state ok"
-    assert v["other"] == "批注完成：Paper ITEM1" and v["otherKind"] == "scholium-state ok"
+    assert v["other"] is None and v["otherKind"] == "scholium-state info", "another paper's section shows nothing of this run"
     assert facts["unfocused"] == {"notices": 2, "notifications": ["批注完成：Paper ITEM2"]}
     assert facts["collapsed"] == {"notices": 4}
     assert facts["scrolledAway"] == {"notices": 6}
     d = facts["deleteInView"]
     assert d == {"removed": 2, "notices": 0, "state": "已删除 1 篇论文上的 2 条 Scholium 批注。", "kind": "scholium-state ok"}
+    assert facts["otherInView"] == {"notices": 2, "notifications": ["批注完成：Paper ITEM1"]},         "only the section of the paper itself replaces the notices"
 
 
 def test_section_shows_running_and_finished_state(facts):
     q = facts["queueWhileFirstRuns"]
-    assert run_time(q["pane1"]["state"]) == "第 6/6 步 写入 Zotero · 已用 Ns · 另有 1 篇排队"
+    assert run_time(q["pane1"]["state"]) == "第 6/6 步 写入 Zotero · 已用 Ns", "the papers waiting are shown in their own sections"
     assert q["pane1"]["stateKind"] == "scholium-state running" and q["pane1"]["cancelHidden"] is False
     assert q["pane2"]["state"] == "排队中，前面还有 1 篇" and q["pane2"]["annotateDisabled"] is True
     w = facts["whileRunning"]["view"]
     assert run_time(w["state"]) == "第 1/6 步 加载技能 · 已用 Ns" and w["stateKind"] == "scholium-state running"
     assert (w["cancelHidden"], w["annotateDisabled"], w["removeDisabled"]) == (False, True, True)
     assert w["entries"] == TRANSCRIPT[:3]
-    assert facts["otherRunning"] == {"state": "正在批注另一篇：Paper ITEM1", "kind": "scholium-state info"}
+    assert facts["otherRunning"] == {"state": None, "kind": "scholium-state info"}, "another paper's run is not shown here"
     f = facts["finished"]
     assert f["notifications"] == [{"title": "批注完成：Paper ITEM1", "body": BRIEF}]
 
@@ -2562,6 +2612,10 @@ def test_extra_instructions_and_follow_ups_continue_the_conversation(facts):
     assert f["withoutSession"] is False and f["calls2"] == 2
 
 
+def test_a_paper_outside_the_queue_shows_nothing_of_a_pause(facts):
+    assert facts["limitOther"] == {"paused": True, "resume1": True, "resume2": False, "state2": None}
+
+
 def test_usage_limit_pauses_the_queue_and_continues_after_the_reset(facts):
     m = facts["limit"]
     waiting = f"额度已用完，{m['clock']} 重置后自动继续"
@@ -2585,7 +2639,7 @@ def test_usage_limit_pauses_the_queue_and_continues_after_the_reset(facts):
     assert t["queue"] == ["ATT1"]
     a = t["after"]
     assert a["calls"] == 2 and a["resume"] == "S1" and a["waits"] == [] and a["paused"] is None
-    assert a["state1"] == DONE_STATE and a["state2"] == "批注完成：Paper ITEM1"
+    assert a["state1"] == DONE_STATE and a["state2"] is None
     assert facts["pauseCancelled"] == {"queue": 0, "paused": None, "waits": [], "calls": 1}
 
 
@@ -2719,6 +2773,15 @@ def test_codex_steps_and_cancel(facts):
     assert s["/data/tmp/scholium"]["methods"] == ["skills/list"]
     assert s["/data/tmp/scholium"]["input"] == [{"type": "skill", "name": "zotero-scholium", "path": "/home/u/.codex/skills/zotero-scholium/SKILL.md"}]
     assert s["none"] == {"methods": ["skills/list", "skills/list"], "input": [], "model": False}
+
+
+def test_a_lost_connection_shows_on_the_state_line_until_the_agent_answers_again(facts):
+    r = facts["reconnecting"]
+    assert run_time(r["codex"]["state"]) == "第 1/6 步 加载技能 · 连接中断，正在重试（2/5） · 已用 Ns"
+    assert run_time(r["codexBack"]["state"]) == "第 1/6 步 加载技能 · 已用 Ns"
+    assert not any("连接" in str(e) or "Reconnecting" in str(e) for e in r["codex"]["entries"]), "the transcript gets no line of its own"
+    assert "连接中断，正在重试（1/10）" in r["claude"]["state"]
+    assert "连接中断" not in r["claudeBack"]["state"]
 
 
 def test_codex_usage_limit_waits_for_the_reset(facts):
