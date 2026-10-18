@@ -89,11 +89,13 @@ controls and the process of the selected paper:
 - The process is shown as Claude Code shows it: the agent's text, each tool call with its command or
   file, and the first lines of each result (errors in red); a failed run ends with its error. A
   running paper is shown live; for a paper run earlier the latest saved log, of either agent, is
-  shown. The box is resized at its lower edge, and its height is kept.
+  shown. The box is resized at its lower edge, and its height is kept. Web addresses and `zotero://`
+  links in a message open on a click or with Enter, in the browser or in Zotero; links to files are
+  shown, not followed.
 - **Personal profile ↗** opens the annotation profile `<data dir>/zotero-scholium/profile.md`, which
   every run follows, in an editor over the Zotero window: the Markdown text as it is on the left, and
   on the right a preview that formats it as it is typed and follows its scrolling; colour codes such
-  as `#ff6666` get a dot of their colour, and links are shown, not followed. **Save** closes the
+  as `#ff6666` get a dot of their colour, and links open as in a message. **Save** closes the
   editor, Ctrl+S keeps it open, **Cancel** or Esc closes it. Closing with unsaved changes asks first.
   The file keeps its line ends. A file changed elsewhere since it was opened (for example by
   `scholium profile --from-library`) is overwritten only after a confirmation; an unedited

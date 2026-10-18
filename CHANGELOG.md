@@ -47,6 +47,8 @@
   through the local API as before. The plugin returns the keys it wrote, which go to `applied_keys.json`
   and are checked on read-back, and names its version in `list`. Through a plugin before 0.1.9,
   `note_replace` is not done and `result.noteReplace` says so.
+- Scholium section: web addresses and `zotero://` links in a message and in the profile preview open
+  on a click or with Enter.
 
 ## 0.1.8 (2026-10-16)
 

@@ -673,6 +673,18 @@
   text-decoration: underline;
 }
 
+.scholium-log .scholium-link[data-href],
+.scholium-preview .scholium-link[data-href] {
+  cursor: pointer;
+}
+
+.scholium-log .scholium-link[data-href]:focus-visible,
+.scholium-preview .scholium-link[data-href]:focus-visible {
+  outline: 2px solid var(--color-focus-outer, var(--accent-blue));
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
 .scholium-editor-foot {
   display: flex;
   align-items: center;

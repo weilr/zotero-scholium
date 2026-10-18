@@ -1290,6 +1290,7 @@ var ScholiumRunner = {
     caption.append(doc.createTextNode(this.text("transcriptCaption")), pane.log);
     pane.list = div("scholium-log");
     pane.list.setAttribute("style", `height: ${this.logHeight()}px;`);
+    this.followLinks(pane.list, win);
     if (win && win.ResizeObserver) {
       try {
         pane.resizer = new win.ResizeObserver(() => this.paneResized(pane));
@@ -1390,6 +1391,7 @@ var ScholiumRunner = {
     });
     ed.input.addEventListener("scroll", () => { this.syncPreview(ed); });
     ed.preview = el("div", "scholium-preview scholium-markdown");
+    this.followLinks(ed.preview, win);
     const panes = el("div", "scholium-editor-panes");
     panes.append(ed.input, ed.preview);
     ed.status = el("span", "scholium-hint");
@@ -1739,10 +1741,11 @@ var ScholiumRunner = {
   },
 
   // `code` (a colour code with a swatch of its colour), formulas (\( \), $ $, and set apart \[ \], $$ $$),
-  // backslash escapes, **bold**, *italics*, and [links](…) as their text with the address as tooltip, so
-  // that nothing in the preview leaves the window. A $ opens a formula before a non-space and closes one
-  // after a non-space that no digit follows, so that prices stay text.
-  inlineMarkdown(doc, parent, text) {
+  // backslash escapes, **bold**, *italics*, [links](…) and bare web addresses. A link shows its text with the
+  // address as tooltip; the transcript and the profile preview open web and zotero: addresses on a click
+  // (followLinks). A $ opens a formula before a non-space and closes one after a non-space that no digit
+  // follows, so that prices stay text.
+  inlineMarkdown(doc, parent, text, inLink = false) {
     const re = new RegExp([
       "`([^`\\n]+)`",                                  // 1 code
       "\\$\\$([^$]+?)\\$\\$",                          // 2 formula set apart
@@ -1753,11 +1756,24 @@ var ScholiumRunner = {
       "\\*\\*([^*\\n]+?)\\*\\*",                       // 7 bold
       "\\*([^*\\s][^*\\n]*?)\\*",                      // 8 italics
       "\\[([^\\]\\n]+)\\]\\(([^)\\s]+)\\)",            // 9, 10 link
+      "((?:https?|zotero)://[^\\s<>\"'`()（）\\[\\]{}，。；：！？、]+)",   // 11 a bare address
     ].join("|"), "g");
     let at = 0;
     let m;
     while ((m = re.exec(text))) {
       if (m.index > at) parent.append(doc.createTextNode(text.slice(at, m.index)));
+      if (m[11] !== undefined) {   // punctuation after an address ends the sentence, not the address
+        // nor is Chinese written right after it: "见https://x.org/abs/1234的图"; a path or query value of Chinese
+        // words follows / = # ? or & ("https://zh.example/页")
+        let n = 0;
+        while (n < m[11].length && m[11].charCodeAt(n) < 0x2e80) n++;
+        const own = n === m[11].length || "/=#?&".includes(m[11][n - 1]) ? m[11] : m[11].slice(0, n);
+        const address = own.replace(/[.,;:!?]+$/, "");
+        re.lastIndex = m.index + address.length;
+        at = re.lastIndex;
+        parent.append(inLink ? doc.createTextNode(address) : this.linkNode(doc, address, address));
+        continue;
+      }
       at = re.lastIndex;
       if (m[2] !== undefined || m[3] !== undefined || m[4] !== undefined || m[5] !== undefined) {
         const display = m[2] !== undefined || m[3] !== undefined;
@@ -1794,15 +1810,53 @@ var ScholiumRunner = {
         const em = doc.createElement("em");
         this.inlineMarkdown(doc, em, m[8]);
         parent.append(em);
+      } else if (inLink) {
+        this.inlineMarkdown(doc, parent, m[9], true);
       } else {
-        const link = doc.createElement("span");
-        link.className = "scholium-link";
-        link.title = m[10];
-        this.inlineMarkdown(doc, link, m[9]);
+        const link = this.linkNode(doc, m[10]);
+        this.inlineMarkdown(doc, link, m[9], true);
         parent.append(link);
       }
     }
     if (at < text.length) parent.append(doc.createTextNode(text.slice(at)));
+  },
+
+  LINK_SCHEMES: /^(?:https?|zotero|mailto):/i,
+
+  // a link's text with its address as tooltip; an address Zotero can open is kept for a click
+  linkNode(doc, address, text = null) {
+    const link = doc.createElement("span");
+    link.className = "scholium-link";
+    link.title = address;
+    if (this.LINK_SCHEMES.test(address)) {
+      link.setAttribute("data-href", address);
+      link.setAttribute("role", "link");
+      link.setAttribute("tabindex", "0");
+    }
+    if (text !== null) link.append(doc.createTextNode(text));
+    return link;
+  },
+
+  // a link in `node` opens on a click (not when the click ends a selection in it) or with Enter
+  followLinks(node, win) {
+    node.addEventListener("click", e => {
+      const link = e.target && e.target.closest && e.target.closest(".scholium-link[data-href]");
+      const sel = win && win.getSelection && win.getSelection();
+      if (!link || (sel && !sel.isCollapsed && link.contains(sel.anchorNode))) return;
+      e.preventDefault();
+      this.openLink(link.getAttribute("data-href"));
+    });
+    node.addEventListener("keydown", e => {
+      const link = e.key === "Enter" && e.target && e.target.closest && e.target.closest(".scholium-link[data-href]");
+      if (link) { e.preventDefault(); this.openLink(link.getAttribute("data-href")); }
+    });
+  },
+
+  // web addresses open in the browser, zotero: addresses in Zotero (zotero://select shows the item)
+  openLink(address) {
+    if (!this.LINK_SCHEMES.test(String(address || ""))) return;
+    try { Zotero.getMainWindow().ZoteroPane.loadURI(address); }
+    catch (e) { this.log("link failed: " + e); }
   },
 
   // the words in a pane's box continue the conversation of the paper it shows

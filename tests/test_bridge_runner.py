@@ -34,7 +34,8 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 // an element as [tag.class[style][start=…][title=…], children or text…], to compare built pages
 const tree = n => (n && n.tagName
   ? [n.tagName + (n.className ? '.' + n.className : '') + (n.attrs.style ? '[' + n.attrs.style + ']' : '')
-     + (n.attrs.start ? '[start=' + n.attrs.start + ']' : '') + (n.title ? '[title=' + n.title + ']' : ''),
+     + (n.attrs.start ? '[start=' + n.attrs.start + ']' : '') + (n.title ? '[title=' + n.title + ']' : '')
+     + (n.attrs['data-href'] ? '[href=' + n.attrs['data-href'] + ']' : ''),
      ...(n.children.length ? n.children.map(tree) : n._text ? [n._text] : [])]
   : n.textContent);
 // a key pressed in an element: its keydown listeners, and whether they kept the key to themselves
@@ -227,6 +228,7 @@ class El {
   insertBefore(n) { this.append(n); }
   querySelector() { return null; }
   closest() { return null; }
+  contains(n) { for (let x = n; x; x = x.parent) if (x === this) return true; return false; }
   remove() { this.removed = true; if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this); this.parent = null; }
 }
 // markup as KaTeX writes it (elements, attributes in double quotes, text in the innermost elements) as El
@@ -268,7 +270,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                    writeFails = false, codex = {}, logTimes = {}, notes = [], secondPdf = false, failLogWrites = null, stdinFails = false, holdDirs = false } = {}) {
   const log = { calls: [], stdin: [], notices: [], alerts: [], confirms: [], kills: 0, menus: [], unregistered: [], listeners: [],
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
-                ftl: [], tabs: [], selected: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
+                ftl: [], tabs: [], selected: [], opened: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
                 madeDirs: [], trashed: [], versionCalls: [], codexCalls: [], codexProcs: [], codexKills: 0, codexTurns: 0,
                 mtimes: Object.assign({}, logTimes), clock: 10, copied: [] };
   const co = Object.assign({ versions: CODEX_VERSIONS, scripts: [], skillAt: '/data', fail: null, failMessage: '' }, codex);
@@ -437,7 +439,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     document: mainDoc,
     MozXULElement: { insertFTLIfNeeded: name => log.ftl.push(name) },
     Zotero_Tabs: { select: id => log.tabs.push(id) },
-    ZoteroPane: { selectItem: async id => log.selected.push(id) },
+    ZoteroPane: { selectItem: async id => log.selected.push(id), loadURI: uri => log.opened.push(uri) },
   };
   // the item pane's window: whether the section is scrolled into view, its size, and the window focus
   const observers = { intersection: [], resize: [] };
@@ -726,6 +728,26 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     h.see(false);
     await h.runner.annotate([h.item2]); await settle(300);
     facts.scrolledAway = { notices: h.log.notices.length };
+  }
+  // a link in the transcript opens on a click or with Enter, not when the click ends a selection in it
+  {
+    const h = harness();
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    const list = p.pane().list;
+    const [para] = h.runner.renderMarkdown(h.paneDoc, 'https://example.org/x and [file](file:///C:/x.pdf)');
+    const [web, , file] = para.children;
+    const event = target => ({ target: { closest: sel => (sel === '.scholium-link[data-href]' && target.getAttribute('data-href') !== null
+                                                         ? target : null) },
+                               defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } });
+    const click = target => { const e = event(target); for (const f of list.listeners.click) f(e); return e.defaultPrevented; };
+    const clicked = [click(web), click(file)];
+    h.paneWin.getSelection = () => ({ isCollapsed: false, anchorNode: web.children[0] || web });
+    clicked.push(click(web));
+    delete h.paneWin.getSelection;
+    const enter = Object.assign(event(web), { key: 'Enter' });
+    for (const f of list.listeners.keydown) f(enter);
+    facts.linkClicks = { clicked, opened: h.log.opened, enterPrevented: enter.defaultPrevented };
   }
   {
     const h = harness({ existing: [['zotero-scholium'], ['zotero-scholium'], ['mine']] });
@@ -1219,6 +1241,13 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     input.scrollTop = 500;
     input.type(input.value + '- x\n');
     f.scrolledAfterTyping = preview.scrollTop;
+    // a link in the preview opens on a click, as in the transcript
+    input.type(input.value + '- 见 https://example.org/rules\n');
+    const list = preview.children[preview.children.length - 1];
+    const link = list.children[list.children.length - 1].children.find(c => c.getAttribute && c.getAttribute('data-href'));
+    const e = { target: { closest: () => link }, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+    for (const g of preview.listeners.click || []) g(e);
+    f.linkOpened = [h.log.opened, e.defaultPrevented];
     facts.profilePreview = f;
   }
   {
@@ -1250,6 +1279,11 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const t0 = Date.now();
     h.runner.renderMarkdown(h.paneDoc, '| a | b |\n' + ' '.repeat(30000) + '|x');
     facts.markdownSpacesMs = Date.now() - t0;
+    // links: a bare address without the punctuation after it, an address in code stays code, an address Zotero
+    // cannot open keeps its tooltip and no target, and an address in a link's text is text
+    facts.markdownLinks = h.runner.renderMarkdown(h.paneDoc, 'See https://example.org/a_b. Code `https://x.y`, a ' +
+      '[file](file:///C:/x.pdf), [see https://in.link](zotero://select/library/items/ABC) and （https://zh.example/页）。' +
+      '见https://arxiv.org/abs/1234的图').map(tree);
     const render = h.runner.renderMarkdown;
     h.runner.renderMarkdown = () => { throw Error('broken'); };
     facts.markdownFallback = tree(h.runner.entryNode(h.paneDoc, { kind: 'text', text: '**原文**' }));
@@ -2235,14 +2269,27 @@ def test_profile_preview_shows_the_text_as_markdown_as_it_is_typed(facts):
                      ["li", ["strong", "新规则"], "：", ["code", ["span.scholium-swatch[background-color: #2ea8e5]"], "#2ea8e5"], " 用于方法"]]
     # 750 of 1000 in the text box: 1500 of 2000 in the preview; 500 after typing: 1000 in the rebuilt preview
     assert f["scrolled"] == 1500 and f["scrolledAfterTyping"] == 1000
+    assert f["linkOpened"] == [["https://example.org/rules"], True]
     assert facts["profilePreviewReload"] == ["ul", ["li", "高亮评论 = 中文翻译"], ["li", "颜色只有两级：红 = 核心，黄 = 其他"], ["li", "新统计"]]
+
+
+def test_links_in_messages(facts):
+    assert facts["markdownLinks"] == [[
+        "p", "See ", ["span.scholium-link[title=https://example.org/a_b][href=https://example.org/a_b]", "https://example.org/a_b"],
+        ". Code ", ["code", "https://x.y"], ", a ", ["span.scholium-link[title=file:///C:/x.pdf]", "file"], ", ",
+        ["span.scholium-link[title=zotero://select/library/items/ABC][href=zotero://select/library/items/ABC]", "see ", "https://in.link"],
+        " and （", ["span.scholium-link[title=https://zh.example/页][href=https://zh.example/页]", "https://zh.example/页"], "）。见",
+        ["span.scholium-link[title=https://arxiv.org/abs/1234][href=https://arxiv.org/abs/1234]", "https://arxiv.org/abs/1234"], "的图"]]
+    c = facts["linkClicks"]
+    assert c["clicked"] == [True, False, False], "a web address opens; a file does not; nor does a click that ends a selection"
+    assert c["opened"] == ["https://example.org/x", "https://example.org/x"] and c["enterPrevented"] is True
 
 
 def test_markdown_preview_builds_elements_and_never_markup(facts):
     assert facts["markdown"] == [
         ["h1", "Title ", ["strong", "bold"]],
         ["p", "Para line one\nline two with ", ["code", "code"], " and ", ["em", "em"], " and ",
-         ["span.scholium-link[title=https://x.y/z]", "link"]],
+         ["span.scholium-link[title=https://x.y/z][href=https://x.y/z]", "link"]],
         ["h2", "Rules"],
         ["ol", ["li", "first"],
                ["li", "second", ["ul", ["li", "nested ", ["code", ["span.scholium-swatch[background-color: #ff6666]"], "#ff6666"],
