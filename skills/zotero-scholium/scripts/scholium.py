@@ -21,7 +21,7 @@ Usage:    scholium --config config.json [--apply] [--list] [--backend auto|api|b
           scholium profile --from-library
 """
 import argparse
-import difflib, glob, hashlib, json, os, sys, re, time, datetime, collections
+import difflib, glob, hashlib, json, os, sys, re, time, datetime, collections, unicodedata
 import html as htmllib
 import urllib.request, urllib.error, urllib.parse
 from decimal import Decimal
@@ -835,7 +835,7 @@ INVISIBLE_RE = re.compile("[\u00ad\u200b]")   # soft hyphen, zero-width space
 NUMBER_RE = re.compile(
     r"(?<![A-Za-z0-9_.])(?P<value>[+−-]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)"
     r"(?:[eE][+-]?\d+)?)"
-    r"(?:\s*(?P<scale>[kK](?![A-Za-z])|[千万亿]))?"
+    r"(?:\s*(?P<scale>[kK](?![A-Za-z])|百万|千万|十亿|百亿|千亿|[千万亿]|(?:thousand|million|billion|trillion)(?![A-Za-z])))?"
     r"(?:\s*(?P<percent>[%％]))?"
     r"(?:\s*-?\s*(?P<unit>[kmgt]i?b|[numμ]?s|[kmg]?hz|毫秒|微秒|纳秒|秒)(?![A-Za-z]))?"
     r"(?![A-Za-z0-9_]|\.\d|,\d)"
@@ -845,11 +845,15 @@ NUMBER_RE = re.compile(
 def _tokens(s):
     """Latin words (3+ characters) and numbers, lower-cased; hyphenation across lines is joined first,
     and both the joined form and its two halves count as terms."""
-    s = "".join(LIG.get(c, c) for c in s)  # expand ligatures so that "preﬁx" and "prefix" are the same term
+    # compatibility forms: mathematical italic letters (𝑜𝑢𝑡) and superscript digits (10⁻⁶) become plain characters
+    # (a full-width comma stays a separator: "2.1%，3" is not one number)
+    s = unicodedata.normalize("NFKC", "".join(LIG.get(c, c) for c in s).replace("，", "， "))
     # PDF text carries soft hyphens and zero-width spaces ("MP-­1") and Unicode hyphens; the comment has plain ones
     s = re.sub("[‐‑‒]", "-", INVISIBLE_RE.sub("", s))
+    s = re.sub(r"(\d)(?:st|nd|rd|th)\b", r"\1", s)                 # 20th -> 20
+    s = re.sub(r"(\d)\s?[x×](?![A-Za-z0-9])", r"\1 ", s)            # 2-3x -> 2-3 (a factor, "2–3 倍")
     toks = set()
-    for m in re.finditer(r"([A-Za-z]{2,})-\s+([A-Za-z]{2,})", s):
+    for m in re.finditer(r"([A-Za-z]+)-\s+([A-Za-z]{2,})", s):
         toks.update(part.lower() for part in m.groups() if len(part) >= 3)
     s = re.sub(r"(\w)-\s+(\w)", r"\1\2", s).lower()
     # Keep version-bearing names intact even when their numeric parts are decimals.
@@ -859,7 +863,8 @@ def _tokens(s):
         # Decimal tuple scaling is exact, including values beyond the default precision.
         number = Decimal(match["value"].replace(",", "").replace("−", "-"))
         sign, digits, exponent = number.as_tuple()
-        exponent += {None: 0, "k": 3, "千": 3, "万": 4, "亿": 8}[match["scale"]]
+        exponent += {None: 0, "k": 3, "千": 3, "万": 4, "亿": 8, "百万": 6, "千万": 7, "十亿": 9, "百亿": 10, "千亿": 11, "thousand": 3, "million": 6, "billion": 9,
+                     "trillion": 12}[match["scale"]]
         digits = list(digits)
         while digits and digits[-1] == 0:
             digits.pop()
@@ -876,13 +881,53 @@ def _tokens(s):
     return toks
 
 
-def _covered(tok, text_tokens):
-    """Numbers and digit-bearing names require exact matches; words allow inflections."""
+def _stem(w):
+    """A word without its plural ending: queries -> query, boxes -> box, kernels -> kernel."""
+    if len(w) > 4 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if len(w) > 4 and w.endswith(("sses", "shes", "ches", "xes", "zes")):
+        return w[:-2]
+    if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
+
+
+def _covered(tok, text_tokens, text_words=(), acronyms=()):
+    """Numbers and digit-bearing names require exact matches; words allow inflections, and an abbreviation (one of
+    `acronyms`) is covered by the words it abbreviates (FNO: Fourier neural operator)."""
     if any(c.isdigit() for c in tok):
         return tok in text_tokens
     if tok in text_tokens or tok + "s" in text_tokens or tok + "es" in text_tokens or tok.rstrip("s") in text_tokens:
         return True
-    return any(len(tok) >= 4 and (u.startswith(tok) or tok.startswith(u)) and min(len(u), len(tok)) >= 4 for u in text_tokens)
+    if any(_stem(tok) == _stem(u) for u in text_tokens):
+        return True
+    if any(len(tok) >= 4 and (u.startswith(tok) or tok.startswith(u)) and min(len(u), len(tok)) >= 4 for u in text_tokens):
+        return True
+    if tok not in acronyms:
+        return False
+    letters = tok[:-1] if tok.endswith("s") and len(tok) > 3 else tok
+    return letters in "".join(w[0] for w in text_words).lower()
+
+
+NUMBER_WORDS = dict(zip("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen "
+                        "seventeen eighteen nineteen twenty".split(), range(21)),
+                    thirty=30, forty=40, fifty=50, sixty=60, seventy=70, eighty=80, ninety=90)
+NUMBER_WORD_RE = re.compile(r"\b(" + "|".join(NUMBER_WORDS) + r")\b", re.I)
+FACTOR_RE = re.compile(r"\d\s?[x×](?![A-Za-z0-9])|\b(?:times|fold)\b", re.I)
+
+
+def _text_variants(text):
+    """The highlighted PDF text read another way: as extraction loses it (a space after a thousands separator
+    "2, 448", "R-squared" for R², "Figure.2"), and as a translation may give it (numbers written as words,
+    "unit variance" as 方差为 1, "11.60 thousand" as 11.60 with 千 elsewhere)."""
+    alt = re.sub(r"(\d), (?=\d{3}(?!\d))", r"\1,", text)
+    alt = re.sub(r"([A-Za-z0-9])[- ]?squared\b", r"\g<1>2", alt)
+    alt = re.sub(r"([A-Za-z0-9])[- ]?cubed\b", r"\g<1>3", alt)
+    alt = re.sub(r"([A-Za-z]{2,})\.(?=\d)", r"\1. ", alt)
+    alt = NUMBER_WORD_RE.sub(lambda m: str(NUMBER_WORDS[m[1].lower()]), alt)
+    alt = re.sub(r"\bunit(?=[- ](?:scale|variance|norm|length|vector|sphere|ball|cube|interval|circle|square|magnitude)s?\b)", "1", alt,
+                 flags=re.I)
+    return re.sub(r"(\d)\s*(?:thousand|million|billion|trillion)\b", r"\1", alt, flags=re.I)
 
 
 def check_translations(annotations):
@@ -892,26 +937,46 @@ def check_translations(annotations):
     comment but not in the highlighted text (content added from outside the span), and a CJK-characters-
     per-English-word ratio far outside the usual range (a comment much longer or shorter than the span
     it translates). The caller decides how to act on them.
+
+    PDF text loses superscripts and subscripts (10⁻³ is extracted as 10−3, L² as L2, CM² as "CM 2"), so a
+    comment's <sub>/<sup> is read both joined to its base and set apart, and the closer reading counts. Words the
+    comment keeps in the original (names, citations, terms) need no translation and do not count towards the
+    length a translation should have.
     """
     warnings = []
     for a in annotations:
         if a.get("type") not in ("highlight", "underline") or not a.get("comment"):
             continue
         text, comment = a["text"], a["comment"]
-        plain = TAG_RE.sub(" ", MATH_RE.sub(" ", comment))  # rich-text tags and mathematics are display, not content
-        text_tokens = _tokens(text)
-        extra = sorted(t for t in _tokens(plain) if not _covered(t, text_tokens))
-        words = len(re.findall(r"[A-Za-z]+", text))
+        base = MATH_RE.sub(" ", comment)    # mathematics is display, not content
+        plain = TAG_RE.sub(" ", base)
+        joined = TAG_RE.sub(" ", SCRIPT_TAG_RE.sub("", base))
+        text_tokens = _tokens(text) | _tokens(_text_variants(text))
+        text_words = re.findall(r"[A-Za-z]+", unicodedata.normalize("NFKC", text))
+        acronyms = {m.lower() for m in re.findall(r"(?<![A-Za-z])[A-Z]{2,6}s?(?![A-Za-z])", plain)}
+        readings = [joined, plain]
+        if FACTOR_RE.search(text):   # "8x fewer samples": "1/8 的样本"
+            readings += [re.sub(r"(?<![\d.])1\s*/\s*(?=\d)", "", p) for p in (joined, plain)]
+        extra = min((sorted(t for t in _tokens(p) if not _covered(t, text_tokens, text_words, acronyms)) for p in readings),
+                    key=len)
+        words = len(text_words)
+        kept = {_stem(w.lower()) for p in (plain, joined) for w in re.findall(r"[A-Za-z]+", unicodedata.normalize("NFKC", p))}
+        initials = "".join(w[0] for w in text_words).lower()
+        abbreviated = set()   # the words an abbreviation in the comment stands for
+        for ac in acronyms:
+            letters = ac[:-1] if ac.endswith("s") and len(ac) > 3 else ac
+            at = initials.find(letters)
+            if at >= 0:
+                abbreviated.update(range(at, at + len(letters)))
+        translated = sum(1 for i, w in enumerate(text_words) if i not in abbreviated and _stem(w.lower()) not in kept)
         cjk = len(CJK_RE.findall(plain))
         reasons = []
         if extra:
             reasons.append("terms or numbers not present in the highlighted text: " + ", ".join(extra))
-        if cjk and words >= 6:
-            ratio = cjk / words
-            if ratio > 2.8:
-                reasons.append(f"comment is long for the span ({ratio:.1f} characters per word); it may translate more than what is highlighted")
-            elif ratio < 0.8:
-                reasons.append(f"comment is short for the span ({ratio:.1f} characters per word); it may omit part of the sentence")
+        if cjk and words >= 6 and cjk / words > 2.8:
+            reasons.append(f"comment is long for the span ({cjk / words:.1f} characters per word); it may translate more than what is highlighted")
+        elif cjk and translated >= 6 and cjk / translated < 0.8:
+            reasons.append(f"comment is short for the span ({cjk / translated:.1f} characters per translated word); it may omit part of the sentence")
         if reasons:
             warnings.append({"page": a["pageLabel"], "text": text[:80], "comment": comment[:80], "reasons": reasons})
     return warnings

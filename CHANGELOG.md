@@ -30,6 +30,13 @@
 - A top or bottom band without room at its font size is set smaller in steps of 0.5 pt down to
   `band_min_font_size` (default 8, between 4 and 36) and listed under `fitted`. When even that is too
   small, the warning gives how many characters fit, the words they end with, and how many to cut.
+- Translation warnings read extracted text as it lost its scripts (10−3 for 10⁻³, L2 for L², "CM 2"),
+  mathematical italic letters, a space after a thousands separator, "R-squared", ordinals, factors
+  ("2-3x" for 2–3 倍), English and Chinese number words (million, 百万, 亿), plurals and abbreviations of
+  words in the sentence. Words a comment keeps in English do not count towards the length a translation
+  should have. Numbers written as words ("eight", "below one", "unit variance"), "11.60 thousand" given as
+  11.60 with 千 elsewhere, "Figure.2", and "1/8" for "8x fewer" are read too. SKILL.md: a faithful
+  translation is not changed to silence a warning.
 
 ## 0.1.8 (2026-10-16)
 

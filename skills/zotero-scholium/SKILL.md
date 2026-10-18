@@ -65,7 +65,7 @@ First run without `--apply`. Review the report and correct the configuration; th
 
 - `missed`: unknown ids, or phrases not found (each with the closest passage, `closest`).
 - `style_warnings`: formatting, banned phrases, duplicate or overlapping highlights, text the tool already wrote on the page (`duplicate_existing`), note math; kinds in `references/configuration.md`. `core_count` only informs. For a deliberate exception the user asked for, `--accept KIND` lets that kind through.
-- `translation_warnings`: a comment with terms or numbers absent from the sentence, or much longer or shorter than it. Correct the translation or extend the highlight to cover its source.
+- `translation_warnings` (advisory): terms or numbers absent from the sentence, or a comment much longer or shorter than it. Correct a translation that adds or omits content, or extend the highlight to its source; never alter a faithful translation only to silence a warning.
 - `layout_warnings`: a margin box without free space: move the note to a neighbouring paragraph or drop it; open a preview PNG only for a margin box, and only that page. A top or bottom band without room is set smaller, down to 8 pt, and listed under `fitted`; when even that is too small, the warning says how many characters fit and where they end: shorten the text by at least the excess in one edit and keep its place.
 - `colors`, `ambiguous_matches`, `existing_annotations`, `pdf_sha256`, `now_in_zotero`: `references/configuration.md`.
 
