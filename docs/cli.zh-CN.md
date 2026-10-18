@@ -49,7 +49,7 @@ pip install .                            # 提供 `scholium` 命令
    }
    ```
 
-   只保留用户要求的输出类型。每篇论文使用独立的 `out_dir`，如 `out/<ATTACHMENT_KEY>`，句子文件和笔记文件也放在该目录。仅完整重做时使用 `cleanup: true`；只补笔记、页边批注或处理选定范围时，设置 `cleanup: false`。
+   只保留用户要求的输出类型。每篇论文使用独立的 `out_dir`，如 `out/<ATTACHMENT_KEY>`，句子文件和笔记文件也放在该目录。仅完整重做时使用 `cleanup: true`；不设时只做添加（补笔记、页边批注或处理选定范围）。带阅读笔记的重做可设 `note_replace: true`，把工具以前的笔记移入回收站。
 
 4. **生成、检查、写入。** 首先不带 `--apply` 运行，检查下述四类报告并修正配置，再写入。
 
@@ -59,7 +59,7 @@ pip install .                            # 提供 `scholium` 命令
    scholium --config config.json --list     # 各类型/颜色数量、非本工具的注释、笔记标题（--full：全部输出）
    ```
 
-   每次运行都生成 `annotations.json`、备用的 `create_annotations.js` 以及所配置页面的 `preview_p<N>.png`，并报告 `missed`（附该页上最接近的原句）、`style_warnings`、`translation_warnings`、`layout_warnings` 以及运行前后 PDF 的哈希。`missed`、`style_warnings` 或 `layout_warnings` 不为空时 `--apply` 不写入（`--allow-missed`、`--allow-warnings`）。
+   每次运行都生成 `annotations.json`、备用的 `create_annotations.js` 以及所配置页面的 `preview_p<N>.png`，并报告 `missed`（附该页上最接近的原句）、`style_warnings`、`translation_warnings`、`layout_warnings` 以及运行前后 PDF 的哈希。`missed`、`style_warnings`（`core_count` 除外）或 `layout_warnings` 不为空时 `--apply` 不写入（`--accept KIND`、`--allow-missed`、`--allow-warnings`）。
 
 [本地 API 调用示例](../examples/direct_api_example.py)以约三十行代码演示了 Zotero 10 本地 API 的基本调用，可用于其他应用。
 

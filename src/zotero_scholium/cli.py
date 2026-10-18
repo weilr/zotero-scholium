@@ -22,9 +22,18 @@ Usage:    scholium --config config.json [--apply] [--list] [--backend auto|api|b
 """
 import argparse
 import difflib, glob, hashlib, json, os, sys, re, time, datetime, collections
+import html as htmllib
 import urllib.request, urllib.error, urllib.parse
 from decimal import Decimal
-import pymupdf
+try:
+    import pymupdf
+except ImportError:   # PyMuPDF before 1.24 is imported as fitz
+    try:
+        import fitz as pymupdf
+    except ImportError:
+        pymupdf = None
+
+PYMUPDF_MISSING = "PyMuPDF is not installed; run: pip install -U pymupdf"
 
 __version__ = "0.1.8"
 
@@ -46,11 +55,13 @@ DEFAULTS = {
     "note_title": None,
     "note_title_prefix": None,
     "note_html": None,
-    "note_replace": False,      # Destructive: deletes existing child notes whose title starts with note_title_prefix.
+    "note_replace": False,      # True: after the new note is written, the tool's earlier notes under the item (restricted to
+                                # titles starting with note_title_prefix when one is given) go to the trash; untagged notes stay.
                                 # By default existing notes are preserved and a new note receives a versioned title.
-    "cleanup": True,            # False: keep every existing annotation on the attachment (the tool's own included); only add
+    "cleanup": False,           # True: a complete redo; the tool's earlier annotations on the attachment are deleted once the new
+                                # ones are written. False: keep every existing annotation (the tool's own included); only add
     "cleanup_external": False,  # bridge backend only: additionally delete annotations Zotero imported from the PDF file
-    "core_range": None,         # [low, high]: expected number of highlights in core_color; outside it a style warning is reported
+    "core_range": None,         # [low, high]: expected number of highlights in core_color; outside it an advisory style warning
     "banned_phrases": [],       # strings that must not occur in comments, margin texts or the note (reported as style warnings)
     "sentences": None,          # sentences.json written by `extract --sentences` (default: <out_dir>/sentences.json)
 }
@@ -909,6 +920,35 @@ def _existing_rects(listing, keep_own=False):
     return rects
 
 
+def _brief(s):
+    """The first 80 characters with whitespace collapsed: what a listing keeps of a text or comment."""
+    return " ".join((s or "").split())[:80].strip()
+
+
+def _own_texts(listing):
+    """{(page index, is a highlight or underline): [(text or comment as listed, key)]} of the tool's annotations."""
+    out = {}
+    for a in (listing or {}).get("annotations", []):
+        if not set(a.get("tags") or []) & OWN_TAGS:
+            continue
+        page = parse_position(a.get("position")).get("pageIndex")
+        mark = a.get("type") in ("highlight", "underline")
+        body = _brief(a.get("text") if mark else a.get("comment"))
+        if page is not None and body:
+            out.setdefault((int(page), mark), []).append((body, a.get("key")))
+    return out
+
+
+def _listed_as(text, listed):
+    """Whether a listing's cut text is `text`: listings keep about 80 characters (the plugin counts UTF-16 units and
+    may split a character at the cut), so a long listed text matches when the text begins with it."""
+    full = " ".join((text or "").split())
+    if full == listed:
+        return True
+    cut = max(len(listed), len(listed.encode("utf-16-le", "surrogatepass")) // 2) >= 76
+    return cut and full.startswith(listed[:-1])
+
+
 def _text_defects(s, page=False):
     """(kind, reason) pairs for display defects in a comment or margin text; `page`: text shown on the page, where
     page_text has already written scripts without a Unicode form with ^."""
@@ -939,13 +979,16 @@ def check_style(annotations, cfg, listing=None, note_html=None):
     Checked: display defects in comments and margin texts (raw LaTeX, ^/_ exponents, tags the reader does not
     render, hard line breaks), label-colon margin notes and arrows or circled numbers in them, `banned_phrases`, highlights
     that duplicate or intersect each other, highlights that overlap annotations already in Zotero (the tool's
-    own earlier ones excepted unless `cleanup` is false), the number of core-coloured highlights against
-    `core_range`, and mathematics in the note (a double backslash inside a math node, LaTeX outside one).
+    own earlier ones excepted unless `cleanup` is false), text the tool already wrote on the same page when `cleanup` is
+    false (`duplicate_existing`), the number of core-coloured highlights against `core_range` (advisory: it does not
+    block --apply), and mathematics in the note (a double backslash inside a math node, LaTeX outside one).
     """
     warnings = []
-    existing = _existing_rects(listing, keep_own=not cfg.get("cleanup", True))
+    existing = _existing_rects(listing, keep_own=not cfg.get("cleanup", False))
     banned = [b for b in (cfg.get("banned_phrases") or []) if b]
     marks = [a for a in annotations if a["type"] in ("highlight", "underline")]
+    # what the tool wrote earlier and a run without cleanup keeps: the same text again on the same page is a duplicate
+    earlier = {} if cfg.get("cleanup", False) else _own_texts(listing)
 
     def warn(kind, a, reason):
         label = a.get("text") if a["type"] in ("highlight", "underline") else a.get("comment", "")
@@ -954,6 +997,11 @@ def check_style(annotations, cfg, listing=None, note_html=None):
     for a in annotations:
         is_mark = a["type"] in ("highlight", "underline")
         comment = a.get("comment", "")
+        same = next((key for body, key in earlier.get((a["position"]["pageIndex"], is_mark), [])
+                     if _listed_as(a.get("text") if is_mark else comment, body)), None)
+        if same:
+            warn("duplicate_existing", a, f"the tool already wrote this on the page ({same}); drop it, or set cleanup: true for "
+                                          "a complete redo")
         for kind, reason in _text_defects(comment, page=a["type"] == "text"):
             warn(kind, a, reason)
         if not is_mark and LABEL_RE.match(comment):
@@ -963,7 +1011,7 @@ def check_style(annotations, cfg, listing=None, note_html=None):
         hits = [b for b in banned if b in TAG_RE.sub("", comment)]
         if hits:
             warn("banned_phrase", a, "contains: " + ", ".join(hits))
-        if is_mark:
+        if is_mark and not same:
             page, rects = a["position"]["pageIndex"], a["position"]["rects"]
             for key, rs in existing.get(page, []):
                 if any(_overlaps(r, rs) for r in rects):
@@ -1031,6 +1079,19 @@ def note_title_from_html(html):
     m = re.search(r"<h1[^>]*>(.*?)</h1>", html or "", flags=re.S | re.I)
     src = m.group(1) if m else re.sub(r"<br\s*/?>", "\n", html or "")
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", src)).strip()[:200]
+
+
+def note_body(html):
+    """A note's text without its title (which carries the version) and without markup; Zotero wraps a saved
+    note in <div data-schema-version="…">, which changes nothing here."""
+    text = re.sub(r"<[^>]+>", " ", re.sub(r"<h1[^>]*>.*?</h1>", " ", html or "", count=1, flags=re.S | re.I))
+    return re.sub(r"\s+", " ", htmllib.unescape(text)).strip()
+
+
+def read_text(path):
+    """A text file written by the agent; a byte-order mark (PowerShell 5 writes one) is dropped."""
+    with open(path, encoding="utf-8-sig") as f:
+        return f.read()
 
 
 # ---------------------------------------------------------------------------
@@ -1212,7 +1273,9 @@ def extract_main(argv):
     ap.add_argument("--keep-references", action="store_true", help="keep the bibliography")
     ap.add_argument("--sentences", metavar="JSON", help="write numbered sentences to this JSON file and print the numbered listing instead of plain text")
     args = ap.parse_args(argv)
-    pdf = args.pdf or (json.load(open(args.config, encoding="utf8")).get("pdf") if args.config else None)
+    if pymupdf is None:
+        sys.exit(PYMUPDF_MISSING)
+    pdf = args.pdf or (json.loads(read_text(args.config)).get("pdf") if args.config else None)
     if not pdf:
         sys.exit("extract: give --pdf or --config")
     pages = None
@@ -1231,10 +1294,10 @@ def extract_main(argv):
         json.dump({"pdf": pdf, "pdf_sha256": pdf_hash, "sentences": [it for it in items if "id" in it],
                    "headings": [it for it in items if "id" not in it]}, open(args.sentences, "w", encoding="utf8"), ensure_ascii=False, indent=0)
         text = render_sentences([it for it in items if not pages or it["page"] in pages])
-        summary = f"{n} sentences -> {args.sentences}"
+        summary = f"{n} sentences -> {args.sentences}; {text.count(chr(10))} lines, {len(text)} characters"
     else:
         text = extract_text(pdf, pages=pages, keep_references=args.keep_references)
-        summary = f"{len(text)} characters"
+        summary = f"{text.count(chr(10))} lines, {len(text)} characters"
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         open(args.out, "w", encoding="utf8").write(text)
@@ -1390,6 +1453,16 @@ class LocalApi:
                 raise RuntimeError(f"delete failed (HTTP {s}): {t[:300]}")
         return len(keys)
 
+    def trash(self, rows):
+        """Move items to Zotero's trash (recoverable there); `rows` are their API rows, whose versions guard the write."""
+        for i in range(0, len(rows), 50):
+            body = [{"key": r["key"], "version": r["data"].get("version", r.get("version", 0)), "deleted": True} for r in rows[i:i + 50]]
+            s, h, t = self.write("POST", "/api/users/0/items", body)
+            failed = (json.loads(t).get("failed") or {}) if s == 200 else None
+            if s != 200 or failed:
+                raise RuntimeError(f"moving notes to the trash failed (HTTP {s}): {(json.dumps(failed) if failed else t)[:300]}")
+        return len(rows)
+
 
 def parse_position(value):
     """annotationPosition arrives as a JSON string from the local API and as an object from the bridge plugin."""
@@ -1416,7 +1489,7 @@ def api_list(cfg, api):
 
 def api_apply(cfg, out, api):
     # Capture old owned keys before creating anything; matching text is not ownership.
-    rows = api.children(cfg["attachment_key"], "annotation") if cfg.get("cleanup", True) else []
+    rows = api.children(cfg["attachment_key"], "annotation") if cfg.get("cleanup", False) else []
     to_delete, kept = [], 0
     for r in rows:
         tags = {t["tag"] for t in r["data"].get("tags", [])}
@@ -1425,25 +1498,31 @@ def api_apply(cfg, out, api):
         else:
             kept += 1
     result = {"ok": False, "backend": "api", "removed": 0, "kept": kept,
-              "noteCreated": False, "notesRemoved": 0, "created": {},
+              "noteCreated": False, "notesTrashed": 0, "created": {},
               "createdKeys": [], "noteKeys": [], "failed": []}
     victims = []
-    # (1) Child note: preserve old notes until all new content has been created.
+    # (1) Child note: old notes stay until all new content has been created; then, with note_replace, the tool's
+    #     earlier notes go to the trash. A tool note with the same text is not written again.
     if cfg.get("note_html") and cfg.get("item_key"):
-        html = open(cfg["note_html"], encoding="utf8").read()
+        html = read_text(cfg["note_html"])
         prefix = cfg.get("note_title_prefix") or cfg.get("note_title") or ""
         existing = [c for c in api.children(cfg["item_key"]) if c["data"]["itemType"] == "note"]
-        titles = [note_title_from_html(c["data"].get("note", "")) for c in existing]
-        if cfg.get("note_replace") and prefix:
-            victims = [c["key"] for c, t in zip(existing, titles) if t.startswith(prefix)]
-            titles = []
-        html, _ = version_note(html, prefix, titles)
-        keys, failed = api.create([{"itemType": "note", "parentItem": cfg["item_key"], "note": html, "tags": [{"tag": TAG}]}])
-        result["noteKeys"] = keys
-        result["noteCreated"] = not failed and len(keys) == 1
-        if not result["noteCreated"]:
-            result["failed"] = failed or [{"message": "note creation returned no unique item key"}]
-            return result
+        same = next((c for c in existing if _own(c) and note_body(c["data"].get("note", "")) == note_body(html)), None)
+        if cfg.get("note_replace"):
+            only = cfg.get("note_title_prefix") or ""
+            victims = [c for c in existing if _own(c) and c is not same
+                       and note_title_from_html(c["data"].get("note", "")).startswith(only)]
+        if same:
+            result["noteSkipped"] = f"the tool's note {same['key']} has the same text"
+        else:
+            titles = [note_title_from_html(c["data"].get("note", "")) for c in existing if c not in victims]
+            html, _ = version_note(html, prefix, titles)
+            keys, failed = api.create([{"itemType": "note", "parentItem": cfg["item_key"], "note": html, "tags": [{"tag": TAG}]}])
+            result["noteKeys"] = keys
+            result["noteCreated"] = not failed and len(keys) == 1
+            if not result["noteCreated"]:
+                result["failed"] = failed or [{"message": "note creation returned no unique item key"}]
+                return result
     # (2) annotations
     items = []
     for a in out:
@@ -1466,7 +1545,7 @@ def api_apply(cfg, out, api):
     result["created"] = counts
     # Do not remove earlier work if either creation call failed.
     result["removed"] = api.delete(to_delete) if to_delete else 0
-    result["notesRemoved"] = api.delete(victims) if victims else 0
+    result["notesTrashed"] = api.trash(victims) if victims else 0
     result["ok"] = True
     return result
 
@@ -1578,13 +1657,18 @@ def bridge_apply(cfg, out):
     token, lst = bridge_connect(cfg)
     if not token:
         return None, lst
-    html = open(cfg["note_html"], encoding="utf8").read() if cfg.get("note_html") else None
+    html = read_text(cfg["note_html"]) if cfg.get("note_html") else None
     prefix = cfg.get("note_title_prefix") or cfg.get("note_title") or ""
-    if html and not cfg.get("note_replace"):
-        html, prefix = version_note(html, prefix, [n["title"] for n in lst.get("notes", [])])
+    only = cfg.get("note_title_prefix") or ""
+    replace = bool(cfg.get("note_replace", False))
+    if html:   # the notes the run leaves in place decide the version in the new note's title
+        stay = [n["title"] for n in lst.get("notes", [])
+                if not (replace and set(n.get("tags") or []) & OWN_TAGS and (n["title"] or "").startswith(only))]
+        html, prefix = version_note(html, prefix, stay)
+    # trashOwn and trashTitlePrefix are new keys: an older plugin ignores them and trashes nothing
     payload = {"itemKey": cfg["item_key"], "attachmentKey": cfg["attachment_key"],
-               "cleanup": bool(cfg.get("cleanup", True)), "cleanupExternal": bool(cfg.get("cleanup_external")), "tag": TAG, "legacyTags": sorted(LEGACY_TAGS), "annotations": out,
-               "note": {"html": html, "titlePrefix": prefix, "replace": bool(cfg.get("note_replace", False))} if html else None}
+               "cleanup": bool(cfg.get("cleanup", False)), "cleanupExternal": bool(cfg.get("cleanup_external")), "tag": TAG, "legacyTags": sorted(LEGACY_TAGS), "annotations": out,
+               "note": {"html": html, "titlePrefix": prefix, "trashOwn": replace, "trashTitlePrefix": only} if html else None}
     s, h, t = http("POST", "/scholium-bridge/apply", payload, {"X-Annotate-Token": token}, timeout=180)
     res = json.loads(t) if s == 200 else {}
     if not res.get("ok"):
@@ -1597,20 +1681,26 @@ def bridge_apply(cfg, out):
 # Backend 3: "Run JavaScript" file (manual execution)
 # ---------------------------------------------------------------------------
 def render_js(cfg, out):
-    html = open(cfg["note_html"], encoding="utf8").read() if cfg.get("note_html") else None
+    html = read_text(cfg["note_html"]) if cfg.get("note_html") else None
     title_prefix = cfg.get("note_title_prefix") or cfg.get("note_title") or ""
+    replace = bool(html and cfg.get("note_replace"))
+    note_step = ("create a child note unless a note of this tool has the same text; " +
+                 ("then move the tool's other notes" + (" whose title starts with the prefix" if cfg.get("note_title_prefix") else "") +
+                  " to the trash (step 2)" if replace else "a note with the same title gets a versioned title; no note is deleted")
+                 if html else "(no child note in this run)")
     n_h = sum(1 for a in out if a["type"] in ("highlight", "underline")); n_t = len(out) - n_h
     return f"""// Usage: in Zotero, open Tools -> Developer -> Run JavaScript, enable "Run as async function",
 // paste the entire content of this file, and click Run.
 // Effect (all changes are made in the Zotero database; the PDF file is not modified):
-//   (0) {'delete annotations carrying a current or legacy tool tag on the attachment, once the new ones are saved (step 2);' if cfg.get('cleanup', True) else 'keep every existing annotation (cleanup disabled);'}
-//   (1) {"create a child note (if a note with the same title exists, the new note receives a versioned title; no note is deleted);" if html else "(no child note in this run)"}
+//   (0) {'delete annotations carrying a current or legacy tool tag on the attachment, once the new ones are saved (step 2);' if cfg.get('cleanup', False) else 'keep every existing annotation (cleanup disabled);'}
+//   (1) {note_step};
 //   (2) create {n_h} highlight/underline annotations and {n_t} margin text annotations; a failure leaves the old ones.
 var ITEM_KEY = {json.dumps(cfg['item_key'])}, ATT_KEY = {json.dumps(cfg['attachment_key'])}, TAG = {json.dumps(TAG)};
 var OWN_TAGS = {json.dumps(sorted(OWN_TAGS))};
-var CLEANUP = {json.dumps(bool(cfg.get('cleanup', True)))};
+var CLEANUP = {json.dumps(bool(cfg.get('cleanup', False)))};
 var NOTE_HTML = {json.dumps(html, ensure_ascii=False)};
 var NOTE_TITLE_PREFIX = {json.dumps(title_prefix, ensure_ascii=False)};
+var NOTE_REPLACE = {json.dumps(replace)}, TRASH_TITLE_PREFIX = {json.dumps(cfg.get('note_title_prefix') or '', ensure_ascii=False)};
 var ANNOTATIONS = {json.dumps(out, ensure_ascii=False)};
 
 var libraryID = Zotero.Libraries.userLibraryID;
@@ -1626,22 +1716,30 @@ for (let a of (CLEANUP ? att.getAnnotations(true) : [])) {{
   if (mine) {{ old.push(a); }} else {{ kept++; }}
 }}
 
-var noteCreated = false;
+var noteCreated = false, noteSame = null, trash = [];
 if (NOTE_HTML) {{
-  let existing = Zotero.Items.get(parent.getNotes()).map(n => n.getNoteTitle());
+  let body = h => String(h || "").replace(/<h1[^>]*>[\\s\\S]*?<\\/h1>/i, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&").replace(/\\s+/g, " ").trim();
+  let notes = Zotero.Items.get(parent.getNotes());
+  let own = n => n.getTags().some(t => OWN_TAGS.includes(t.tag));
+  noteSame = notes.find(n => own(n) && body(n.getNote()) === body(NOTE_HTML)) || null;
+  if (NOTE_REPLACE) trash = notes.filter(n => own(n) && n !== noteSame && (n.getNoteTitle() || "").startsWith(TRASH_TITLE_PREFIX)).map(n => n.id);
+  let existing = notes.filter(n => !trash.includes(n.id)).map(n => n.getNoteTitle());
   let same = existing.filter(t => t && NOTE_TITLE_PREFIX && t.startsWith(NOTE_TITLE_PREFIX));
   let html = NOTE_HTML;
   if (same.length) {{
     let d = new Date(), ds = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
     html = html.replace(/<h1([^>]*)>([\\s\\S]*?)<\\/h1>/i, (m, attrs, t) => "<h1" + attrs + ">" + t.replace(/\\s*\\(v\\d+, \\d{{4}}-\\d{{2}}-\\d{{2}}\\)\\s*$/, "") + " (v" + (same.length + 1) + ", " + ds + ")</h1>");
   }}
-  let note = new Zotero.Item("note");
-  note.libraryID = libraryID;
-  note.parentID = parent.id;
-  note.setNote(html);
-  note.setTags([{{tag: TAG}}]);
-  await note.saveTx();
-  noteCreated = true;
+  if (!noteSame) {{
+    let note = new Zotero.Item("note");
+    note.libraryID = libraryID;
+    note.parentID = parent.id;
+    note.setNote(html);
+    note.setTags([{{tag: TAG}}]);
+    await note.saveTx();
+    noteCreated = true;
+  }}
 }}
 
 var created = {{highlight: 0, underline: 0, text: 0, note: 0}};
@@ -1667,7 +1765,9 @@ await Zotero.DB.executeTransaction(async function () {{
   }}
   for (let a of old) await a.erase();
 }});
-return "removed " + old.length + " old annotations (kept " + kept + " of yours); note: " + (NOTE_HTML ? (noteCreated ? "created" : "not created") : "none") +
+if (trash.length) await Zotero.Items.trashTx(trash);
+return "removed " + old.length + " old annotations (kept " + kept + " of yours); note: " + (NOTE_HTML ? (noteCreated ? "created" : noteSame ? "the same text exists already" : "not created") : "none") +
+  (trash.length ? "; " + trash.length + " earlier notes of the tool moved to the trash" : "") +
   "; created " + created.highlight + " highlights, " + (created.underline ? created.underline + " underlines, " : "") + created.text + " margin texts" + (created.note ? ", " + created.note + " sticky notes" : "") + ". Close and reopen the PDF to see them.";
 """
 
@@ -1855,7 +1955,8 @@ def profile_main(argv):
     ap = argparse.ArgumentParser(prog="scholium profile", description="Derive an annotation profile from the user's own Zotero annotations (read-only).")
     ap.add_argument("--from-library", action="store_true", help="analyse the library of the running Zotero instance")
     ap.add_argument("--exclude-author", default="", help="annotationAuthorName whose annotations are excluded from the analysis (e.g. the name of an automated tool)")
-    ap.add_argument("--path", action="store_true", help="print the resolved profile location and exit (no library access)")
+    ap.add_argument("--path", action="store_true", help="print the path of profile.md and exit (no library access)")
+    ap.add_argument("--json", action="store_true", help="with --path: print the data directory, the path and whether the file exists as JSON")
     ap.add_argument("--data-dir", default=None, help="Zotero data directory (default: ZOTERO_DATA_DIR, Zotero's prefs.js, or ~/Zotero)")
     ap.add_argument("--out", default=None, help="directory for profile.json and profile.md (default: <Zotero data dir>/zotero-scholium/)")
     a = ap.parse_args(argv)
@@ -1864,12 +1965,21 @@ def profile_main(argv):
     md_path = os.path.join(out, "profile.md")
     legacy_md = os.path.join(legacy_profile_dir(), "profile.md")
     if a.path:
-        print(json.dumps({"data_dir": zotero_data_dir(cfg), "profile_md": md_path, "exists": os.path.exists(md_path),
-                          "legacy_profile_md": legacy_md if os.path.exists(legacy_md) else None}, ensure_ascii=False, indent=1))
+        if a.json:
+            print(json.dumps({"data_dir": zotero_data_dir(cfg), "profile_md": md_path, "exists": os.path.exists(md_path),
+                              "legacy_profile_md": legacy_md if os.path.exists(legacy_md) else None}, ensure_ascii=False, indent=1))
+        else:
+            print(md_path)
+            if not os.path.exists(md_path):
+                print("(the file does not exist yet; run `scholium profile --from-library`)", file=sys.stderr)
         return
     if not a.from_library:
         ap.error("use --from-library to derive the profile, or --path to print its location")
-    prof = profile_from_library(a.exclude_author)
+    try:
+        prof = profile_from_library(a.exclude_author)
+    except RuntimeError as e:
+        print(json.dumps({"error": str(e)}, ensure_ascii=False, indent=1))
+        return 1
     os.makedirs(out, exist_ok=True)
     json.dump(prof, open(os.path.join(out, "profile.json"), "w", encoding="utf8"), ensure_ascii=False, indent=1)
     migrated = None
@@ -1898,8 +2008,10 @@ def _sha256(path):
 
 
 def pick_backend(requested, cfg):
-    """Return (name, handle, reason)."""
+    """Return (name, handle, reason). When `auto` falls back to the JavaScript file, the reason names why each
+    write channel was unavailable."""
     ver, sid = zotero_version() if requested in ("auto", "api") else (None, None)
+    why_not = []
     if requested in ("auto", "api"):
         if ver and sid:
             try:
@@ -1908,18 +2020,22 @@ def pick_backend(requested, cfg):
                 major = 0
             if major >= 10:
                 return "api", LocalApi(sid), f"Zotero {ver}: official local API write support"
-            if requested == "api":
-                return None, None, f"Zotero {ver}: the local API is read-only before Zotero 10"
-        elif requested == "api":
-            return None, None, "Zotero is not running or its local server is disabled"
+            why_not.append(f"Zotero {ver}: the local API is read-only before Zotero 10")
+        else:
+            why_not.append("Zotero is not running or its local server is disabled")
+        if requested == "api":
+            return None, None, why_not[-1]
     if requested in ("auto", "bridge"):
         token, info = bridge_connect(cfg)
         if token:
             return "bridge", token, "scholium-bridge plugin"
         if requested == "bridge":
             return None, None, info
+        if not any(str(info).startswith(w) for w in why_not):
+            why_not.append(str(info))
     if requested in ("auto", "js"):
-        return "js", None, "no write channel available; generated a Run-JavaScript file instead" if requested == "auto" else "Run-JavaScript file requested"
+        return "js", None, ("no write channel available (" + "; ".join(why_not) + "); generated a Run-JavaScript file instead"
+                            if requested == "auto" else "Run-JavaScript file requested")
     return None, None, "no backend available"
 
 
@@ -1954,6 +2070,21 @@ def _paper(key):
     return item, pdfs, [k for k in kids if k["data"]["itemType"] == "note"]
 
 
+VENUE_FIELDS = ("publicationTitle", "proceedingsTitle", "conferenceName", "bookTitle", "university", "repository", "publisher")
+
+
+def citation(item):
+    """The item's key, title and what a citation line needs: authors (the first twelve), date, venue, DOI and URL."""
+    d = item["data"]
+    people = [c.get("name") or " ".join(x for x in (c.get("firstName"), c.get("lastName")) if x)
+              for c in d.get("creators", []) if c.get("creatorType", "author") == "author"]
+    out = {"key": item["key"], "title": d.get("title", "")[:200], "year": (d.get("date") or "")[:4],
+           "authors": people[:12] + ([f"… {len(people) - 12} more"] if len(people) > 12 else []),
+           "date": d.get("date", ""), "venue": next((d[f] for f in VENUE_FIELDS if d.get(f)), ""),
+           "doi": d.get("DOI", ""), "url": d.get("url", "")}
+    return {k: v for k, v in out.items() if v or k in ("key", "title")}
+
+
 def paper_status(key):
     """What a paper already has: each PDF with its file and the annotations on it (the tool's own counted by type and
     colour, the user's counted), and the notes under the item (title, length, whether the tool wrote them)."""
@@ -1969,8 +2100,7 @@ def paper_status(key):
                     "own": len(own), "others": len(anns) - len(own),
                     "own_by_type": dict(collections.Counter(a["data"]["annotationType"] for a in own)),
                     "own_by_color": dict(collections.Counter(a["data"].get("annotationColor") for a in own))})
-    return {"item": {"key": item["key"], "title": item["data"].get("title", "")[:200], "year": (item["data"].get("date") or "")[:4]}
-            if item else None,
+    return {"item": citation(item) if item else None,
             "pdfs": out,
             "notes": [{"key": n["key"], "title": note_title_from_html(n["data"].get("note", ""))[:100], "own": _own(n),
                        "characters": len(_plain(n["data"].get("note", ""))), "modified": n["data"].get("dateModified", "")[:10]}
@@ -2064,6 +2194,46 @@ def samples_main(argv):
     return 1 if "error" in result else 0
 
 
+ADVISORY_STYLE = {"core_count"}   # style warnings that inform without blocking --apply
+CONFIG_KEYS = set(DEFAULTS) | {"pdf", "item_key", "attachment_key", "out_dir", "highlights", "summaries", "data_dir", "snap"}
+HIGHLIGHT_KEYS = {"id", "ids", "page", "text", "occurrence", "core", "level", "color", "comment", "type"}
+SUMMARY_KEYS = {"id", "page", "anchor", "text", "place", "side", "kind", "color", "font_size", "rect", "occurrence"}
+
+
+def config_problems(raw):
+    """Mistakes a run would otherwise pass over in silence: unknown keys (a misspelt "cleanup" keeps its default), an
+    unknown level, a highlight type other than highlight or underline, and missing required keys."""
+    if not isinstance(raw, dict):
+        return ["the configuration must be a JSON object"]
+    problems = []
+
+    def unknown(keys, allowed, where):
+        for k in keys:
+            if k not in allowed:
+                near = difflib.get_close_matches(k, sorted(allowed), n=1)
+                problems.append(f"unknown key {k!r}{where}" + (f" (did you mean {near[0]!r}?)" if near else ""))
+    if "author" in raw:
+        problems.append("the 'author' key is not supported")
+    unknown([k for k in raw if k != "author"], CONFIG_KEYS, "")
+    for k in ("pdf", "item_key", "attachment_key", "out_dir"):
+        if not raw.get(k):
+            problems.append(f"missing required key: {k}")
+    levels = raw.get("levels") or {}
+    for i, h in enumerate(raw.get("highlights") or []):
+        if not isinstance(h, dict):
+            problems.append(f"highlights[{i}] must be an object")
+            continue
+        unknown(h, HIGHLIGHT_KEYS, f" in highlights[{i}]")
+        if "level" in h and h["level"] not in levels:
+            problems.append(f"highlights[{i}]: unknown level {h['level']!r} (levels: {', '.join(levels) or 'none defined'})")
+        if h.get("type", "highlight") not in ("highlight", "underline"):
+            problems.append(f"highlights[{i}]: type must be highlight or underline")
+    for i, s in enumerate(raw.get("summaries") or []):
+        if isinstance(s, dict):
+            unknown(s, SUMMARY_KEYS, f" in summaries[{i}]")
+    return problems
+
+
 def main(argv=None):
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -2086,49 +2256,68 @@ def main(argv=None):
     ap.add_argument("--backend", default="auto", choices=["auto", "api", "bridge", "js"])
     ap.add_argument("--allow-missed", action="store_true", help="apply even if some phrases could not be located in the PDF")
     ap.add_argument("--allow-warnings", action="store_true", help="apply even if style or layout warnings are reported")
+    ap.add_argument("--accept", default="", metavar="KIND[,KIND]",
+                    help="apply despite style warnings of these kinds (e.g. user_overlap) and, with \"layout\", despite layout warnings")
     ap.add_argument("--ignore-existing", action="store_true",
                     help="do not read the attachment's existing annotations before laying out margin notes (they may then be overlapped)")
     ap.add_argument("--version", action="version", version=f"scholium {__version__}")
     args = ap.parse_args(argv)
-    raw = json.load(open(args.config, encoding="utf8"))
-    if "author" in raw:
-        sys.exit("config error: the 'author' key is not supported")
+    try:
+        raw = json.loads(read_text(args.config))
+    except (OSError, ValueError) as e:
+        sys.exit(f"config error: {e}")
+    problems = config_problems(raw)
+    if problems:
+        sys.exit("config error: " + "; ".join(problems))
     cfg = dict(DEFAULTS); cfg.update(raw)
-    for k in ("pdf", "item_key", "attachment_key", "out_dir"):
-        if not cfg.get(k):
-            sys.exit(f"config missing required key: {k}")
+    if pymupdf is None and not args.list:
+        sys.exit(PYMUPDF_MISSING)
 
     if args.list:
         name, handle, why = pick_backend(args.backend if args.backend != "js" else "auto", cfg)
-        if name == "api":
-            res, err = api_list(cfg, handle), None
-        elif name == "bridge":
-            res, err = bridge_list(cfg)
-        else:
-            res, err = None, why
+        try:
+            if name == "api":
+                res, err = api_list(cfg, handle), None
+            elif name == "bridge":
+                res, err = bridge_list(cfg)
+            else:
+                res, err = None, why
+        except Exception as e:
+            res, err = None, str(e)
         print(json.dumps((res if args.full else compact_listing(res)) if res else {"error": err}, ensure_ascii=False, indent=1))
         sys.exit(0 if res else 1)
 
-    obstacles, existing_info, listing = {}, "not consulted (--ignore-existing)", None
+    obstacles, existing_info, listing, unread = {}, "not consulted (--ignore-existing)", None, None
     if not args.ignore_existing:
         name, handle, why = pick_backend(args.backend if args.backend != "js" else "auto", cfg)
-        listing = api_list(cfg, handle) if name == "api" else (bridge_list(cfg)[0] if name == "bridge" else None)
+        try:
+            if name == "api":
+                listing = api_list(cfg, handle)
+            elif name == "bridge":
+                listing, err = bridge_list(cfg)
+                why = err or why
+        except Exception as e:
+            listing, why = None, str(e)
         if listing:
-            obstacles = existing_obstacles(listing, keep_own=not cfg.get("cleanup", True))
+            obstacles = existing_obstacles(listing, keep_own=not cfg.get("cleanup", False))
             existing_info = {"annotations_in_zotero": len(listing["annotations"]),
                              "avoided_rects": sum(len(v) for v in obstacles.values())}
         else:
             existing_info = f"unavailable ({why}); existing annotations were not taken into account"
+            if name in ("api", "bridge"):   # a write channel that cannot list: --apply could write a second copy
+                unread = why
     pdf_before = _sha256(cfg["pdf"])
     out, missed = build(cfg, obstacles)
     json.dump(out, open(os.path.join(cfg["out_dir"], "annotations.json"), "w", encoding="utf8"), ensure_ascii=False, indent=1)
     js_path = os.path.join(cfg["out_dir"], "create_annotations.js")
     open(js_path, "w", encoding="utf8").write(render_js(cfg, out))
     by_type = collections.Counter(a["type"] for a in out)
-    note_html = open(cfg["note_html"], encoding="utf8").read() if cfg.get("note_html") else None
+    note_html = read_text(cfg["note_html"]) if cfg.get("note_html") else None
+    own_now = [a for a in (listing or {}).get("annotations", []) if set(a.get("tags") or []) & OWN_TAGS]
     report = {"highlights": by_type.get("highlight", 0), "underlines": by_type.get("underline", 0),
               "margin_texts": by_type.get("text", 0), "sticky_notes": by_type.get("note", 0),
               "colors": dict(collections.Counter(a["color"] for a in out if a["type"] in ("highlight", "underline"))),
+              "cleanup_removes": (len(own_now) if listing else None) if cfg.get("cleanup") else 0,
               "missed": missed, "translation_warnings": check_translations(out),
               "style_warnings": check_style(out, cfg, listing, note_html),
               "snapped": [{"page": a["pageLabel"], "text": a["text"][:60], "similarity": a["snapped"]} for a in out if a.get("snapped")],
@@ -2138,13 +2327,19 @@ def main(argv=None):
               "previews": [os.path.join(cfg["out_dir"], f"preview_p{p}.png") for p in cfg["preview_pages"]]}
 
     if args.apply:
+        accepted = {k.strip() for k in args.accept.split(",") if k.strip()}
+        blocking = [w for w in report["style_warnings"] if w["kind"] not in accepted | ADVISORY_STYLE]
         blockers = []
         if missed and not args.allow_missed:
             blockers.append("some phrases could not be located; correct them or pass --allow-missed")
-        if report["style_warnings"] and not args.allow_warnings:
-            blockers.append("style warnings are reported; correct them or pass --allow-warnings")
-        if report["layout_warnings"] and not args.allow_warnings:
-            blockers.append("layout warnings are reported; move, shorten or drop those notes, or pass --allow-warnings")
+        if blocking and not args.allow_warnings:
+            blockers.append("style warnings are reported (" + ", ".join(sorted({w["kind"] for w in blocking})) +
+                            "); correct them, or accept a deliberate exception with --accept KIND")
+        if report["layout_warnings"] and not args.allow_warnings and "layout" not in accepted:
+            blockers.append("layout warnings are reported; move, shorten or drop those notes, or pass --accept layout")
+        if unread:
+            blockers.append(f"the annotations already on the attachment could not be read ({unread}); run again when Zotero "
+                            "answers, or pass --ignore-existing")
         if blockers:
             report["applied"] = False
             report["apply_error"] = "; ".join(blockers)
@@ -2162,6 +2357,11 @@ def main(argv=None):
             report["applied"] = False
             if res is not None:
                 report["result"] = res
+                if res.get("createdKeys") or res.get("noteKeys"):   # the keys go to a file; the report keeps counts
+                    keys_path = os.path.join(cfg["out_dir"], "applied_keys.json")
+                    json.dump({"createdKeys": res.get("createdKeys", []), "noteKeys": res.get("noteKeys", [])},
+                              open(keys_path, "w", encoding="utf8"), indent=1)
+                    report["result"] = dict({k: v for k, v in res.items() if k not in ("createdKeys", "noteKeys")}, keys=keys_path)
             if res and res.get("ok"):
                 try:
                     lst = api_list(cfg, handle) if name == "api" else bridge_list(cfg)[0]
@@ -2185,10 +2385,13 @@ def main(argv=None):
                     report["fallback"] = "execute the generated file in Zotero: Tools -> Developer -> Run JavaScript (Run as async function): " + js_path
     pdf_after = _sha256(cfg["pdf"])
     report["pdf_sha256"] = {"before": pdf_before, "after": pdf_after, "unchanged": pdf_before == pdf_after}
+    for key in ("applied", "apply_error", "fallback"):   # the outcome comes last, where the end of the output shows it
+        if key in report:
+            report[key] = report.pop(key)
     print(json.dumps(report, ensure_ascii=False, indent=1))
     if missed or (args.apply and not report.get("applied")):
         sys.exit(2)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

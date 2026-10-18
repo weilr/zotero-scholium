@@ -49,7 +49,7 @@ Inside the skill the same file is `skills/zotero-scholium/scripts/scholium.py`; 
    }
    ```
 
-   Include only the requested output types. Use a separate `out_dir` for each paper, such as `out/<ATTACHMENT_KEY>`, and place its sentence and note files there. Set `cleanup: true` only for a complete redo; for added notes, margin remarks or a selected scope, set `cleanup: false`.
+   Include only the requested output types. Use a separate `out_dir` for each paper, such as `out/<ATTACHMENT_KEY>`, and place its sentence and note files there. Set `cleanup: true` only for a complete redo; without it a run only adds (added notes, margin remarks, a selected scope). For a redo with a reading note, `note_replace: true` moves the tool's earlier notes to the trash.
 
 4. **Generate, review, and apply.** Run without `--apply` first, review all four warning fields below and correct the configuration before applying.
 
@@ -59,7 +59,7 @@ Inside the skill the same file is `skills/zotero-scholium/scripts/scholium.py`; 
    scholium --config config.json --list     # counts, the annotations that are not the tool's own, note titles (--full: everything)
    ```
 
-   Every run writes `annotations.json`, a fallback `create_annotations.js`, and `preview_p<N>.png` for the configured pages, and reports `missed` entries (each with the closest passage found on the page), `style_warnings`, `translation_warnings`, `layout_warnings`, and the PDF's hash before and after. `--apply` refuses to write while `missed`, `style_warnings` or `layout_warnings` is non-empty (`--allow-missed`, `--allow-warnings`).
+   Every run writes `annotations.json`, a fallback `create_annotations.js`, and `preview_p<N>.png` for the configured pages, and reports `missed` entries (each with the closest passage found on the page), `style_warnings`, `translation_warnings`, `layout_warnings`, and the PDF's hash before and after. `--apply` refuses to write while `missed`, `style_warnings` (other than `core_count`) or `layout_warnings` is non-empty (`--accept KIND`, `--allow-missed`, `--allow-warnings`).
 
 [`examples/direct_api_example.py`](../examples/direct_api_example.py) demonstrates the underlying Zotero 10 local API calls in approximately thirty lines for use in other applications.
 

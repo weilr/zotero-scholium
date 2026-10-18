@@ -153,14 +153,15 @@ which listens on localhost only):
 | Endpoint | Purpose |
 |---|---|
 | `GET /scholium-bridge/ping` | returns `{ok, version, dataDir}`; no token required |
-| `POST /scholium-bridge/list` | lists the annotations of one attachment and the child notes of its parent item |
-| `POST /scholium-bridge/apply` | deletes annotations previously created by the tool, then creates highlights, text annotations, and optionally a child note |
+| `POST /scholium-bridge/list` | lists the annotations of one attachment and the child notes of its parent item, with their tags |
+| `POST /scholium-bridge/apply` | writes a child note (unless a note of the tool has the same text), then, in one transaction, creates highlights and text annotations and, with `cleanup`, deletes those the tool created earlier; with `note.trashOwn`, moves the tool's earlier notes to the trash |
 
 Requests must carry the header `X-Annotate-Token`, whose value is the content of
 `<Zotero data directory>/scholium-bridge.token`, a random string written by the plugin on first
 start. The endpoints accept **data only**; no code is evaluated. The `apply` endpoint can create
-annotations and notes, and can delete only annotations that carry the tool's tag, or, when
-`cleanupExternal: true` is passed explicitly, annotations that Zotero imported from the PDF file.
+annotations and notes, can delete only annotations that carry the tool's tag, or, when
+`cleanupExternal: true` is passed explicitly, annotations that Zotero imported from the PDF file, and
+can move to the trash only notes that carry the tool's tag.
 
 ## Installation
 

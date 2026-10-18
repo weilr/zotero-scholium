@@ -91,7 +91,7 @@ def test_status_shows_the_pdfs_annotations_and_notes(zotero, capsys, tmp_path):
     for key in ("I1", "A1"):                 # from the item or from one of its PDFs
         out, code = run(capsys, "status", key)
         assert code == 0
-        assert out["item"] == {"key": "I1", "title": "Paper One", "year": "2025"}
+        assert out["item"] == {"key": "I1", "title": "Paper One", "year": "2025", "date": "2025-03-01"}
         a1, a2 = out["pdfs"]
         assert a1 == {"key": "A1", "file": os.path.join(str(tmp_path), "storage", "A1", "one.pdf"), "exists": True, "own": 4, "others": 1,
                       "own_by_type": {"highlight": 3, "text": 1}, "own_by_color": {"#ff6666": 2, "#ffd400": 1, "#1a73e8": 1}}

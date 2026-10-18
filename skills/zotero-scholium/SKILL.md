@@ -1,6 +1,6 @@
 ---
 name: zotero-scholium
-description: "Use when the user asks to highlight, translate key sentences, or write annotations, margin notes or reading notes back to a paper in their Zotero library. Excludes summaries that are not written back to Zotero."
+description: "Use when the user asks to highlight, translate key sentences, or write annotations, margin notes, page summaries or reading notes back to a paper in their Zotero library, or to redo, extend or correct such annotations. Excludes summaries that are not written back to Zotero."
 ---
 
 # Zotero paper annotation (native annotations and reading note)
@@ -11,7 +11,7 @@ Create only the output types and paper scope the user requests. Current instruct
 
 | Output | Form | Rules |
 |---|---|---|
-| Key-sentence highlights | native `highlight` annotations | The comment is a translation of the sentence into the user's language, not an interpretation. Default colours: `#ff6666` (red) for *core* statements — the enumerated contributions, headline results, the central claim (about 10–15 per paper); `#ffd400` (yellow) for *other* points — method details, setup, limitations, useful observations (about 20–30). Colours are not assigned by topic. |
+| Key-sentence highlights | native `highlight` annotations | The comment is a translation of the sentence into the user's language, not an interpretation. Default colours: `#ff6666` (red) for *core* statements — the enumerated contributions, headline results, the central claim (about 10–15 per paper); `#ffd400` (yellow) for *other* points — method details, setup, limitations, useful observations. Colours are not assigned by topic. |
 | Margin notes | native `text` annotations in the page margin beside the paragraph | Blue `#1a73e8`, 8 pt, no hard line breaks. At most one per paragraph, one or two sentences, a reader's own remark. |
 | Page summary | `text` annotation across the top of page 1 (`place: "top"`) | Only when the profile or the user asks for it: three or four sentences, `font_size` 9. |
 | Reading note | child note (HTML) under the item | What a researcher records after reading: assessments, open questions, specific figures. |
@@ -21,15 +21,15 @@ Sticky notes (`kind: "note"`) only when the profile shows that habit or the user
 
 ## Requirements
 
-`scripts/scholium.py` needs Python 3.9 or later and PyMuPDF (`import pymupdf`; if missing, ask the user to run `pip install pymupdf`). Zotero must be running. The write channel (local API on Zotero 10, the bridge plugin on 7–9, a JavaScript file as fallback) is selected automatically: `references/backends.md`.
+`scripts/scholium.py` needs Python 3.9 or later and PyMuPDF (if missing, ask the user to run `pip install -U pymupdf`). Zotero must be running. The write channel (local API on Zotero 10, the bridge plugin on 7–9, a JavaScript file as fallback) is selected automatically: `references/backends.md`.
 
 ## Workflow
 
-Run `python <skill dir>/scripts/scholium.py …` from any directory. Use a separate `<out_dir>` for each attachment, e.g. `out/<ATTACHMENT_KEY>`.
+Run `python <skill dir>/scripts/scholium.py …` from any directory. Use a separate `<out_dir>` for each attachment, e.g. `out/<ATTACHMENT_KEY>`, and keep every file you write for the paper there. Write files with your file-writing tool, not a shell here-document.
 
 ### 0. Profile
 
-Read `<Zotero data dir>/zotero-scholium/profile.md` (`scholium.py profile --path` prints the location). Its `## User's rules (always win)` section overrides the learned statistics, and both override the defaults above. If the file does not exist, run `scholium.py profile --from-library`, complete the draft with the user, and record their corrections in that section. Details: `references/profile.md`. When the profile or the user asks to follow the style of earlier annotations, `scholium.py samples [KEY …] [--query WORDS] --exclude <this paper's key>` prints a few highlights, margin texts and the start of the reading note of each such paper; do not dump annotations or notes through the API.
+Read the profile; `scholium.py profile --path` prints the path of `profile.md`. Its `## User's rules (always win)` section overrides the learned statistics, and both override the defaults above. If the file does not exist, run `scholium.py profile --from-library`, complete the draft with the user, and record their corrections in that section. Details: `references/profile.md`. When the profile or the user asks to follow the style of earlier annotations, `scholium.py samples [KEY …] [--query WORDS] --exclude <this paper's key>` prints a few highlights, margin texts and the start of the reading note of each such paper; do not dump annotations or notes through the API.
 
 ### 1. Locate the item and the PDF (read-only)
 
@@ -37,23 +37,23 @@ Read `<Zotero data dir>/zotero-scholium/profile.md` (`scholium.py profile --path
 python <skill dir>/scripts/scholium.py status --query "<title words>"   # matching items and their keys
 python <skill dir>/scripts/scholium.py status <ITEM_KEY>                # the paper's current state
 ```
-`status` lists the item's PDF attachments with their file paths, the annotations already on each (the tool's own by type and colour, and the user's), and the notes under the item (title, length, whether the tool wrote them). Prefer the published version over a preprint. An error saying Zotero does not answer: ask the user to start it; "Local API is not enabled": ask the user to turn on Settings → Advanced → *Allow other applications on this computer to communicate with Zotero*.
+`status` gives the item's authors, date, venue, DOI and URL (for the note's citation), its PDF attachments with their file paths and the annotations already on each (the tool's own by type and colour, and the user's), and the notes under the item (title, length, whether the tool wrote them). Prefer the published version over a preprint. An error saying Zotero does not answer: ask the user to start it; "Local API is not enabled": ask the user to turn on Settings → Advanced → *Allow other applications on this computer to communicate with Zotero*.
 
 ### 2. Read the paper once, then write the configuration
 
 ```bash
 python <skill dir>/scripts/scholium.py extract --pdf <pdf> --sentences <out_dir>/sentences.json --out <out_dir>/sentences.txt
 ```
-For a whole-paper task, read `sentences.txt` in full, appendices included; for a selected scope, read that scope with enough context. It contains page markers, headings and numbered sentences grouped by paragraph; headers, footers and bibliography are removed. Use `--pages N-M` if output is truncated. Do not also read the PDF or full-text cache.
+For a whole-paper task, read `sentences.txt` in full, appendices included; for a selected scope, read that scope with enough context. It contains page markers, headings and numbered sentences grouped by paragraph; headers, footers and bibliography are removed. The command prints the file's length; when one read cannot hold it, issue reads of consecutive line ranges together in one response. Do not also read the PDF or full-text cache.
 
 Extraction creates output directories and binds `sentences.json` to the PDF's SHA-256. Re-extract old caches without a fingerprint, or after replacing the PDF. If an id is reported as ambiguous, check the page's matching passages and set `occurrence` explicitly; do not guess a position.
 
-Write one configuration from `examples/config.template.json`, including only requested outputs. Set `cleanup: true` only for a complete redo; use `cleanup: false` when adding notes, margin remarks or annotations within a selected scope. Keep `note_replace: false`.
+Write one configuration from `examples/config.template.json`, including only requested outputs; unknown keys are refused. Without `cleanup` a run only adds. Set `cleanup: true` only for a complete redo: the tool's earlier annotations on the PDF are then replaced (the report's `cleanup_removes` counts them). For a redo that writes a reading note, `note_replace: true` moves the tool's earlier notes to the trash once the new one is written; the user's notes are never touched.
 
 - `highlights[]`: `id` (one sentence) or `ids: [first, last]` (consecutive sentences on one page), `core`, and `comment` (the translation). Core: the contributions enumerated in the introduction, the main claim of the abstract, the first quantitative sentence of each results subsection, the summary sentence of the conclusion. Each sentence at most once.
 - `summaries[]`: `id` (a sentence of the paragraph) and `text`; omit paragraphs with nothing substantive to say.
 - `note_html`: the reading note (template: `examples/reading_note.template.html`).
-- Use the profile's `banned_phrases`; use its `core_range` for whole-paper highlighting, adjusting or omitting it for a limited scope. `sentences` is the JSON written above (default `<out_dir>/sentences.json`). Other fields and defaults: `references/configuration.md`.
+- Take banned phrases and the expected number of core highlights from the profile's rules (`banned_phrases`, `core_range`); adjust or omit `core_range` for a limited scope. `sentences` is the JSON written above (default `<out_dir>/sentences.json`). Other fields and defaults: `references/configuration.md`.
 
 ### 3. Review the report, then apply
 
@@ -61,10 +61,10 @@ Write one configuration from `examples/config.template.json`, including only req
 python <skill dir>/scripts/scholium.py --config <config.json>
 python <skill dir>/scripts/scholium.py --config <config.json> --apply
 ```
-First run without `--apply`. Review the report and correct the configuration before running with `--apply`; this is a quality check, not another request for write permission. `--apply` resolves ids, lays out annotations, checks, writes and reads back. It refuses to write while `missed`, `style_warnings` or `layout_warnings` is non-empty.
+First run without `--apply`. Review the report and correct the configuration; this is a quality check, not another request for write permission. After small corrections `--apply` may follow directly: it refuses to write while `missed`, `style_warnings` or `layout_warnings` holds a blocking finding, and its outcome is the last field of its output.
 
 - `missed`: unknown ids, or phrases not found (each with the closest passage, `closest`).
-- `style_warnings`: formatting, banned phrases, duplicate or overlapping highlights, core count or note math issues; kinds are listed in `references/configuration.md`.
+- `style_warnings`: formatting, banned phrases, duplicate or overlapping highlights, text the tool already wrote on the page (`duplicate_existing`), note math; kinds in `references/configuration.md`. `core_count` only informs. For a deliberate exception the user asked for, `--accept KIND` lets that kind through.
 - `translation_warnings`: a comment with terms or numbers absent from the sentence, or much longer or shorter than it. Correct the translation or extend the highlight to cover its source.
 - `layout_warnings`: a margin box without free space: move the note to a neighbouring paragraph or drop it. A top or bottom band without room: the warning gives how many characters fit at its font size and, when one exists, a smaller font size that fits all of it; shorten the text to that length or set that font size. Open a preview PNG only for a margin box, and only that page.
 - `colors`, `ambiguous_matches`, `existing_annotations`, `pdf_sha256`, `now_in_zotero`: `references/configuration.md`.
@@ -73,7 +73,7 @@ The report names each problem and what to change; reading `scholium.py`'s source
 
 After successful apply, ask the user to close and reopen the PDF. `applied: false` names the cause in `apply_error` (`references/backends.md`). If a write partially succeeded or read-back failed, run `--list` to reconcile the stored items before retrying. Do not re-read `annotations.json` or the configuration: the comments are already in your context.
 
-With `cleanup: true`, repeated runs replace only annotations carrying the tool's current or legacy tags, never untagged annotations with identical content. Notes receive versioned titles. Iterate by editing the configuration; never edit the generated JavaScript.
+Only annotations carrying the tool's current or legacy tags are ever replaced, never untagged ones with identical content. A note with the same title as an existing one gets a versioned title. Iterate by editing the configuration; never edit the generated JavaScript.
 
 ## Batch runs
 

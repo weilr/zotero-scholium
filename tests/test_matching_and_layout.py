@@ -843,7 +843,7 @@ def test_style_warnings_flag_mechanical_defects(pdf_path, tmp_path):
     note.write_text('<h1>T</h1><p>inline <span class="math">$\\\\frac{a}{b}$</span>, raw $y^2$ here, 值得注意</p>', encoding="utf8")
     cfg = dict(cli.DEFAULTS)
     cfg.update({"pdf": pdf_path, "item_key": "I", "attachment_key": "A", "out_dir": str(tmp_path), "preview_pages": [],
-                "note_html": str(note), "core_range": [2, 3], "banned_phrases": ["值得注意"],
+                "note_html": str(note), "core_range": [2, 3], "banned_phrases": ["值得注意"], "cleanup": True,
                 "highlights": [
                     {"page": 1, "core": True, "text": "Foundation models have transformed machine learning", "comment": "基础模型 $x^2$ 改变了机器学习"},
                     {"page": 1, "core": False, "text": "Data heterogeneity and unstable long-term dynamics", "comment": "QK^T 与 10−3 不稳定"},

@@ -50,8 +50,10 @@ Every annotation and note created by the tool carries the tag `zotero-scholium`.
 used the tags `zotero-marginalia` and `zotero-paper-annotate`; all three are recognised. On a repeated run the tool deletes only
 annotations that carry one of these tags, after the new ones have been created; identical content alone
 does not establish ownership. Annotations that Zotero imported from the PDF file stay unless
-`cleanup_external` is set. Existing child notes are never deleted; if a note with the same title prefix
-exists, the new note receives a versioned title (`… (v2, 2026-08-26)`).
+`cleanup_external` is set. The user's child notes are never touched; if a note with the same title prefix
+exists, the new note receives a versioned title (`… (v2, 2026-08-26)`), and a note of the tool with the
+same text is not written again. With `note_replace` the tool's earlier notes go to Zotero's trash after the
+new one is written.
 
 ## Margin layout
 

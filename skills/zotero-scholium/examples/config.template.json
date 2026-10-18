@@ -9,7 +9,7 @@
   "preview_pages": [
     1
   ],
-  "cleanup": true,
+  "cleanup": false,
   "core_range": [10, 15],
   "banned_phrases": [],
   "highlights": [

@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+- `cleanup` is off by default: a run only adds unless the configuration sets `cleanup: true` for a
+  complete redo, and the dry-run report counts what that would delete (`cleanup_removes`). Without
+  cleanup, text the tool already wrote on the same page is a blocking `duplicate_existing` warning, and
+  `--apply` does not write when the annotations already on the attachment could not be read. A redo
+  started from the Scholium section names `cleanup: true` in its prompt.
+- `note_replace: true` moves the tool's earlier notes under the item to Zotero's trash once the new note
+  is written (only those whose title starts with `note_title_prefix`, when it is set); notes without the
+  tool's tags are never touched. A note of the tool with the same text is not written again. The local
+  API, the JavaScript file and the plugin do this; the plugin's request takes `trashOwn` and
+  `trashTitlePrefix`.
+- `core_count` informs without blocking `--apply`; `--accept KIND[,KIND]` lets chosen style warning
+  kinds (and `layout`) through.
+- Unknown configuration keys, unknown levels and highlight types other than highlight and underline
+  end the run with the nearest valid key. A configuration or note written with a byte-order mark is
+  read.
+- The report ends with `applied`, `apply_error` and `fallback`; the created keys go to
+  `<out_dir>/applied_keys.json` (`result.keys`). `--list` and the dry run report a failed read of the
+  attachment instead of a traceback, and `profile --from-library` one of the library.
+- `profile --path` prints the path of `profile.md` (`--json` for the earlier details). `status` gives
+  the authors, date, venue, DOI and URL. `extract` prints the length of its listing in lines.
+- The JavaScript fallback says why each write channel was unavailable. Without PyMuPDF, the commands
+  that need it say how to install it; PyMuPDF before 1.24 (`fitz`) is used too.
+- SKILL.md: the new defaults and options; files are written with the file tool into `out_dir`;
+  `--apply` may follow small corrections directly; the description covers redoing, extending and
+  correcting annotations.
+
 ## 0.1.8 (2026-10-16)
 
 - The Scholium section shows the agent's messages as they are written (Claude Code's partial

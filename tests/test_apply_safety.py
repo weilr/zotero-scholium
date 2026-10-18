@@ -70,7 +70,7 @@ def test_cleanup_preserves_untagged_annotations_even_when_content_matches(commen
         annotation("OWN", ["zotero-scholium"]),
         annotation("LEGACY", [next(iter(cli.LEGACY_TAGS))]),
     ])
-    result = cli.api_apply(config(), [dict(HIGHLIGHT, comment=comment)], api)
+    result = cli.api_apply(config(cleanup=True), [dict(HIGHLIGHT, comment=comment)], api)
     assert set(api.rows) == {"USER_EMPTY", "USER_SAME", "NEW1"}
     assert result["removed"] == 2 and result["ok"]
 
@@ -141,7 +141,9 @@ def test_main_reports_readback_error_after_writing(tmp_path, monkeypatch, capsys
     code, report = run_main(tmp_path, monkeypatch, capsys, MemoryApi(readback_error=True))
     assert code == 2 and report["applied"] is False
     assert "read-back unavailable" in report["apply_error"]
-    assert report["result"]["createdKeys"] == ["NEW1"]
+    assert "createdKeys" not in report["result"], "the keys go to a file, not into the report"
+    keys = json.loads(open(report["result"]["keys"], encoding="utf8").read())
+    assert keys["createdKeys"] == ["NEW1"]
 
 
 def test_main_reports_verified_annotation_and_note(tmp_path, monkeypatch, capsys):

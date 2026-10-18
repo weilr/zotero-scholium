@@ -2113,7 +2113,7 @@ def test_existing_annotations_need_confirmation(facts):
     assert facts["refused"]["calls"] == 0
     assert "2 条" in facts["refused"]["confirms"][0] and "1 篇" in facts["refused"]["confirms"][0]
     assert facts["redo"]["calls"] == 1
-    assert "already carries 1 annotations of this tool; the user confirmed a complete redo" in facts["redo"]["prompt"]
+    assert "already carries 1 annotations of this tool; the user confirmed a complete redo (cleanup: true in the configuration)" in facts["redo"]["prompt"]
 
 
 def test_failure_and_cancel_are_reported(facts):

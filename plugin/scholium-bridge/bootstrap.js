@@ -70,7 +70,7 @@ var ScholiumBridge = {
     const anns = att.getAnnotations(true).map(a => this.summarize(a));
     const notes = [];
     const parent = att.parentID ? Zotero.Items.get(att.parentID) : null;
-    if (parent) for (const n of Zotero.Items.get(parent.getNotes())) notes.push({ key: n.key, title: n.getNoteTitle() });
+    if (parent) for (const n of Zotero.Items.get(parent.getNotes())) notes.push({ key: n.key, title: n.getNoteTitle(), tags: n.getTags().map(t => t.tag) });
     return { ok: true, attachmentKey: att.key, parentKey: parent ? parent.key : null, annotations: anns, notes };
   },
 
@@ -97,20 +97,24 @@ var ScholiumBridge = {
       }
     }
 
-    // (1) child note. With note.replace = true, existing child notes whose title starts with titlePrefix are
-    //     deleted first (intended only for notes this tool created under that title; the option is opt-in).
-    let noteCreated = false, noteSkipped = false, notesRemoved = 0;
+    // (1) child note. A note of this tool with the same text is not written again, nor one with the same title.
+    //     With note.trashOwn, the tool's other notes (titles starting with trashTitlePrefix, when given) go to the
+    //     trash once everything is written; notes without the tool's tags are never touched.
+    let noteCreated = false, noteSkipped = false, notesTrashed = 0;
+    const trash = [];
     if (data.note && data.note.html && parent) {
       const prefix = data.note.titlePrefix || "";
-      let existingNotes = Zotero.Items.get(parent.getNotes());
-      if (prefix && data.note.replace) {
-        for (const n of existingNotes) {
-          if ((n.getNoteTitle() || "").startsWith(prefix)) { await n.eraseTx(); notesRemoved++; }
-        }
-        existingNotes = Zotero.Items.get(parent.getNotes());
+      const body = html => String(html || "").replace(/<h1[^>]*>[\s\S]*?<\/h1>/i, " ").replace(/<[^>]+>/g, " ")
+        .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+        .replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+      const existingNotes = Zotero.Items.get(parent.getNotes());
+      const own = n => n.getTags().some(t => ownTags.has(t.tag));
+      const same = existingNotes.find(n => own(n) && body(n.getNote()) === body(data.note.html));
+      if (data.note.trashOwn) {
+        const only = data.note.trashTitlePrefix || "";
+        for (const n of existingNotes) if (own(n) && n !== same && (n.getNoteTitle() || "").startsWith(only)) trash.push(n.id);
       }
-      const existing = existingNotes.map(n => n.getNoteTitle());
-      if (prefix && existing.some(t => t && t.startsWith(prefix))) {
+      if (same || (prefix && existingNotes.some(n => !trash.includes(n.id) && (n.getNoteTitle() || "").startsWith(prefix)))) {
         noteSkipped = true;
       } else {
         const note = new Zotero.Item("note");
@@ -149,7 +153,8 @@ var ScholiumBridge = {
       }
       for (const a of old) await a.erase();
     });
-    return { ok: true, removed: old.length, kept, noteCreated, noteSkipped, notesRemoved, created };
+    if (trash.length) { await Zotero.Items.trashTx(trash); notesTrashed = trash.length; }
+    return { ok: true, removed: old.length, kept, noteCreated, noteSkipped, notesTrashed, created };
   },
 
   register() {
@@ -738,7 +743,7 @@ var ScholiumRunner = {
         `- 输出目录：${outDir}`,
         "",
         "这是从 Zotero 里一键启动的无人值守任务：不要向用户提问，不要启动子代理，由你独立完成第 1–3 步并写入 Zotero。",
-        own ? `这篇论文已有 ${own} 条本工具的注释，用户已确认整篇重做。` : "这篇论文目前没有本工具的注释。",
+        own ? `这篇论文已有 ${own} 条本工具的注释，用户已确认整篇重做（配置里设 cleanup: true）。` : "这篇论文目前没有本工具的注释。",
         ...(job.extra ? ["", "用户的附加要求：", job.extra] : []),
         "",
         "结束时最后一行只写一句：高亮 N 条（核心 M 条），页边批注 K 条，笔记标题，剩余警告。",
@@ -753,7 +758,7 @@ var ScholiumRunner = {
       `- Output directory: ${outDir}`,
       "",
       "This is an unattended task started from Zotero with one click: do not ask the user anything and do not start sub-agents; complete steps 1-3 yourself and write to Zotero.",
-      own ? `The paper already carries ${own} annotations of this tool; the user confirmed a complete redo.` : "The paper carries no annotations of this tool yet.",
+      own ? `The paper already carries ${own} annotations of this tool; the user confirmed a complete redo (cleanup: true in the configuration).` : "The paper carries no annotations of this tool yet.",
       ...(job.extra ? ["", "The user's extra instructions:", job.extra] : []),
       "",
       "End with one line only: N highlights (M core), K margin notes, the note title, remaining warnings.",
