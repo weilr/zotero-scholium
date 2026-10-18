@@ -76,7 +76,7 @@ You need Zotero 7 or later with its local API turned on (Settings → Advanced �
    npx skills add weilr/zotero-scholium -g -y
    ```
 3. Download [`scholium-bridge.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium-bridge.xpi) and install it in Zotero: Tools → Plugins → ⚙ → Install Plugin From File.
-4. Select a paper, open the **Scholium** section and press **Annotate**. On Zotero 10, choose *Always Allow* when Zotero asks whether the tool may write.
+4. Select a paper, open the **Scholium** section and press **Annotate**.
 
 ### From your agent
 
@@ -88,7 +88,7 @@ Highlight the key claims of "Direct Preference Optimization" with translations a
 Write a reading note for "Direct Preference Optimization"
 ```
 
-Close and reopen the PDF afterwards to see the result.
+Close and reopen the PDF afterwards to see the result. Without the plugin, Zotero 10 asks once whether the tool may write: choose *Always Allow*.
 
 <details>
 <summary>Other ways to install the skill, and updating</summary>
@@ -118,7 +118,7 @@ flowchart LR
     E --> F["native annotations<br/>and a child note"]
 ```
 
-The agent only picks sentence numbers and writes the text. The tool finds the exact words and their position on the page, places each margin note beside its paragraph where there is room, and writes everything through Zotero 10's local API, or the bundled plugin on Zotero 7–9.
+The agent only picks sentence numbers and writes the text. The tool finds the exact words and their position on the page, places each margin note beside its paragraph where there is room, and writes everything through the bundled plugin, or through Zotero 10's local API without it.
 
 More in [docs/design.md](docs/design.md) (data model, write channels, repeated runs) and [references/configuration.md](skills/zotero-scholium/references/configuration.md) (every option and report field).
 

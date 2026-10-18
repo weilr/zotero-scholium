@@ -242,6 +242,58 @@ def test_the_javascript_fallback_names_why_each_channel_was_unavailable(monkeypa
     assert why.count("Zotero is not running") == 1
 
 
+def test_auto_writes_through_a_recent_plugin_and_otherwise_through_the_local_api(monkeypatch):
+    monkeypatch.setattr(cli, "zotero_version", lambda: ("10.0.6", "SID"))
+    for plugin, expected in (("0.1.9", "bridge"), ("0.2.0.10200001", "bridge"), ("0.1.8", "api"), (None, "api")):
+        listing = {"ok": True, "annotations": [], "notes": []}
+        if plugin:
+            listing["version"] = plugin
+        monkeypatch.setattr(cli, "bridge_connect", lambda cfg, listing=listing: ("TOKEN", listing))
+        name, handle, why = cli.pick_backend("auto", {})
+        assert name == expected, plugin
+        assert (handle, why) == ("TOKEN", f"scholium-bridge plugin {plugin}") if expected == "bridge" else why.startswith("Zotero 10.0.6")
+    # on Zotero 9 an older plugin is the only write channel
+    monkeypatch.setattr(cli, "zotero_version", lambda: ("9.0.1", "SID"))
+    assert cli.pick_backend("auto", {})[0] == "bridge"
+    monkeypatch.setattr(cli, "bridge_connect", lambda cfg: pytest.fail("the plugin is not asked when the local API is requested"))
+    monkeypatch.setattr(cli, "zotero_version", lambda: ("10.0.6", "SID"))
+    assert cli.pick_backend("api", {})[0] == "api"
+
+
+def test_the_plugins_keys_are_kept_and_checked_after_writing(paper, monkeypatch, capsys):
+    hl = [{"page": 1, "text": SENTENCE, "comment": "该方法提升了结果。"}]
+    monkeypatch.setattr(cli, "pick_backend", lambda *a: ("bridge", "TOKEN", "scholium-bridge plugin 0.1.9"))
+    listing = {"ok": True, "version": "0.1.9", "annotations": [], "notes": []}
+    monkeypatch.setattr(cli, "bridge_list", lambda cfg: (listing, None))
+    result = {"ok": True, "removed": 0, "kept": 0, "noteCreated": False, "created": {"highlight": 1}, "createdKeys": ["NEW1"], "noteKeys": []}
+    monkeypatch.setattr(cli, "bridge_apply", lambda cfg, out: (result, None))
+    listing["annotations"] = [{"key": "NEW1", "tags": ["zotero-scholium"]}]
+    code, report = run(paper, monkeypatch, capsys, {"highlights": hl}, "--apply", "--ignore-existing")
+    assert code == 0 and report["applied"] is True and report["verification"] == {"missing_annotations": [], "missing_notes": []}
+    tmp, _ = paper
+    assert json.loads((tmp / "out" / "applied_keys.json").read_text(encoding="utf8"))["createdKeys"] == ["NEW1"]
+    listing["annotations"] = []
+    code, report = run(paper, monkeypatch, capsys, {"highlights": hl}, "--apply", "--ignore-existing")
+    assert code == 2 and report["verification"]["missing_annotations"] == ["NEW1"] and "verification failed" in report["apply_error"]
+    # a plugin before 0.1.9 returns no keys: its write is checked by the listing alone
+    del result["createdKeys"], result["noteKeys"]
+    code, report = run(paper, monkeypatch, capsys, {"highlights": hl}, "--apply", "--ignore-existing")
+    assert code == 0 and report["applied"] is True and "verification" not in report
+
+
+def test_an_older_plugin_says_it_left_the_earlier_notes(tmp_path, monkeypatch):
+    note = tmp_path / "note.html"
+    note.write_text("<h1>Paper</h1><p>New.</p>", encoding="utf8")
+    monkeypatch.setattr(cli, "bridge_connect", lambda c: ("TOKEN", {"ok": True, "annotations": [], "notes": []}))
+    answer = {"ok": True, "removed": 0, "kept": 0, "noteCreated": True, "created": {}}   # a plugin before 0.1.9
+    monkeypatch.setattr(cli, "http", lambda *a, **k: (200, {}, json.dumps(answer)))
+    res, err = cli.bridge_apply(cfg(note_html=str(note), note_replace=True), [])
+    assert err is None and "update the plugin" in res["noteReplace"]
+    answer["notesTrashed"] = 1
+    res, err = cli.bridge_apply(cfg(note_html=str(note), note_replace=True), [])
+    assert "noteReplace" not in res
+
+
 def test_status_gives_what_a_citation_line_needs():
     item = {"key": "I1", "data": {"title": "A Paper", "date": "2025-03-01", "proceedingsTitle": "ICLR 2025", "DOI": "10.1/x",
                                   "url": "https://x.org", "creators": [{"creatorType": "author", "firstName": "Ada", "lastName": "Lovelace"},

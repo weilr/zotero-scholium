@@ -76,7 +76,7 @@
    npx skills add weilr/zotero-scholium -g -y
    ```
 3. 下载 [`scholium-bridge.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium-bridge.xpi)，在 Zotero 中安装：工具 → 插件 → ⚙ → 从文件安装插件。
-4. 选中一篇论文，打开 **Scholium** 区块，点 **批注这篇**。Zotero 10 首次写入时会询问是否允许，选「始终允许」。
+4. 选中一篇论文，打开 **Scholium** 区块，点 **批注这篇**。
 
 ### 在代理对话里使用
 
@@ -88,7 +88,7 @@
 为《Direct Preference Optimization》写一篇阅读笔记
 ```
 
-完成后关闭并重新打开 PDF 即可看到结果。
+完成后关闭并重新打开 PDF 即可看到结果。没装插件时，Zotero 10 首次写入会询问是否允许，选「始终允许」。
 
 <details>
 <summary>其他安装方式与更新</summary>
@@ -118,7 +118,7 @@ flowchart LR
     E --> F["原生注释<br/>与子笔记"]
 ```
 
-代理只需挑句子编号、写内容。原文在页面上的准确位置、页边批注放在段落旁哪块空白，都由工具算出；最后通过 Zotero 10 的本地 API（Zotero 7–9 通过随附插件）写入。
+代理只需挑句子编号、写内容。原文在页面上的准确位置、页边批注放在段落旁哪块空白，都由工具算出；最后通过随附插件写入，没装插件时用 Zotero 10 的本地 API。
 
 详见 [docs/design.md](docs/design.md)（数据模型、写入通道、重复运行）和 [references/configuration.md](skills/zotero-scholium/references/configuration.md)（全部选项与报告字段），两者均为英文。
 

@@ -42,6 +42,11 @@
   sentences and headings of the paper are unchanged.
 - A sentence range that crosses a heading names the heading and the sentence after which to split it.
   A sentence whose text is not found on its page no longer suggests running `extract` again.
+- `--apply` writes through the scholium-bridge plugin when it is 0.1.9 or later, without an authorisation
+  dialog, the annotations in one transaction (the local API saves each item on its own); otherwise
+  through the local API as before. The plugin returns the keys it wrote, which go to `applied_keys.json`
+  and are checked on read-back, and names its version in `list`. Through a plugin before 0.1.9,
+  `note_replace` is not done and `result.noteReplace` says so.
 
 ## 0.1.8 (2026-10-16)
 

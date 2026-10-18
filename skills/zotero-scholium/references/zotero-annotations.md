@@ -15,7 +15,7 @@
 | `annotationIsExternal` | `true` for annotations Zotero imported from the PDF file (displayed as locked). Not exposed by the local API. |
 | `tags` | `[{"tag": "…"}]`. The tool tags everything it creates with `zotero-scholium`. |
 
-## Official local API write support (Zotero 10 and later; preferred)
+## Official local API write support (Zotero 10 and later; used without the plugin)
 
 Zotero 10.0 (2026-08-17) added write requests to the local API; Zotero 7 to 9 remain read-only.
 
@@ -24,9 +24,9 @@ Zotero 10.0 (2026-08-17) added write requests to the local API; Zotero 7 to 9 re
 3. Every write request carries `Zotero-Server-ID` and `Zotero-API-Key`. `POST /api/users/0/items` accepts an array of at most 50 items and returns `{successful, failed}`. `DELETE /api/users/0/items?itemKey=A,B` requires `If-Unmodified-Since-Version` (taken from the `Last-Modified-Version` header of any GET) and returns 204.
 4. Verified item shapes: `{"itemType":"annotation","parentItem":<attachment key>, …fields above…, "tags":[…]}`; `text` annotations retain `fontSize` and `rotation`. Child note: `{"itemType":"note","parentItem":<item key>,"note":<html>}`. Read back with `GET /api/users/0/items/<attachment key>/children?itemType=annotation`.
 
-## scholium-bridge plugin (Zotero 7 to 9)
+## scholium-bridge plugin (Zotero 7 and later; preferred from plugin 0.1.9)
 
-Endpoints on Zotero's own local server (`http://127.0.0.1:23119`, localhost only): `GET /scholium-bridge/ping`, `POST /scholium-bridge/list {attachmentKey}`, and `POST /scholium-bridge/apply {itemKey, attachmentKey, tag, cleanup, cleanupExternal, annotations[], note{html,titlePrefix,trashOwn,trashTitlePrefix}}`. The header `X-Annotate-Token` must equal the content of `<Zotero data dir>/scholium-bridge.token`, created on first start. The endpoints accept data only; no code is executed. Installation: Tools → Plugins → gear icon → Install Plugin From File. Note for plugin authors: an endpoint's `init` must take exactly one parameter; otherwise Zotero's server treats it as the legacy callback style and never responds.
+Endpoints on Zotero's own local server (`http://127.0.0.1:23119`, localhost only): `GET /scholium-bridge/ping`, `POST /scholium-bridge/list {attachmentKey}` (annotations, notes and the plugin's `version`), and `POST /scholium-bridge/apply {itemKey, attachmentKey, tag, cleanup, cleanupExternal, annotations[], note{html,titlePrefix,trashOwn,trashTitlePrefix}}`, which writes the annotations and removes the old ones in one transaction and returns `createdKeys` and `noteKeys`. The header `X-Annotate-Token` must equal the content of `<Zotero data dir>/scholium-bridge.token`, created on first start. The endpoints accept data only; no code is executed. Installation: Tools → Plugins → gear icon → Install Plugin From File. Note for plugin authors: an endpoint's `init` must take exactly one parameter; otherwise Zotero's server treats it as the legacy callback style and never responds.
 
 Rich text and mathematics: `annotationComment` and `annotationText` render only `<b> <i> <sub> <sup>`; write mathematics in comments with Unicode symbols and these tags. Note HTML renders mathematics through the note editor's KaTeX nodes: `<span class="math">$…$</span>` inline, `<pre class="math">$$…$$</pre>` for display equations.
 

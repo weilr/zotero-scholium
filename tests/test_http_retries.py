@@ -74,7 +74,10 @@ def test_the_js_backend_does_not_ask_zotero(monkeypatch):
     monkeypatch.setattr(cli, "http", lambda method, path, *a, **k: asked.append(path) or (0, {}, "refused"))
     assert cli.pick_backend("js", {})[0] == "js" and asked == []
     cli.pick_backend("auto", {})
-    assert asked[0] == "/api/"
+    assert asked[:2] == ["/scholium-bridge/list", "/api/"]
+    asked.clear()
+    cli.pick_backend("api", {})
+    assert asked == ["/api/"]
 
 
 @pytest.mark.parametrize("status", [0, 500, 503])

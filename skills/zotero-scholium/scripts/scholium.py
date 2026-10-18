@@ -1788,11 +1788,13 @@ def bridge_apply(cfg, out):
     payload = {"itemKey": cfg["item_key"], "attachmentKey": cfg["attachment_key"],
                "cleanup": bool(cfg.get("cleanup", False)), "cleanupExternal": bool(cfg.get("cleanup_external")), "tag": TAG, "legacyTags": sorted(LEGACY_TAGS), "annotations": out,
                "note": {"html": html, "titlePrefix": prefix, "trashOwn": replace, "trashTitlePrefix": only} if html else None}
-    s, h, t = http("POST", "/scholium-bridge/apply", payload, {"X-Annotate-Token": token}, timeout=180)
+    s, h, t = http("POST", "/scholium-bridge/apply", payload, {"X-Annotate-Token": token}, timeout=LocalApi.WRITE_TIMEOUT)
     res = json.loads(t) if s == 200 else {}
     if not res.get("ok"):
         return None, "apply failed (HTTP %s): %s" % (s, t[:200])
     res["backend"] = "bridge"
+    if html and replace and "notesTrashed" not in res:
+        res["noteReplace"] = "not done: plugins before 0.1.9 leave earlier notes in place; update the plugin"
     return res, None
 
 
@@ -2126,9 +2128,20 @@ def _sha256(path):
     return h.hexdigest()
 
 
+BRIDGE_FIRST = (0, 1, 9)   # from this plugin version on, `auto` writes through the plugin: one transaction, keys returned
+
+
+def _version(text):
+    return tuple(int(x) for x in re.findall(r"\d+", str(text or ""))[:3])
+
+
 def pick_backend(requested, cfg):
-    """Return (name, handle, reason). When `auto` falls back to the JavaScript file, the reason names why each
-    write channel was unavailable."""
+    """Return (name, handle, reason). `auto` takes the scholium-bridge plugin when it is recent enough, else the
+    local API on Zotero 10, else an older plugin. When `auto` falls back to the JavaScript file, the reason names
+    why each write channel was unavailable."""
+    bridge = bridge_connect(cfg) if requested in ("auto", "bridge") else None
+    if requested == "auto" and bridge[0] and isinstance(bridge[1], dict) and _version(bridge[1].get("version")) >= BRIDGE_FIRST:
+        return "bridge", bridge[0], f"scholium-bridge plugin {bridge[1]['version']}"
     ver, sid = zotero_version() if requested in ("auto", "api") else (None, None)
     why_not = []
     if requested in ("auto", "api"):
@@ -2145,7 +2158,7 @@ def pick_backend(requested, cfg):
         if requested == "api":
             return None, None, why_not[-1]
     if requested in ("auto", "bridge"):
-        token, info = bridge_connect(cfg)
+        token, info = bridge
         if token:
             return "bridge", token, "scholium-bridge plugin"
         if requested == "bridge":
@@ -2493,11 +2506,11 @@ def main(argv=None):
                     if not lst:
                         raise RuntimeError("read-back unavailable")
                     report["now_in_zotero"] = {"annotations": len(lst["annotations"]), "notes": [n["title"][:70] for n in lst["notes"]]}
-                    if name == "api":
+                    if "createdKeys" in res:   # the local API and plugins from 0.1.9 on return the new keys
                         ann_keys = {a["key"] for a in lst["annotations"]}
                         note_keys = {n["key"] for n in lst["notes"]}
                         verification = {"missing_annotations": sorted(set(res["createdKeys"]) - ann_keys),
-                                        "missing_notes": sorted(set(res["noteKeys"]) - note_keys)}
+                                        "missing_notes": sorted(set(res.get("noteKeys", [])) - note_keys)}
                         report["verification"] = verification
                         if any(verification.values()):
                             raise RuntimeError("new items are missing from read-back")

@@ -5,10 +5,11 @@
  * annotations are hidden. Hiding removes them from the view only; stored items are not changed.
  * One-click annotation (the Scholium section of the item pane): starts the installed Claude Code or
  * Codex in the background for the paper shown (see ScholiumRunner).
- * Endpoints (needed on Zotero 7 to 9 only), on Zotero's built-in local HTTP server (http://127.0.0.1:23119):
+ * Endpoints, on Zotero's built-in local HTTP server (http://127.0.0.1:23119); the tool writes through them
+ * when the plugin is installed, and on Zotero 7 to 9 they are its only write channel:
  *   GET  /scholium-bridge/ping   -> { ok, version, dataDir }                       (no token)
- *   POST /scholium-bridge/list   -> annotations of one attachment                  (token)
- *   POST /scholium-bridge/apply  -> clean up + create annotations / child note     (token)
+ *   POST /scholium-bridge/list   -> annotations and notes of one attachment, the plugin's version (token)
+ *   POST /scholium-bridge/apply  -> clean up + create annotations / child note, the new keys (token)
  * No code is evaluated: requests carry plain data (highlight, text, and note annotations).
  * The token is stored in <Zotero data directory>/scholium-bridge.token (created on first start).
  */
@@ -71,7 +72,7 @@ var ScholiumBridge = {
     const notes = [];
     const parent = att.parentID ? Zotero.Items.get(att.parentID) : null;
     if (parent) for (const n of Zotero.Items.get(parent.getNotes())) notes.push({ key: n.key, title: n.getNoteTitle(), tags: n.getTags().map(t => t.tag) });
-    return { ok: true, attachmentKey: att.key, parentKey: parent ? parent.key : null, annotations: anns, notes };
+    return { ok: true, version: this.version, attachmentKey: att.key, parentKey: parent ? parent.key : null, annotations: anns, notes };
   },
 
   async apply(data) {
@@ -101,7 +102,7 @@ var ScholiumBridge = {
     //     With note.trashOwn, the tool's other notes (titles starting with trashTitlePrefix, when given) go to the
     //     trash once everything is written; notes without the tool's tags are never touched.
     let noteCreated = false, noteSkipped = false, notesTrashed = 0;
-    const trash = [];
+    const trash = [], noteKeys = [], createdKeys = [];
     if (data.note && data.note.html && parent) {
       const prefix = data.note.titlePrefix || "";
       const body = html => String(html || "").replace(/<h1[^>]*>[\s\S]*?<\/h1>/i, " ").replace(/<[^>]+>/g, " ")
@@ -124,6 +125,7 @@ var ScholiumBridge = {
         if (tag) note.setTags([{ tag }]);
         await note.saveTx();
         noteCreated = true;
+        noteKeys.push(note.key);
       }
     }
 
@@ -150,11 +152,12 @@ var ScholiumBridge = {
         if (tag) ann.setTags([{ tag }]);
         await ann.save();
         created[type]++;
+        createdKeys.push(ann.key);
       }
       for (const a of old) await a.erase();
     });
     if (trash.length) { await Zotero.Items.trashTx(trash); notesTrashed = trash.length; }
-    return { ok: true, removed: old.length, kept, noteCreated, noteSkipped, notesTrashed, created };
+    return { ok: true, removed: old.length, kept, noteCreated, noteSkipped, notesTrashed, created, createdKeys, noteKeys };
   },
 
   register() {

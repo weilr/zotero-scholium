@@ -4,8 +4,8 @@
 
 | Backend | Zotero | Notes |
 |---|---|---|
-| `api`: official local API | 10 and later (preferred) | The first run opens an "Allow / Always Allow" dialog in Zotero; tell the user in advance to choose "Always Allow". The key is stored under `%APPDATA%/zotero-scholium/` (or `~/.config/zotero-scholium/`). No plugin is required. |
-| `bridge`: plugin | 7 to 9 | The local API is read-only before Zotero 10. Ask the user once to download `scholium-bridge.xpi` from https://github.com/weilr/zotero-scholium/releases and install it (Tools → Plugins → gear icon → Install Plugin From File). |
+| `bridge`: plugin | 7 and later | Taken first when the plugin is 0.1.9 or later: the annotations are written, and with `cleanup` the old ones removed, in one transaction, and the new keys are checked on read-back. An older plugin leaves `note_replace` undone (`result.noteReplace` says so). On Zotero 7 to 9, whose local API is read-only, it is the only write channel; ask the user once to download `scholium-bridge.xpi` from https://github.com/weilr/zotero-scholium/releases and install it (Tools → Plugins → gear icon → Install Plugin From File). |
+| `api`: official local API | 10 and later | Taken without the plugin or with an older one. The first run opens an "Allow / Always Allow" dialog in Zotero; tell the user in advance to choose "Always Allow". The key is stored under `%APPDATA%/zotero-scholium/` (or `~/.config/zotero-scholium/`). |
 | `js`: script file | fallback | `create_annotations.js`, to be executed in Tools → Developer → Run JavaScript with "Run as async function" enabled. |
 
 Do not write to `zotero.sqlite` directly (the database is locked while Zotero is running), and do not attempt to obtain tokens from other plugins' endpoints.

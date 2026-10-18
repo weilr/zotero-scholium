@@ -8,8 +8,9 @@ The plugin has four functions:
   annotate the selected paper.
 - **Deleting the tool's annotations** (Zotero 7 and later): removes them and the tool's reading notes
   from the selected paper.
-- **Write endpoints** (needed on Zotero 7 to 9 only): Zotero 10 provides an official local API with
-  write support, which `scholium` uses directly; the local API of Zotero 7, 8, and 9 is read-only.
+- **Write endpoints**: `scholium` writes through them when the plugin is installed, the annotations of
+  a run in one transaction; on Zotero 7, 8 and 9, whose local API is read-only, they are its only write
+  channel.
 
 ## Reader toggle
 
@@ -153,8 +154,8 @@ which listens on localhost only):
 | Endpoint | Purpose |
 |---|---|
 | `GET /scholium-bridge/ping` | returns `{ok, version, dataDir}`; no token required |
-| `POST /scholium-bridge/list` | lists the annotations of one attachment and the child notes of its parent item, with their tags |
-| `POST /scholium-bridge/apply` | writes a child note (unless a note of the tool has the same text), then, in one transaction, creates highlights and text annotations and, with `cleanup`, deletes those the tool created earlier; with `note.trashOwn`, moves the tool's earlier notes to the trash |
+| `POST /scholium-bridge/list` | lists the annotations of one attachment and the child notes of its parent item, with their tags, and the plugin's version |
+| `POST /scholium-bridge/apply` | writes a child note (unless a note of the tool has the same text), then, in one transaction, creates highlights and text annotations and, with `cleanup`, deletes those the tool created earlier; with `note.trashOwn`, moves the tool's earlier notes to the trash; returns the keys it created |
 
 Requests must carry the header `X-Annotate-Token`, whose value is the content of
 `<Zotero data directory>/scholium-bridge.token`, a random string written by the plugin on first

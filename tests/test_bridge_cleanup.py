@@ -42,7 +42,7 @@ const context = vm.createContext({ Zotero: {
       if (type !== 'annotation') throw Error('unexpected item type');
     }
     setTags(tags) { this.tags = tags; }
-    async save() { saved.push(this); }
+    async save() { this.key = 'NEW' + (saved.length + 1); saved.push(this); }
   },
 } });
 let applied;
@@ -116,6 +116,20 @@ def test_cleanup_uses_ownership_tags_only(options, remaining, removed, kept):
     assert output["result"]["kept"] == kept
     assert output["result"]["created"]["highlight"] == 2
     assert len(output["saved"]) == 2
+    assert output["result"]["createdKeys"] == ["NEW1", "NEW2"] and output["result"]["noteKeys"] == []
+
+
+def test_the_listing_names_the_plugins_version():
+    script = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const attachment = { id: 1, key: 'ATTACH01', parentID: null, getAnnotations: () => [] };
+const context = vm.createContext({ Zotero: { Libraries: { userLibraryID: 1 }, Items: { getByLibraryAndKey: () => attachment } } });
+vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+context.ScholiumBridge.list({ attachmentKey: 'ATTACH01' }).then(r => process.stdout.write(JSON.stringify(r)));
+"""
+    out = json.loads(subprocess.run([NODE, "-e", script, str(BRIDGE)], text=True, capture_output=True, check=True, timeout=15).stdout)
+    assert out["ok"] and out["version"] == cli.__version__ and out["annotations"] == []
 
 
 @pytest.mark.parametrize("cleanup", [True, False], ids=["cleanup-enabled", "cleanup-disabled"])
@@ -144,7 +158,7 @@ def test_generated_js_cleanup_uses_ownership_tags_only(cleanup):
 def run_failing_apply(data, existing, script=None):
     """Like run_apply, but the second annotation fails to save; returns the error and what is left."""
     harness = RUN_APPLY.replace(
-        "async save() { saved.push(this); }",
+        "async save() { this.key = 'NEW' + (saved.length + 1); saved.push(this); }",
         "async save() { if (saved.length) throw Error('simulated save failure'); saved.push(this); }",
     ).replace(
         ".catch(error => { console.error(error); process.exitCode = 1; });",
@@ -257,6 +271,8 @@ def test_note_replace_moves_only_the_tools_notes_to_the_trash(channel):
     assert trashed == ["OWN_OLD", "LEGACY"], "with a title prefix only the tool's notes under that title"
     result, created, trashed = run_notes(channel, EARLIER_NOTES, NEW_NOTE, False)
     assert len(created) == 1 and trashed == [], "without note_replace nothing goes"
+    if channel == "bridge":
+        assert result["noteKeys"] == ["NOTE1"]
 
 
 @pytest.mark.parametrize("channel", ["bridge", "generated-js"])
@@ -265,6 +281,8 @@ def test_a_note_with_the_same_text_is_not_written_again(channel):
                               "tags": ["zotero-scholium"]}]
     result, created, trashed = run_notes(channel, notes, NEW_NOTE, True)
     assert created == [] and "SAME" not in trashed and trashed == ["OWN_OLD", "LEGACY", "OWN_OTHER"]
+    if channel == "bridge":
+        assert result["noteKeys"] == []
     # the same text in the user's own note is no reason to skip
     result, created, trashed = run_notes(channel, [{"key": "USER", "html": NEW_NOTE}], NEW_NOTE, False)
     assert len(created) == 1
