@@ -307,6 +307,21 @@ def page_figure_rects(page, min_size=8.0):
     return out
 
 
+def user_space_shift(page):
+    """(dx, dy) from the tool's page coordinates (x from the left edge of the visible page, y up from its bottom
+    edge) to PDF user space, in which Zotero stores positions; not zero when the page's crop box or media box does
+    not start at (0, 0). Rotated pages are not annotated and get (0, 0)."""
+    if page.rotation % 360:
+        return 0.0, 0.0
+    m = page.transformation_matrix
+    dx, dy = -m.e, m.f - page.rect.height
+    return (round(dx, 2) if abs(dx) >= 0.01 else 0.0), (round(dy, 2) if abs(dy) >= 0.01 else 0.0)
+
+
+def shift_rect(r, dx, dy):
+    return [round(r[0] + dx, 2), round(r[1] + dy, 2), round(r[2] + dx, 2), round(r[3] + dy, 2)]
+
+
 def cw(c):  # estimated glyph width in em
     o = ord(c)
     if o < 128:
@@ -803,8 +818,9 @@ def build(cfg, obstacles=None):
             missed.extend({"kind": "summary", "page": p + 1, "anchor": sp["anchor"], "reason": ROTATED_PAGE} for sp in page_specs)
             continue
         pi = page_index(p)
-        # existing annotations and figures are occupied space for every summary on the page
-        page_obstacles = list((obstacles or {}).get(p, [])) + page_figure_rects(doc[p])
+        # existing annotations (in PDF user space) and figures are occupied space for every summary on the page
+        dx, dy = user_space_shift(doc[p])
+        page_obstacles = [shift_rect(r, -dx, -dy) for r in (obstacles or {}).get(p, [])] + page_figure_rects(doc[p])
         out.extend(layout_page_summaries(pi, page_specs, page_obstacles, missed))
     for a in out:   # soft hyphens and zero-width spaces copied from the PDF into a comment are left out
         if a.get("comment"):
@@ -841,6 +857,14 @@ def build(cfg, obstacles=None):
                                       fontsize=afs, fontname="china-s", color=rgb)
         shape.commit()
         page.get_pixmap(dpi=90).save(os.path.join(cfg["out_dir"], f"preview_p{p + 1}.png"))
+    shifts = {}
+    for a in out:   # Zotero stores positions in PDF user space
+        p = a["position"]["pageIndex"]
+        if p not in shifts:
+            shifts[p] = user_space_shift(doc[p])
+        dx, dy = shifts[p]
+        if dx or dy:
+            a["position"]["rects"] = [shift_rect(r, dx, dy) for r in a["position"]["rects"]]
     doc.close()  # the document is never saved; the PDF file remains unchanged
     return out, missed
 

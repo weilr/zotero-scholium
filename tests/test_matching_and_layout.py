@@ -977,3 +977,44 @@ def test_layout_warnings_block_apply(tmp_path, capsys):
         cli.main(["--config", str(cp), "--apply", "--backend", "js", "--ignore-existing", "--allow-warnings"])
     rep = json.loads(capsys.readouterr().out)
     assert rep["backend"] == "js" and "layout warnings" not in (rep.get("apply_error") or "")
+
+
+def _cropped_pdf(tmp_path):
+    """The two columns on a page whose crop box is [50 50 562 732], as some publishers' PDFs have it."""
+    p = tmp_path / "cropped.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_textbox(pymupdf.Rect(110, 120, 297, 700), LEFT, fontsize=10, fontname="helv")
+    page.insert_textbox(pymupdf.Rect(315, 120, 500, 700), RIGHT, fontsize=10, fontname="helv")
+    page.set_cropbox(pymupdf.Rect(50, 60, 562, 742))
+    doc.save(str(p)); doc.close()
+    return str(p)
+
+
+def test_positions_are_in_pdf_user_space_when_the_crop_box_does_not_start_at_zero(tmp_path):
+    """Zotero stores PDF user space; MuPDF measures from the crop box's corner."""
+    pdf = _cropped_pdf(tmp_path)
+    cfg = _cfg(pdf=pdf, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[1],
+               highlights=[{"page": 1, "text": "patch jittering", "comment": "x"}],
+               summaries=[{"page": 1, "anchor": "Foundation models have transformed", "text": "a remark"}])
+    out, missed = cli.build(cfg)
+    assert not missed
+    page = pymupdf.open(pdf)[0]
+    word = page.search_for("patch jittering")[0] * ~page.transformation_matrix
+    hl = next(a for a in out if a["type"] == "highlight")["position"]["rects"][0]
+    assert abs(hl[0] - word.x0) < 1.5 and abs(hl[1] - word.y0) < 1.5 and abs(hl[3] - word.y1) < 1.5
+    box = next(a for a in out if a["type"] == "text")["position"]["rects"][0]
+    assert 50 <= box[0] < box[2] <= 110, "the margin box sits in the visible left margin, beside the column"
+    assert 50 <= box[1] < box[3] <= 732
+
+
+def test_existing_annotations_count_in_pdf_user_space_on_an_offset_page(tmp_path):
+    pdf = _cropped_pdf(tmp_path)
+    cfg = _cfg(pdf=pdf, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+               summaries=[{"page": 1, "anchor": "Foundation models have transformed", "text": "a remark beside a user's note"}])
+    out, _ = cli.build(cfg)
+    x0, y0, x1, y1 = out[0]["position"]["rects"][0]
+    note = [x0, y0 - 5, x1, y1 + 5]                         # the user's text box where the remark wants to go
+    out2, _ = cli.build(cfg, {0: [note]})
+    _, b0, _, b1 = out2[0]["position"]["rects"][0]
+    assert b1 <= note[1] or b0 >= note[3], "the box must not overlap the existing annotation"

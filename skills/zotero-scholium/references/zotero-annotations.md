@@ -10,7 +10,7 @@
 | `annotationColor` | `#rrggbb`. Zotero palette: yellow `#ffd400`, red `#ff6666`, green `#5fb236`, blue `#2ea8e5`, purple `#a28ae5`. |
 | `annotationPageLabel` | page label string, usually the page number. |
 | `annotationSortIndex` | `"ppppp|oooooo|ttttt"`: page index (5 digits), character offset (6 digits, may be 0), distance from the page top in PDF points (5 digits). Affects sidebar ordering only. |
-| `annotationPosition` | JSON string. Highlight: `{"pageIndex":0,"rects":[[x0,y0,x1,y1],…]}`, one rectangle per line. Text: `{"pageIndex":0,"rects":[[x0,y0,x1,y1]],"fontSize":8,"rotation":0}`. Note: one 22×22 rectangle. Coordinates are in PDF user space (origin at the bottom left, y axis upward). PyMuPDF uses a top-left origin: `y_pdf = page.height − y_fitz` when the media box starts at 0. |
+| `annotationPosition` | JSON string. Highlight: `{"pageIndex":0,"rects":[[x0,y0,x1,y1],…]}`, one rectangle per line. Text: `{"pageIndex":0,"rects":[[x0,y0,x1,y1]],"fontSize":8,"rotation":0}`. Note: one 22×22 rectangle. Coordinates are in PDF user space (origin at the bottom left, y axis upward). PyMuPDF measures from the top-left corner of the crop box: user space is `Rect × ~page.transformation_matrix`, which is `y_pdf = page.height − y_fitz` only when the crop box starts at (0, 0). |
 | `annotationAuthorName` | author name shown in the reader. Not set by the tool; the configuration key `author` is not accepted. Ownership is marked by the tag. |
 | `annotationIsExternal` | `true` for annotations Zotero imported from the PDF file (displayed as locked). Not exposed by the local API. |
 | `tags` | `[{"tag": "…"}]`. The tool tags everything it creates with `zotero-scholium`. |

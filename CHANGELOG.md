@@ -53,6 +53,9 @@
   and its notices are left out only while that paper's section is on screen. While the agent has lost
   its connection and tries again (Claude Code's `api_retry`, Codex's "Reconnecting… 2/5"), the state
   line says so until the agent answers again.
+- Positions are written in PDF user space also on pages whose crop box or media box does not start at
+  (0, 0); on such pages every annotation used to be shifted by the box's offset. Annotations written there
+  before stay shifted until the paper is annotated again.
 
 ## 0.1.8 (2026-10-16)
 

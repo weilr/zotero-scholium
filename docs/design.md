@@ -37,8 +37,9 @@ editable, are synchronised as data, and leave the PDF file untouched.
 }
 ```
 
-- Coordinates are expressed in PDF user space (origin at the bottom left, y axis upward). PyMuPDF uses
-  a top-left origin; the conversion is `y_pdf = page.height - y_fitz`.
+- Coordinates are expressed in PDF user space (origin at the bottom left, y axis upward). PyMuPDF measures
+  from the top-left corner of the crop box; layout works in those page coordinates with y turned upward, and
+  positions are shifted by the crop box's offset on their way to and from Zotero (`user_space_shift`).
 - `annotationSortIndex` has the form `page(5)|charOffset(6)|topFromPageTop(5)` and affects only the
   ordering of the sidebar.
 - `text` annotations wrap to the width of their rectangle. Hard line breaks must not be inserted into
