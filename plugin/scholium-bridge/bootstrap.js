@@ -487,7 +487,8 @@ var ScholiumRunner = {
   unsent: new Map(),        // "<library>/<item key>" -> the words in a section's message box, not yet sent
   katexLib: undefined,      // KaTeX once loaded (null when it cannot be), for the formulas in messages
   mathCache: new Map(),     // "D"/"I" + TeX -> its MathML, or null when KaTeX cannot read it
-  paused: null,             // { until, known, timer } while the usage limit holds the queue
+  paused: null,             // { until, known, throttled, timer } while the usage limit or the service's limit holds the queue
+  restoreTimer: null,
   RETRY_MS: 10 * 60000,     // the wait when the agent names no reset time
   NET_RETRY_MS: 30000,      // the wait before the second try of a run whose connection failed
   pref: "extensions.scholium-bridge.",
@@ -526,6 +527,11 @@ var ScholiumRunner = {
                    : "Claude Code (claude) was not found. Set extensions.scholium-bridge.claudePath in about:config.",
       noCodex: zh ? "找不到 Codex（codex.exe）。请在 about:config 中设置 extensions.scholium-bridge.codexPath。"
                   : "Codex (codex) was not found. Set extensions.scholium-bridge.codexPath in about:config.",
+      noSkill: agent => agent === "codex"
+        ? (zh ? "Codex 找不到 zotero-scholium 技能：请把它放进 ~/.codex/skills/（见 README）。"
+              : "Codex does not find the zotero-scholium skill: put it in ~/.codex/skills/ (see the README).")
+        : (zh ? "Claude Code 找不到 zotero-scholium 技能：请把它放进 ~/.claude/skills/（见 README）。"
+              : "Claude Code does not find the zotero-scholium skill: put it in ~/.claude/skills/ (see the README)."),
       redoTitle: zh ? "重新批注" : "Annotate again",
       redo: (n, m) => zh ? `${m} 篇论文已有 Scholium 批注，共 ${n} 条。重新批注会替换这些批注，你自己的批注不受影响。继续吗？`
                          : `${m} of the papers already carry ${n} Scholium annotations. Annotating again replaces them; your own annotations are not affected. Continue?`,
@@ -588,6 +594,9 @@ var ScholiumRunner = {
       cancelled: zh ? "已取消" : "cancelled",
       interrupted: zh ? "已中断" : "interrupted",
       interruptedLine: zh ? "运行被中断（插件更新或停用，或 Zotero 退出）" : "The run was interrupted (the plugin was updated or disabled, or Zotero quit)",
+      codexSkills: msg => zh ? `Codex 列不出它的技能：${msg}` : `Codex could not list its skills: ${msg}`,
+      codexSkillOff: zh ? "Codex 里的 zotero-scholium 技能被停用了：请在 Codex 里重新启用它。"
+                        : "The zotero-scholium skill is switched off in Codex: switch it on there.",
       unfinished: zh ? "（这条回复没有写完）" : "(this message was not finished)",
       stepOf: (i, n, label) => zh ? `第 ${i}/${n} 步 ${label}` : `step ${i}/${n} ${label}`,
       running: (step, time) => zh ? `${step} · 已用 ${time}` : `${step} · ${time} so far`,
@@ -602,14 +611,17 @@ var ScholiumRunner = {
       sendHint: key => zh ? `${key}+Enter 发送` : `${key}+Enter to send`,
       extraLabel: zh ? "附加要求：" : "Extra instructions: ",
       continued: zh ? "额度已恢复，接着中断的地方继续" : "The usage limit has reset; continuing where the run stopped",
+      continuedThrottle: zh ? "限流已解除，接着中断的地方继续" : "The service takes requests again; continuing where the run stopped",
       continuedUpdate: zh ? "插件已更新，接着中断的地方继续" : "The plugin was updated; continuing where the run stopped",
       retrying: zh ? "连接失败，30 秒后自动重试一次" : "The connection failed; trying once more in 30 seconds",
       continuing: zh ? "接着上次的对话" : "continuing the conversation",
       continuedNotice: zh ? "已在后台接着上次的对话处理。" : "Continuing the conversation in the background.",
       resumeNow: zh ? "现在继续" : "Continue now",
       limitTitle: name => zh ? `${name} 额度已用完` : `${name} usage limit reached`,
+      throttleTitle: name => zh ? `${name} 服务暂时限流` : `${name} is limiting requests for now`,
       pausedState: time => zh ? `额度已用完，${time} 重置后自动继续` : `Usage limit reached; continues by itself after ${time}`,
       pausedRetry: time => zh ? `额度已用完，${time} 自动重试` : `Usage limit reached; retries by itself at ${time}`,
+      throttledState: time => zh ? `服务暂时限流，${time} 自动继续` : `The service is limiting requests; continues by itself at ${time}`,
       lastRun: zh ? "上次：" : "Last run: ",
       turns: n => zh ? `${n} 轮` : `${n} turns`,
       tokens: amount => zh ? `${amount} token` : `${amount} tokens`,
@@ -769,12 +781,13 @@ var ScholiumRunner = {
         `- 附件 key：${job.att.key}`,
         `- PDF：${job.path}`,
         `- 输出目录：${outDir}`,
+        job.profile ? `- 画像：${job.profile}` : "- 画像：没有；按默认值标注，不要生成或修改画像",
         "",
         "这是从 Zotero 里一键启动的无人值守任务：不要向用户提问，不要启动子代理，由你独立完成第 1–3 步并写入 Zotero。",
         own ? `这篇论文已有 ${own} 条本工具的注释，用户已确认整篇重做（配置里设 cleanup: true）。` : "这篇论文目前没有本工具的注释。",
         ...(job.extra ? ["", "用户的附加要求：", job.extra] : []),
         "",
-        "结束时最后一行只写一句：高亮 N 条（核心 M 条），页边批注 K 条，笔记标题，剩余警告。",
+        "结束时最后一行只写一句：高亮 N 条（核心 M 条），页边批注 K 条，笔记《标题》，剩余警告。",
       ].join("\n");
     }
     return [
@@ -784,27 +797,33 @@ var ScholiumRunner = {
       `- Attachment key: ${job.att.key}`,
       `- PDF: ${job.path}`,
       `- Output directory: ${outDir}`,
+      job.profile ? `- Profile: ${job.profile}` : "- Profile: none; annotate with the defaults and do not create or change a profile",
       "",
       "This is an unattended task started from Zotero with one click: do not ask the user anything and do not start sub-agents; complete steps 1-3 yourself and write to Zotero.",
       own ? `The paper already carries ${own} annotations of this tool; the user confirmed a complete redo (cleanup: true in the configuration).` : "The paper carries no annotations of this tool yet.",
       ...(job.extra ? ["", "The user's extra instructions:", job.extra] : []),
       "",
-      "End with one line only: N highlights (M core), K margin notes, the note title, remaining warnings.",
+      "End with one line only: N highlights (M core), K margin notes, note “title”, remaining warnings.",
     ].join("\n");
   },
 
-  // the next message of the paper's conversation: the user's words, or a continuation after the limit
+  // the next message of the paper's conversation: the user's words, or a continuation after the usage limit, a
+  // limit of the service or an update of the plugin
   followUpPrompt(job) {
     const zh = this.zh();
     if (!job.say) {
       if (job.updated) return zh ? "插件更新打断了上面的任务。请从中断的地方继续完成，规则不变。"
                                   : "A plugin update interrupted the task above. Continue it from where it stopped; the rules are unchanged.";
+      if (job.throttled) return zh ? "服务已恢复。请从中断的地方继续完成上面的任务，规则不变。"
+                                    : "The service takes requests again. Continue the task above from where it stopped; the rules are unchanged.";
       return zh ? "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。"
                 : "The usage limit has reset. Continue the task above from where it stopped; the rules are unchanged.";
     }
     return (zh ? [
       "下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
         + "只是提问就直接回答；要改批注时按技能的流程修改配置，再写入 Zotero。",
+      "改已经写入的批注或补几条时，都编辑写入它们的那份配置（它是这篇论文的全部批注），设 cleanup: true 整份重写"
+        + "（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置，否则下次整份重写时会把它们删掉。",
       "",
       job.say,
       "",
@@ -812,6 +831,9 @@ var ScholiumRunner = {
     ] : [
       "Below is a follow-up message about this paper and its annotations, sent from Zotero. It is still unattended: do not ask the user anything and do not start sub-agents. "
         + "Answer a question directly; to change annotations, edit the configuration as the skill describes and write it to Zotero again.",
+      "To change annotations already written or to add a few, edit the configuration they were written from (it holds the paper's whole "
+        + "set) and set cleanup: true, so that the whole set replaces them (and note_replace: true when the reading note changes); do not "
+        + "write a separate configuration with just new entries, which the next whole rewrite would delete.",
       "",
       job.say,
       "",
@@ -978,7 +1000,7 @@ var ScholiumRunner = {
       out.push({ kind: "text", text: String(event.text).trim(), unfinished: true });
     }
     if (event.type === "scholium" && event.subtype === "continue") {
-      out.push({ kind: "info", text: this.text(event.reason === "update" ? "continuedUpdate" : "continued") });
+      out.push({ kind: "info", text: this.text(event.reason === "update" ? "continuedUpdate" : event.reason === "throttle" ? "continuedThrottle" : "continued") });
     }
     // the end of a run without a result of its own: cancelled, failed before a result, interrupted
     if (event.type === "scholium" && event.subtype === "end") {
@@ -2227,7 +2249,8 @@ var ScholiumRunner = {
       const running = this.job && pane.keys.includes(this.job.key);
       const queuedAt = this.queue.findIndex(j => pane.keys.includes(j.att.key));
       const note = pane.keys.map(k => this.notes.get(k)).filter(Boolean).sort((a, b) => b.at - a.at)[0] || pane.past;
-      const paused = this.paused ? this.text(this.paused.known ? "pausedState" : "pausedRetry", this.clock(this.paused.until)) : null;
+      const paused = this.paused ? this.text(this.paused.throttled ? "throttledState" : this.paused.known ? "pausedState" : "pausedRetry",
+                                             this.clock(this.paused.until)) : null;
       const lines = [];
       let kind = "info", title = "";
       if (running) {
@@ -2401,19 +2424,31 @@ var ScholiumRunner = {
     }
   },
 
-  // the usage limit: the interrupted paper waits at the head of the queue and continues its
-  // conversation when the limit resets; nothing else starts meanwhile
-  pause(job, { until, session }) {
+  // the usage limit, or a limit of the service: the interrupted paper waits at the head of the queue and continues
+  // its conversation when the limit resets; nothing else starts meanwhile
+  pause(job, { until, session, throttled }) {
     if (this.job && this.job.key === job.att.key) this.job = null;
     // a question stays one when its conversation continues
-    this.queue.unshift(Object.assign({}, job, session ? { resume: session, say: "", extra: "", asked: !!(job.say || job.asked) } : { interrupted: true }));
+    this.queue.unshift(Object.assign({}, job, session ? { resume: session, say: "", extra: "", asked: !!(job.say || job.asked),
+                                                          throttled: !!throttled, updated: false } : { interrupted: true }));
     const wait = until ? Math.max(until - Date.now(), 0) + 60000 : this.RETRY_MS;
     if (this.paused) clearTimeout(this.paused.timer);
-    this.paused = { until: Date.now() + wait, known: !!until, timer: setTimeout(() => { this.resumeQueue(); }, wait) };
-    const line = this.text(until ? "pausedState" : "pausedRetry", this.clock(this.paused.until));
+    this.paused = { until: Date.now() + wait, known: !!until, throttled: !!throttled, timer: setTimeout(() => { this.resumeQueue(); }, wait) };
+    const line = this.text(throttled ? "throttledState" : until ? "pausedState" : "pausedRetry", this.clock(this.paused.until));
     this.notice(job, line, true);
-    if (!this.paneInView(job.att.key)) this.notify(this.text("limitTitle", this.agentName(job.agent, true)), line);
+    if (!this.paneInView(job.att.key)) this.notify(this.text(throttled ? "throttleTitle" : "limitTitle", this.agentName(job.agent, true)), line);
     this.refresh();
+  },
+
+  // the time a limit's message names ("约 24 分钟后重置", "try again in 24 minutes"), as a moment; null without one
+  // or beyond six hours
+  resetFrom(text) {
+    const s = String(text || "");
+    const m = /(\d+(?:\.\d+)?)\s*(分钟|小时)\s*后/.exec(s)
+      || /\bin\s+(?:about\s+|~\s*)?(\d+(?:\.\d+)?)\s*(minutes?|mins?|hours?|hrs?)\b/i.exec(s);
+    if (!m) return null;
+    const ms = Number(m[1]) * (/^(小时|hour|hr)/i.test(m[2]) ? 3600000 : 60000);
+    return ms > 0 && ms <= 6 * 3600000 ? Date.now() + ms : null;
   },
 
   resumeQueue() {
@@ -2497,11 +2532,12 @@ var ScholiumRunner = {
     }
     await IOUtils.makeDirectory(this.outDir(key), { createAncestors: true, ignoreExisting: true });
     if (!keep || !(await this.exists(logPath))) await IOUtils.writeUTF8(logPath, "");
+    if (!job.resume) job.profile = (await this.exists(this.profilePath())) ? this.profilePath() : null;
     // the user's words, or an automatic continuation, go into the log as the plugin's own lines; a
     // second try has them already
     const mark = job.retried ? null
       : job.say || job.extra ? { type: "scholium", subtype: "prompt", text: job.say || this.text("extraLabel") + job.extra }
-      : job.resume ? { type: "scholium", subtype: "continue", reason: job.updated ? "update" : undefined } : null;
+      : job.resume ? { type: "scholium", subtype: "continue", reason: job.updated ? "update" : job.throttled ? "throttle" : undefined } : null;
     if (mark) {
       await IOUtils.writeUTF8(logPath, JSON.stringify(mark) + "\n", { mode: "append" });
       this.appendEntries(this.entries(mark));
@@ -2537,9 +2573,12 @@ var ScholiumRunner = {
       message = summary;
       this.notice(job, [`${this.text("done")} · ${this.duration(Date.now() - started)}`, answered ? summary : this.brief(summary)].filter(Boolean).join("\n"));
     } else if (limit) {
-      return { exitCode, result, limited: true, until: limit.until, session };
+      // a limit of the service ("not your usage limit") names no reset time, its message may name a wait
+      const said = text + "\n" + ctx.stderr;
+      const throttled = !limit.until && /not your usage limit|temporarily limiting|限流/i.test(said);
+      return { exitCode, result, limited: true, until: limit.until || this.resetFrom(said), throttled, session };
     } else {
-      message = (summary || ctx.stderr.trim().split("\n").pop() || `exit ${exitCode}`).slice(0, 300);
+      message = (ctx.failure || summary || ctx.stderr.trim().split("\n").pop() || `exit ${exitCode}`).slice(0, 300);
       if (!(result && this.entries(result).length)) this.appendEntries(this.entries(await this.logEnd(logPath, "failed", message, started)));
       // the connection failed before the agent used a tool, so nothing was written: one more try
       if (!job.retried && !ctx.acted && this.transient(message, ctx.errorInfo)) {
@@ -2670,6 +2709,12 @@ var ScholiumRunner = {
             ctx.session = ctx.running.session = event.session_id;
             this.sessions.set(key, { agent: "claude", id: ctx.session });
           }
+          // the skills Claude Code loaded: without this one the run would only look for it
+          if (event.type === "system" && event.subtype === "init" && Array.isArray(event.skills)
+              && !event.skills.some(name => /(?:^|:)zotero-scholium$/.test(String(name)))) {
+            ctx.failure = this.text("noSkill", "claude");
+            try { proc.kill(); } catch (e) {}
+          }
           if (event.type === "result") ctx.result = event;
           if (event.type === "assistant" && ((event.message && event.message.content) || []).some(c => c && c.type === "tool_use")) ctx.acted = true;
           if (event.type === "rate_limit_event" && event.rate_limit_info) {
@@ -2785,22 +2830,35 @@ var ScholiumRunner = {
 
   // the zotero-scholium skill as Codex sees it from the working directory; a project skill of the
   // data directory (<data dir>/.agents/skills) is added for this conversation only
+  // null when Codex lists no such skill; a request Codex fails, errors in its listing, or the skill switched off end the run
+  // with what Codex said
   async codexSkill(rpc, cwd) {
+    let failure = null, off = false;
+    const issues = [];
     const find = async cwds => {
       try {
         const answer = await rpc.request("skills/list", { cwds });
         for (const entry of (answer && answer.data) || []) {
-          for (const s of (entry && entry.skills) || []) if (s && s.name === "zotero-scholium" && s.path && s.enabled !== false) return s;
+          for (const e of (entry && entry.errors) || []) issues.push(String((e && (e.message || e.error)) || JSON.stringify(e)));
+          for (const s of (entry && entry.skills) || []) {
+            if (!s || s.name !== "zotero-scholium" || !s.path) continue;
+            if (s.enabled === false) off = true;
+            else return s;
+          }
         }
-      } catch (e) { this.log("skills/list failed: " + e); }
+      } catch (e) { failure = e; this.log("skills/list failed: " + e); }
       return null;
     };
     let skill = await find([cwd]);
     if (!skill) {
       skill = await find([Zotero.DataDirectory.dir]);
+      if (!skill && off) throw new Error(this.text("codexSkillOff"));
+      if (!skill && (failure || issues.length)) {
+        throw new Error(this.text("codexSkills", failure ? String(failure.message || failure) : [...new Set(issues)].slice(0, 3).join("; ")));
+      }
       if (!skill) return null;
       try { await rpc.request("skills/extraRoots/set", { extraRoots: [PathUtils.parent(PathUtils.parent(skill.path))] }); }
-      catch (e) { this.log("skill root failed: " + e); return null; }
+      catch (e) { throw new Error(this.text("codexSkills", String(e.message || e))); }
     }
     return { name: skill.name, path: skill.path };
   },
@@ -2915,6 +2973,7 @@ var ScholiumRunner = {
       const quiet = await this.codexQuiet(rpc);
       if (quiet.config) settings.config = quiet.config;
       const skill = job.resume ? null : await this.codexSkill(rpc, cwd);
+      if (!job.resume && !skill) throw new Error(this.text("noSkill", "codex"));
       const opened = job.resume ? await rpc.request("thread/resume", Object.assign({ threadId: job.resume }, settings))
                                 : await rpc.request("thread/start", settings);
       const thread = opened && opened.thread && opened.thread.id;
@@ -3069,7 +3128,7 @@ var ScholiumRunner = {
   carryOver(running) {
     const plain = j => ({ key: j.att.key, libraryID: j.att.libraryID, agent: j.agent, extra: j.extra || "", say: j.say || "",
                           resume: j.resume || null, asked: !!j.asked, own: j.own || 0, interrupted: !!j.interrupted,
-                          retried: !!j.retried, retryAt: j.retryAt || 0 });
+                          throttled: !!j.throttled, retried: !!j.retried, retryAt: j.retryAt || 0 });
     const jobs = [];
     if (running && running.source) {
       const j = running.source;
@@ -3077,11 +3136,11 @@ var ScholiumRunner = {
       // paper is handed over as it was queued, the user's words with it
       jobs.push(running.session && running.delivered
         ? Object.assign(plain(j), { resume: running.session, say: "", extra: "", asked: !!(j.say || j.asked),
-                                    retried: false, retryAt: 0, updated: true })
+                                    throttled: false, retried: false, retryAt: 0, updated: true })
         : plain(j));
     }
     for (const j of this.queue) jobs.push(plain(j));
-    const paused = this.paused ? { until: this.paused.until, known: this.paused.known } : null;
+    const paused = this.paused ? { until: this.paused.until, known: this.paused.known, throttled: !!this.paused.throttled } : null;
     try { if (jobs.length) Zotero.Prefs.set(this.pref + "carryOver", JSON.stringify({ jobs, paused }), true); }
     catch (e) { this.log("queue not kept: " + e); }
   },
@@ -3100,13 +3159,13 @@ var ScholiumRunner = {
       if (!job || this.busy(job.att.key) || jobs.some(j => j.att.key === job.att.key)) continue;
       jobs.push(Object.assign(job, { agent: s.agent === "codex" ? "codex" : "claude", extra: String(s.extra || ""), say: String(s.say || ""),
                                      resume: s.resume || null, asked: !!s.asked, own: Number(s.own) || 0, updated: !!s.updated,
-                                     interrupted: !!s.interrupted, retried: !!s.retried,
+                                     interrupted: !!s.interrupted, throttled: !!s.throttled, retried: !!s.retried,
                                      retryAt: Number(s.retryAt) || 0 }));
     }
     if (!jobs.length) return;
     const p = saved.paused;
     if (p && p.until > Date.now() && !this.paused) {   // the limit still holds: the queue waits for it, as before the update
-      this.paused = { until: p.until, known: !!p.known, 
+      this.paused = { until: p.until, known: !!p.known, throttled: !!p.throttled,
                       timer: setTimeout(() => { this.resumeQueue(); }, p.until - Date.now()) };
     }
     this.enqueue(jobs);

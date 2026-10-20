@@ -350,9 +350,9 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
         case 'initialize': return answer({ userAgent: 'scholium-bridge/0.160.0', codexHome: '/home/u/.codex' });
         case 'model/list': return answer({ data: CODEX_MODELS, nextCursor: null });
         case 'config/read': return answer({ config: { model: 'gpt-6-astra', mcp_servers: { s: { env: { TOKEN: 'secret-token' } } } } });
-        case 'skills/list': return answer({ data: p.cwds.map(cwd => ({ cwd, errors: [], skills: [{ name: 'other', path: '/x/other/SKILL.md', enabled: true }]
+        case 'skills/list': return answer({ data: p.cwds.map(cwd => ({ cwd, errors: co.skillErrors || [], skills: [{ name: 'other', path: '/x/other/SKILL.md', enabled: true }]
           .concat(co.skillAt === cwd ? [{ name: 'zotero-scholium', path: cwd === '/data' ? '/data/.agents/skills/zotero-scholium/SKILL.md'
-                                                                                      : '/home/u/.codex/skills/zotero-scholium/SKILL.md', enabled: true }] : []) })) });
+                                                                                      : '/home/u/.codex/skills/zotero-scholium/SKILL.md', enabled: !co.skillOff }] : []) })) });
         case 'skills/extraRoots/set': return answer({});
         case 'plugin/installed': return answer({ marketplaces: [{ name: 'm', plugins: [
           { id: 'superpowers@m', installed: true, enabled: true }, { id: 'off@m', installed: true, enabled: false },
@@ -1761,7 +1761,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     facts.reconnecting = states;
   }
   {
-    // the skill in Codex's own skills folder: no extra root; no skill at all: the prompt alone
+    // the skill in Codex's own skills folder: no extra root; no skill at all: the run ends before a conversation opens
     const found = {};
     for (const skillAt of ['/data/tmp/scholium', null]) {
       const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { skillAt } });
@@ -1769,9 +1769,10 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
       await h.runner.annotate([h.item1]);
       await settle(400);
       const sent = h.log.codexProcs.at(-1).sent;
+      const turn = sent.find(m => m.method === 'turn/start'), thread = sent.find(m => m.method === 'thread/start');
       found[skillAt || 'none'] = { methods: sent.filter(m => typeof m.method === 'string').map(m => m.method).filter(m => m.startsWith('skills/')),
-                                   input: sent.find(m => m.method === 'turn/start').params.input.slice(1),
-                                   model: 'model' in sent.find(m => m.method === 'thread/start').params };
+                                   input: turn ? turn.params.input.slice(1) : null, model: thread ? 'model' in thread.params : null,
+                                   outcome: (h.runner.notes.get('ATT1') || {}).text, log: h.log.writes['/data/tmp/scholium/ATT1/codex-run.jsonl'] };
     }
     facts.codexSkillFound = found;
   }
@@ -1965,6 +1966,44 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
                            undelivered: [handed.resume, handed.extra, !!handed.updated] };
     for (const x of [h2, r]) x.runner.stop();   // the waits end with them
   }
+  // Codex that cannot list its skills, lists them with errors, or has the skill switched off: the run ends with what Codex said
+  {
+    const said = {};
+    for (const [name, codex] of [['failed', { fail: 'skills/list', failMessage: 'invalid type: integer' }],
+                                 ['errors', { skillAt: null, skillErrors: [{ path: '/home/u/.codex/skills/x/SKILL.md', message: 'invalid YAML' }] }],
+                                 ['off', { skillAt: '/data/tmp/scholium', skillOff: true }]]) {
+      const c = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex });
+      c.runner.start('x');
+      await c.runner.annotate([c.item1]); await settle(400);
+      said[name] = [c.runner.transcript.at(-1).text, (c.runner.notes.get('ATT1') || {}).text.slice(0, 2)];
+      c.runner.stop();
+    }
+    facts.codexSkillIssues = said;
+  }
+  // the prompt names the profile when there is one, and says to use the defaults when there is none
+  {
+    const h = harness({ logs: { [PROFILE_PATH]: PROFILE } });
+    h.runner.start('x');
+    await h.runner.annotate([h.item1]); await settle(300);
+    const en = harness({ locale: 'en-US' });
+    en.runner.start('x');
+    await en.runner.annotate([en.item1]); await settle(300);
+    facts.profilePrompt = { zh: h.log.stdin[0], en: en.log.stdin[0] };
+  }
+  // Claude Code without the skill: the run ends at its start
+  {
+    const h = harness({ script: [ev({ type: 'system', subtype: 'init', model: 'claude-opus-5-5', session_id: 'S1', skills: ['other', 'x:y'] }), 'WAIT'] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await h.runner.annotate([h.item1]); await settle(200);
+    const lines = h.log.writes['/data/tmp/scholium/ATT1/claude-run.jsonl'].trim().split('\n');
+    facts.noSkill = { kills: h.log.kills, last: p.view().entries.at(-1), state: p.view().state, end: JSON.parse(lines.at(-1)) };
+    const ok = harness({ script: [ev({ type: 'system', subtype: 'init', model: 'm', session_id: 'S1', skills: ['zotero-scholium:zotero-scholium'] }),
+                                  LAST, RESULT] });
+    ok.runner.start('x');
+    await ok.runner.annotate([ok.item1]); await settle(200);
+    facts.pluginSkill = { kills: ok.log.kills, state: (ok.runner.notes.get('ATT1') || {}).text };
+  }
   // an update while a paper runs: its log records the interruption, and the new copy continues the paper's
   // conversation, then the paper still waiting; a disabled plugin hands nothing over
   {
@@ -2015,6 +2054,25 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const later = harness({ logs: { [logPath]: h.log.writes[logPath] } });
     later.runner.start('x');
     facts.cancelLogged = { end: JSON.parse(h.log.writes[logPath].trim().split('\n').at(-1)), history: (await later.pane(later.item1)).view().state };
+  }
+  // the service's limit ("not your usage limit") waits as long as its message says, and says what it is
+  {
+    const busy = 'API Error: Server is temporarily limiting requests (not your usage limit) · 约 24 分钟后重置';
+    const h = harness({ scripts: [[SCRIPT[0], ev({ type: 'rate_limit_event', session_id: 'S1', rate_limit_info: { status: 'rejected', isUsingOverage: false } }),
+                                   ev({ type: 'assistant', error: 'rate_limit', session_id: 'S1', message: { content: [{ type: 'text', text: busy }] } }),
+                                   ev({ type: 'result', subtype: 'success', is_error: true, result: busy, session_id: 'S1' })],
+                                  SCRIPT.concat([LAST, RESULT])] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    const started = Date.now();
+    await h.runner.annotate([h.item1]); await settle(300);
+    const paused = h.runner.paused;
+    facts.throttle = { throttled: paused && paused.throttled, known: paused && paused.known, wait: paused && paused.until - started,
+                       waits: h.live(), state: p.view().state, clock: paused && h.runner.clock(paused.until), notices: h.log.notices.at(-1).descriptions };
+    h.fire(); await settle(400);
+    facts.throttle.after = { prompt: h.log.stdin[1], entries: p.view().entries.map(e => e[1]), paused: h.runner.paused };
+    facts.resetFrom = ['约 24 分钟后重置', 'Please try again in 3 minutes.', 'try again in about 2 hours', '5 小时额度已用完', 'in 900 hours', '']
+      .map(t => { const at = h.runner.resetFrom(t); return at ? Math.round((at - Date.now()) / 60000) : null; });
   }
 
   process.stdout.write(JSON.stringify(facts));
@@ -2852,7 +2910,11 @@ def test_codex_steps_and_cancel(facts):
     s = facts["codexSkillFound"]
     assert s["/data/tmp/scholium"]["methods"] == ["skills/list"]
     assert s["/data/tmp/scholium"]["input"] == [{"type": "skill", "name": "zotero-scholium", "path": "/home/u/.codex/skills/zotero-scholium/SKILL.md"}]
-    assert s["none"] == {"methods": ["skills/list", "skills/list"], "input": [], "model": False}
+    none = s["none"]
+    assert none["methods"] == ["skills/list", "skills/list"] and none["input"] is None and none["model"] is None, "no conversation opens"
+    assert none["outcome"].startswith("失败")
+    end = json.loads(none["log"].strip().splitlines()[-1])
+    assert end["subtype"] == "end" and end["outcome"] == "failed" and "Codex 找不到 zotero-scholium 技能" in end["text"]
 
 
 def test_a_lost_connection_shows_on_the_state_line_until_the_agent_answers_again(facts):
@@ -2919,6 +2981,29 @@ def test_a_failed_connection_gets_one_more_try(facts):
     assert facts["transient"] == [True, True, True, True, True, False, False, False]
 
 
+def test_the_prompt_names_the_profile_or_the_defaults(facts):
+    p = facts["profilePrompt"]
+    assert "- 画像：/data/zotero-scholium/profile.md\n" in p["zh"]
+    assert "- Profile: none; annotate with the defaults and do not create or change a profile\n" in p["en"]
+    assert p["en"].endswith("End with one line only: N highlights (M core), K margin notes, note “title”, remaining warnings.")
+    assert facts["prompt"].count("画像：没有；按默认值标注，不要生成或修改画像") == 1
+    assert "笔记《标题》" in facts["prompt"]
+
+
+def test_a_follow_up_says_how_to_change_written_annotations(facts):
+    prompt = facts["followUp"]["prompt"]
+    assert "改已经写入的批注或补几条时，都编辑写入它们的那份配置（它是这篇论文的全部批注），设 cleanup: true 整份重写" in prompt
+    assert "不要另写只含新条目的配置，否则下次整份重写时会把它们删掉。" in prompt
+
+
+def test_claude_code_without_the_skill_stops_at_once(facts):
+    n = facts["noSkill"]
+    assert n["kills"] == 1 and n["state"].startswith("失败")
+    assert n["last"] == ["scholium-entry final error", "Claude Code 找不到 zotero-scholium 技能：请把它放进 ~/.claude/skills/（见 README）。"]
+    assert n["end"]["subtype"] == "end" and n["end"]["outcome"] == "failed"
+    assert facts["pluginSkill"]["kills"] == 0 and facts["pluginSkill"]["state"].startswith("完成"), "a plugin's skill counts"
+
+
 def test_an_update_hands_the_running_paper_and_the_queue_to_the_new_copy(facts):
     u = facts["update"]
     assert u["end"]["subtype"] == "end" and u["end"]["outcome"] == "interrupted"
@@ -2939,6 +3024,16 @@ def test_a_cancelled_run_keeps_its_end_in_the_log(facts):
     assert run_time(c["history"]) == "上次：已取消 · Ns"
 
 
+def test_the_services_limit_waits_as_long_as_it_says(facts):
+    t = facts["throttle"]
+    assert t["throttled"] is True and t["known"] is True and 1_490_000 < t["wait"] <= 1_510_000
+    assert t["state"] == f"服务暂时限流，{t['clock']} 自动继续" and t["notices"] == [t["state"]]
+    a = t["after"]
+    assert a["prompt"] == "服务已恢复。请从中断的地方继续完成上面的任务，规则不变。" and a["paused"] is None
+    assert "限流已解除，接着中断的地方继续" in a["entries"]
+    assert facts["resetFrom"] == [24, 3, 120, None, None, None]
+
+
 def test_the_new_copy_of_an_update_takes_over_and_a_stale_hand_over_is_dropped(facts):
     r = facts["reasons"]
     assert r["takingOver"] == [5, 7, 8] and r["replacing"] == [7, 8]
@@ -2952,3 +3047,10 @@ def test_an_update_keeps_a_pause_a_wait_and_words_not_yet_received(facts):
     assert c["queue"] == [["ATT1", "S1"], ["ATT2", None]]
     assert c["retry"] == {"calls": 0, "queued": [["ATT1", True, True]]}, "a second try keeps its time"
     assert c["undelivered"] == [None, "只标方法部分", False], "the paper starts again with the user's words"
+
+
+def test_codex_skill_problems_are_named(facts):
+    assert facts["codexSkillIssues"] == {
+        "failed": ["Codex 列不出它的技能：invalid type: integer", "失败"],
+        "errors": ["Codex 列不出它的技能：invalid YAML", "失败"],
+        "off": ["Codex 里的 zotero-scholium 技能被停用了：请在 Codex 里重新启用它。", "失败"]}

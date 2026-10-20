@@ -82,6 +82,13 @@
   on, and words the agent had not received yet are handed over with their paper. A run that has started and ends without a result of its own (cancelled, failed, interrupted by an
   update, by disabling the plugin or by quitting Zotero) leaves its end in the log, and the paper's history
   shows it.
+- Scholium section: the prompt names the profile, or says there is none and the defaults apply; a
+  follow-up that changes or adds annotations is told to edit the paper's one configuration and apply it
+  whole with `cleanup: true`. A run whose agent does not find the skill ends at its start and says where
+  to put it; when Codex cannot list its skills, lists them with errors or has the skill switched off, the
+  run ends with what Codex said. A limit of the service
+  rather than of the account ("not your usage limit") is named as such, and the queue waits as long as its
+  message says.
 
 ## 0.1.8 (2026-10-16)
 

@@ -34,8 +34,10 @@ one at a time. A regular item is annotated through its best PDF attachment.
 
 Requirements: Claude Code or Codex installed and signed in, and the zotero-scholium skill installed
 for it (`~/.claude/skills/zotero-scholium` for Claude Code; for Codex, `~/.codex/skills/`,
-`~/.agents/skills/`, or `<data dir>/.agents/skills/`). The plugin starts the installed executable
-unchanged and does not read its credentials; the usage counts toward the signed-in account.
+`~/.agents/skills/`, or `<data dir>/.agents/skills/`); a run whose agent does not find the skill ends at
+its start and says where to put it (when Codex cannot list its skills, lists them with errors or has the
+skill switched off, the run ends with what Codex said). The plugin starts the installed executable unchanged and does not read
+its credentials; the usage counts toward the signed-in account.
 
 Each Claude Code run:
 
@@ -62,11 +64,13 @@ Each Codex run:
   `<data dir>/tmp/scholium/<attachment key>/codex-run.jsonl`, between a start line and a result line
   in Claude Code's form.
 
-Both receive the item key, the attachment key, the PDF path, and the output directory
-`<data dir>/tmp/scholium/<attachment key>`, and are told not to ask questions or start sub-agents. A
-follow-up adds to the paper's log. Besides the agent's events, the log holds the plugin's own lines: the
-user's words, a continuation, and the end of a run that has started and has no result of its own
-(cancelled, failed, interrupted).
+Both receive the item key, the attachment key, the PDF path, the output directory
+`<data dir>/tmp/scholium/<attachment key>` and the profile's path (or that there is none, so that the
+defaults apply and no profile is created), and are told not to ask questions or start sub-agents. A
+follow-up adds to the paper's log; one that changes or adds annotations is told to edit the configuration
+they were written from, the paper's whole set, and apply it whole with `cleanup: true`. Besides the agent's
+events, the log holds the plugin's own lines: the user's words, a continuation, and the end of a run that
+has started and has no result of its own (cancelled, failed, interrupted).
 
 The *Scholium* section of the item pane, in the library and in the reader's side pane, holds the
 controls and the process of the selected paper:
@@ -123,7 +127,9 @@ and the log keep the failed try.
 When the agent reports that the usage limit is reached, the queue waits: the interrupted paper
 stays at its head, the state line and a notice give the reset time, and a minute after the reset the
 paper continues its conversation where it stopped, followed by the rest of the queue. Without a reset
-time the queue tries again after ten minutes. **Continue now** in the section ends the wait at once.
+time the queue tries again after ten minutes. A limit of the service rather than of the account (“not
+your usage limit”) is named as such, and the queue waits as long as its message says. **Continue now** in
+the section ends the wait at once.
 
 When the plugin is updated while a paper runs, the run ends and its log records the interruption; the
 new version continues that paper's conversation, then runs the papers still waiting, and a pause for a
