@@ -1,0 +1,7 @@
+# Several papers, reviews
+
+Annotate one paper per agent context. First determine whether the request covers one paper or several. One paper is annotated directly. Only when it covers several, ask the user before starting whether to annotate them one after another or with several sub-agents in parallel, and wait for the answer. Sub-agent calls issued in one response run in parallel; one call per response runs them in sequence.
+
+The coordinating context only dispatches and collects. Start with a short context (a fresh session, or after compacting). Each dispatch includes the item key, attachment key, profile location, current task scope and requested output types, language, temporary preferences, the skill/script path, and a unique `out_dir` named after the attachment key. Preserve the user's instructions when dispatching. Wait for each sub-agent once instead of polling; the coordinator does not run `scholium.py`, read a paper or open a report. Each sub-agent performs steps 1–3 and reports counts, note title and remaining warnings. Do not start a second paper in a context that has already read one.
+
+A content review, when the user asks for one, runs in a fresh sub-agent with the configuration, report and `sentences.txt`, and returns a findings list. A fresh sub-agent makes corrections from the configuration and findings. Both receive the same task scope, language and preferences as the writer.

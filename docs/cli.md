@@ -55,7 +55,7 @@ Inside the skill the same file is `skills/zotero-scholium/scripts/scholium.py`; 
 
    ```bash
    scholium --config config.json            # build and report without writing
-   scholium --config config.json --apply    # build, check, write into Zotero, read back (Zotero 10: confirm the dialog once)
+   scholium --config config.json --apply    # build, check, write into Zotero, read back (through the local API without the plugin: confirm the dialog once)
    scholium --config config.json --list     # counts, the annotations that are not the tool's own, note titles (--full: everything)
    ```
 
@@ -72,6 +72,7 @@ The skill's files are the reference for the command line too.
 | [`SKILL.md`](../skills/zotero-scholium/SKILL.md) | The workflow: locating the item, choosing sentences, writing comments and margin notes, invoking the script, verifying the result |
 | [`references/configuration.md`](../skills/zotero-scholium/references/configuration.md) | Configuration keys, commands, and report fields |
 | [`references/backends.md`](../skills/zotero-scholium/references/backends.md) | Write channels, failure handling, and pitfalls |
+| [`references/batch.md`](../skills/zotero-scholium/references/batch.md) | Several papers in one request, with sub-agents; content reviews |
 | [`references/profile.md`](../skills/zotero-scholium/references/profile.md) | The annotation profile: `scholium profile --from-library` derives it from the library's annotations, `scholium profile --path` prints where it is; precedence and procedure |
 | [`references/style-zh.md`](../skills/zotero-scholium/references/style-zh.md) | Style guide for Chinese comments, margin notes, and reading notes |
 | [`references/zotero-annotations.md`](../skills/zotero-scholium/references/zotero-annotations.md) | The annotation data model of Zotero |

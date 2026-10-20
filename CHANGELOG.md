@@ -24,9 +24,8 @@
   the authors, date, venue, DOI and URL. `extract` prints the length of its listing in lines.
 - The JavaScript fallback says why each write channel was unavailable. Without PyMuPDF, the commands
   that need it say how to install it; PyMuPDF before 1.24 (`fitz`) is used too.
-- SKILL.md: the new defaults and options; files are written with the file tool into `out_dir`;
-  `--apply` may follow small corrections directly; the description covers redoing, extending and
-  correcting annotations.
+- SKILL.md: the new defaults and options; files are written with the file tool into `out_dir`; the
+  description covers redoing, extending and correcting annotations.
 - A top or bottom band without room at its font size is set smaller in steps of 0.5 pt down to
   `band_min_font_size` (default 8, between 4 and 36) and listed under `fitted`. When even that is too
   small, the warning gives how many characters fit, the words they end with, and how many to cut.
@@ -67,6 +66,12 @@
   blocks `--apply` (`user_edit`) unless the configuration keeps the change; listings give the tool's own
   annotations whole, with their dates.
 - Requests to Zotero's local server do not go through a proxy named in the environment.
+- SKILL.md: the profile's path comes from `status`; a run with no user to ask uses the defaults when there
+  is no profile; to change or add to annotations already written, the configuration they came from (the
+  paper's whole set) is edited and applied whole with `cleanup: true`; after corrections `--apply` follows directly, and no `status` follows a successful
+  write; the citation comes from `status`, a code link only from the paper. The references are pointed to
+  only for what SKILL.md leaves out, and several papers and reviews moved to `references/batch.md`.
+  `--help` names the write channels in the order they are chosen.
 
 ## 0.1.8 (2026-10-16)
 

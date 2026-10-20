@@ -55,7 +55,7 @@ pip install .                            # 提供 `scholium` 命令
 
    ```bash
    scholium --config config.json            # 生成并报告，不写入
-   scholium --config config.json --apply    # 生成、检查、写入 Zotero、回读（Zotero 10 首次运行需确认授权对话框）
+   scholium --config config.json --apply    # 生成、检查、写入 Zotero、回读（没装插件时经本地 API 写入，首次运行需确认授权对话框）
    scholium --config config.json --list     # 各类型/颜色数量、非本工具的注释、笔记标题（--full：全部输出）
    ```
 
@@ -72,6 +72,7 @@ pip install .                            # 提供 `scholium` 命令
 | [`SKILL.md`](../skills/zotero-scholium/SKILL.md) | 工作流程：定位条目、选择句子、撰写评论与页边批注、调用脚本、核对结果 |
 | [`references/configuration.md`](../skills/zotero-scholium/references/configuration.md) | 配置键、命令与报告字段 |
 | [`references/backends.md`](../skills/zotero-scholium/references/backends.md) | 写入通道、失败处理与注意事项 |
+| [`references/batch.md`](../skills/zotero-scholium/references/batch.md) | 一次请求多篇论文（用子代理）；内容审查 |
 | [`references/profile.md`](../skills/zotero-scholium/references/profile.md) | 标注画像：`scholium profile --from-library` 从文库已有的注释归纳画像，`scholium profile --path` 打印它的位置；优先级与流程 |
 | [`references/style-zh.md`](../skills/zotero-scholium/references/style-zh.md) | 中文评论、页边批注与阅读笔记的写作规范 |
 | [`references/zotero-annotations.md`](../skills/zotero-scholium/references/zotero-annotations.md) | Zotero 注释的数据模型 |

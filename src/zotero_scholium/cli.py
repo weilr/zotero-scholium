@@ -10,15 +10,17 @@ For one PDF attachment the tool creates (the PDF file itself is never modified):
     (short summaries; wrapped automatically and editable in Zotero)
   * optionally a child note (HTML) under the parent item
 
-Backends (--backend auto selects the first available one):
+Backends (--backend auto takes the plugin from 0.1.9, else the local API on Zotero 10, else an older plugin):
+  bridge  the bundled scholium-bridge plugin (Zotero 7 and later): a run's annotations in one transaction
   api     official local API of Zotero 10 and later (no plugin; one confirmation dialog on first use)
-  bridge  the bundled scholium-bridge plugin (Zotero 7 to 9)
   js      a "Run JavaScript" file for manual execution in Zotero (last resort)
 
 Requires: pip install pymupdf
 Usage:    scholium --config config.json [--apply] [--list] [--backend auto|api|bridge|js]
-          scholium extract --pdf paper.pdf
-          scholium profile --from-library
+          scholium status ITEM_KEY | --query WORDS
+          scholium extract --pdf paper.pdf [--sentences sentences.json] [--out sentences.txt]
+          scholium samples [KEY ...] [--query WORDS]
+          scholium profile [--from-library | --path]
 """
 import argparse
 import difflib, glob, hashlib, json, os, sys, re, time, datetime, collections, unicodedata
@@ -1762,7 +1764,7 @@ def api_apply(cfg, out, api):
 
 
 # ---------------------------------------------------------------------------
-# Backend 2: scholium-bridge plugin (Zotero 7 to 9)
+# Backend 2: scholium-bridge plugin (Zotero 7 and later)
 # ---------------------------------------------------------------------------
 def zotero_prefs_data_dir(profile_roots=None):
     """Data directory recorded in Zotero's prefs.js (`extensions.zotero.dataDir`), or None."""
