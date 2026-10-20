@@ -15,8 +15,11 @@
  */
 
 var ScholiumBridge = {
-  version: "0.1.8",
+  version: "",              // the plugin's, from its manifest (startup)
+  // the tags that mark the tool's annotations and notes, the current one first: only these are removed or trashed
+  OWN_TAGS: ["zotero-scholium", "zotero-marginalia", "zotero-paper-annotate"],
   token: null,
+  timer: null,
   paths: ["/scholium-bridge/ping", "/scholium-bridge/list", "/scholium-bridge/apply"],
 
   log(msg) { Zotero.debug("[scholium-bridge] " + msg); },
@@ -54,12 +57,16 @@ var ScholiumBridge = {
     return d || {};
   },
 
+  // an annotation as the tool reads it: the tool's own with their whole comment and with the dates that show whether the
+  // user changed them in Zotero after they were written, the others shortened
   summarize(a) {
+    const tags = a.getTags().map(t => t.tag);
+    const cut = tags.some(t => this.OWN_TAGS.includes(t)) ? 2000 : 80;
     return {
       key: a.key, type: a.annotationType, color: a.annotationColor, author: a.annotationAuthorName || "",
       isExternal: !!a.annotationIsExternal, pageLabel: a.annotationPageLabel,
-      text: (a.annotationText || "").slice(0, 80), comment: (a.annotationComment || "").slice(0, 80),
-      tags: a.getTags().map(t => t.tag),
+      text: (a.annotationText || "").slice(0, cut), comment: (a.annotationComment || "").slice(0, cut),
+      tags, added: a.dateAdded, modified: a.dateModified,
       position: (() => { try { return JSON.parse(a.annotationPosition || "{}"); } catch (e) { return {}; } })(),
     };
   },
@@ -79,14 +86,18 @@ var ScholiumBridge = {
     const libraryID = Zotero.Libraries.userLibraryID;
     const att = Zotero.Items.getByLibraryAndKey(libraryID, data.attachmentKey);
     if (!att) throw new Error("attachment not found: " + data.attachmentKey);
-    const parent = data.itemKey ? Zotero.Items.getByLibraryAndKey(libraryID, data.itemKey)
-                                : (att.parentID ? Zotero.Items.get(att.parentID) : null);
+    const parent = att.parentID ? Zotero.Items.get(att.parentID) : null;
+    if (data.itemKey && data.itemKey !== att.key && !(parent && parent.key === data.itemKey)) {
+      throw new Error(`item ${data.itemKey} is not the parent of attachment ${data.attachmentKey}`);
+    }
+    if (data.note && data.note.html && !parent) throw new Error(`attachment ${data.attachmentKey} has no parent item to hold the note`);
     const anns = Array.isArray(data.annotations) ? data.annotations : [];
 
     // (0) cleanup: annotations tagged by this tool, and external (PDF-imported, locked) annotations when
     //     data.cleanupExternal is true. They are removed in (2), after the new annotations are saved.
     const tag = data.tag || "";
-    const ownTags = new Set([tag].concat(data.legacyTags || []).filter(Boolean));
+    if (tag && tag !== this.OWN_TAGS[0]) throw new Error(`tag must be ${this.OWN_TAGS[0]}`);
+    const ownTags = new Set(this.OWN_TAGS);
     const old = [];
     let kept = 0;
     if (data.cleanup !== false) {
@@ -187,12 +198,23 @@ var ScholiumBridge = {
         catch (e) { return self.reply(500, { ok: false, error: String(e && e.message || e) }); }
       };
     }
-    Zotero.Server.Endpoints["/scholium-bridge/ping"] = Ping;
-    Zotero.Server.Endpoints["/scholium-bridge/list"] = List;
-    Zotero.Server.Endpoints["/scholium-bridge/apply"] = Apply;
+    this.endpoints = { "/scholium-bridge/ping": Ping, "/scholium-bridge/list": List, "/scholium-bridge/apply": Apply };
+    Object.assign(Zotero.Server.Endpoints, this.endpoints);
   },
 
-  unregister() { for (const p of this.paths) delete Zotero.Server.Endpoints[p]; },
+  // only this copy's endpoints: during an update the new copy may have registered its own before this one stops
+  unregister() {
+    if (this.timer) clearTimeout(this.timer);
+    for (const p of this.paths) if (this.endpoints && Zotero.Server.Endpoints[p] === this.endpoints[p]) delete Zotero.Server.Endpoints[p];
+  },
+
+  // after an update: the copy it replaced may stop after this one registered, and a copy before 0.1.9 removes the
+  // endpoints whoever registered them; the missing ones are put back a moment later
+  keep() {
+    this.timer = setTimeout(() => {
+      for (const p of this.paths) if (this.endpoints && !Zotero.Server.Endpoints[p]) Zotero.Server.Endpoints[p] = this.endpoints[p];
+    }, 5000);
+  },
 };
 
 var ScholiumToggle = {
@@ -3046,7 +3068,7 @@ async function startup({ id, version, rootURI }) {
       [["content", pkg, rootURI + "content/"]]);
     ScholiumRunner.chrome = "chrome://" + pkg + "/content/";
   } catch (e) { Zotero.debug("[scholium-bridge] chrome registration failed: " + e); }
-  ScholiumRunner.version = version;
+  ScholiumRunner.version = ScholiumBridge.version = version;
   try { ScholiumToggle.start(id); ScholiumToggle.log("reader toggle registered"); }
   catch (e) { ScholiumToggle.log("reader toggle failed: " + e); }
   try { ScholiumRunner.start(id); ScholiumRunner.log("annotation menu registered"); }

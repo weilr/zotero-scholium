@@ -72,6 +72,11 @@
   write; the citation comes from `status`, a code link only from the paper. The references are pointed to
   only for what SKILL.md leaves out, and several papers and reviews moved to `references/batch.md`.
   `--help` names the write channels in the order they are chosen.
+- Plugin: the bridge removes and trashes only items with the tool's own tags, which are fixed in the
+  plugin; it refuses a request that names another tag, or an item other than the attachment's parent for
+  the note. It reports the version of its manifest, lists the tool's own annotations whole with their dates,
+  and a copy that stops removes only its own endpoints; after an update the new copy puts back endpoints an
+  older copy removed.
 
 ## 0.1.8 (2026-10-16)
 

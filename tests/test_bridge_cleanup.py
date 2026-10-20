@@ -83,19 +83,19 @@ def run_apply(data, existing, script=None):
             0,
         ),
         (
-            {"tag": "", "legacyTags": []},
-            ["blank", "same-comment", "same-text", "external", "current", "legacy"],
-            0,
-            6,
+            {"legacyTags": ["personal"]},
+            ["blank", "same-comment", "same-text", "external"],
+            2,
+            4,
         ),
     ],
-    ids=["default", "external-disabled", "external-enabled", "cleanup-disabled", "no-owned-tags"],
+    ids=["default", "external-disabled", "external-enabled", "cleanup-disabled", "other-tags-requested"],
 )
 def test_cleanup_uses_ownership_tags_only(options, remaining, removed, kept):
     data = {
         "attachmentKey": "ATTACH01",
-        "tag": "scholium",
-        "legacyTags": ["old-scholium"],
+        "tag": "zotero-scholium",
+        "legacyTags": ["zotero-marginalia"],
         "annotations": [
             {"type": "highlight", "comment": "", "text": "shared text", "position": {}},
             {"type": "highlight", "comment": "shared comment", "text": "new text", "position": {}},
@@ -107,8 +107,8 @@ def test_cleanup_uses_ownership_tags_only(options, remaining, removed, kept):
         {"key": "same-comment", "comment": "shared comment", "tags": ["personal"]},
         {"key": "same-text", "comment": "user comment", "text": "shared text"},
         {"key": "external", "comment": "", "external": True},
-        {"key": "current", "comment": "old output", "tags": ["scholium"]},
-        {"key": "legacy", "comment": "older output", "tags": ["old-scholium"]},
+        {"key": "current", "comment": "old output", "tags": ["zotero-scholium"]},
+        {"key": "legacy", "comment": "older output", "tags": ["zotero-marginalia"]},
     ]
     output = run_apply(data, existing)
     assert output["remaining"] == remaining
@@ -124,12 +124,23 @@ def test_the_listing_names_the_plugins_version():
 const fs = require('node:fs');
 const vm = require('node:vm');
 const attachment = { id: 1, key: 'ATTACH01', parentID: null, getAnnotations: () => [] };
-const context = vm.createContext({ Zotero: { Libraries: { userLibraryID: 1 }, Items: { getByLibraryAndKey: () => attachment } } });
+const manifest = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const context = vm.createContext({
+  Zotero: { Libraries: { userLibraryID: 1 }, Items: { getByLibraryAndKey: () => attachment }, initializationPromise: Promise.resolve(),
+            debug() {}, DataDirectory: { dir: 'D' }, Utilities: { randomString: () => 'x'.repeat(40) }, Server: { Endpoints: {} } },
+  PathUtils: { join: (...p) => p.join('/') }, IOUtils: { exists: async () => false, writeUTF8: async () => {} },
+});
 vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
-context.ScholiumBridge.list({ attachmentKey: 'ATTACH01' }).then(r => process.stdout.write(JSON.stringify(r)));
+// startup gives the bridge the version of the manifest it was installed with
+context.startup({ id: manifest.applications.zotero.id, version: manifest.version, rootURI: '' })
+  .then(() => context.ScholiumBridge.list({ attachmentKey: 'ATTACH01' }))
+  .then(r => process.stdout.write(JSON.stringify(r)));
 """
-    out = json.loads(subprocess.run([NODE, "-e", script, str(BRIDGE)], text=True, capture_output=True, check=True, timeout=15).stdout)
-    assert out["ok"] and out["version"] == cli.__version__ and out["annotations"] == []
+    manifest = BRIDGE.parent / "manifest.json"
+    out = json.loads(subprocess.run([NODE, "-e", script, str(BRIDGE), str(manifest)], text=True, capture_output=True, check=True,
+                                    timeout=15).stdout)
+    assert out["ok"] and out["version"] == json.loads(manifest.read_text(encoding="utf8"))["version"] == cli.__version__
+    assert out["annotations"] == []
 
 
 @pytest.mark.parametrize("cleanup", [True, False], ids=["cleanup-enabled", "cleanup-disabled"])
@@ -204,7 +215,7 @@ const notes = input.notes.map((n, i) => ({ id: i + 10, key: n.key, html: n.html,
   getNote() { return this.html; }, getNoteTitle() { return (this.html.match(/<h1[^>]*>(.*?)<\/h1>/) || [null, ''])[1]; },
   getTags() { return this.tags.map(tag => ({ tag })); } }));
 const created = [], trashed = [];
-const parent = { id: 2, getNotes: () => notes.map(n => n.id) };
+const parent = { id: 2, key: 'PARENT01', getNotes: () => notes.map(n => n.id) };
 const attachment = { id: 1, key: 'ATTACH01', parentID: 2, getAnnotations: () => [] };
 const context = vm.createContext({ Zotero: {
   Libraries: { userLibraryID: 1 },
@@ -286,3 +297,62 @@ def test_a_note_with_the_same_text_is_not_written_again(channel):
     # the same text in the user's own note is no reason to skip
     result, created, trashed = run_notes(channel, [{"key": "USER", "html": NEW_NOTE}], NEW_NOTE, False)
     assert len(created) == 1
+
+
+def test_the_bridge_refuses_another_tag():
+    """Only the tool's own tags mark what a run may remove; a request cannot name others."""
+    data = {"attachmentKey": "ATTACH01", "tag": "to-read", "cleanup": True, "annotations": []}
+    completed = subprocess.run([NODE, "-e", RUN_APPLY, str(BRIDGE)], input=json.dumps({"data": data, "existing": [
+        {"key": "USER", "comment": "", "tags": ["to-read"]}], "script": None}), text=True, capture_output=True, timeout=15)
+    assert completed.returncode != 0 and "tag must be zotero-scholium" in completed.stderr
+
+
+@pytest.mark.parametrize("item_key, fragment", [("OTHER001", "is not the parent of attachment ATTACH01")])
+def test_the_bridge_refuses_a_note_for_another_item(item_key, fragment):
+    data = {"attachmentKey": "ATTACH01", "itemKey": item_key, "tag": "zotero-scholium", "annotations": [],
+            "note": {"html": NEW_NOTE, "titlePrefix": "", "trashOwn": True, "trashTitlePrefix": ""}}
+    completed = subprocess.run([NODE, "-e", RUN_NOTES, str(BRIDGE)], input=json.dumps({"data": data, "notes": EARLIER_NOTES, "script": None}),
+                               text=True, capture_output=True, timeout=15)
+    assert completed.returncode != 0 and fragment in completed.stderr
+
+
+def test_a_copy_that_stops_leaves_the_new_copys_endpoints():
+    """During an update the new copy may register its endpoints before the old copy stops."""
+    script = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const endpoints = {};
+const copy = () => {
+  const context = vm.createContext({ Zotero: { Server: { Endpoints: endpoints }, debug() {} } });
+  vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+  return context.ScholiumBridge;
+};
+const old = copy(), fresh = copy();
+old.register();
+fresh.register();
+old.unregister();
+const kept = Object.keys(endpoints).filter(p => endpoints[p] === fresh.endpoints[p]).length;
+fresh.unregister();
+process.stdout.write(JSON.stringify({ kept, left: Object.keys(endpoints).length }));
+"""
+    out = json.loads(subprocess.run([NODE, "-e", script, str(BRIDGE)], text=True, capture_output=True, check=True, timeout=15).stdout)
+    assert out == {"kept": 3, "left": 0}
+
+
+def test_after_an_update_the_endpoints_an_older_copy_removed_come_back():
+    """A copy before 0.1.9 removes the endpoints whoever registered them; it may stop after the new copy started."""
+    script = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const endpoints = {}, later = [];
+const context = vm.createContext({ Zotero: { Server: { Endpoints: endpoints }, debug() {} }, setTimeout: f => later.push(f), clearTimeout() {} });
+vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+const bridge = context.ScholiumBridge;
+bridge.register();
+bridge.keep();
+for (const p of Object.keys(endpoints)) delete endpoints[p];
+later.forEach(f => f());
+process.stdout.write(JSON.stringify(Object.keys(endpoints).filter(p => endpoints[p] === bridge.endpoints[p]).length));
+"""
+    out = json.loads(subprocess.run([NODE, "-e", script, str(BRIDGE)], text=True, capture_output=True, check=True, timeout=15).stdout)
+    assert out == 3
