@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.9 (2026-10-20)
 
 - `cleanup` is off by default: a run only adds unless the configuration sets `cleanup: true` for a
   complete redo, and the dry-run report counts what that would delete (`cleanup_removes`). Without
