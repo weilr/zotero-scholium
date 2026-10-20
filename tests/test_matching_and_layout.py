@@ -1018,3 +1018,36 @@ def test_existing_annotations_count_in_pdf_user_space_on_an_offset_page(tmp_path
     out2, _ = cli.build(cfg, {0: [note]})
     _, b0, _, b1 = out2[0]["position"]["rects"][0]
     assert b1 <= note[1] or b0 >= note[3], "the box must not overlap the existing annotation"
+
+
+@pytest.mark.parametrize("comment", ["若 x<y，则 f(x)>f(y)。", "当 n<k 且 k>m 时成立。", "比例为 3:1 时效果最好。", "按 3：1 混合。",
+                                     "按 3 : 1 混合。"])
+def test_comparisons_and_ratios_are_not_markup_or_labels(comment):
+    assert cli._text_defects(comment, page=False) == []
+    assert not cli.LABEL_RE.match(comment)
+
+
+@pytest.mark.parametrize("comment, kind", [("用 <em>强调</em>", "tag"), ('<span class="x">a</span>', "tag"), ("x<br/>y", "tag")])
+def test_real_tags_are_still_reported(comment, kind):
+    assert [k for k, _ in cli._text_defects(comment, page=False)] == [kind]
+    assert cli.LABEL_RE.match("方法：三招") and cli.LABEL_RE.match("结论：2 倍加速来自缓存。") and cli.LABEL_RE.match("Step 2: do")
+
+
+def test_a_rewrite_that_would_undo_the_users_change_is_reported(pdf_path, tmp_path):
+    """With cleanup, a tool's annotation the user changed in Zotero after it was written must be kept by the configuration."""
+    text = "patch jittering, a stabilization method"
+    cfg = _cfg(pdf=pdf_path, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[], cleanup=True,
+               highlights=[{"page": 1, "text": text, "comment": "补丁抖动，一种稳定化方法"}])
+    out, _ = cli.build(cfg)
+
+    def listing(comment, added="2026-10-20 05:00:00", modified="2026-10-20 05:00:00"):
+        return {"annotations": [{"key": "OWN1", "type": "highlight", "color": cfg["other_color"], "tags": [cli.TAG], "pageLabel": "1",
+                                 "text": out[0]["text"], "comment": comment, "added": added, "modified": modified,
+                                 "position": {"pageIndex": 0, "rects": out[0]["position"]["rects"]}}]}
+    kinds = lambda lst, c=cfg: [w["kind"] for w in cli.check_style(out, c, lst, None)]
+    edited = listing("补丁抖动：用户改过的译文", modified="2026-10-21T09:00:00Z")
+    w = [x for x in cli.check_style(out, cfg, edited, None) if x["kind"] == "user_edit"]
+    assert len(w) == 1 and "OWN1" in w[0]["reason"] and "补丁抖动：用户改过的译文" in w[0]["reason"]
+    assert "user_edit" not in kinds(listing("补丁抖动：用户改过的译文")), "written by the tool and never changed: replaced quietly"
+    assert "user_edit" not in kinds(listing("补丁抖动，一种稳定化方法", modified="2026-10-21 09:00:00")), "the configuration keeps the change"
+    assert "user_edit" not in kinds(edited, dict(cfg, cleanup=False)), "without cleanup nothing is replaced"

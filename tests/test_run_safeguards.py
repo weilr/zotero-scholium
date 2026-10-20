@@ -190,6 +190,17 @@ def test_accept_lets_a_deliberate_exception_through_and_core_count_only_informs(
     ({"author": "Me"}, "the 'author' key is not supported"),
     ({"band_min_font_size": 0}, "band_min_font_size must be a number between 4 and 36"),
     ({"band_min_font_size": "8"}, "band_min_font_size must be a number between 4 and 36"),
+    ({"highlights": [{"page": 0, "text": SENTENCE}]}, "highlights[0]: give id, ids, or a 1-based page with text"),
+    ({"highlights": [{"page": 1}]}, "highlights[0]: give id, ids, or text with its page"),
+    ({"highlights": [{"text": SENTENCE}]}, "highlights[0]: give id, ids, or a 1-based page with text"),
+    ({"highlights": [{"ids": [5]}]}, "highlights[0]: ids must be [first, last], two sentence numbers in order"),
+    ({"highlights": [{"ids": [5, 3]}]}, "highlights[0]: ids must be [first, last], two sentence numbers in order"),
+    ({"highlights": [{"id": "5"}]}, "highlights[0]: id must be a sentence number"),
+    ({"highlights": [{"id": 5, "occurrence": "first"}]}, "highlights[0]: occurrence must be a number from 1"),
+    ({"highlights": [{"id": 5, "comment": 5}]}, "highlights[0]: comment must be text"),
+    ({"highlights": [{"id": 5, "color": "red"}]}, "highlights[0]: color must be a #rrggbb colour"),
+    ({"core_color": "red"}, "core_color must be a #rrggbb colour"),
+    ({"levels": {"claim": "#f00"}}, "levels: 'claim' must be a #rrggbb colour"),
 ])
 def test_configuration_mistakes_are_refused(paper, monkeypatch, capsys, config, fragment):
     code, out = run(paper, monkeypatch, capsys, config)
@@ -337,3 +348,8 @@ def test_text_lines_are_read_without_decoding_the_pages_images(tmp_path):
     assert lines(blocks) == lines(with_images)
     index = cli.PageIndex(page)
     assert index.blocks() is index.blocks()   # read once per page
+
+
+def test_a_page_beyond_the_end_is_missed_not_raised(paper, monkeypatch, capsys):
+    code, report = run(paper, monkeypatch, capsys, {"highlights": [{"page": 9, "text": SENTENCE, "comment": "x"}]}, "--ignore-existing")
+    assert code == 2 and "page 9 is outside the document (1 pages)" in report["missed"][0]["reason"]

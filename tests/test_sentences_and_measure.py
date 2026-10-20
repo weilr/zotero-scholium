@@ -184,3 +184,35 @@ def test_session_usage_reads_codex_and_claude_transcripts(tmp_path):
     assert (c["harness"], c["calls"], c["input"], c["cached"], c["output"], c["peak"]) == ("codex", 2, 90000, 75000, 1200, 50000)
     assert (k["harness"], k["calls"], k["input"], k["output"], k["peak"]) == ("claude", 2, 64300, 400, 32200)
     assert c["tools"]["scholium apply"] == 1 and k["tools"]["scholium dry-run"] == 1
+
+
+def test_a_lone_number_or_letter_inside_the_text_is_kept(tmp_path):
+    """Only a page's first and last rows can hold its page number; a formula's variable on its own line is text."""
+    fp = str(tmp_path / "formula.pdf")
+    body = [f"Body line {w} of the running text continues here" for w in "abcdefghij"]
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_textbox(pymupdf.Rect(72, 72, 540, 700), "\n".join(
+        body + ["and the learned vector field defines an ODE,", "d", "dt x = v(t, x), which is solved numerically.",
+                "We train the model for", "12", "epochs on the data."] + body) + ".", fontsize=10)
+    page.insert_text((300, 760), "7", fontsize=9)
+    page.insert_textbox(pymupdf.Rect(30, 72, 60, 700), "\n".join(f"{n:03d}" for n in range(1, 40)), fontsize=8)   # line numbers
+    doc.save(fp); doc.close()
+    text = " ".join(it["text"] for it in cli.extract_sentences(fp) if "id" in it)
+    assert "an ODE, d dt x = v(t, x)" in text and "for 12 epochs" in text
+    assert not text.rstrip(".").endswith(" 7"), "the page number at the foot is still dropped"
+    assert "005" not in text and "020" not in text, "a column of line numbers is dropped"
+
+
+def test_extract_stops_on_a_pdf_without_text(tmp_path):
+    fp = str(tmp_path / "scan.pdf")
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(pymupdf.Rect(72, 72, 540, 700), fill=(0.9, 0.9, 0.9))
+    doc.save(fp); doc.close()
+    js = tmp_path / "sentences.json"
+    with pytest.raises(SystemExit) as stop:
+        cli.extract_main(["--pdf", fp, "--sentences", str(js), "--out", str(tmp_path / "sentences.txt")])
+    assert "no text layer" in str(stop.value) and not js.exists()
+    with pytest.raises(SystemExit):
+        cli.extract_main(["--pdf", fp])

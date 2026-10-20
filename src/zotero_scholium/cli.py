@@ -492,7 +492,8 @@ def place_blocks(blocks, occupied, floor, ceiling, gap=3.0):
                     break
         if not ok:
             cand = desired
-            b["layout_warning"] = "no free space in the margin beside this paragraph; the box may overlap an existing annotation or a figure"
+            b["layout_warning"] = ("no gap tall enough for this box anywhere in this margin of the page; shorten the text, set side to "
+                                   "the other margin, anchor it on another page, or drop it")
         b["y_top"] = cand
         occ.append((cand - h, cand))
         occ.sort()
@@ -750,7 +751,11 @@ def build(cfg, obstacles=None):
         if h is None:
             continue
         p = int(h["page"]) - 1
-        if 0 <= p < len(doc) and doc[p].rotation % 360:
+        if not 0 <= p < len(doc):
+            missed.append({"kind": "highlight", "page": p + 1, "text": str(h.get("text", ""))[:60],
+                           "reason": f"page {p + 1} is outside the document ({len(doc)} pages)"})
+            continue
+        if doc[p].rotation % 360:
             missed.append({"kind": "highlight", "page": p + 1, "text": h["text"][:60], "reason": ROTATED_PAGE})
             continue
         pi = page_index(p)
@@ -881,9 +886,10 @@ NUMBER_RE = re.compile(
 )
 
 
-def _tokens(s):
+def _tokens(s, origin=None):
     """Latin words (3+ characters) and numbers, lower-cased; hyphenation across lines is joined first,
-    and both the joined form and its two halves count as terms."""
+    and both the joined form and its two halves count as terms. `origin`, when given, receives each number's
+    text as written (1.75E+11 -> "1750 亿")."""
     # compatibility forms: mathematical italic letters (𝑜𝑢𝑡) and superscript digits (10⁻⁶) become plain characters
     # (a full-width comma stays a separator: "2.1%，3" is not one number)
     s = unicodedata.normalize("NFKC", "".join(LIG.get(c, c) for c in s).replace("，", "， "))
@@ -911,7 +917,10 @@ def _tokens(s):
         value = str(Decimal((sign, digits, exponent))) if digits else "0"
         # Keep units on their quantities; spaces must not hide a unit change.
         unit = {"毫秒": "ms", "微秒": "us", "纳秒": "ns", "秒": "s", "μs": "us"}.get(match["unit"], match["unit"])
-        toks.add(value + ("%" if match["percent"] else "") + (" " + unit if unit else ""))
+        token = value + ("%" if match["percent"] else "") + (" " + unit if unit else "")
+        toks.add(token)
+        if origin is not None:
+            origin.setdefault(token, match[0].strip())
         return " "
     s = NUMBER_RE.sub(number_token, s)
     for t in re.findall(r"[a-z0-9]+(?:\.[0-9]+)?", s):
@@ -964,6 +973,7 @@ def _text_variants(text):
     alt = re.sub(r"([A-Za-z0-9])[- ]?cubed\b", r"\g<1>3", alt)
     alt = re.sub(r"([A-Za-z]{2,})\.(?=\d)", r"\1. ", alt)
     alt = NUMBER_WORD_RE.sub(lambda m: str(NUMBER_WORDS[m[1].lower()]), alt)
+    alt = re.sub(r"(\d)\s*per\s?cent\b", r"\1%", alt, flags=re.I)
     alt = re.sub(r"\bunit(?=[- ](?:scale|variance|norm|length|vector|sphere|ball|cube|interval|circle|square|magnitude)s?\b)", "1", alt,
                  flags=re.I)
     return re.sub(r"(\d)\s*(?:thousand|million|billion|trillion)\b", r"\1", alt, flags=re.I)
@@ -996,8 +1006,11 @@ def check_translations(annotations):
         readings = [joined, plain]
         if FACTOR_RE.search(text):   # "8x fewer samples": "1/8 的样本"
             readings += [re.sub(r"(?<![\d.])1\s*/\s*(?=\d)", "", p) for p in (joined, plain)]
-        extra = min((sorted(t for t in _tokens(p) if not _covered(t, text_tokens, text_words, acronyms)) for p in readings),
-                    key=len)
+        found = []
+        for p in readings:   # each reported as the comment writes it
+            origin = {}
+            found.append(sorted({origin.get(t, t) for t in _tokens(p, origin) if not _covered(t, text_tokens, text_words, acronyms)}))
+        extra = min(found, key=len)
         words = len(text_words)
         kept = {_stem(w.lower()) for p in (plain, joined) for w in re.findall(r"[A-Za-z]+", unicodedata.normalize("NFKC", p))}
         initials = "".join(w[0] for w in text_words).lower()
@@ -1022,7 +1035,9 @@ def check_translations(annotations):
 
 
 STYLE_SYMBOL_RE = re.compile(r"[→←↑↓⇒①-⑳【】]")            # arrows, circled numbers, bracket tags
-LABEL_RE = re.compile(r"^[^：:，,。.]{1,12}[：:]\s*\S")         # "label: content" at the start of a margin note
+LABEL_RE = re.compile(r"^[^：:，,。.]{1,12}(?:(?<!\d)(?<!\d\s)[：:]|[：:](?!\s?\d))\s*\S")   # "label: content" (not 3:1, 3：1, 3 : 1)
+# a tag as markup writes it: <em>, </span>, <br/>, <span class="x">; not the comparisons in "x<y，则 f(x)>f(y)"
+MARKUP_TAG_RE = re.compile(r"</?([a-zA-Z][a-zA-Z0-9]*)(?:\s+[a-zA-Z][\w:-]*\s*=\s*(?:\"[^\"]*\"|'[^']*'|[^\s\"'<>]+))*\s*/?>")
 MATH_FORMAT_RE = re.compile(r"\^|_\{|(?:\b10|\de)−\d")        # ^, _{ or a bare minus exponent instead of <sup>/<sub>
 MATH_NODE_RE = re.compile(r'<(?:span|pre) class="math">(.*?)</(?:span|pre)>', re.S)
 READER_TAGS = {"b", "i", "sub", "sup"}                        # the only tags the reader renders in comments
@@ -1066,6 +1081,26 @@ def _own_texts(listing):
     return out
 
 
+def _changed_by_user(a):
+    """Whether a listed annotation was changed after it was created: written by the tool, its two dates are equal, and
+    opening the PDF in the reader leaves them so; a change in Zotero moves the later one."""
+    def when(s):
+        try:
+            return datetime.datetime.fromisoformat(str(s).replace("Z", "+00:00").replace(" ", "T")).replace(tzinfo=None)
+        except ValueError:
+            return None
+    added, modified = when(a.get("added")), when(a.get("modified"))
+    return bool(added and modified and (modified - added).total_seconds() > 5)
+
+
+def _reproduces(new, old):
+    """Whether a new annotation repeats a listed one: the same page, type and colour, the same text and comment."""
+    same = lambda x, y: " ".join((x or "").split()) == " ".join((y or "").split())
+    return (new["position"]["pageIndex"] == parse_position(old.get("position")).get("pageIndex") and new["type"] == old.get("type")
+            and (new.get("color") or "").lower() == (old.get("color") or "").lower() and same(new.get("comment"), old.get("comment"))
+            and (new["type"] not in ("highlight", "underline") or _listed_as(new.get("text"), _brief(old.get("text")))))
+
+
 def _listed_as(text, listed):
     """Whether a listing's cut text is `text`: listings keep about 80 characters (the plugin counts UTF-16 units and
     may split a character at the cut), so a long listed text matches when the text begins with it."""
@@ -1084,7 +1119,7 @@ def _text_defects(s, page=False):
         found.append(("latex", "raw LaTeX; write mathematics with Unicode symbols and <sub>/<sup>"))
     if MATH_FORMAT_RE.search(s.replace("^", "") if page else s):
         found.append(("math_format", "exponent or subscript written with ^, _{ or a bare minus; use <sup>/<sub>"))
-    tags = [m.group(1).lower() for m in re.finditer(r"</?([a-zA-Z][a-zA-Z0-9]*)[^>]*>", s)]
+    tags = [m.group(1).lower() for m in MARKUP_TAG_RE.finditer(s)]
     bad = sorted(set(tags) - READER_TAGS)
     if bad:
         found.append(("tag", "tags the reader does not render: " + ", ".join(bad)))
@@ -1107,7 +1142,8 @@ def check_style(annotations, cfg, listing=None, note_html=None):
     render, hard line breaks), label-colon margin notes and arrows or circled numbers in them, `banned_phrases`, highlights
     that duplicate or intersect each other, highlights that overlap annotations already in Zotero (the tool's
     own earlier ones excepted unless `cleanup` is false), text the tool already wrote on the same page when `cleanup` is
-    false (`duplicate_existing`), the number of core-coloured highlights against `core_range` (advisory: it does not
+    false (`duplicate_existing`), the tool's annotations that the user changed in Zotero and a rewrite with `cleanup` would
+    undo (`user_edit`), the number of core-coloured highlights against `core_range` (advisory: it does not
     block --apply), and mathematics in the note (a double backslash inside a math node, LaTeX outside one).
     """
     warnings = []
@@ -1152,6 +1188,15 @@ def check_style(annotations, cfg, listing=None, note_html=None):
                 warn("duplicate", b, "the same span is highlighted twice")
             elif any(_overlaps(r, b["position"]["rects"]) for r in a["position"]["rects"]):
                 warn("overlap", b, "intersects another highlight: " + a["text"][:40])
+    if cfg.get("cleanup", False):   # a rewrite would undo what the user changed in the tool's annotations since they were written
+        for old in (listing or {}).get("annotations", []):
+            if not set(old.get("tags") or []) & OWN_TAGS or not _changed_by_user(old) or any(_reproduces(a, old) for a in annotations):
+                continue
+            comment = " ".join((old.get("comment") or "").split())
+            warnings.append({"kind": "user_edit", "page": old.get("pageLabel"), "text": _brief(old.get("text") or comment)[:60],
+                             "reason": f"the user changed this annotation ({old.get('key')}) in Zotero after the tool wrote it, and the "
+                                       f"rewrite would undo that: keep its comment “{comment[:300]}” and colour {old.get('color')} in the "
+                                       "configuration, or --accept user_edit when the user asked to change it"})
     if cfg.get("core_range"):
         lo, hi = cfg["core_range"]
         n = sum(1 for a in marks if a["color"] == cfg["core_color"])
@@ -1271,9 +1316,14 @@ def extract_paragraphs(pdf_path, pages=None, keep_references=False):
     out, in_refs = [], False
     for p, rows in zip(sel, page_rows):
         paras = []
+        # blocks of nothing but lone numbers or numerals: line numbers beside the text, axis ticks, a page number
+        numeric = {r[0] for r in rows} - {blk for blk, t, _, _ in rows if not PAGE_NUM_RE.match(t)}
         for i, (blk, t, size, bold) in enumerate(rows):
             n = norm_str(t)
-            if PAGE_NUM_RE.match(t) or ((i < 3 or i >= len(rows) - 3) and n in recurring):
+            edge = i < 3 or i >= len(rows) - 3
+            # page numbers and running lines are among a page's first or last rows; inside a block of text a lone
+            # number or letter is part of the text (a variable of a formula set on its own line)
+            if (PAGE_NUM_RE.match(t) and (edge or blk in numeric)) or (edge and n in recurring):
                 continue
             if not keep_references:
                 if not in_refs and n in ("references", "bibliography"):
@@ -1427,12 +1477,16 @@ def extract_main(argv):
         if not m:
             sys.exit("extract: --pages takes N or N-M")
         pages = list(range(int(m.group(1)), int(m.group(2) or m.group(1)) + 1))
+    no_text = ("extract: the PDF has no text layer (a scanned document); it cannot be annotated until OCR has added one, "
+               "so stop and tell the user")
     if args.sentences:
         pdf_hash = _sha256(pdf)
         items = extract_sentences(pdf, keep_references=args.keep_references)   # ids count over the whole document
         n = sum(1 for it in items if "id" in it)
         if _sha256(pdf) != pdf_hash:
             sys.exit("extract: PDF changed during extraction; run again")
+        if not any("id" in it or "heading" in it for it in items):
+            sys.exit(no_text)
         os.makedirs(os.path.dirname(os.path.abspath(args.sentences)), exist_ok=True)
         json.dump({"pdf": pdf, "pdf_sha256": pdf_hash, "sentences": [it for it in items if "id" in it],
                    "headings": [it for it in items if "id" not in it]}, open(args.sentences, "w", encoding="utf8"), ensure_ascii=False, indent=0)
@@ -1440,6 +1494,8 @@ def extract_main(argv):
         summary = f"{n} sentences -> {args.sentences}; {text.count(chr(10))} lines, {len(text)} characters"
     else:
         text = extract_text(pdf, pages=pages, keep_references=args.keep_references)
+        if not pages and not re.sub(r"--- p\.\d+ ---|\s", "", text):
+            sys.exit(no_text)
         summary = f"{text.count(chr(10))} lines, {len(text)} characters"
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
@@ -1617,11 +1673,17 @@ def parse_position(value):
 
 def api_list(cfg, api):
     rows = api.children(cfg["attachment_key"], "annotation")
-    anns = [{"key": r["key"], "type": r["data"]["annotationType"], "color": r["data"].get("annotationColor"),
-             "author": r["data"].get("annotationAuthorName", ""), "tags": [t["tag"] for t in r["data"].get("tags", [])],
-             "pageLabel": r["data"].get("annotationPageLabel"), "text": (r["data"].get("annotationText") or "")[:80],
-             "comment": (r["data"].get("annotationComment") or "")[:80],
-             "position": parse_position(r["data"].get("annotationPosition"))} for r in rows]
+
+    def listed(r):
+        # the tool's own annotations whole, with the dates that show whether the user changed them after they were written
+        d = r["data"]
+        tags = [t["tag"] for t in d.get("tags", [])]
+        cut = 2000 if set(tags) & OWN_TAGS else 80
+        return {"key": r["key"], "type": d["annotationType"], "color": d.get("annotationColor"), "author": d.get("annotationAuthorName", ""),
+                "tags": tags, "pageLabel": d.get("annotationPageLabel"), "text": (d.get("annotationText") or "")[:cut],
+                "comment": (d.get("annotationComment") or "")[:cut], "added": d.get("dateAdded"), "modified": d.get("dateModified"),
+                "position": parse_position(d.get("annotationPosition"))}
+    anns = [listed(r) for r in rows]
     notes = []
     if cfg.get("item_key"):
         for c in api.children(cfg["item_key"]):
@@ -2357,8 +2419,9 @@ SUMMARY_KEYS = {"id", "page", "anchor", "text", "place", "side", "kind", "color"
 
 
 def config_problems(raw):
-    """Mistakes a run would otherwise pass over in silence: unknown keys (a misspelt "cleanup" keeps its default), an
-    unknown level, a highlight type other than highlight or underline, and missing required keys."""
+    """Mistakes a run would otherwise pass over in silence or end on with a traceback: unknown keys (a misspelt
+    "cleanup" keeps its default), an unknown level, a colour that is not #rrggbb, a highlight without a sentence id or
+    a page with text, ids out of order, a highlight type other than highlight or underline, and missing required keys."""
     if not isinstance(raw, dict):
         return ["the configuration must be a JSON object"]
     problems = []
@@ -2378,16 +2441,48 @@ def config_problems(raw):
         v = raw["band_min_font_size"]
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not 4 <= v <= 36:
             problems.append("band_min_font_size must be a number between 4 and 36")
+    def whole(v, low=1):
+        return isinstance(v, int) and not isinstance(v, bool) and v >= low
+
+    def colour(v):
+        return isinstance(v, str) and HEX_COLOR_RE.match(v)
+
     levels = raw.get("levels") or {}
+    if not isinstance(levels, dict):
+        problems.append("levels must map names to #rrggbb colours")
+        levels = {}
+    for name, v in levels.items():
+        if not colour(v):
+            problems.append(f"levels: {name!r} must be a #rrggbb colour")
+    for k in ("core_color", "other_color", "text_color"):
+        if k in raw and not colour(raw[k]):
+            problems.append(f"{k} must be a #rrggbb colour")
     for i, h in enumerate(raw.get("highlights") or []):
         if not isinstance(h, dict):
             problems.append(f"highlights[{i}] must be an object")
             continue
-        unknown(h, HIGHLIGHT_KEYS, f" in highlights[{i}]")
+        at = f"highlights[{i}]"
+        unknown(h, HIGHLIGHT_KEYS, f" in {at}")
+        if "id" in h and not whole(h["id"]):
+            problems.append(f"{at}: id must be a sentence number")
+        elif "ids" in h and not (isinstance(h["ids"], list) and len(h["ids"]) == 2 and all(whole(v) for v in h["ids"])
+                                 and h["ids"][0] <= h["ids"][1]):
+            problems.append(f"{at}: ids must be [first, last], two sentence numbers in order")
+        elif "id" not in h and "ids" not in h:
+            if not whole(h.get("page")):
+                problems.append(f"{at}: give id, ids, or a 1-based page with text")
+            if not (isinstance(h.get("text"), str) and h["text"].strip()):
+                problems.append(f"{at}: give id, ids, or text with its page")
+        if "occurrence" in h and h["occurrence"] is not None and not whole(h["occurrence"]):
+            problems.append(f"{at}: occurrence must be a number from 1")
+        if "comment" in h and not isinstance(h["comment"], str):
+            problems.append(f"{at}: comment must be text")
+        if "color" in h and not colour(h["color"]):
+            problems.append(f"{at}: color must be a #rrggbb colour")
         if "level" in h and h["level"] not in levels:
-            problems.append(f"highlights[{i}]: unknown level {h['level']!r} (levels: {', '.join(levels) or 'none defined'})")
+            problems.append(f"{at}: unknown level {h['level']!r} (levels: {', '.join(levels) or 'none defined'})")
         if h.get("type", "highlight") not in ("highlight", "underline"):
-            problems.append(f"highlights[{i}]: type must be highlight or underline")
+            problems.append(f"{at}: type must be highlight or underline")
     for i, s in enumerate(raw.get("summaries") or []):
         if isinstance(s, dict):
             unknown(s, SUMMARY_KEYS, f" in summaries[{i}]")

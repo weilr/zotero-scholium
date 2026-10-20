@@ -56,6 +56,16 @@
 - Positions are written in PDF user space also on pages whose crop box or media box does not start at
   (0, 0); on such pages every annotation used to be shifted by the box's offset. Annotations written there
   before stay shifted until the paper is annotated again.
+- `extract` drops a lone number or roman numeral only among a page's first and last three rows or in a
+  block made only of such rows; inside a block of text it stays (a formula's variable set on its own line).
+  A PDF without a text layer ends `extract` with a message. Highlight entries are checked before the run (an id, ids in order, or a page from 1 with
+  text; `occurrence`, `comment`, and `#rrggbb` colours in `color`, `levels`, `core_color`, `other_color`
+  and `text_color`), and a page beyond the document is a `missed` entry. The `tag` warning passes
+  comparisons such as "x<y，则 f(x)>f(y)", the `label` warning ratios such as "3:1"; translation warnings
+  read "15 percent" as 15% and quote a number as the comment writes it. A margin box without room says
+  what to change. With `cleanup`, a tool's annotation that the user changed in Zotero after it was written
+  blocks `--apply` (`user_edit`) unless the configuration keeps the change; listings give the tool's own
+  annotations whole, with their dates.
 
 ## 0.1.8 (2026-10-16)
 

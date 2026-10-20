@@ -142,3 +142,14 @@ def test_a_translation_that_leaves_out_most_of_the_sentence_is_short():
     warnings = translation_warnings("The model reduces the error on all six benchmarks while using fewer parameters and less training time.",
                                     "模型降低了误差。")
     assert warnings and "short" in warnings[0]["reasons"][-1]
+
+
+def test_percent_written_out_matches_the_sign():
+    assert translation_warnings("Accuracy improves by 15 percent on the benchmark.", "在基准上准确率提高 15%。") == []
+    assert translation_warnings("Accuracy improves by 15 per cent on the benchmark.", "在基准上准确率提高 15%。") == []
+
+
+def test_a_warning_quotes_the_number_as_the_comment_writes_it():
+    warnings = translation_warnings("The model has 175B parameters in total.", "该模型共有 1750 亿个参数，训练了 100 轮。")
+    reason = warnings[0]["reasons"][0]
+    assert "1750 亿" in reason and "100" in reason and "E+" not in reason
