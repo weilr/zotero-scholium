@@ -66,6 +66,7 @@
   what to change. With `cleanup`, a tool's annotation that the user changed in Zotero after it was written
   blocks `--apply` (`user_edit`) unless the configuration keeps the change; listings give the tool's own
   annotations whole, with their dates.
+- Requests to Zotero's local server do not go through a proxy named in the environment.
 
 ## 0.1.8 (2026-10-16)
 

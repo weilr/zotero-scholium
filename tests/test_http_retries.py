@@ -58,11 +58,11 @@ def test_a_refused_read_is_not_retried_but_a_timed_out_one_is(monkeypatch, failu
     """Nothing listening (Zotero closed) is final at once; a busy Zotero gets more tries."""
     tries, waits = [], []
 
-    def urlopen(req, timeout=None):
+    def opened(req, timeout=None):
         tries.append(req.full_url)
         raise cli.urllib.error.URLError(failure)
 
-    monkeypatch.setattr(cli.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(cli, "local_opener", lambda: type("Opener", (), {"open": staticmethod(opened)})())
     monkeypatch.setattr(cli.time, "sleep", waits.append)
     status, _, _ = cli.http("GET", "/api/")
     assert status == 0 and len(tries) == attempts and len(waits) == attempts - 1
@@ -128,3 +128,30 @@ def test_post_retries_rejected_precondition_with_fresh_version(api, monkeypatch)
     result = api.write("POST", "/api/users/0/items", [], {"If-Unmodified-Since-Version": "7"})
     assert result == (200, {}, "accepted")
     assert versions == ["7", "8"]
+
+
+def test_requests_to_zotero_pass_by_a_proxy_the_environment_names(monkeypatch):
+    """http_proxy without no_proxy must not send the calls to the local server elsewhere."""
+    import http.server
+    import threading
+
+    class Answer(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Answer)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setattr(cli, "BASE", f"http://127.0.0.1:{server.server_port}")
+        monkeypatch.setenv("http_proxy", "http://127.0.0.1:9")
+        monkeypatch.delenv("no_proxy", raising=False)
+        monkeypatch.delenv("NO_PROXY", raising=False)
+        status, _, _ = cli.http("GET", "/api/", timeout=5)
+    finally:
+        server.shutdown()
+    assert status == 200

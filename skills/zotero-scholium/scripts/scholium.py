@@ -1509,6 +1509,12 @@ def extract_main(argv):
 GET_ATTEMPTS = 3
 
 
+def local_opener():
+    """An opener that goes straight to Zotero on this computer, also when the environment names a proxy (http_proxy
+    without no_proxy)."""
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def http(method, path, body=None, headers=None, timeout=60):
     """One HTTP call against the local API.
 
@@ -1527,7 +1533,7 @@ def http(method, path, body=None, headers=None, timeout=60):
         for k, v in (headers or {}).items():
             req.add_header(k, v)
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
+            with local_opener().open(req, timeout=timeout) as r:
                 return r.status, dict(r.headers), r.read().decode("utf8", "ignore")
         except urllib.error.HTTPError as e:
             return e.code, dict(e.headers), e.read().decode("utf8", "ignore")
