@@ -89,6 +89,12 @@
   run ends with what Codex said. A limit of the service
   rather than of the account ("not your usage limit") is named as such, and the queue waits as long as its
   message says.
+- Scholium section: while Zotero is in front a corner notice tells how a paper ended, while it is in the
+  background a system notification; the agent's words in a notice are shown as text. A failed deletion is
+  shown in the paper's state line only. Only papers in My Library are annotated; a PDF file that is not on
+  the computer is named as such; **Annotate** leaves a follow-up in the box for **Send**. Texts for one
+  paper, “个人配置” throughout, the Config Editor in place of about:config, the transcript's remaining
+  English words in Chinese, solid focus outlines, and each second only the state line set again.
 
 ## 0.1.8 (2026-10-16)
 

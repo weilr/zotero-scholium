@@ -30,7 +30,8 @@ the plugin shows them again in open readers.
 
 **Annotate** in the *Scholium* section of the item pane starts the Claude Code CLI or the Codex CLI
 in the background for the selected paper; papers started while another runs wait in a queue and run
-one at a time. A regular item is annotated through its best PDF attachment.
+one at a time. A regular item is annotated through its best PDF attachment. Only papers in My Library are
+annotated: for a paper in a group library the section says so and **Annotate** is off.
 
 Requirements: Claude Code or Codex installed and signed in, and the zotero-scholium skill installed
 for it (`~/.claude/skills/zotero-scholium` for Claude Code; for Codex, `~/.codex/skills/`,
@@ -109,15 +110,17 @@ controls and the process of the selected paper:
   text shows the file's current content when Zotero is focused again. A missing profile starts as
   the empty `## User's rules (always win)` section of `scholium profile`'s template, which keeps that
   section when it later writes the statistics, and is written on saving.
-- The box below the transcript takes the user's words. With **Annotate** they go to the new run as
-  extra instructions. Once the paper has a run, **Send** (or Ctrl+Enter) continues that run's
-  conversation with them, with the agent that held it (`claude -p --resume <session>`, or Codex's
-  `thread/resume`), for example to change some annotations. The words appear in the transcript.
+- The box below the transcript takes the user's words. While the paper has no conversation, they go
+  with **Annotate** to the new run as extra instructions. Once it has one, **Send** (or Ctrl+Enter)
+  continues that run's conversation with them, with the agent that held it (`claude -p --resume
+  <session>`, or Codex's `thread/resume`), for example to change some annotations; **Annotate** then
+  starts a new run and leaves the words in the box. The words appear in the transcript.
 
-A notice in the corner of the window appears when a paper starts and when it ends, and closes by itself; when a paper ends, a system
-notification reports the run's last line or the error. Both show the last line a part per line
-(counts, remaining warnings), without the note's title.
-Neither appears while a Scholium section is on screen in the focused Zotero window.
+While Zotero is in front, a notice in the corner of the window appears when a paper starts and when it
+ends, and closes by itself; while Zotero is in the background, a system notification reports the end
+instead. They give the run's last line a part per line (counts, remaining warnings), without the note's
+title, or the error. Neither appears while the paper's Scholium section is on screen in the focused
+Zotero window, whose state line says the same.
 
 When a run fails on the connection to the agent's service (a timeout, a lost connection, an
 overloaded or failing server) before the agent has used any tool, the paper is tried once more after

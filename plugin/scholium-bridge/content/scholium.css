@@ -59,9 +59,8 @@
 }
 
 .scholium-select:focus-visible {
-  outline: none;
-  border-color: var(--accent-blue);
-  box-shadow: 0 0 0 2px var(--accent-blue30);
+  outline: 2px solid var(--color-focus-border, var(--accent-blue));
+  outline-offset: 1px;
 }
 
 .scholium-select:disabled {
@@ -104,8 +103,8 @@
 }
 
 .scholium-button:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--accent-blue30);
+  outline: 2px solid var(--color-focus-border, var(--accent-blue));
+  outline-offset: 1px;
 }
 
 .scholium-button:disabled {
@@ -278,8 +277,8 @@
 }
 
 .scholium-copy:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--accent-blue30);
+  outline: 2px solid var(--color-focus-border, var(--accent-blue));
+  outline-offset: 1px;
 }
 
 .scholium-copy.done {
@@ -680,7 +679,7 @@
 
 .scholium-log .scholium-link[data-href]:focus-visible,
 .scholium-preview .scholium-link[data-href]:focus-visible {
-  outline: 2px solid var(--color-focus-outer, var(--accent-blue));
+  outline: 2px solid var(--color-focus-border, var(--accent-blue));
   outline-offset: 1px;
   border-radius: 2px;
 }
@@ -689,4 +688,13 @@
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* a high-contrast theme draws no shadows: the text boxes show their focus with an outline */
+@media (forced-colors: active) {
+  .scholium-composer:focus-within,
+  #scholium-profile-sheet .scholium-editor:focus {
+    outline: 2px solid Highlight;
+    outline-offset: 1px;
+  }
 }

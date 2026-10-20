@@ -465,12 +465,13 @@ var ScholiumToggle = {
  * text beside a live Markdown preview in an editor sheet over the Zotero window. The state line shows
  * the turns and tokens of a run; when the usage limit is reached, the queue waits and the interrupted
  * paper continues its conversation after the reset. The section's look is content/scholium.css,
- * linked into each main window. Short notices at the start and the end close by themselves, and a
- * system notification reports the end; both are left out while a Scholium section is on screen in the
- * focused window. An update of the plugin hands the papers still to do over to the new copy, and the
- * running paper continues its conversation there. Every event but the pieces of a message being
- * written, and the plugin's own lines (the user's words, a continuation, the end of a run without a
- * result of its own), is logged to
+ * linked into each main window. Short notices in the corner of the window at the start and the end
+ * close by themselves while Zotero is in front; while it is in the background a system notification
+ * reports the end; neither shows while the paper's Scholium section is on screen in the focused window.
+ * An update of the plugin hands the papers still to do over to the new copy, and the running paper
+ * continues its conversation there. Only papers in My Library are annotated. Every event but the
+ * pieces of a message being written, and the plugin's own lines (the user's words, a continuation, the
+ * end of a run without a result of its own), is logged to
  * <data dir>/tmp/scholium/<attachment key>/claude-run.jsonl or codex-run.jsonl.
  */
 var ScholiumRunner = {
@@ -520,21 +521,24 @@ var ScholiumRunner = {
 
   text(key, ...args) {
     const zh = this.zh();
+    const plural = (k, one, many) => `${k} ${k === 1 ? one : many}`;
     const t = {
       headline: zh ? "Scholium 批注" : "Scholium annotation",
-      noPdf: zh ? "所选条目没有可用的 PDF 附件。" : "The selected items have no usable PDF attachment.",
-      noClaude: zh ? "找不到 Claude Code（claude.exe）。请在 about:config 中设置 extensions.scholium-bridge.claudePath。"
-                   : "Claude Code (claude) was not found. Set extensions.scholium-bridge.claudePath in about:config.",
-      noCodex: zh ? "找不到 Codex（codex.exe）。请在 about:config 中设置 extensions.scholium-bridge.codexPath。"
-                  : "Codex (codex) was not found. Set extensions.scholium-bridge.codexPath in about:config.",
+      noPdf: zh ? "这篇论文没有 PDF 附件。" : "This paper has no PDF attachment.",
+      noFile: zh ? "这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）。" : "The paper's PDF file is not on this computer (not downloaded yet, or moved).",
+      myLibraryOnly: zh ? "Scholium 只能批注“我的文库”里的论文。" : "Scholium annotates papers in My Library only.",
+      noClaude: zh ? "找不到 Claude Code（claude.exe）。请在 设置 → 高级 → 配置编辑器 中设置 extensions.scholium-bridge.claudePath。"
+                   : "Claude Code (claude) was not found. Set extensions.scholium-bridge.claudePath in Settings → Advanced → Config Editor.",
+      noCodex: zh ? "找不到 Codex（codex.exe）。请在 设置 → 高级 → 配置编辑器 中设置 extensions.scholium-bridge.codexPath。"
+                  : "Codex (codex) was not found. Set extensions.scholium-bridge.codexPath in Settings → Advanced → Config Editor.",
       noSkill: agent => agent === "codex"
         ? (zh ? "Codex 找不到 zotero-scholium 技能：请把它放进 ~/.codex/skills/（见 README）。"
               : "Codex does not find the zotero-scholium skill: put it in ~/.codex/skills/ (see the README).")
         : (zh ? "Claude Code 找不到 zotero-scholium 技能：请把它放进 ~/.claude/skills/（见 README）。"
               : "Claude Code does not find the zotero-scholium skill: put it in ~/.claude/skills/ (see the README)."),
       redoTitle: zh ? "重新批注" : "Annotate again",
-      redo: (n, m) => zh ? `${m} 篇论文已有 Scholium 批注，共 ${n} 条。重新批注会替换这些批注，你自己的批注不受影响。继续吗？`
-                         : `${m} of the papers already carry ${n} Scholium annotations. Annotating again replaces them; your own annotations are not affected. Continue?`,
+      redo: n => zh ? `这篇论文已有 ${n} 条 Scholium 批注。重新批注会替换它们，你自己的批注不受影响。继续吗？`
+                    : `This paper already carries ${plural(n, "Scholium annotation", "Scholium annotations")}. Annotating again replaces them; your own annotations are not affected. Continue?`,
       typical: zh ? "已在后台开始，通常需要 10–20 分钟。过程和进度见条目侧栏的 Scholium 区块。"
                   : "Started in the background; this usually takes 10–20 minutes. The Scholium section of the item pane shows the process and the progress.",
       paneAgent: zh ? "智能体" : "Agent",
@@ -553,7 +557,7 @@ var ScholiumRunner = {
       copiedMessage: zh ? "已复制" : "Copied",
       profileOpen: zh ? "个人配置 ↗" : "Personal profile ↗",
       profileTitle: zh ? "个人配置" : "Personal profile",
-      profileAbout: zh ? "每次批注都遵循这份画像。重新统计文库只改写开头的统计，Interpretation 和 User's rules 两节保持不变。"
+      profileAbout: zh ? "每次批注都遵循这份个人配置。重新统计文库只改写开头的统计，Interpretation 和 User's rules 两节保持不变。"
                        : "Every run follows this profile. Deriving it again from the library rewrites only the statistics at the top; the Interpretation and User's rules sections are kept.",
       profileSave: zh ? "保存" : "Save",
       profileCancel: zh ? "取消" : "Cancel",
@@ -565,21 +569,26 @@ var ScholiumRunner = {
       profileChanged: zh ? "profile.md 在打开后被别处改动过（例如重新统计了文库）。用这里的内容覆盖它吗？"
                          : "profile.md was changed elsewhere after it was opened (for example by deriving it again from the library). Overwrite it with this text?",
       profileNotSaved: zh ? "未保存：文件已被别处改动" : "Not saved: the file was changed elsewhere",
-      profileReadFailed: msg => zh ? `读不到画像文件：${msg}` : `The profile could not be read: ${msg}`,
+      profileReadFailed: msg => zh ? `读不到个人配置文件：${msg}` : `The profile could not be read: ${msg}`,
       profileFailed: msg => zh ? `保存失败：${msg}` : `The profile could not be saved: ${msg}`,
       noHistory: zh ? "这篇还没有运行记录。" : "This paper has not been run yet.",
       queuedThis: n => zh ? `排队中，前面还有 ${n} 篇` : `Queued, ${n} ahead`,
       deleteTitle: zh ? "删除 Scholium 批注和笔记" : "Delete Scholium annotations and notes",
-      deleteConfirm: (n, notes, m) => zh
-        ? `将删除 ${m} 篇论文上带 zotero-scholium 标签的 ${n} 条批注${notes ? `和 ${notes} 篇阅读笔记` : ""}。`
-          + `批注永久删除，不能撤销${notes ? "；笔记移到回收站，可以恢复" : ""}。你自己的批注和笔记都保留。删除会同步。继续吗？`
-        : `This deletes ${n} annotations${notes ? ` and ${notes} reading notes` : ""} tagged zotero-scholium on ${m} papers. `
-          + `The annotations are deleted for good${notes ? "; the notes go to the trash, where they can be restored" : ""}. `
-          + "Your own annotations and notes are kept. The deletion syncs. Continue?",
-      deleteSkipped: n => zh ? `${n} 篇论文正在批注或排队，不会删除。` : `${n} papers being annotated or queued are skipped.`,
-      deleteNone: zh ? "所选论文没有 Scholium 批注或笔记。" : "The selected papers carry no Scholium annotations or notes.",
-      deleteDone: (n, notes, m) => zh ? `已删除 ${m} 篇论文上的 ${n} 条 Scholium 批注${notes ? `，${notes} 篇笔记已移到回收站` : ""}。`
-                                      : `Deleted ${n} Scholium annotations on ${m} papers${notes ? `; ${notes} notes moved to the trash` : ""}.`,
+      deleteConfirm: (n, notes) => zh
+        ? `将删除这篇论文上带 zotero-scholium 标签的${[n ? ` ${n} 条批注` : "", notes ? ` ${notes} 篇阅读笔记` : ""].filter(Boolean).join("和")}。`
+          + [n ? "批注永久删除，不能撤销" : "", notes ? "笔记移到回收站，可以恢复" : ""].filter(Boolean).join("；")
+          + "。你自己的批注和笔记都保留。删除会同步。继续吗？"
+        : `This deletes ${[n ? plural(n, "annotation", "annotations") : "", notes ? plural(notes, "reading note", "reading notes") : ""]
+            .filter(Boolean).join(" and ")} tagged zotero-scholium on this paper. `
+          + [n ? "The annotations are deleted for good" : "", notes ? (n ? "the" : "The") + " notes go to the trash, where they can be restored" : ""]
+            .filter(Boolean).join("; ")
+          + ". Your own annotations and notes are kept. The deletion syncs. Continue?",
+      deleteSkipped: zh ? "正在批注或排队的 PDF 不会删除。" : "A PDF being annotated or queued is skipped.",
+      deleteNone: zh ? "这篇论文没有 Scholium 批注或笔记。" : "This paper carries no Scholium annotations or notes.",
+      deleteDone: (n, notes) => zh
+        ? [n || !notes ? `已删除 ${n} 条 Scholium 批注` : "", notes ? `${notes} 篇笔记已移到回收站` : ""].filter(Boolean).join("，") + "。"
+        : [n || !notes ? `Deleted ${plural(n, "Scholium annotation", "Scholium annotations")}` : "",
+           notes ? `${plural(notes, "note", "notes")} moved to the trash` : ""].filter(Boolean).join("; ") + ".",
       deleteFailed: msg => zh ? `删除失败：${msg}` : `Deletion failed: ${msg}`,
       model: zh ? "模型" : "Model",
       starting: name => zh ? `启动 ${name}` : `starting ${name}`,
@@ -594,6 +603,11 @@ var ScholiumRunner = {
       cancelled: zh ? "已取消" : "cancelled",
       interrupted: zh ? "已中断" : "interrupted",
       interruptedLine: zh ? "运行被中断（插件更新或停用，或 Zotero 退出）" : "The run was interrupted (the plugin was updated or disabled, or Zotero quit)",
+      noOutput: zh ? "（无输出）" : "(no output)",
+      itemFailed: zh ? "失败" : "failed",
+      itemDeclined: zh ? "已拒绝" : "declined",
+      exitCode: n => zh ? `退出码 ${n}` : `exit ${n}`,
+      noThread: zh ? "Codex 没有打开会话" : "Codex opened no conversation",
       codexSkills: msg => zh ? `Codex 列不出它的技能：${msg}` : `Codex could not list its skills: ${msg}`,
       codexSkillOff: zh ? "Codex 里的 zotero-scholium 技能被停用了：请在 Codex 里重新启用它。"
                         : "The zotero-scholium skill is switched off in Codex: switch it on there.",
@@ -614,6 +628,7 @@ var ScholiumRunner = {
       continuedThrottle: zh ? "限流已解除，接着中断的地方继续" : "The service takes requests again; continuing where the run stopped",
       continuedUpdate: zh ? "插件已更新，接着中断的地方继续" : "The plugin was updated; continuing where the run stopped",
       retrying: zh ? "连接失败，30 秒后自动重试一次" : "The connection failed; trying once more in 30 seconds",
+      retryWait: zh ? "等待第二次尝试" : "waiting for the second try",
       continuing: zh ? "接着上次的对话" : "continuing the conversation",
       continuedNotice: zh ? "已在后台接着上次的对话处理。" : "Continuing the conversation in the background.",
       resumeNow: zh ? "现在继续" : "Continue now",
@@ -1027,7 +1042,7 @@ var ScholiumRunner = {
     let out = lines.slice(0, 4).join("\n");
     if (lines.length > 4) out += `\n… +${lines.length - 4}`;
     if (out.length > 600) out = out.slice(0, 599) + "…";
-    return out || "ok";
+    return out || this.text("noOutput");
   },
 
   // one Codex notification as display entries, in the same manner: its messages, each command and
@@ -1044,12 +1059,12 @@ var ScholiumRunner = {
     if (item.type === "agentMessage") return String(item.text || "").trim() ? [{ kind: "text", text: String(item.text).trim() }] : [];
     if (item.type === "commandExecution") {
       const output = String(item.aggregatedOutput || "");
-      return [{ kind: "result", text: failed && !output.trim() ? item.status : this.resultSummary(output),
+      return [{ kind: "result", text: failed && !output.trim() ? this.itemStatus(item) : this.resultSummary(output),
                 error: failed || (typeof item.exitCode === "number" && item.exitCode !== 0) }];
     }
     if (item.type === "fileChange") {
       return (item.changes || []).filter(c => c && c.path).map(c => ({ kind: "tool", name: "Edit", text: `Edit(${this.toolSummary({ file_path: c.path })})` }))
-        .concat(failed ? [{ kind: "result", text: item.status, error: true }] : []);
+        .concat(failed ? [{ kind: "result", text: this.itemStatus(item), error: true }] : []);
     }
     if (item.type === "mcpToolCall") {
       const name = `${item.server}.${item.tool}`;
@@ -1060,6 +1075,8 @@ var ScholiumRunner = {
     if (item.type === "webSearch") return [{ kind: "tool", name: "WebSearch", text: `WebSearch(${this.toolSummary({ pattern: item.query })})` }];
     return [];
   },
+
+  itemStatus(item) { return this.text(item.status === "declined" ? "itemDeclined" : "itemFailed"); },
 
   // PDF attachment keys of the item shown in an item pane
   paneKeys(item) {
@@ -1326,7 +1343,8 @@ var ScholiumRunner = {
     // the main action first, the contextual ones beside it, deletion apart at the end
     const actions = div("scholium-actions");
     pane.annotate = this.paneButton(doc, this.text("annotateThis"), () => {
-      const extra = String(pane.input.value || "").trim();
+      // while the paper has a conversation the box holds a follow-up, which Send sends, not extra instructions
+      const extra = pane.shownKey && this.sessions.get(pane.shownKey) ? "" : String(pane.input.value || "").trim();
       this.annotate([item], { extra }).then(n => { if (n && extra) this.clearInput(pane); })
         .catch(e => this.log("annotate failed: " + e));
     }, "primary");
@@ -2251,17 +2269,20 @@ var ScholiumRunner = {
       const note = pane.keys.map(k => this.notes.get(k)).filter(Boolean).sort((a, b) => b.at - a.at)[0] || pane.past;
       const paused = this.paused ? this.text(this.paused.throttled ? "throttledState" : this.paused.known ? "pausedState" : "pausedRetry",
                                              this.clock(this.paused.until)) : null;
+      const foreign = !!pane.item && pane.item.libraryID !== Zotero.Libraries.userLibraryID;
       const lines = [];
       let kind = "info", title = "";
       if (running) {
         lines.push(this.runningState());
         kind = "running";
       } else if (queuedAt >= 0 && this.queue[queuedAt].retryAt > Date.now()) {
-        lines.push(this.text("retrying"));
+        lines.push(this.text("retryWait"));
         kind = "paused";
       } else if (queuedAt >= 0) {
         if (!(paused && queuedAt === 0)) lines.push(this.text("queuedThis", queuedAt + (this.job ? 1 : 0)));
         if (paused) { lines.push(paused); kind = "paused"; }
+      } else if (foreign) {
+        lines.push(this.text("myLibraryOnly"));
       } else if (note) {
         lines.push(note.text);
         kind = note.error ? "error" : "ok";
@@ -2272,7 +2293,7 @@ var ScholiumRunner = {
       pane.state.title = title;
       this.show(pane.state, lines.length > 0);
       const busy = !!running || queuedAt >= 0;
-      pane.annotate.disabled = busy;
+      pane.annotate.disabled = busy || foreign;
       pane.remove.disabled = busy;
       this.show(pane.remove, !busy);   // out of the way while the paper runs, so that the buttons keep to one row
       this.show(pane.cancel, !!((running && this.current) || queuedAt >= 0));
@@ -2313,7 +2334,7 @@ var ScholiumRunner = {
     try { Zotero.File.reveal(this.logs.get(key) || this.logPath(key, "claude")); } catch (e) { this.log("reveal failed: " + e); }
   },
 
-  // system notification, visible while Zotero is in the background
+  // system notification, for while Zotero is in the background (the corner notice is for when it is in front)
   notify(title, body) {
     try {
       const svc = Components.classes["@mozilla.org/alerts-service;1"].getService(Components.interfaces.nsIAlertsService);
@@ -2329,20 +2350,25 @@ var ScholiumRunner = {
   // queue the selected papers; returns how many were queued
   async annotate(items, { extra = "" } = {}) {
     const jobs = [];
-    let found = 0;
+    let found = 0, foreign = false;
     for (const item of items || []) {
       try {
         const job = await this.resolve(item);
         if (job) found += 1;
+        if (job && job.att.libraryID !== Zotero.Libraries.userLibraryID) { foreign = true; continue; }
         if (job && !jobs.some(j => j.att.key === job.att.key) && !this.busy(job.att.key)) jobs.push(job);
       } catch (e) { this.log("resolve failed: " + e); }
     }
     const win = Zotero.getMainWindow();
-    if (!found) { Services.prompt.alert(win, this.text("headline"), this.text("noPdf")); return 0; }
+    if (!found) {
+      Services.prompt.alert(win, this.text("headline"), this.text(this.pdfAttachments(items).length ? "noFile" : "noPdf"));
+      return 0;
+    }
+    if (!jobs.length && foreign) { Services.prompt.alert(win, this.text("headline"), this.text("myLibraryOnly")); return 0; }
     if (!jobs.length) { this.refresh(); return 0; }   // every paper is already queued or running
     const own = jobs.map(j => j.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length);
     const total = own.reduce((a, b) => a + b, 0);
-    if (total && !Services.prompt.confirm(win, this.text("redoTitle"), this.text("redo", total, own.filter(Boolean).length))) return 0;
+    if (total && !Services.prompt.confirm(win, this.text("redoTitle"), this.text("redo", total))) return 0;
     jobs.forEach((j, i) => { j.own = own[i]; j.extra = extra; j.agent = this.agent(); });
     this.enqueue(jobs);
     return jobs.length;
@@ -2436,7 +2462,7 @@ var ScholiumRunner = {
     this.paused = { until: Date.now() + wait, known: !!until, throttled: !!throttled, timer: setTimeout(() => { this.resumeQueue(); }, wait) };
     const line = this.text(throttled ? "throttledState" : until ? "pausedState" : "pausedRetry", this.clock(this.paused.until));
     this.notice(job, line, true);
-    if (!this.paneInView(job.att.key)) this.notify(this.text(throttled ? "throttleTitle" : "limitTitle", this.agentName(job.agent, true)), line);
+    if (!this.focused()) this.notify(this.text(throttled ? "throttleTitle" : "limitTitle", this.agentName(job.agent, true)), line);
     this.refresh();
   },
 
@@ -2459,10 +2485,15 @@ var ScholiumRunner = {
     if (!this.draining && this.queue.length) this.drain();
   },
 
-  // a short notice in the corner of the window that closes by itself; left out while the paper's
-  // Scholium section is on screen, whose state line says the same
+  // whether a Zotero main window has the focus: a corner notice is for then, the system notification for the rest
+  focused() {
+    return this.windows().some(win => { try { return win.document.hasFocus(); } catch (e) { return false; } });
+  },
+
+  // a short notice in the corner of the window that closes by itself, while Zotero is in front; left out while
+  // the paper's Scholium section is on screen, whose state line says the same
   notice(job, text, error = false) {
-    if (this.paneInView(job.att && job.att.key)) return;
+    if (!this.focused() || this.paneInView(job.att && job.att.key)) return;
     try {
       const pw = new Zotero.ProgressWindow({ closeOnClick: true });
       pw.changeHeadline(this.text("headline"));
@@ -2470,8 +2501,10 @@ var ScholiumRunner = {
       try { if (job.att) icon = job.att.getItemTypeIconName(); } catch (e) {}
       const line = new pw.ItemProgress(icon, job.title);
       if (error) line.setError(); else line.setProgress(100);
-      // a description per line: a description shows its text without line breaks
-      for (const part of String(text).split("\n")) pw.addDescription(part);
+      // a description per line: a description shows its text without line breaks. Zotero turns <a …>…</a> in it
+      // into a link with the attributes it names; the agent's words are text, so a joiner follows each <
+      const joiner = String.fromCharCode(0x2060);
+      for (const part of String(text).split("\n")) pw.addDescription(part.replace(/</g, "<" + joiner));
       pw.show();
       pw.startCloseTimer(error ? 2 * this.NOTICE_MS : this.NOTICE_MS);
     } catch (e) { this.log("notice failed: " + e); }
@@ -2482,14 +2515,17 @@ var ScholiumRunner = {
     if (this.job && this.job.key === job.att.key) this.job = null;
     const title = this.text(answered ? "answered" : ok ? "finished" : "failedLine", job.title);
     this.notes.set(job.att.key, { text: outcome || this.text(ok ? "done" : "failed"), error: !ok, at: Date.now(), title: detail || "" });
-    if (!this.paneInView(job.att.key)) this.notify(title, ok && !answered ? this.brief(summary) : summary || "");
+    if (!this.focused()) this.notify(title, ok && !answered ? this.brief(summary) : summary || "");
     this.refresh();
   },
 
   // the run's last line for a notice, a line per part, without the note's title:
   // 高亮 47 条（核心 13 条），页边批注 24 条，笔记《…》，剩余警告：…。 -> 高亮 47 条（核心 13 条）/ 页边批注 24 条 / 剩余警告：…
+  // 47 highlights (13 core), 24 margin notes, note “…”, remaining warnings: none -> the same three parts
   brief(summary) {
-    return String(summary || "").replace(/[，,]?[^，,]*《[^》]*》/g, "").replace(/[。.]\s*$/, "")
+    return String(summary || "")
+      .replace(/(^|[，,；;])\s*[^，,；;。]*笔记[^，,；;。《]*《[^》]*》|(^|[，,；;])\s*(?:the\s+|reading\s+)?note\s*(?:“[^”]*”|"[^"]*"|‘[^’]*’|'[^']*')/gi, "")
+      .replace(/[。.]\s*$/, "")
       .split(/\s*[，；;]\s*|,\s+/).map(part => part.trim()).filter(Boolean).slice(0, 4)
       .map(part => (part.length > 40 ? part.slice(0, 39) + "…" : part)).join("\n");
   },
@@ -2499,7 +2535,10 @@ var ScholiumRunner = {
     while (this.job === job) {
       await Zotero.Promise.delay(this.TICK_MS);
       if (this.job !== job) break;
-      for (const pane of this.panes.values()) if (pane.keys.includes(job.key)) this.paintPane(pane);
+      for (const pane of this.panes.values()) {
+        if (!pane.keys.includes(job.key)) continue;
+        try { pane.state.textContent = this.runningState(); } catch (e) {}
+      }
     }
   },
 
@@ -2578,7 +2617,7 @@ var ScholiumRunner = {
       const throttled = !limit.until && /not your usage limit|temporarily limiting|限流/i.test(said);
       return { exitCode, result, limited: true, until: limit.until || this.resetFrom(said), throttled, session };
     } else {
-      message = (ctx.failure || summary || ctx.stderr.trim().split("\n").pop() || `exit ${exitCode}`).slice(0, 300);
+      message = (ctx.failure || summary || ctx.stderr.trim().split("\n").pop() || this.text("exitCode", exitCode)).slice(0, 300);
       if (!(result && this.entries(result).length)) this.appendEntries(this.entries(await this.logEnd(logPath, "failed", message, started)));
       // the connection failed before the agent used a tool, so nothing was written: one more try
       if (!job.retried && !ctx.acted && this.transient(message, ctx.errorInfo)) {
@@ -2977,7 +3016,7 @@ var ScholiumRunner = {
       const opened = job.resume ? await rpc.request("thread/resume", Object.assign({ threadId: job.resume }, settings))
                                 : await rpc.request("thread/start", settings);
       const thread = opened && opened.thread && opened.thread.id;
-      if (!thread) throw new Error("Codex opened no conversation");
+      if (!thread) throw new Error(this.text("noThread"));
       state.thread = ctx.session = ctx.running.session = thread;
       this.sessions.set(key, { agent: "codex", id: thread });
       // the start of a run, as Claude Code's log has it: the model and the conversation
@@ -3081,10 +3120,10 @@ var ScholiumRunner = {
     }).filter(t => t.own.length || t.notes.length);
     const total = targets.reduce((n, t) => n + t.own.length, 0);
     const notes = targets.reduce((n, t) => n + t.notes.length, 0);
-    const skippedText = skipped ? "\n\n" + this.text("deleteSkipped", skipped) : "";
+    const skippedText = skipped ? "\n\n" + this.text("deleteSkipped") : "";
     if (!total && !notes) { Services.prompt.alert(win, this.text("deleteTitle"), this.text("deleteNone") + skippedText); return 0; }
-    if (!Services.prompt.confirm(win, this.text("deleteTitle"), this.text("deleteConfirm", total, notes, targets.length) + skippedText)) return 0;
-    let removed = 0, trashed = 0, papers = 0, current = null;
+    if (!Services.prompt.confirm(win, this.text("deleteTitle"), this.text("deleteConfirm", total, notes) + skippedText)) return 0;
+    let removed = 0, trashed = 0, current = null;
     try {
       for (const t of targets) {
         current = t;
@@ -3092,15 +3131,16 @@ var ScholiumRunner = {
         removed += t.own.length;
         if (t.notes.length) await Zotero.Items.trashTx(t.notes.map(n => n.id));
         trashed += t.notes.length;
-        papers += 1;
-        this.notes.set(t.att.key, { text: this.text("deleteDone", t.own.length, t.notes.length, 1), error: false, at: Date.now() });
+        this.notes.set(t.att.key, { text: this.text("deleteDone", t.own.length, t.notes.length), error: false, at: Date.now() });
       }
-      this.notice({ att: targets[0].att, title: this.text("deleteTitle") }, this.text("deleteDone", removed, trashed, papers));
+      this.notice({ att: targets[0].att, title: this.text("deleteTitle") }, this.text("deleteDone", removed, trashed));
     } catch (e) {
-      const message = this.text("deleteFailed", String(e && e.message || e));
+      const message = this.text("deleteFailed", String(e && e.message || e))
+        + (removed || trashed ? " " + this.text("deleteDone", removed, trashed) : "");
       this.log("delete failed: " + e);
-      if (current) this.notes.set(current.att.key, { text: message, error: true, at: Date.now() });
-      this.notice({ att: null, title: this.text("deleteTitle") }, message + "\n" + this.text("deleteDone", removed, trashed, papers), true);
+      const att = (current || targets[0]).att;
+      this.notes.set(att.key, { text: message, error: true, at: Date.now() });
+      this.notice({ att, title: this.text("deleteTitle") }, message, true);
     }
     this.refresh();
     return removed + trashed;

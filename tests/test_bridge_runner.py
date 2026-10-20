@@ -6,8 +6,8 @@ request; for Codex it plays `codex app-server`, answering its JSON-RPC requests 
 notifications of a turn. So the command line, the task prompt, the Scholium section of the item
 pane (the models Claude Code reports, the remembered effort and the levels of each model, the
 editor sheet of the personal profile, buttons, state line, resizable transcript, saved history, the message box), the self-closing
-notices and the system notification (left out while the section is on screen in the focused
-window), follow-ups, the usage limit, deletion, failures, cancellation and the queue are checked
+notices while Zotero is in front and the system notification while it is not (neither while the section is on screen in the
+focused window), follow-ups, the usage limit, deletion, failures, cancellation, the queue and a plugin update are checked
 without starting an agent. PathUtils behaves like Zotero's: it has no homeDir, and join()
 rejects a first component that is not an absolute path.
 """
@@ -434,6 +434,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     },
     querySelector: sel => (sel === '[href="scholium-bridge.ftl"]' && log.ftl.length ? { remove: () => log.ftl.push('removed') } : null),
     createElementNS: (ns, tag) => new El(tag),
+    hasFocus: () => focused,   // the item pane is in the main window: one focus for both
   };
   const mainWin = {
     document: mainDoc,
@@ -717,7 +718,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
                      state: p.view().state, kind: p.view().stateKind, other: p2.view().state, otherKind: p2.view().stateKind };
     h.focus(false);
     await h.runner.annotate([h.item2]); await settle(300);
-    facts.unfocused = { notices: h.log.notices.length, notifications: h.log.notifications.map(n => n.title) };
+    facts.unfocused = { notices: h.log.notices.length, notifications: h.log.notifications.slice() };
     h.focus(true);
     p.body.checkVisibility = () => false;
     p2.body.checkVisibility = () => false;
@@ -764,6 +765,15 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     h.see(true);
     await h.runner.annotate([h.item1]); await settle(300);
     facts.otherInView = { notices: h.log.notices.length, notifications: h.log.notifications.map(n => n.title) };
+  }
+  // in the background: a failed paper and a finished one, each told by a system notification only
+  {
+    const failing = SCRIPT.slice(0, 3).concat([ev({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'scholium.py: style_warnings remain' })]);
+    const h = harness({ scripts: [failing, SCRIPT.concat([LAST, RESULT])] });
+    h.runner.start('x');
+    h.focus(false);
+    await h.runner.annotate([h.item1]); await h.runner.annotate([h.item2]); await settle(600);
+    facts.background = { notices: h.log.notices.length, notifications: h.log.notifications.slice() };
   }
 
   // during a run, the transcript box holds no more entries than the transcript keeps
@@ -974,7 +984,8 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const logPath = '/data/tmp/scholium/ATT1/claude-run.jsonl';
     facts.streamed = { writing, whole, done: tree(last()), drafts: drafts(),
                        left: h.runner.draft, streamLines: h.log.writes[logPath].split('\n').filter(l => l.includes('stream_event')).length,
-                       prompt: h.log.stdin[1], args: h.log.calls[1].opts.arguments, notifications: h.log.notifications.slice(notified) };
+                       prompt: h.log.stdin[1], args: h.log.calls[1].opts.arguments, notifications: h.log.notifications.slice(notified),
+                       notice: h.log.notices.at(-1).descriptions };
   }
   {
     // a cancelled run keeps the part of the message it showed, marked, in the transcript and the log; the
@@ -1592,6 +1603,12 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
   // the last line of a run as notices show it
   facts.brief = ['高亮 47 条（核心 13 条），页边批注 24 条，笔记《Cooperative robotic exploration of a planetary skylight surface (v2, 2026-10-04)》，剩余警告：附件未包含补充材料。',
                  '28 highlights (12 core), 9 margin notes, the note title, remaining warnings: none.',
+                 '28 highlights (12 core), 9 margin notes, note “Attention, revisited”, remaining warnings: none.',
+                 '高亮 30 条（核心 10 条），页边批注 12 条，笔记《A》，剩余警告：第 4 页“label”警告已接受。',
+                 '30 highlights (10 core), 12 margin notes, note "A", remaining warnings: "label" accepted.',
+                 '高亮 47 条（核心 13 条）；页边批注 24 条；笔记《X》；剩余警告：无。',
+                 '高亮 30 条，页边批注 24 条，剩余警告：《指南》未引用。',
+                 '28 highlights (12 core), 9 margin notes, reading note “X, Y”, remaining warnings: none.',
                  '第 5 页的译文已缩短；无剩余警告。', 'a'.repeat(60), '']
     .map(s => harness().runner.brief(s));
 
@@ -1980,6 +1997,13 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     }
     facts.codexSkillIssues = said;
   }
+
+  // the agent's words in a corner notice are text: Zotero would turn <a …>…</a> into a link with its attributes
+  {
+    const h = harness();
+    h.runner.notice({ att: null, title: 't' }, 'done <a onmouseover="x()">here</a>\nnext', false);
+    facts.noticeMarkup = h.log.notices.at(-1).descriptions;
+  }
   // the prompt names the profile when there is one, and says to use the defaults when there is none
   {
     const h = harness({ logs: { [PROFILE_PATH]: PROFILE } });
@@ -2073,6 +2097,45 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     facts.throttle.after = { prompt: h.log.stdin[1], entries: p.view().entries.map(e => e[1]), paused: h.runner.paused };
     facts.resetFrom = ['约 24 分钟后重置', 'Please try again in 3 minutes.', 'try again in about 2 hours', '5 小时额度已用完', 'in 900 hours', '']
       .map(t => { const at = h.runner.resetFrom(t); return at ? Math.round((at - Date.now()) / 60000) : null; });
+  }
+  // papers outside My Library, and a paper whose PDF file is missing
+  {
+    const h = harness();
+    h.runner.start('x');
+    const group = Object.assign({}, h.att1, { key: 'GATT', id: 'GATT', libraryID: 2 });
+    const p = await h.pane(group);
+    const queued = await h.runner.annotate([group]);
+    const missing = Object.assign({}, h.item2, { getBestAttachment: async () => Object.assign({}, h.att2, { getFilePathAsync: async () => null }) });
+    await h.runner.annotate([missing]);
+    facts.otherLibrary = { state: p.view().state, annotateDisabled: p.view().annotateDisabled, queued, alerts: h.log.alerts, calls: h.log.calls.length };
+  }
+  // while the paper has a conversation, Annotate leaves the words in the box for Send
+  {
+    const h = harness();
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await h.runner.annotate([h.item1]); await settle(300);
+    p.pane().input.type('第 5 页那条译文改短');
+    p.pane().annotate.click(); await settle(300);
+    facts.annotateInConversation = { calls: h.log.calls.length, prompt: h.log.stdin[1], resumed: h.log.calls[1].opts.arguments.includes('--resume'),
+                                     kept: p.pane().input.value };
+  }
+  // a failed deletion while the paper's section is on screen: its state line says so, once
+  {
+    const h = harness({ existing: [['zotero-scholium']], eraseFails: true });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    h.see(true);
+    await h.runner.removeAnnotations([h.item1]);
+    facts.deleteFailsInView = { notices: h.log.notices.length, state: p.view().state, kind: p.view().stateKind };
+  }
+  // words of the transcript in the UI's language
+  {
+    const h = harness();
+    facts.uiWords = { empty: h.runner.entries(JSON.parse(answer(''))).map(e => e.text),
+                      declined: h.runner.codexEntries({ method: 'item/completed', params: { item: { type: 'commandExecution', status: 'declined', aggregatedOutput: '' } } })
+                        .map(e => e.text),
+                      exit: h.runner.text('exitCode', 3) };
   }
 
   process.stdout.write(JSON.stringify(facts));
@@ -2299,12 +2362,15 @@ def test_a_section_on_screen_replaces_the_notices(facts):
     assert (v["notices"], v["notifications"]) == (0, 0)
     assert v["state"] == DONE_STATE and v["kind"] == "scholium-state ok"
     assert v["other"] is None and v["otherKind"] == "scholium-state info", "another paper's section shows nothing of this run"
-    assert facts["unfocused"] == {"notices": 2, "notifications": ["批注完成：Paper ITEM2"]}
-    assert facts["collapsed"] == {"notices": 4}
-    assert facts["scrolledAway"] == {"notices": 6}
+    assert facts["unfocused"] == {"notices": 0, "notifications": [{"title": "批注完成：Paper ITEM2", "body": BRIEF}]}, \
+        "in the background the system notification tells, not a corner notice"
+    assert facts["collapsed"] == {"notices": 2}
+    assert facts["scrolledAway"] == {"notices": 4}
     d = facts["deleteInView"]
-    assert d == {"removed": 2, "notices": 0, "state": "已删除 1 篇论文上的 2 条 Scholium 批注。", "kind": "scholium-state ok"}
-    assert facts["otherInView"] == {"notices": 2, "notifications": ["批注完成：Paper ITEM1"]},         "only the section of the paper itself replaces the notices"
+    assert d == {"removed": 2, "notices": 0, "state": "已删除 2 条 Scholium 批注。", "kind": "scholium-state ok"}
+    assert facts["otherInView"] == {"notices": 2, "notifications": []}, "only the section of the paper itself replaces the notices"
+    assert facts["background"] == {"notices": 0, "notifications": [
+        {"title": "批注失败：Paper ITEM1", "body": "scholium.py: style_warnings remain"}, {"title": "批注完成：Paper ITEM2", "body": BRIEF}]}
 
 
 def test_section_shows_running_and_finished_state(facts):
@@ -2317,14 +2383,19 @@ def test_section_shows_running_and_finished_state(facts):
     assert (w["cancelHidden"], w["annotateDisabled"], w["removeDisabled"]) == (False, True, True)
     assert w["entries"] == TRANSCRIPT[:3]
     assert facts["otherRunning"] == {"state": None, "kind": "scholium-state info"}, "another paper's run is not shown here"
-    f = facts["finished"]
-    assert f["notifications"] == [{"title": "批注完成：Paper ITEM1", "body": BRIEF}]
+    assert facts["finished"]["notifications"] == [], "Zotero is in front: the corner notice tells"
 
 
 def test_notices_put_each_part_of_the_last_line_on_its_own_line(facts):
     assert facts["brief"] == [
         "高亮 47 条（核心 13 条）\n页边批注 24 条\n剩余警告：附件未包含补充材料",
         "28 highlights (12 core)\n9 margin notes\nthe note title\nremaining warnings: none",
+        "28 highlights (12 core)\n9 margin notes\nremaining warnings: none",
+        "高亮 30 条（核心 10 条）\n页边批注 12 条\n剩余警告：第 4 页“label”警告已接受",
+        "30 highlights (10 core)\n12 margin notes\nremaining warnings: \"label\" accepted",
+        "高亮 47 条（核心 13 条）\n页边批注 24 条\n剩余警告：无",
+        "高亮 30 条\n页边批注 24 条\n剩余警告：《指南》未引用",
+        "28 highlights (12 core)\n9 margin notes\nremaining warnings: none",
         "第 5 页的译文已缩短\n无剩余警告",
         "a" * 39 + "…",
         "",
@@ -2333,7 +2404,7 @@ def test_notices_put_each_part_of_the_last_line_on_its_own_line(facts):
 
 def test_existing_annotations_need_confirmation(facts):
     assert facts["refused"]["calls"] == 0
-    assert "2 条" in facts["refused"]["confirms"][0] and "1 篇" in facts["refused"]["confirms"][0]
+    assert facts["refused"]["confirms"][0].startswith("这篇论文已有 2 条 Scholium 批注。")
     assert facts["redo"]["calls"] == 1
     assert "already carries 1 annotations of this tool; the user confirmed a complete redo (cleanup: true in the configuration)" in facts["redo"]["prompt"]
 
@@ -2341,14 +2412,14 @@ def test_existing_annotations_need_confirmation(facts):
 def test_failure_and_cancel_are_reported(facts):
     f = facts["failure"]
     assert f["last"] == ["scholium-entry final error", "scholium.py: style_warnings remain"]
-    assert f["notifications"] == [{"title": "批注失败：Paper ITEM1", "body": "scholium.py: style_warnings remain"}]
+    assert f["notifications"] == [] and f["notices"][-1]["descriptions"] == ["失败 · scholium.py: style_warnings remain"]
     assert run_time(f["state"]) == "失败 · Ns" and f["kind"] == "scholium-state error"
     c = facts["cancel"]
     assert c["kills"] == 1 and c["current"] is None
     assert c["last"] == ["scholium-entry final error", "已取消"]
     assert c["view"]["cancelHidden"] is True and c["view"]["annotateDisabled"] is False
     assert run_time(c["state"]) == "已取消 · Ns"
-    assert c["notifications"] == ["批注失败：Paper ITEM1"]
+    assert c["notifications"] == [] and c["notices"][-1]["descriptions"] == ["已取消"]
 
 
 def test_papers_run_one_after_another_without_duplicates(facts):
@@ -2356,7 +2427,7 @@ def test_papers_run_one_after_another_without_duplicates(facts):
     assert (q["calls"], q["queued"], q["alerts"]) == (1, 1, 0)
     done = facts["queueDone"]
     assert done["calls"] == 2 and done["prompts"] == ["ATT1", "ATT2"]
-    assert done["notifications"] == ["批注失败：Paper ITEM1", "批注完成：Paper ITEM2"]
+    assert done["notifications"] == []
     assert done["pane2"]["shownKey"] == "ATT2" and done["pane2"]["entries"][-1] == TRANSCRIPT[-1]
     assert done["pane2"]["state"] == DONE_STATE
     assert facts["raceWhileFirstStarts"] == {"calls": 1, "queued": 1}
@@ -2369,35 +2440,34 @@ def test_delete_removes_only_the_tools_annotations_and_notes_after_a_confirmatio
     assert d["remaining"] == ["E2", "E3", "E4"]
     # the tool's notes go to the trash; the user's stay
     assert d["trashed"] == ["N0", "N3"] and d["notesLeft"] == ["N1", "N2"]
-    assert d["confirms"] == ["将删除 1 篇论文上带 zotero-scholium 标签的 2 条批注和 2 篇阅读笔记。"
+    assert d["confirms"] == ["将删除这篇论文上带 zotero-scholium 标签的 2 条批注和 2 篇阅读笔记。"
                              "批注永久删除，不能撤销；笔记移到回收站，可以恢复。你自己的批注和笔记都保留。删除会同步。继续吗？"]
-    assert d["notice"] == {"closeOnClick": True, "errors": 0, "descriptions": ["已删除 1 篇论文上的 2 条 Scholium 批注，2 篇笔记已移到回收站。"],
+    assert d["notice"] == {"closeOnClick": True, "errors": 0, "descriptions": ["已删除 2 条 Scholium 批注，2 篇笔记已移到回收站。"],
                            "closeTimer": 6000, "shown": True}
-    assert facts["deleteNothingLeft"] == {"removed": 0, "alerts": ["所选论文没有 Scholium 批注或笔记。"]}
+    assert facts["deleteNothingLeft"] == {"removed": 0, "alerts": ["这篇论文没有 Scholium 批注或笔记。"]}
     n = facts["deleteNoteOnly"]
     assert n["removed"] == 1 and n["trashed"] == ["N0"] and n["erased"] == []
-    assert n["confirms"] == ["This deletes 0 annotations and 1 reading notes tagged zotero-scholium on 1 papers. The annotations are "
-                             "deleted for good; the notes go to the trash, where they can be restored. Your own annotations and notes "
-                             "are kept. The deletion syncs. Continue?"]
-    assert n["notice"] == ["Deleted 0 Scholium annotations on 1 papers; 1 notes moved to the trash."]
+    assert n["confirms"] == ["This deletes 1 reading note tagged zotero-scholium on this paper. The notes go to the trash, where they "
+                             "can be restored. Your own annotations and notes are kept. The deletion syncs. Continue?"]
+    assert n["notice"] == ["1 note moved to the trash."]
     assert facts["deleteRefused"] == {"removed": 0, "erased": [], "remaining": 1}
     f = facts["deleteFails"]
     assert f["removed"] == 0 and f["notice"]["errors"] == 1
-    assert f["notice"]["descriptions"] == ["删除失败：library is read-only", "已删除 0 篇论文上的 0 条 Scholium 批注。"]
+    assert f["notice"]["descriptions"] == ["删除失败：library is read-only"]
     assert f["state"] == "删除失败：library is read-only" and f["kind"] == "scholium-state error"
 
 
 def test_delete_skips_a_paper_being_annotated(facts):
     r = facts["deleteWhileRunning"]
     assert r["removed"] == 0 and r["erased"] == [] and r["trashed"] == []
-    assert r["alerts"] == ["所选论文没有 Scholium 批注或笔记。\n\n1 篇论文正在批注或排队，不会删除。"]
+    assert r["alerts"] == ["这篇论文没有 Scholium 批注或笔记。\n\n正在批注或排队的 PDF 不会删除。"]
     assert r["paneButtons"] == {"annotate": True, "remove": True}
 
 
 def test_missing_pdf_missing_claude_and_preferences(facts):
     assert facts["noPdf"]["calls"] == 0 and len(facts["noPdf"]["alerts"]) == 1
     nc = facts["noClaude"]
-    assert nc["calls"] == 0 and nc["notifications"] == ["批注失败：Paper ITEM1"]
+    assert nc["calls"] == 0 and nc["notifications"] == []
     assert nc["last"][0] == "scholium-entry final error" and "extensions.scholium-bridge.claudePath" in nc["last"][1]
     assert nc["notices"][-1]["errors"] == 1 and nc["state"] == "失败"
     args = facts["prefArgs"]
@@ -2409,8 +2479,8 @@ def test_missing_pdf_missing_claude_and_preferences(facts):
 def test_home_directory_comes_from_the_directory_service_or_the_environment(facts):
     assert facts["localClaude"] == ["/home/u/.local/bin/claude.exe"]
     assert facts["home_env"] == {"calls": 1, "addDir": "/profile/u/.claude/skills/zotero-scholium",
-                                 "notifications": ["批注完成：Paper ITEM1"]}
-    assert facts["home_none"] == {"calls": 1, "addDir": None, "notifications": ["批注完成：Paper ITEM1"]}
+                                 "notifications": []}
+    assert facts["home_none"] == {"calls": 1, "addDir": None, "notifications": []}
 
 
 def test_personal_profile_is_edited_as_markdown_over_the_zotero_window(facts):
@@ -2582,7 +2652,7 @@ def test_a_reply_shows_as_it_is_written_and_a_question_is_answered(facts):
     assert "--include-partial-messages" in s["args"] and s["args"][s["args"].index("--resume") + 1] == "S1"
     assert s["prompt"].endswith("\n\n用的什么模型？\n\n" + CLOSING)
     # nothing was written to Zotero: the notice gives the answer's opening, not a closing line
-    assert s["notifications"] == [{"title": "已回答：Paper ITEM1", "body": "结论"}]
+    assert s["notifications"] == [] and s["notice"][1:] == ["结论"]
     c = facts["codexDraft"]
     assert c["grown"] == [["先", "a1"]] and c["left"] is None
 
@@ -2647,7 +2717,7 @@ def test_profile_changed_elsewhere_is_not_overwritten_unasked(facts):
 
 
 def test_profile_read_and_write_failures_keep_the_file_and_the_text(facts):
-    assert facts["profileUnreadable"] == {"status": "读不到画像文件：NotReadableError", "error": True, "inputDisabled": True,
+    assert facts["profileUnreadable"] == {"status": "读不到个人配置文件：NotReadableError", "error": True, "inputDisabled": True,
                                           "saveDisabled": True, "file": True, "dirs": 0}
     assert facts["profileWriteFailed"] == {"status": "保存失败：NotAllowedError", "error": True, "open": True,
                                            "saveDisabled": False, "kept": True}
@@ -2763,7 +2833,7 @@ def test_usage_limit_pauses_the_queue_and_continues_after_the_reset(facts):
     assert m["state2"] == "排队中，前面还有 1 篇\n" + waiting
     assert m["resumeShown"] is True and m["cancelShown"] is True
     assert m["notices"][-1]["errors"] == 1 and m["notices"][-1]["descriptions"] == [waiting]
-    assert m["notifications"] == [{"title": "Claude 额度已用完", "body": waiting}]
+    assert m["notifications"] == []
     assert m["last"] == ["scholium-entry text error", "⏺ You've hit your limit · resets 9pm"]
     assert m["followUpWhileQueued"] is False and m["queued"] == 2
     r = facts["limitResumed"]
@@ -2771,7 +2841,7 @@ def test_usage_limit_pauses_the_queue_and_continues_after_the_reset(facts):
     assert r["prompt"] == "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。"
     assert "额度已恢复，接着中断的地方继续" in r["entries"] and r["markers"] == ["continue"] and r["inits"] == 2
     assert r["state1"] == DONE_STATE and r["paused"] is None and r["waits"] == []
-    assert r["notifications"] == ["Claude 额度已用完", "批注完成：Paper ITEM1", "批注完成：Paper ITEM2"]
+    assert r["notifications"] == []
     t = facts["retry"]
     assert t["waits"] == [600000] and t["state1"] == f"额度已用完，{t['clock']} 自动重试"
     assert t["queue"] == ["ATT1"]
@@ -2930,7 +3000,7 @@ def test_codex_usage_limit_waits_for_the_reset(facts):
     l = facts["codexLimit"]
     assert l["clock"] == l["expected"] and l["known"] is True
     assert l["queue"] == [["ATT1", "codex", "T1"], ["ATT2", "codex", None]]
-    assert l["notifications"] == ["Codex 额度已用完"]
+    assert l["notifications"] == []
     assert l["last"] == ["scholium-entry final error", "You've hit your usage limit. Try again at 9:00 PM."]
     a = l["after"]
     assert a["resume"] == "T1" and a["prompt"] == "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。"
@@ -2948,14 +3018,14 @@ def test_codex_failures_are_reported(facts):
     assert r["killed"] is True and r["turns"] == 0
     n = facts["noCodex"]
     assert n["codexCalls"] == 0 and n["state"] == "失败"
-    assert n["last"] == ["scholium-entry final error", "找不到 Codex（codex.exe）。请在 about:config 中设置 extensions.scholium-bridge.codexPath。"]
+    assert n["last"] == ["scholium-entry final error", "找不到 Codex（codex.exe）。请在 设置 → 高级 → 配置编辑器 中设置 extensions.scholium-bridge.codexPath。"]
     assert n["models"] == [""] and n["labels"] == ["Codex 默认"]
 
 
 def test_a_failed_connection_gets_one_more_try(facts):
     r = facts["retry2"]
     w = r["ok"]["waiting"]
-    assert w["state"] == "连接失败，30 秒后自动重试一次" and w["kind"] == "scholium-state paused"
+    assert w["state"] == "等待第二次尝试" and w["kind"] == "scholium-state paused", "the transcript says why"
     assert w["last"] == [["scholium-entry final error", "workspace routing discovery timed out"],
                          ["scholium-entry info", "连接失败，30 秒后自动重试一次"]]
     assert w["cancelShown"] is True and w["queue"] == [["ATT1", True]] and w["job"] is None
@@ -2967,18 +3037,23 @@ def test_a_failed_connection_gets_one_more_try(facts):
     assert ok["entries"][:4] == [["scholium-entry prompt", "附加要求：只标注方法部分"], ["scholium-entry info", "模型: gpt-6-astra"],
                                  ["scholium-entry final error", "workspace routing discovery timed out"],
                                  ["scholium-entry info", "连接失败，30 秒后自动重试一次"]]
-    assert ok["notifications"] == ["批注完成：Paper ITEM1"]
+    assert ok["notifications"] == []
     again = r["again"]
     assert again["turns"] == 2 and again["queue"] == 0 and again["state"].startswith("失败")
-    assert again["marks"] == ["prompt", "retry"] and again["notifications"] == ["批注失败：Paper ITEM1"]
+    assert again["marks"] == ["prompt", "retry"] and again["notifications"] == []
     assert again["waiting"]["last"][0] == ["scholium-entry final error", "stream disconnected before completion"]
     assert r["cancelled"] == {"queue": 0, "turns": 1, "state": "已取消", "draining": False}
     assert r["refused"] == {"turns": 1, "queue": 0}
     c = r["claude"]
-    assert c["waiting"] == {"state": "连接失败，30 秒后自动重试一次", "calls": 1}
+    assert c["waiting"] == {"state": "等待第二次尝试", "calls": 1}
     assert c["calls"] == 2 and c["state"] == DONE_STATE and c["resumed"] is False and c["prompts"] == 2
     assert r["claudeActed"] == {"calls": 1, "queue": 0}
     assert facts["transient"] == [True, True, True, True, True, False, False, False]
+
+
+def test_a_notice_shows_the_agents_words_as_text(facts):
+    d = facts["noticeMarkup"]
+    assert d == ["done <\u2060a onmouseover=\"x()\">here<\u2060/a>", "next"]
 
 
 def test_the_prompt_names_the_profile_or_the_defaults(facts):
@@ -3032,6 +3107,29 @@ def test_the_services_limit_waits_as_long_as_it_says(facts):
     assert a["prompt"] == "服务已恢复。请从中断的地方继续完成上面的任务，规则不变。" and a["paused"] is None
     assert "限流已解除，接着中断的地方继续" in a["entries"]
     assert facts["resetFrom"] == [24, 3, 120, None, None, None]
+
+
+def test_papers_outside_my_library_and_missing_files_are_not_run(facts):
+    o = facts["otherLibrary"]
+    assert o["state"] == "Scholium 只能批注“我的文库”里的论文。" and o["annotateDisabled"] is True
+    assert o["queued"] == 0 and o["calls"] == 0
+    assert o["alerts"] == ["Scholium 只能批注“我的文库”里的论文。", "这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）。"]
+    assert facts["noPdf"]["alerts"] == ["这篇论文没有 PDF 附件。"]
+
+
+def test_annotate_leaves_a_follow_up_in_the_box(facts):
+    a = facts["annotateInConversation"]
+    assert a["calls"] == 2 and a["resumed"] is False and "第 5 页那条译文改短" not in a["prompt"]
+    assert a["kept"] == "第 5 页那条译文改短"
+
+
+def test_a_failed_deletion_in_view_is_told_once(facts):
+    assert facts["deleteFailsInView"] == {"notices": 0, "state": "删除失败：library is read-only", "kind": "scholium-state error"}
+
+
+def test_transcript_words_follow_the_ui_language(facts):
+    w = facts["uiWords"]
+    assert w == {"empty": ["（无输出）"], "declined": ["已拒绝"], "exit": "退出码 3"}
 
 
 def test_the_new_copy_of_an_update_takes_over_and_a_stale_hand_over_is_dropped(facts):
