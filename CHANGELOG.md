@@ -77,6 +77,11 @@
   the note. It reports the version of its manifest, lists the tool's own annotations whole with their dates,
   and a copy that stops removes only its own endpoints; after an update the new copy puts back endpoints an
   older copy removed.
+- Scholium section: when the plugin is updated while a paper runs, the new version continues that paper's
+  conversation and then runs the papers still waiting; a pause for a limit and a wait for a second try go
+  on, and words the agent had not received yet are handed over with their paper. A run that has started and ends without a result of its own (cancelled, failed, interrupted by an
+  update, by disabling the plugin or by quitting Zotero) leaves its end in the log, and the paper's history
+  shows it.
 
 ## 0.1.8 (2026-10-16)
 

@@ -566,7 +566,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
   };
   const styles = () => mainDoc.documentElement.children.map(c => [c.tagName, c.id, c.attrs.rel, c.attrs.href]);
   return { runner, log, item1, item2, att1, att2, note, pane, store, see, resize, focus, observers, timers, fire, styles, sheet, paneWin, paneDoc, lastFocus,
-           chromePackage: context.chromePackage,
+           chromePackage: context.chromePackage, replacing: context.replacing, takingOver: context.takingOver,
            live: () => timers.filter(t => t.live).map(t => t.ms), toolbarItems: () => mainDoc.bar.children.length };
 }
 const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descriptions: n.descriptions, closeTimer: n.closeTimer, shown: n.shown });
@@ -1937,6 +1937,86 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     facts.logCache = { first, again, unchanged, after, reparsed: parsed - once - unchanged };
   }
 
+  // an update during a pause for the usage limit: the new copy waits for the same reset; a paper waiting for its second
+  // try keeps waiting; a paper whose agent has not answered to its prompt yet is handed over as it was queued
+  {
+    const h = harness({ scripts: [SCRIPT.slice(0, 3).concat(LIMIT_HIT)] });
+    h.runner.start('x');
+    await h.runner.annotate([h.item1, h.item2]);
+    await settle(300);
+    const until = h.runner.paused && h.runner.paused.until;
+    h.runner.stop(true);
+    const carried = h.store.get('extensions.scholium-bridge.carryOver');
+    const h2 = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried } });
+    h2.runner.start('x', true);
+    await settle(300);
+    const r = harness({ prefs: { 'extensions.scholium-bridge.carryOver': JSON.stringify({ jobs: [{ key: 'ATT1', libraryID: 1, agent: 'claude',
+                                                                                              retried: true, retryAt: Date.now() + 600000 }] }) } });
+    r.runner.start('x', true);
+    await settle(200);
+    const n = harness({ script: [SCRIPT[0], 'WAIT'] });   // the conversation has begun, the agent has not answered yet
+    n.runner.start('x');
+    await n.runner.annotate([n.item1], { extra: '只标方法部分' }); await settle(100);
+    n.runner.stop(true);
+    const handed = JSON.parse(n.store.get('extensions.scholium-bridge.carryOver')).jobs[0];
+    facts.carriedPause = { paused: h2.runner.paused && { until: h2.runner.paused.until, known: h2.runner.paused.known }, until, calls: h2.log.calls.length,
+                           queue: h2.runner.queue.map(j => [j.att.key, j.resume || null]), waits: h2.live(),
+                           retry: { calls: r.log.calls.length, queued: r.runner.queue.map(j => [j.att.key, !!j.retried, j.retryAt > Date.now()]) },
+                           undelivered: [handed.resume, handed.extra, !!handed.updated] };
+    for (const x of [h2, r]) x.runner.stop();   // the waits end with them
+  }
+  // an update while a paper runs: its log records the interruption, and the new copy continues the paper's
+  // conversation, then the paper still waiting; a disabled plugin hands nothing over
+  {
+    const logPath = '/data/tmp/scholium/ATT1/claude-run.jsonl';
+    const h = harness({ gateFirst: true });
+    h.runner.start('x');
+    await h.runner.annotate([h.item1]); await h.runner.annotate([h.item2]);
+    await settle(80);
+    h.runner.stop(true);
+    await settle(40);
+    const carried = h.store.get('extensions.scholium-bridge.carryOver');
+    const h2 = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried }, logs: { [logPath]: h.log.writes[logPath] } });
+    h2.runner.start('x', true);
+    const p2 = await h2.pane(h2.item1);
+    await settle(600);
+    const h3 = harness({ logs: { [logPath]: h.log.writes[logPath] } });
+    h3.runner.start('x');
+    const history = await h3.pane(h3.item1);
+    const d = harness({ gateFirst: true });
+    d.runner.start('x');
+    await d.runner.annotate([d.item1]); await settle(80);
+    d.runner.stop(false);
+    await settle(40);
+    // Zotero starts the new copy of an update with ADDON_INSTALL (it has forgotten the old version by then); a
+    // hand-over that no copy took is dropped when Zotero starts
+    const stale = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried } });
+    stale.runner.start('x');
+    await settle(200);
+    facts.reasons = { takingOver: [1, 2, 3, 4, 5, 6, 7, 8].filter(r => h.takingOver(r)), replacing: [1, 2, 3, 4, 5, 6, 7, 8].filter(r => h.replacing(r)),
+                      staleDropped: stale.store.get('extensions.scholium-bridge.carryOver'), staleRuns: stale.log.calls.length };
+    facts.update = { kills: h.log.kills, end: JSON.parse(h.log.writes[logPath].trim().split('\n').at(-1)), carried: JSON.parse(carried),
+                     prompts: h2.log.stdin, resume: h2.log.calls[0].opts.arguments.includes('--resume'),
+                     cleared: h2.store.get('extensions.scholium-bridge.carryOver'), entries: p2.view().entries.map(e => e[1]),
+                     history: history.view().state, historyLast: history.view().entries.at(-1),
+                     disabled: { carried: d.store.get('extensions.scholium-bridge.carryOver') ?? null,
+                                 end: JSON.parse(d.log.writes[logPath].trim().split('\n').at(-1)).outcome } };
+  }
+  // a cancelled run's end is in its log, and its history shows it
+  {
+    const logPath = '/data/tmp/scholium/ATT1/claude-run.jsonl';
+    const h = harness({ script: SCRIPT.slice(0, 3).concat(['WAIT']) });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    const done = h.runner.annotate([h.item1]);
+    await settle(80);
+    p.pane().cancel.click();
+    await done; await settle(80);
+    const later = harness({ logs: { [logPath]: h.log.writes[logPath] } });
+    later.runner.start('x');
+    facts.cancelLogged = { end: JSON.parse(h.log.writes[logPath].trim().split('\n').at(-1)), history: (await later.pane(later.item1)).view().state };
+  }
+
   process.stdout.write(JSON.stringify(facts));
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
@@ -2837,3 +2917,38 @@ def test_a_failed_connection_gets_one_more_try(facts):
     assert c["calls"] == 2 and c["state"] == DONE_STATE and c["resumed"] is False and c["prompts"] == 2
     assert r["claudeActed"] == {"calls": 1, "queue": 0}
     assert facts["transient"] == [True, True, True, True, True, False, False, False]
+
+
+def test_an_update_hands_the_running_paper_and_the_queue_to_the_new_copy(facts):
+    u = facts["update"]
+    assert u["end"]["subtype"] == "end" and u["end"]["outcome"] == "interrupted"
+    assert u["end"]["text"] == "运行被中断（插件更新或停用，或 Zotero 退出）"
+    assert [(c["key"], c["resume"], c.get("updated", False)) for c in u["carried"]["jobs"]] == [("ATT1", "S1", True), ("ATT2", None, False)]
+    assert u["carried"]["paused"] is None
+    assert u["resume"] is True and u["prompts"][0] == "插件更新打断了上面的任务。请从中断的地方继续完成，规则不变。"
+    assert "附件 key：ATT2" in u["prompts"][1] and len(u["prompts"]) == 2
+    assert u["cleared"] == "", "handed over once"
+    assert "运行被中断（插件更新或停用，或 Zotero 退出）" in u["entries"] and "插件已更新，接着中断的地方继续" in u["entries"]
+    assert run_time(u["history"]) == "上次：已中断 · Ns" and u["historyLast"] == ["scholium-entry final error", "运行被中断（插件更新或停用，或 Zotero 退出）"]
+    assert u["disabled"] == {"carried": None, "end": "interrupted"}
+
+
+def test_a_cancelled_run_keeps_its_end_in_the_log(facts):
+    c = facts["cancelLogged"]
+    assert c["end"]["outcome"] == "cancelled" and c["end"]["text"] == "已取消"
+    assert run_time(c["history"]) == "上次：已取消 · Ns"
+
+
+def test_the_new_copy_of_an_update_takes_over_and_a_stale_hand_over_is_dropped(facts):
+    r = facts["reasons"]
+    assert r["takingOver"] == [5, 7, 8] and r["replacing"] == [7, 8]
+    assert r["staleDropped"] == "" and r["staleRuns"] == 0
+
+
+def test_an_update_keeps_a_pause_a_wait_and_words_not_yet_received(facts):
+    c = facts["carriedPause"]
+    assert c["paused"] == {"until": c["until"], "known": True} and c["calls"] == 0, "the queue waits for the same reset"
+    assert any(7_000_000 < w <= 7_260_000 for w in c["waits"])
+    assert c["queue"] == [["ATT1", "S1"], ["ATT2", None]]
+    assert c["retry"] == {"calls": 0, "queued": [["ATT1", True, True]]}, "a second try keeps its time"
+    assert c["undelivered"] == [None, "只标方法部分", False], "the paper starts again with the user's words"

@@ -64,7 +64,9 @@ Each Codex run:
 
 Both receive the item key, the attachment key, the PDF path, and the output directory
 `<data dir>/tmp/scholium/<attachment key>`, and are told not to ask questions or start sub-agents. A
-follow-up adds to the paper's log.
+follow-up adds to the paper's log. Besides the agent's events, the log holds the plugin's own lines: the
+user's words, a continuation, and the end of a run that has started and has no result of its own
+(cancelled, failed, interrupted).
 
 The *Scholium* section of the item pane, in the library and in the reader's side pane, holds the
 controls and the process of the selected paper:
@@ -122,6 +124,13 @@ When the agent reports that the usage limit is reached, the queue waits: the int
 stays at its head, the state line and a notice give the reset time, and a minute after the reset the
 paper continues its conversation where it stopped, followed by the rest of the queue. Without a reset
 time the queue tries again after ten minutes. **Continue now** in the section ends the wait at once.
+
+When the plugin is updated while a paper runs, the run ends and its log records the interruption; the
+new version continues that paper's conversation, then runs the papers still waiting, and a pause for a
+limit or a wait for a second try goes on; a paper whose agent had not yet received its prompt is handed
+over as it was queued, the user's words with it. Disabling the
+plugin or quitting Zotero ends a run the same way, without handing the papers over: the paper's history
+shows the run as interrupted, and **Send** continues it.
 
 Papers that already carry the tool's annotations are annotated again only after a confirmation; the
 new run replaces those annotations.

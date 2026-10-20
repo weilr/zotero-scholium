@@ -467,7 +467,10 @@ var ScholiumToggle = {
  * paper continues its conversation after the reset. The section's look is content/scholium.css,
  * linked into each main window. Short notices at the start and the end close by themselves, and a
  * system notification reports the end; both are left out while a Scholium section is on screen in the
- * focused window. Every event but the pieces of a message being written is logged to
+ * focused window. An update of the plugin hands the papers still to do over to the new copy, and the
+ * running paper continues its conversation there. Every event but the pieces of a message being
+ * written, and the plugin's own lines (the user's words, a continuation, the end of a run without a
+ * result of its own), is logged to
  * <data dir>/tmp/scholium/<attachment key>/claude-run.jsonl or codex-run.jsonl.
  */
 var ScholiumRunner = {
@@ -583,6 +586,8 @@ var ScholiumRunner = {
       done: zh ? "完成" : "done",
       failed: zh ? "失败" : "failed",
       cancelled: zh ? "已取消" : "cancelled",
+      interrupted: zh ? "已中断" : "interrupted",
+      interruptedLine: zh ? "运行被中断（插件更新或停用，或 Zotero 退出）" : "The run was interrupted (the plugin was updated or disabled, or Zotero quit)",
       unfinished: zh ? "（这条回复没有写完）" : "(this message was not finished)",
       stepOf: (i, n, label) => zh ? `第 ${i}/${n} 步 ${label}` : `step ${i}/${n} ${label}`,
       running: (step, time) => zh ? `${step} · 已用 ${time}` : `${step} · ${time} so far`,
@@ -597,6 +602,7 @@ var ScholiumRunner = {
       sendHint: key => zh ? `${key}+Enter 发送` : `${key}+Enter to send`,
       extraLabel: zh ? "附加要求：" : "Extra instructions: ",
       continued: zh ? "额度已恢复，接着中断的地方继续" : "The usage limit has reset; continuing where the run stopped",
+      continuedUpdate: zh ? "插件已更新，接着中断的地方继续" : "The plugin was updated; continuing where the run stopped",
       retrying: zh ? "连接失败，30 秒后自动重试一次" : "The connection failed; trying once more in 30 seconds",
       continuing: zh ? "接着上次的对话" : "continuing the conversation",
       continuedNotice: zh ? "已在后台接着上次的对话处理。" : "Continuing the conversation in the background.",
@@ -791,6 +797,8 @@ var ScholiumRunner = {
   followUpPrompt(job) {
     const zh = this.zh();
     if (!job.say) {
+      if (job.updated) return zh ? "插件更新打断了上面的任务。请从中断的地方继续完成，规则不变。"
+                                  : "A plugin update interrupted the task above. Continue it from where it stopped; the rules are unchanged.";
       return zh ? "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。"
                 : "The usage limit has reset. Continue the task above from where it stopped; the rules are unchanged.";
     }
@@ -969,7 +977,13 @@ var ScholiumRunner = {
     if (event.type === "scholium" && event.subtype === "unfinished" && String(event.text || "").trim()) {
       out.push({ kind: "text", text: String(event.text).trim(), unfinished: true });
     }
-    if (event.type === "scholium" && event.subtype === "continue") out.push({ kind: "info", text: this.text("continued") });
+    if (event.type === "scholium" && event.subtype === "continue") {
+      out.push({ kind: "info", text: this.text(event.reason === "update" ? "continuedUpdate" : "continued") });
+    }
+    // the end of a run without a result of its own: cancelled, failed before a result, interrupted
+    if (event.type === "scholium" && event.subtype === "end") {
+      out.push({ kind: "final", text: String(event.text || "").trim() || this.text(event.outcome || "failed"), error: true });
+    }
     if (event.type === "scholium" && event.subtype === "retry") out.push({ kind: "info", text: this.text("retrying") });
     // a successful result repeats Claude's last message; only a failed run's result is shown
     if (event.type === "result" && (event.is_error || (event.subtype && event.subtype !== "success"))) {
@@ -1957,6 +1971,9 @@ var ScholiumRunner = {
         if (typeof event.session_id === "string" && event.session_id) session = event.session_id;
         if (event.type === "system" && event.subtype === "init") result = null;
         if (event.type === "result") result = event;
+        if (event.type === "scholium" && event.subtype === "end") {
+          result = { type: "result", subtype: event.outcome, is_error: true, result: event.text, duration_ms: event.duration_ms };
+        }
         this.addEntries(entries, this.entries(event));
       }
       log = { at: stat && stat.lastModified, size: stat && stat.size, entries: entries.slice(-this.MAX_ENTRIES), session, result };
@@ -2166,9 +2183,11 @@ var ScholiumRunner = {
 
   // 完成 · 6m 17s · 29 轮 · 257 万 token
   outcome(result, cancelled = false, started = 0) {
-    const parts = [this.text(cancelled ? "cancelled" : this.succeeded(result) ? "done" : "failed")];
-    const ms = result && result.duration_ms > 0 ? result.duration_ms : started ? Date.now() - started : 0;
-    if (ms || started) parts.push(this.duration(ms));
+    const ended = result && ["cancelled", "interrupted"].includes(result.subtype) ? result.subtype : null;
+    const parts = [this.text(cancelled ? "cancelled" : ended || (this.succeeded(result) ? "done" : "failed"))];
+    const timed = !!result && typeof result.duration_ms === "number" && result.duration_ms >= 0;
+    const ms = timed ? result.duration_ms : started ? Date.now() - started : 0;
+    if (timed || started) parts.push(this.duration(ms));
     if (result && result.num_turns > 0) parts.push(this.text("turns", result.num_turns));
     const tokens = this.tokenCounts(result).reduce((n, [, count]) => n + count, 0);
     if (tokens) parts.push(this.text("tokens", this.amount(tokens)));
@@ -2364,7 +2383,8 @@ var ScholiumRunner = {
           const message = String(e && e.message || e).slice(0, 300);
           this.current = null;
           this.dropDraft();
-          this.appendEntries([{ kind: "final", text: message, error: true }]);
+          const log = this.logs.get(job.att.key);
+          this.appendEntries(log ? this.entries(await this.logEnd(log, "failed", message)) : [{ kind: "final", text: message, error: true }]);
           this.notice(job, `${this.text("failed")} · ${message}`, true);
           this.finish(job, false, message);
           this.log("run failed: " + e);
@@ -2452,7 +2472,8 @@ var ScholiumRunner = {
     const started = Date.now();
     const key = job.att.key;
     const agent = job.agent === "codex" ? "codex" : "claude";
-    this.job = { title: job.title, key, libraryID: job.att.libraryID, started, agent, step: job.resume ? "continuing" : "starting" };
+    this.job = { title: job.title, key, libraryID: job.att.libraryID, started, agent, step: job.resume ? "continuing" : "starting",
+                 source: job, session: job.resume || null, log: null };
     const running = this.job;
     // a continued conversation, and a second try, keep the transcript; a new run starts afresh
     const keep = !!(job.resume || job.retried);
@@ -2460,6 +2481,7 @@ var ScholiumRunner = {
     this.transcriptKey = key;
     const logPath = this.logPath(key, agent);
     this.logs.set(key, logPath);
+    running.log = logPath;
     this.startPanes(key);
     this.notice(job, this.text(job.resume ? "continuedNotice" : "typical"));
     this.refresh();
@@ -2479,7 +2501,7 @@ var ScholiumRunner = {
     // second try has them already
     const mark = job.retried ? null
       : job.say || job.extra ? { type: "scholium", subtype: "prompt", text: job.say || this.text("extraLabel") + job.extra }
-      : job.resume ? { type: "scholium", subtype: "continue" } : null;
+      : job.resume ? { type: "scholium", subtype: "continue", reason: job.updated ? "update" : undefined } : null;
     if (mark) {
       await IOUtils.writeUTF8(logPath, JSON.stringify(mark) + "\n", { mode: "append" });
       this.appendEntries(this.entries(mark));
@@ -2508,7 +2530,7 @@ var ScholiumRunner = {
     let ok = false, message;
     if (current.cancelled) {
       message = this.text("cancelled");
-      this.appendEntries([{ kind: "final", text: message, error: true }]);
+      this.appendEntries(this.entries(await this.logEnd(logPath, "cancelled", message, started)));
       this.notice(job, message, true);
     } else if (exitCode === 0 && result && !result.is_error) {
       ok = true;
@@ -2518,7 +2540,7 @@ var ScholiumRunner = {
       return { exitCode, result, limited: true, until: limit.until, session };
     } else {
       message = (summary || ctx.stderr.trim().split("\n").pop() || `exit ${exitCode}`).slice(0, 300);
-      if (!(result && this.entries(result).length)) this.appendEntries([{ kind: "final", text: message, error: true }]);
+      if (!(result && this.entries(result).length)) this.appendEntries(this.entries(await this.logEnd(logPath, "failed", message, started)));
       // the connection failed before the agent used a tool, so nothing was written: one more try
       if (!job.retried && !ctx.acted && this.transient(message, ctx.errorInfo)) {
         const mark = { type: "scholium", subtype: "retry" };
@@ -2531,6 +2553,16 @@ var ScholiumRunner = {
     }
     this.finish(job, ok, message, this.outcome(result, current.cancelled, started), this.tokenDetail(result), answered);
     return { exitCode, result };
+  },
+
+  // the end of a run that has no result of its own (cancelled, failed before a result) as the plugin's line in the
+  // log, so that the paper's history shows how it ended
+  async logEnd(logPath, outcome, text, started = 0) {
+    const mark = { type: "scholium", subtype: "end", outcome, text };
+    if (started) mark.duration_ms = Date.now() - started;
+    try { await IOUtils.writeUTF8(logPath, JSON.stringify(mark) + "\n", { mode: "append" }); }
+    catch (e) { this.log("end not logged: " + e); }
+    return mark;
   },
 
   // the first line of an answer that says something, without its Markdown marks, for a notice; code
@@ -2625,6 +2657,7 @@ var ScholiumRunner = {
             continue;
           }
           if (event.type === "assistant") this.dropDraft();   // the whole message replaces its draft
+          if (event.type === "assistant" || event.type === "result") ctx.running.delivered = true;   // the agent has the prompt
           if (event.type === "result") {
             const unfinished = this.unfinished();
             if (unfinished) {
@@ -2634,7 +2667,7 @@ var ScholiumRunner = {
           }
           kept.push(raw);
           if (typeof event.session_id === "string" && event.session_id) {
-            ctx.session = event.session_id;
+            ctx.session = ctx.running.session = event.session_id;
             this.sessions.set(key, { agent: "claude", id: ctx.session });
           }
           if (event.type === "result") ctx.result = event;
@@ -2886,7 +2919,7 @@ var ScholiumRunner = {
                                 : await rpc.request("thread/start", settings);
       const thread = opened && opened.thread && opened.thread.id;
       if (!thread) throw new Error("Codex opened no conversation");
-      state.thread = ctx.session = thread;
+      state.thread = ctx.session = ctx.running.session = thread;
       this.sessions.set(key, { agent: "codex", id: thread });
       // the start of a run, as Claude Code's log has it: the model and the conversation
       const init = { type: "system", subtype: "init", agent: "codex", model: (opened && opened.model) || model, session_id: thread };
@@ -2903,6 +2936,7 @@ var ScholiumRunner = {
       if (!ctx.current.cancelled) {
         const begun = await rpc.request("turn/start", params);
         state.turn = (begun && begun.turn && begun.turn.id) || null;
+        ctx.running.delivered = true;   // the turn has the prompt
         if (skill) this.advance(ctx, "skill");
         if (ctx.current.cancelled) stop();
         await over;
@@ -3013,13 +3047,82 @@ var ScholiumRunner = {
     return removed + trashed;
   },
 
-  start(pluginID) {
+  // `update`: this copy may replace another (an update or a downgrade), which may hand papers over (carryOver); at
+  // Zotero's start a hand-over that no copy took is dropped
+  start(pluginID, update = false) {
     this.pluginID = pluginID;
     this.registerPane(pluginID);
     for (const win of this.windows()) this.addToWindow(win);
+    if (!update) {
+      if (this.getPref("carryOver")) { try { Zotero.Prefs.set(this.pref + "carryOver", "", true); } catch (e) {} }
+      return;
+    }
+    // Zotero's handlers for an update do not wait for each other: the copy it replaces may stop after this one
+    // started, so its papers are looked for again a moment later
+    this.restoreQueue().catch(e => this.log("queue not restored: " + e));
+    this.restoreTimer = setTimeout(() => { this.restoreQueue().catch(e => this.log("queue not restored: " + e)); }, 5000);
   },
 
-  stop() {
+  // the papers still to do when an update replaces this copy, the running one first, as a preference that the new
+  // copy reads when it starts (restoreQueue): the running paper continues its conversation, the others start; a pause
+  // for a limit and a wait for a second try go on
+  carryOver(running) {
+    const plain = j => ({ key: j.att.key, libraryID: j.att.libraryID, agent: j.agent, extra: j.extra || "", say: j.say || "",
+                          resume: j.resume || null, asked: !!j.asked, own: j.own || 0, interrupted: !!j.interrupted,
+                          retried: !!j.retried, retryAt: j.retryAt || 0 });
+    const jobs = [];
+    if (running && running.source) {
+      const j = running.source;
+      // once the agent has answered to the prompt the conversation holds it, and the paper continues there; before that the
+      // paper is handed over as it was queued, the user's words with it
+      jobs.push(running.session && running.delivered
+        ? Object.assign(plain(j), { resume: running.session, say: "", extra: "", asked: !!(j.say || j.asked),
+                                    retried: false, retryAt: 0, updated: true })
+        : plain(j));
+    }
+    for (const j of this.queue) jobs.push(plain(j));
+    const paused = this.paused ? { until: this.paused.until, known: this.paused.known } : null;
+    try { if (jobs.length) Zotero.Prefs.set(this.pref + "carryOver", JSON.stringify({ jobs, paused }), true); }
+    catch (e) { this.log("queue not kept: " + e); }
+  },
+
+  // the papers an update interrupted (carryOver), queued again once
+  async restoreQueue() {
+    const raw = this.getPref("carryOver");
+    if (!raw) return;
+    try { Zotero.Prefs.set(this.pref + "carryOver", "", true); } catch (e) {}
+    let saved = null;
+    try { saved = JSON.parse(raw); } catch (e) { return; }
+    const jobs = [];
+    for (const s of (saved && Array.isArray(saved.jobs) && saved.jobs) || []) {
+      const att = s && Zotero.Items.getByLibraryAndKey(s.libraryID, s.key);
+      const job = att ? await this.resolve(att) : null;
+      if (!job || this.busy(job.att.key) || jobs.some(j => j.att.key === job.att.key)) continue;
+      jobs.push(Object.assign(job, { agent: s.agent === "codex" ? "codex" : "claude", extra: String(s.extra || ""), say: String(s.say || ""),
+                                     resume: s.resume || null, asked: !!s.asked, own: Number(s.own) || 0, updated: !!s.updated,
+                                     interrupted: !!s.interrupted, retried: !!s.retried,
+                                     retryAt: Number(s.retryAt) || 0 }));
+    }
+    if (!jobs.length) return;
+    const p = saved.paused;
+    if (p && p.until > Date.now() && !this.paused) {   // the limit still holds: the queue waits for it, as before the update
+      this.paused = { until: p.until, known: !!p.known, 
+                      timer: setTimeout(() => { this.resumeQueue(); }, p.until - Date.now()) };
+    }
+    this.enqueue(jobs);
+  },
+
+  // `update`: an update or a downgrade replaces this copy, which hands the papers still to do over to the new one.
+  // The running paper's log records that its run was interrupted.
+  stop(update = false) {
+    const running = this.job;
+    if (running && running.log) {
+      const mark = { type: "scholium", subtype: "end", outcome: "interrupted", text: this.text("interruptedLine"),
+                     duration_ms: Date.now() - running.started };
+      IOUtils.writeUTF8(running.log, JSON.stringify(mark) + "\n", { mode: "append" }).catch(() => {});
+    }
+    if (update) this.carryOver(running);
+    clearTimeout(this.restoreTimer);
     if (this.editor) this.closeProfile(this.editor, false);
     if (this.paused) clearTimeout(this.paused.timer);
     this.paused = null;
@@ -3058,7 +3161,18 @@ function onMainWindowUnload({ window }) {
   try { ScholiumRunner.removeFromWindow(window); } catch (e) {}
 }
 
-async function startup({ id, version, rootURI }) {
+// ADDON_UPGRADE and ADDON_DOWNGRADE: one copy of the plugin replaces another, as the copy that stops is told
+function replacing(reason) {
+  return [typeof ADDON_UPGRADE === "number" ? ADDON_UPGRADE : 7, typeof ADDON_DOWNGRADE === "number" ? ADDON_DOWNGRADE : 8].includes(reason);
+}
+
+// the reasons the new copy of an update may start with: Zotero's handlers forget the old version before they start the
+// new one, which then gets ADDON_INSTALL
+function takingOver(reason) {
+  return replacing(reason) || reason === (typeof ADDON_INSTALL === "number" ? ADDON_INSTALL : 5);
+}
+
+async function startup({ id, version, rootURI }, reason) {
   await Zotero.initializationPromise;
   try {
     const aomStartup = Components.classes["@mozilla.org/addons/addon-manager-startup;1"]
@@ -3071,15 +3185,16 @@ async function startup({ id, version, rootURI }) {
   ScholiumRunner.version = ScholiumBridge.version = version;
   try { ScholiumToggle.start(id); ScholiumToggle.log("reader toggle registered"); }
   catch (e) { ScholiumToggle.log("reader toggle failed: " + e); }
-  try { ScholiumRunner.start(id); ScholiumRunner.log("annotation menu registered"); }
+  try { ScholiumRunner.start(id, takingOver(reason)); ScholiumRunner.log("annotation menu registered"); }
   catch (e) { ScholiumRunner.log("annotation menu failed: " + e); }
   ScholiumBridge.token = await ScholiumBridge.loadToken();
   ScholiumBridge.register();
+  if (takingOver(reason)) ScholiumBridge.keep();
   ScholiumBridge.log("endpoints registered");
 }
 
-function shutdown() {
-  try { ScholiumRunner.stop(); } catch (e) {}
+function shutdown(data, reason) {
+  try { ScholiumRunner.stop(replacing(reason)); } catch (e) {}
   try { ScholiumToggle.stop(); } catch (e) {}
   try { ScholiumBridge.unregister(); } catch (e) {}
   try { if (chromeHandle) chromeHandle.destruct(); } catch (e) {}

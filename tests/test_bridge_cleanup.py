@@ -316,6 +316,29 @@ def test_the_bridge_refuses_a_note_for_another_item(item_key, fragment):
     assert completed.returncode != 0 and fragment in completed.stderr
 
 
+def test_the_new_copy_of_an_update_is_told_to_take_over():
+    """Zotero starts the new copy of an update with ADDON_INSTALL or ADDON_UPGRADE; a start of Zotero hands nothing over."""
+    script = r"""
+const fs = require('node:fs');
+const vm = require('node:vm');
+const context = vm.createContext({
+  Zotero: { initializationPromise: Promise.resolve(), debug() {}, DataDirectory: { dir: 'D' }, Utilities: { randomString: () => 'x'.repeat(40) },
+            Server: { Endpoints: {} } },
+  PathUtils: { join: (...p) => p.join('/') }, IOUtils: { exists: async () => false, writeUTF8: async () => {} },
+  setTimeout: () => 0, clearTimeout() {},
+});
+vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+const started = [];
+context.ScholiumRunner.start = (id, update) => { started.push(update); };
+(async () => {
+  for (const reason of [1, 3, 5, 7, 8]) await context.startup({ id: 'x', version: '0.1.9', rootURI: '' }, reason);
+  process.stdout.write(JSON.stringify(started));
+})();
+"""
+    out = json.loads(subprocess.run([NODE, "-e", script, str(BRIDGE)], text=True, capture_output=True, check=True, timeout=15).stdout)
+    assert out == [False, False, True, True, True]
+
+
 def test_a_copy_that_stops_leaves_the_new_copys_endpoints():
     """During an update the new copy may register its endpoints before the old copy stops."""
     script = r"""
