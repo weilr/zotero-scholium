@@ -2107,7 +2107,9 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const queued = await h.runner.annotate([group]);
     const missing = Object.assign({}, h.item2, { getBestAttachment: async () => Object.assign({}, h.att2, { getFilePathAsync: async () => null }) });
     await h.runner.annotate([missing]);
-    facts.otherLibrary = { state: p.view().state, annotateDisabled: p.view().annotateDisabled, queued, alerts: h.log.alerts, calls: h.log.calls.length };
+    facts.otherLibrary = { state: p.view().state, annotateDisabled: p.view().annotateDisabled, queued, alerts: h.log.alerts.slice(), calls: h.log.calls.length,
+                           sendHidden: p.view().sendHidden, asked: await h.runner.ask(group, '这篇讲什么？') };
+    facts.otherLibrary.askedMissing = [await h.runner.ask(missing, '这篇讲什么？'), h.log.alerts.slice(facts.otherLibrary.alerts.length), h.log.calls.length];
   }
   // while the paper has a conversation, Annotate leaves the words in the box for Send
   {
@@ -2119,6 +2121,194 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     p.pane().annotate.click(); await settle(300);
     facts.annotateInConversation = { calls: h.log.calls.length, prompt: h.log.stdin[1], resumed: h.log.calls[1].opts.arguments.includes('--resume'),
                                      kept: p.pane().input.value };
+  }
+  // a question about a paper without a conversation starts one that answers; Annotate continues it with the box's
+  // words as extra instructions, and once it has an annotation a redo starts afresh and leaves the box alone
+  {
+    const reply = '用变分推断估计后验。';
+    const ANSWER = [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'Q1' }),
+                    tool('Skill', { skill: 'zotero-scholium' }), answer('Launching skill: zotero-scholium'), said(reply), 'HOLD',
+                    ev({ type: 'result', subtype: 'success', is_error: false, result: reply, session_id: 'Q1' })];
+    const logPath = '/data/tmp/scholium/ATT1/claude-run.jsonl';
+    const marks = () => h.log.writes[logPath].trim().split('\n').map(l => JSON.parse(l)).filter(l => l.type === 'scholium');
+    const h = harness({ scripts: [ANSWER, SCRIPT.concat([LAST, RESULT]), SCRIPT.concat([LAST, RESULT])] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    const look = () => ({ placeholder: p.view().placeholder, sendHidden: p.view().sendHidden, cancel: p.pane().cancel.textContent,
+                          session: h.runner.sessions.get('ATT1') || null });
+    p.pane().input.type('这篇怎么估计后验？');
+    const sent = key(p.pane().input, { key: 'Enter', ctrlKey: true }).defaultPrevented;
+    await settle(200);
+    const during = Object.assign(look(), { state: p.view().state, cleared: p.pane().input.value });
+    h.log.release();
+    await settle(300);
+    const asked = { sent, during, after: look(), state: p.view().state, args: h.log.calls[0].opts.arguments, prompt: h.log.stdin[0],
+                    lines: marks(), notices: h.log.notices.map(n => n.descriptions), entries: p.view().entries.map(e => e[1]) };
+    const questionLog = h.log.writes[logPath];
+    p.pane().input.type('重点标方法部分');
+    p.pane().annotate.click();
+    await settle(400);
+    const args1 = h.log.calls[1].opts.arguments;
+    const annotated = { resume: args1.includes('--resume') ? args1[args1.indexOf('--resume') + 1] : null, prompt: h.log.stdin[1],
+                        cleared: p.pane().input.value, after: look(), lines: marks(),
+                        prompts: p.view().entries.filter(e => e[0] === 'scholium-entry prompt').map(e => e[1]),
+                        notices: h.log.notices.slice(asked.notices.length).map(n => n.descriptions) };
+    const annotatedLog = h.log.writes[logPath];
+    p.pane().input.type('第 5 页那条译文改短');
+    p.pane().annotate.click();
+    await settle(400);
+    const redo = { calls: h.log.calls.length, resumed: h.log.calls[2].opts.arguments.includes('--resume'), kept: p.pane().input.value,
+                   lines: marks() };
+    // after a restart the log names the question's conversation: Annotate from the context menu continues it, with the
+    // profile; a conversation that went on with an annotation is one of an annotation
+    const r = harness({ logs: { [logPath]: questionLog, [PROFILE_PATH]: PROFILE } });
+    r.runner.start('x');
+    await r.runner.annotate([r.item1]); await settle(300);
+    const shown = harness({ logs: { [logPath]: questionLog } });
+    shown.runner.start('x');
+    const sp = await shown.pane(shown.item1);
+    await settle(100);
+    const later = harness({ logs: { [logPath]: annotatedLog } });
+    later.runner.start('x');
+    const lp = await later.pane(later.item1);
+    await settle(100);
+    facts.ask = { asked, annotated, redo,
+                  restarted: { resumed: r.log.calls[0].opts.arguments.includes('Q1'), prompt: r.log.stdin[0].split('\n')[0],
+                               profile: r.log.stdin[0].split('\n').find(l => l.startsWith('- 画像')) },
+                  shown: { placeholder: sp.view().placeholder, session: shown.runner.sessions.get('ATT1') },
+                  later: { placeholder: lp.view().placeholder, session: later.runner.sessions.get('ATT1') } };
+  }
+  // the box while a question and then its annotation start, before the agent names the conversation: a question's
+  // words, then a follow-up's
+  {
+    const reply = '用变分推断估计后验。';
+    const h = harness({ holdDirs: true, scripts: [[ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'Q1' }),
+                                                   said(reply), ev({ type: 'result', subtype: 'success', is_error: false, result: reply, session_id: 'Q1' })]] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.ask(h.item1, '这篇怎么估计后验？'); await settle(50);
+    const asking = p.view().placeholder;
+    h.log.releaseDir(); await settle(300);
+    await h.runner.annotate([h.item1]); await settle(50);
+    facts.askBox = { asking, annotating: p.view().placeholder, state: p.view().state, session: h.runner.sessions.get('ATT1') };
+    h.log.releaseDir(); await settle(300);
+  }
+  // a follow-up in a question's conversation is not told of a configuration; an annotation there that ends before the
+  // agent names the conversation leaves it one of an annotation, as its log says; with annotations of the tool the
+  // question says how to list them
+  {
+    const reply = '用变分推断估计后验。';
+    const init = ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'Q1' });
+    const answered = [init, said(reply), ev({ type: 'result', subtype: 'success', is_error: false, result: reply, session_id: 'Q1' })];
+    const gone = [ev({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'No conversation found with session ID: Q1' })];
+    const h = harness({ existing: [['zotero-scholium']], scripts: [answered, answered, gone, SCRIPT.concat([LAST, RESULT])] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.ask(h.item1, '这篇怎么估计后验？'); await settle(300);
+    await h.runner.followUp(h.att1, '那它的损失函数呢？'); await settle(300);
+    await h.runner.annotate([h.item1]); await settle(300);
+    const failed = { session: h.runner.sessions.get('ATT1'), placeholder: p.view().placeholder };
+    await h.runner.annotate([h.item1]); await settle(300);
+    facts.askEdges = { owned: h.log.stdin[0].split('\n').find(l => l.startsWith('这篇论文已有')), followUp: h.log.stdin[1],
+                       resumes: h.log.calls.map(c => c.opts.arguments.includes('--resume')), failed };
+  }
+  // Annotate and a question for the same paper at once: one of them is queued
+  {
+    const h = harness({ gateFirst: true });
+    h.runner.start('x');
+    const both = await Promise.all([h.runner.annotate([h.item1]), h.runner.ask(h.item1, '这篇讲什么？')]);
+    await settle(80);
+    facts.askRace = { both, queued: h.runner.queue.length, calls: h.log.calls.length, prompt: h.log.stdin[0].split('\n')[0] };
+    h.runner.stop();
+  }
+  // a paper handed over by an update and still waiting is handed over again as one an update interrupted
+  {
+    const carried = JSON.stringify({ jobs: [{ key: 'ATT1', libraryID: 1, agent: 'claude', resume: 'S1', updated: true }],
+                                     paused: { until: Date.now() + 600000, known: true } });
+    const h = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried } });
+    h.runner.start('x', true);
+    await settle(100);
+    h.runner.stop(true);
+    facts.handedTwice = { calls: h.log.calls.length, updated: JSON.parse(h.store.get('extensions.scholium-bridge.carryOver')).jobs[0].updated };
+  }
+  // a question goes before the papers still waiting for their first run, after the questions before it
+  {
+    const h = harness({ gateFirst: true });
+    h.runner.start('x');
+    await h.runner.annotate([h.item1]); await settle(80);
+    await h.runner.annotate([h.item2]);
+    for (const k of ['ATT3', 'ATT4']) await h.runner.ask(Object.assign({}, h.att1, { key: k, id: k }), '这篇讲什么？');
+    facts.askOrder = h.runner.queue.map(j => j.att.key);
+    h.runner.stop();
+  }
+  // after a question to Claude Code, Annotate with Codex chosen starts Codex's own conversation
+  {
+    const reply = '用变分推断估计后验。';
+    const h = harness({ scripts: [[ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'Q1' }), said(reply),
+                                   ev({ type: 'result', subtype: 'success', is_error: false, result: reply, session_id: 'Q1' })]],
+                        codex: { scripts: [CODEX_SCRIPT] } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(200);
+    await h.runner.ask(h.item1, '这篇怎么估计后验？'); await settle(300);
+    p.pane().agent.change('codex');
+    await settle(200);
+    await h.runner.annotate([h.item1]); await settle(500);
+    const sent = h.log.codexProcs.at(-1).sent;
+    facts.askThenCodex = { claudeCalls: h.log.calls.length, threads: sent.map(m => m.method).filter(m => typeof m === 'string' && m.startsWith('thread/')),
+                           session: h.runner.sessions.get('ATT1'), placeholder: p.view().placeholder };
+  }
+  // the usage limit in a question and in the annotation that continued its conversation: each goes on there with the
+  // plain continuation; a question waiting in the queue is cancelled as a question
+  {
+    const reply = '用变分推断估计后验。';
+    const init = ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'Q1' });
+    const h = harness({ scripts: [[init].concat(LIMIT_HIT),
+                                  [init, said(reply), ev({ type: 'result', subtype: 'success', is_error: false, result: reply, session_id: 'Q1' })],
+                                  [init].concat(SCRIPT.slice(1, 3), LIMIT_HIT), SCRIPT.concat([LAST, RESULT])] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.ask(h.item1, '这篇怎么估计后验？'); await settle(300);
+    const paused = { cancel: p.pane().cancel.textContent, queued: h.runner.queue.map(j => [j.resume || null, !!j.question, j.say]) };
+    h.fire(); await settle(400);
+    const answered = { prompt: h.log.stdin[1], session: h.runner.sessions.get('ATT1'), state: p.view().state };
+    await h.runner.annotate([h.item1]); await settle(300);
+    const annotating = { cancel: p.pane().cancel.textContent, queued: h.runner.queue.map(j => [j.resume || null, !!j.annotate]) };
+    h.fire(); await settle(400);
+    facts.askLimit = { paused, answered, annotating, annotatePrompt: h.log.stdin[2].split('\n')[0], continued: h.log.stdin[3],
+                       resumes: h.log.calls.map(c => c.opts.arguments.includes('--resume')), session: h.runner.sessions.get('ATT1') };
+  }
+  // an update hands over a question not yet received with its words, and an annotation in a question's conversation
+  // as it stands: before the agent answered with its whole task, after that with the plain continuation
+  {
+    const reply = '用变分推断估计后验。';
+    const logPath = '/data/tmp/scholium/ATT1/claude-run.jsonl';
+    const init = ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'Q1' });
+    const ANSWERED = [init, said(reply), ev({ type: 'result', subtype: 'success', is_error: false, result: reply, session_id: 'Q1' })];
+    const question = h => h.runner.ask(h.item1, '这篇怎么估计后验？');
+    const annotate = async h => { await question(h); await settle(300); await h.runner.annotate([h.item1]); };
+    const hand = async (scripts, act) => {
+      const h = harness({ scripts });
+      h.runner.start('x');
+      await act(h); await settle(150);
+      h.runner.stop(true);
+      const carried = h.store.get('extensions.scholium-bridge.carryOver');
+      const job = JSON.parse(carried).jobs[0];
+      const n = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried }, logs: { [logPath]: h.log.writes[logPath] || '' } });
+      n.runner.start('x', true);
+      await settle(400);
+      const out = { handed: [job.question, job.annotate, job.say, job.resume, !!job.updated], prompt: (n.log.stdin[0] || '').split('\n')[0],
+                    resume: !!n.log.calls[0] && n.log.calls[0].opts.arguments.includes('--resume') };
+      n.runner.stop();
+      return out;
+    };
+    facts.askUpdate = { question: await hand([[init, 'WAIT']], question),
+                        annotateSent: await hand([ANSWERED, [init, 'WAIT']], annotate),
+                        annotateAnswered: await hand([ANSWERED, [init, said('先读论文。'), 'WAIT']], annotate) };
   }
   // a failed deletion while the paper's section is on screen: its state line says so, once
   {
@@ -2156,6 +2346,7 @@ def facts(tmp_path_factory):
 CLAUDE = "/appdata/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 SUMMARY = "高亮 28 条（核心 12 条），页边批注 9 条，笔记《Deep latent》，无剩余警告。"
 BRIEF = "高亮 28 条（核心 12 条）\n页边批注 9 条\n无剩余警告"   # the summary in a notice
+ASK = "向这篇论文提问；或写附加要求，随「批注这篇」发送"   # the message box's placeholder before an annotation
 CLOSING = "改了批注时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。"   # the end of a follow-up's prompt
 DONE_NOTICE = ["完成 · Ns"] + BRIEF.split("\n")   # a harness run's own time, read through run_time
 DONE_STATE = "完成 · 6m 17s · 26 轮 · 257 万 token"
@@ -2794,14 +2985,13 @@ def test_a_failed_log_write_stops_the_agent(facts):
 
 
 def test_an_empty_message_box_fits_its_placeholder(facts):
-    assert facts["inputHeight"] == {"placeholder": "Extra instructions (optional), sent with Annotate",
+    assert facts["inputHeight"] == {"placeholder": "Ask about this paper, or write extra instructions to send with Annotate",
                                     "empty": "48px", "typed": "24px", "cleared": "48px", "value": ""}
 
 
 def test_extra_instructions_and_follow_ups_continue_the_conversation(facts):
     e = facts["extra"]
-    assert e["before"] == {"placeholder": "附加要求（可选），随「批注这篇」一起发送", "sendHidden": True, "sendDisabled": True,
-                           "sendRowHidden": True}
+    assert e["before"] == {"placeholder": ASK, "sendHidden": False, "sendDisabled": True, "sendRowHidden": False}
     assert "用户的附加要求：\n只标注方法部分\n\n结束时" in e["prompt"] and e["cleared"] == ""
     assert e["firstLogLine"] == {"type": "scholium", "subtype": "prompt", "text": "附加要求：只标注方法部分"}
     assert e["firstEntry"] == ["scholium-entry prompt", "附加要求：只标注方法部分"]
@@ -2920,7 +3110,7 @@ def test_codex_runs_the_skill_in_a_sandbox_through_its_app_server(facts):
     # questions that reach the plugin are declined: nobody is there to answer
     assert r["answers"] == [{"id": "q1", "result": {"decision": "decline"}}, {"id": "q2", "result": {"answers": {}}},
                             {"id": "q3", "error": {"code": -32601, "message": "not handled by scholium-bridge"}}]
-    assert r["killed"] is True and r["session"] == {"agent": "codex", "id": "T1"} and r["claudeCalls"] == 0
+    assert r["killed"] is True and r["session"] == {"agent": "codex", "id": "T1", "question": False} and r["claudeCalls"] == 0
 
 
 def test_codex_transcript_state_and_log_read_like_claude_codes(facts):
@@ -2940,10 +3130,10 @@ def test_codex_transcript_state_and_log_read_like_claude_codes(facts):
     assert r["sendShown"] is True and r["revealed"] == ["/data/tmp/scholium/ATT1/codex-run.jsonl"]
     latest = facts["latestLog"]
     assert latest["codex"] == {"first": ["scholium-entry info", "模型: gpt-6-luna"], "count": len(CODEX_TRANSCRIPT),
-                               "state": "上次：完成 · 6m 17s · 3 轮 · 265 万 token", "session": {"agent": "codex", "id": "T1"},
+                               "state": "上次：完成 · 6m 17s · 3 轮 · 265 万 token", "session": {"agent": "codex", "id": "T1", "question": False},
                                "revealed": "/data/tmp/scholium/ATT1/codex-run.jsonl"}
     assert latest["claude"]["first"] == ["scholium-entry info", "模型: claude-opus-5-5"]
-    assert latest["claude"]["session"] == {"agent": "claude", "id": "S1"}
+    assert latest["claude"]["session"] == {"agent": "claude", "id": "S1", "question": False}
     assert latest["claude"]["revealed"] == "/data/tmp/scholium/ATT1/claude-run.jsonl"
 
 
@@ -3115,12 +3305,99 @@ def test_papers_outside_my_library_and_missing_files_are_not_run(facts):
     assert o["queued"] == 0 and o["calls"] == 0
     assert o["alerts"] == ["Scholium 只能批注“我的文库”里的论文。", "这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）。"]
     assert facts["noPdf"]["alerts"] == ["这篇论文没有 PDF 附件。"]
+    assert o["sendHidden"] is True and o["asked"] is False
+    assert o["askedMissing"] == [False, ["这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）。"], 0]
 
 
 def test_annotate_leaves_a_follow_up_in_the_box(facts):
     a = facts["annotateInConversation"]
     assert a["calls"] == 2 and a["resumed"] is False and "第 5 页那条译文改短" not in a["prompt"]
     assert a["kept"] == "第 5 页那条译文改短"
+
+
+def test_a_question_starts_a_conversation_that_answers_without_annotating(facts):
+    a = facts["ask"]["asked"]
+    assert a["sent"] is True and "--resume" not in a["args"]
+    assert a["prompt"] == "\n".join([
+        "使用 zotero-scholium 技能读下面这篇论文（status 给出题录，extract 给出正文），回答用户在 Zotero 里提的问题。",
+        "",
+        "- 条目 key：ITEM1",
+        "- 附件 key：ATT1",
+        "- PDF：D:/Zotero/storage/ATT1/paper.pdf",
+        "- 输出目录：/data/tmp/scholium/ATT1",
+        "- 画像：没有；不要生成或修改画像",
+        "",
+        "这是从 Zotero 里发来的无人值守任务：不要向用户提问，不要启动子代理。只回答，不写批注和笔记；用户在问题里明确要求时，才按技能的流程写入 Zotero。",
+        "这篇论文目前没有本工具的批注。",
+        "",
+        "用户的问题：",
+        "这篇怎么估计后验？",
+        "",
+        "写入了 Zotero 时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。",
+    ])
+    question = {"agent": "claude", "id": "Q1", "question": True}
+    assert run_time(a["during"]) == {"placeholder": ASK, "sendHidden": False, "cancel": "取消提问", "session": question,
+                                     "state": "加载技能 · 已用 Ns", "cleared": ""}, "the steps a question reaches, without their count"
+    assert a["lines"] == [{"type": "scholium", "subtype": "prompt", "text": "这篇怎么估计后验？", "question": True}]
+    assert run_time(a["notices"]) == [["已在后台开始回答。过程见条目侧栏的 Scholium 区块。"], ["完成 · Ns", "用变分推断估计后验。"]]
+    assert a["entries"][0] == "这篇怎么估计后验？" and a["entries"][-1] == "⏺ 用变分推断估计后验。"
+    assert a["after"]["placeholder"] == ASK and a["after"]["session"] == question
+    assert facts["ask"]["shown"] == {"placeholder": ASK, "session": question}, "a restart reads the question's conversation from the log"
+
+
+def test_annotate_continues_a_questions_conversation_with_the_box_as_extra_instructions(facts):
+    n = facts["ask"]["annotated"]
+    assert n["resume"] == "Q1" and n["cleared"] == ""
+    assert n["prompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注：")
+    assert "\n- 画像：没有；按默认值标注，不要生成或修改画像\n" in n["prompt"] and "用户的附加要求：\n重点标方法部分\n\n结束时" in n["prompt"]
+    assert n["lines"][-1] == {"type": "scholium", "subtype": "prompt", "text": "批注这篇\n附加要求：重点标方法部分", "annotate": True}
+    assert n["prompts"] == ["这篇怎么估计后验？", "批注这篇\n附加要求：重点标方法部分"], "the question's transcript stays"
+    assert n["notices"][0] == [STARTED]
+    assert n["after"] == {"placeholder": "接着对话，例如：第 5 页那条译文改短一些", "sendHidden": False, "cancel": "取消批注",
+                          "session": {"agent": "claude", "id": "S1", "question": False}}
+    assert facts["ask"]["redo"] == {"calls": 3, "resumed": False, "kept": "第 5 页那条译文改短", "lines": []}, "a redo starts afresh"
+    assert facts["ask"]["restarted"] == {"resumed": True, "prompt": n["prompt"].split("\n")[0], "profile": "- 画像：/data/zotero-scholium/profile.md"}
+    assert facts["ask"]["later"] == {"placeholder": "接着对话，例如：第 5 页那条译文改短一些",
+                                     "session": {"agent": "claude", "id": "S1", "question": False}}, "the log keeps the annotation"
+    assert facts["askOrder"] == ["ATT3", "ATT4", "ATT2"], "questions go before the papers still waiting, in their order"
+    assert run_time(facts["askBox"]) == {"asking": ASK, "annotating": "接着对话，例如：第 5 页那条译文改短一些", "state": "启动 Claude Code · 已用 Ns",
+                                         "session": {"agent": "claude", "id": "Q1", "question": True}}, "an annotation that starts takes the box's next words as a follow-up"
+    c = facts["askThenCodex"]
+    assert c["claudeCalls"] == 1 and c["threads"] == ["thread/start"], "another agent starts its own conversation"
+    assert c["session"] == {"agent": "codex", "id": "T1", "question": False} and c["placeholder"] == "接着对话，例如：第 5 页那条译文改短一些"
+
+
+def test_a_questions_follow_ups_failures_and_races(facts):
+    e = facts["askEdges"]
+    assert e["owned"] == "这篇论文已有 1 条本工具的批注；问到它们的内容时，写一份只含 pdf、item_key、attachment_key、out_dir 的配置，用 --config <配置> --list --full 列出。"
+    assert e["followUp"] == ("下面是用户在 Zotero 里针对这篇论文发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
+                             "只是提问就直接回答；用户明确要求写批注或笔记时，才按技能的流程写入 Zotero。\n\n那它的损失函数呢？\n\n"
+                             "写入了 Zotero 时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。"), "no configuration to rewrite whole"
+    assert e["resumes"] == [False, True, True, False], "after a failed annotation in the question's conversation a redo starts afresh"
+    assert e["failed"] == {"session": {"agent": "claude", "id": "Q1", "question": False}, "placeholder": "接着对话，例如：第 5 页那条译文改短一些"}
+    assert facts["askRace"] == {"both": [0, True], "queued": 0, "calls": 1,
+                                "prompt": "使用 zotero-scholium 技能读下面这篇论文（status 给出题录，extract 给出正文），回答用户在 Zotero 里提的问题。"}
+    assert facts["handedTwice"] == {"calls": 0, "updated": True}
+
+
+def test_a_question_and_its_annotation_go_on_after_a_limit_and_an_update(facts):
+    lim = facts["askLimit"]
+    assert lim["paused"] == {"cancel": "取消提问", "queued": [["S1", True, ""]]}
+    assert run_time(lim["answered"]) == {"prompt": "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。",
+                                         "session": {"agent": "claude", "id": "Q1", "question": True}, "state": "完成 · Ns"}
+    assert lim["annotating"] == {"cancel": "取消批注", "queued": [["S1", False]]}
+    assert lim["annotatePrompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注")
+    assert lim["continued"] == "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。", "the task is not sent twice"
+    assert lim["resumes"] == [False, True, True, True] and lim["session"] == {"agent": "claude", "id": "S1", "question": False}
+    u = facts["askUpdate"]
+    assert u["question"] == {"handed": [True, False, "这篇怎么估计后验？", None, False],
+                             "prompt": "使用 zotero-scholium 技能读下面这篇论文（status 给出题录，extract 给出正文），回答用户在 Zotero 里提的问题。",
+                             "resume": False}
+    assert u["annotateSent"] == {"handed": [False, True, "", "Q1", False],
+                                 "prompt": "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论、页边批注、阅读笔记，按画像和默认值。",
+                                 "resume": True}
+    assert u["annotateAnswered"] == {"handed": [False, False, "", "Q1", True], "prompt": "插件更新打断了上面的任务。请从中断的地方继续完成，规则不变。",
+                                     "resume": True}
 
 
 def test_a_failed_deletion_in_view_is_told_once(facts):

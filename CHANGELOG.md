@@ -95,6 +95,10 @@
   the computer is named as such; **Annotate** leaves a follow-up in the box for **Send**. Texts for one
   paper, “个人配置” throughout, the Config Editor in place of about:config, the transcript's remaining
   English words in Chinese, solid focus outlines, and each second only the state line set again.
+- Scholium section: **Send** asks about a paper that has no conversation yet, in a new conversation that
+  answers without annotating. Until the conversation has an annotation, the box's words go with
+  **Annotate** as extra instructions, and an annotation by the same agent continues the question's
+  conversation and keeps its transcript.
 
 ## 0.1.8 (2026-10-16)
 

@@ -49,7 +49,7 @@ English | [中文](README.zh-CN.md)
 <td><img src="docs/images/f-note.webp" alt="The reading note in Zotero's note editor, scrolled from the summary through Method, Results and Open questions, with rendered equations"></td>
 </tr>
 <tr>
-<td><b>One click in Zotero</b><br>The Scholium section runs Claude Code or Codex on the selected paper and shows each step. Afterwards, ask for changes in the same conversation, such as <i>shorten the translation on page 5</i>.</td>
+<td><b>One click in Zotero</b><br>The Scholium section runs Claude Code or Codex on the selected paper and shows each step. Ask about the paper before annotating it, or afterwards ask for changes in the same conversation, such as <i>shorten the translation on page 5</i>.</td>
 <td><img src="docs/images/f-pane.webp" alt="Page 2 beside the Scholium section during a run: the extra instructions typed, Annotate pressed, the steps and the transcript, and the annotations arriving on the page"></td>
 </tr>
 <tr>
@@ -76,7 +76,7 @@ You need Zotero 7 or later with its local API turned on (Settings → Advanced �
    npx skills add weilr/zotero-scholium -g -y
    ```
 3. Download [`scholium-bridge.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium-bridge.xpi) and install it in Zotero: Tools → Plugins → ⚙ → Install Plugin From File.
-4. Select a paper, open the **Scholium** section and press **Annotate**.
+4. Select a paper, open the **Scholium** section and press **Annotate**. To only ask about the paper, type the question in the box below the transcript and press **Send**.
 
 ### From your agent
 

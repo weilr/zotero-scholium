@@ -33,12 +33,13 @@ in the background for the selected paper; papers started while another runs wait
 one at a time. A regular item is annotated through its best PDF attachment. Only papers in My Library are
 annotated: for a paper in a group library the section says so and **Annotate** is off.
 
-Requirements: Claude Code or Codex installed and signed in, and the zotero-scholium skill installed
-for it (`~/.claude/skills/zotero-scholium` for Claude Code; for Codex, `~/.codex/skills/`,
+Requirements: Claude Code or Codex installed and signed in, and the zotero-scholium skill installed for
+it (`~/.claude/skills/zotero-scholium` for Claude Code; for Codex, `~/.codex/skills/`,
 `~/.agents/skills/`, or `<data dir>/.agents/skills/`); a run whose agent does not find the skill ends at
-its start and says where to put it (when Codex cannot list its skills, lists them with errors or has the
-skill switched off, the run ends with what Codex said). The plugin starts the installed executable unchanged and does not read
-its credentials; the usage counts toward the signed-in account.
+its start (with Codex, the start of a new thread) and says where to put it (when Codex cannot list its
+skills, lists them with errors or has the skill switched off, the run ends with what Codex said). The
+plugin starts the installed executable unchanged and does not read its credentials; the usage counts
+toward the signed-in account.
 
 Each Claude Code run:
 
@@ -51,9 +52,9 @@ Each Claude Code run:
 
 Each Codex run:
 
-- talks to `codex app-server` over JSON-RPC, in a new thread or, for a follow-up, in the paper's
-  thread, with `<data dir>/tmp/scholium/` as working directory and the zotero-scholium skill
-  attached to the message;
+- talks to `codex app-server` over JSON-RPC, in a new thread or, for a follow-up or an annotation
+  after a question, in the paper's thread, with `<data dir>/tmp/scholium/` as working directory and the zotero-scholium skill
+  attached to the first message of a thread;
 - runs without the user's MCP servers and installed plugins, switched off for the thread only;
   Codex's `config.toml` is not changed;
 - runs in Codex's `workspace-write` sandbox: commands may write only inside `<data dir>/tmp/scholium/`,
@@ -68,10 +69,12 @@ Each Codex run:
 Both receive the item key, the attachment key, the PDF path, the output directory
 `<data dir>/tmp/scholium/<attachment key>` and the profile's path (or that there is none, so that the
 defaults apply and no profile is created), and are told not to ask questions or start sub-agents. A
-follow-up adds to the paper's log; one that changes or adds annotations is told to edit the configuration
+question is told to read the paper with the skill's `status` and `extract` and to write to Zotero only
+when it asks for that. A follow-up adds to the paper's log; one that changes or adds annotations is told to edit the configuration
 they were written from, the paper's whole set, and apply it whole with `cleanup: true`. Besides the agent's
-events, the log holds the plugin's own lines: the user's words, a continuation, and the end of a run that
-has started and has no result of its own (cancelled, failed, interrupted).
+events, the log holds the plugin's own lines: the user's words (a question's marked as one), an annotation
+that continues a question's conversation, a continuation, and the end of a run that has started and has no
+result of its own (cancelled, failed, interrupted).
 
 The *Scholium* section of the item pane, in the library and in the reader's side pane, holds the
 controls and the process of the selected paper:
@@ -89,11 +92,11 @@ controls and the process of the selected paper:
   panes.
 - **Annotate**, **Cancel** and **Delete annotations** act on the selected paper; **Cancel** also takes
   a queued paper out of the queue. **Show log** above the transcript shows the log file.
-- A state line shows the step of six and the elapsed time while the paper runs (and, while the agent
-  has lost its connection and tries again, the attempt, until it answers again), its place in the
-  queue, its latest outcome with the minutes, turns and tokens of the run (the tooltip splits the
-  tokens into input, cache and output), or the deletion; other papers' runs are not shown there. For a
-  paper run earlier, the outcome comes from the saved log.
+- A state line shows the step of six (for a question, the step's name only) and the elapsed time while
+  the paper runs (and, while the agent has lost its connection and tries again, the attempt, until it
+  answers again), its place in the queue, its latest outcome with the minutes, turns and tokens of the
+  run (the tooltip splits the tokens into input, cache and output), or the deletion; other papers' runs
+  are not shown there. For a paper run earlier, the outcome comes from the saved log.
 - The process is shown as Claude Code shows it: the agent's text, each tool call with its command or
   file, and the first lines of each result (errors in red); a failed run ends with its error. A
   running paper is shown live; for a paper run earlier the latest saved log, of either agent, is
@@ -110,11 +113,15 @@ controls and the process of the selected paper:
   text shows the file's current content when Zotero is focused again. A missing profile starts as
   the empty `## User's rules (always win)` section of `scholium profile`'s template, which keeps that
   section when it later writes the statistics, and is written on saving.
-- The box below the transcript takes the user's words. While the paper has no conversation, they go
-  with **Annotate** to the new run as extra instructions. Once it has one, **Send** (or Ctrl+Enter)
-  continues that run's conversation with them, with the agent that held it (`claude -p --resume
-  <session>`, or Codex's `thread/resume`), for example to change some annotations; **Annotate** then
-  starts a new run and leaves the words in the box. The words appear in the transcript.
+- The box below the transcript takes the user's words. Until the paper's conversation has an
+  annotation, **Send** (or Ctrl+Enter) sends them as a question and **Annotate** as extra instructions.
+  A question about a paper without a conversation starts one with the chosen agent, which answers
+  without annotating; further words continue it. An annotation by the agent that holds a question's
+  conversation continues that conversation and keeps its transcript; another agent starts its own.
+  Once the conversation has an annotation, **Send** continues it with the words, with the agent that
+  held it (`claude -p --resume <session>`, or Codex's `thread/resume`), for example to change some
+  annotations; **Annotate** then starts a new run and leaves the words in the box. The words appear in
+  the transcript.
 
 While Zotero is in front, a notice in the corner of the window appears when a paper starts and when it
 ends, and closes by itself; while Zotero is in the background, a system notification reports the end
