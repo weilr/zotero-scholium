@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Scholium section: Claude Code and Codex share the paper's conversation. A message, or **Annotate** after a
+  question, goes to the chosen agent, in its own session there when it has one, and with the turns it has not seen
+  (the user's words and each answer) at the start of the message. The transcript names the agent and model of each
+  run. The log is `<out dir>/conversation.jsonl`; a conversation logged in `claude-run.jsonl` or `codex-run.jsonl`
+  is read and goes on there.
+- Scholium section: when the agent no longer has its session (deleted in the Codex app, or cleaned up by Claude Code),
+  a new session takes the conversation over instead of failing, and the transcript says so; a continuation after a
+  limit or an update ends with that reason. A failed Claude Code run without text shows its errors.
+
 ## 0.1.9 (2026-10-20)
 
 - `cleanup` is off by default: a run only adds unless the configuration sets `cleanup: true` for a
