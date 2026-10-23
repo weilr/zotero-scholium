@@ -2,14 +2,19 @@
 
 ## Unreleased
 
-- Scholium section: Claude Code and Codex share the paper's conversation. A message, or **Annotate** after a
-  question, goes to the chosen agent, in its own session there when it has one, and with the turns it has not seen
-  (the user's words and each answer) at the start of the message. The transcript names the agent and model of each
-  run. The log is `<out dir>/conversation.jsonl`; a conversation logged in `claude-run.jsonl` or `codex-run.jsonl`
-  is read and goes on there.
-- Scholium section: when the agent no longer has its session (deleted in the Codex app, or cleaned up by Claude Code),
-  a new session takes the conversation over instead of failing, and the transcript says so; a continuation after a
-  limit or an update ends with that reason. A failed Claude Code run without text shows its errors.
+- Scholium section: as in llm-for-zotero, each agent has its own conversations of a paper. **New chat** starts
+  one, **History** lists them by day to open, rename or delete (with **Undo**; a deleted Codex conversation's thread
+  is archived), and switching the agent starts a new one. Messages and **Annotate** go on in the conversation shown,
+  the box's words with **Annotate** as extra instructions. Each conversation has its log in
+  `<out dir>/conversations/`; `claude-run.jsonl` and `codex-run.jsonl` of earlier versions are each agent's first
+  conversation.
+- Scholium section: when the agent no longer has a conversation's session (deleted in the Codex app, or cleaned up
+  by Claude Code), a new session is given the conversation, Codex as items of its new thread and Claude Code as text,
+  beyond ten exchanges the earlier ones as excerpts; a continuation after a limit or an update ends with that
+  reason. A failed Claude Code run without text shows its errors.
+- Scholium section: a new session is told which configuration, agent and time wrote the paper's annotations, and a
+  session that goes on is told when another conversation rewrote them since, or that they are gone. The section
+  shows the context the conversation's session takes up, and when each run ended.
 
 ## 0.1.9 (2026-10-20)
 

@@ -49,7 +49,7 @@
 <td><img src="docs/images/f-note.webp" alt="Zotero 笔记编辑器中的阅读笔记，从概述一路滚动到方法、结果和待解问题，公式已渲染"></td>
 </tr>
 <tr>
-<td><b>在 Zotero 里一键批注</b><br>Scholium 区块对选中的论文运行 Claude Code 或 Codex，并显示每一步。批注前可以先就论文提问，批注后可以接着对话修改，比如「把第 5 页的译文改短」；中途换智能体，对话照样接着。</td>
+<td><b>在 Zotero 里一键批注</b><br>Scholium 区块对选中的论文运行 Claude Code 或 Codex，并显示每一步。批注前可以先就论文提问，批注后可以接着对话修改，比如「把第 5 页的译文改短」；之前的对话都留在「历史」里。</td>
 <td><img src="docs/images/f-pane.webp" alt="运行中的第 2 页和 Scholium 区块：输入附加要求，点批注，步骤和过程记录推进，最后注释出现在页面上"></td>
 </tr>
 <tr>

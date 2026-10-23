@@ -48,12 +48,11 @@ Each Claude Code run:
   directory added;
 - runs without the user's MCP servers and hooks (`--strict-mcp-config`, `disableAllHooks`); the
   user's skills stay;
-- logs every event to the paper's log, `<data dir>/tmp/scholium/<attachment key>/conversation.jsonl`.
+- logs every event to the conversation's log, `<data dir>/tmp/scholium/<attachment key>/conversations/claude-<time>.jsonl`.
 
 Each Codex run:
 
-- talks to `codex app-server` over JSON-RPC, in a new thread or in its thread of the paper's
-  conversation, with `<data dir>/tmp/scholium/` as working directory and the zotero-scholium skill
+- talks to `codex app-server` over JSON-RPC, in a new thread or in the conversation's thread, with `<data dir>/tmp/scholium/` as working directory and the zotero-scholium skill
   attached to the first message of a thread;
 - runs without the user's MCP servers and installed plugins, switched off for the thread only;
   Codex's `config.toml` is not changed;
@@ -62,32 +61,40 @@ Each Codex run:
   macOS and Linux), and may use the network, which the skill needs for Zotero's local server;
 - has Codex's automatic reviewer (`auto_review`) decide on requests beyond the sandbox; a request or
   question that reaches the plugin is declined;
-- logs Codex's notifications, without the streaming deltas, to the paper's log, between a start line
-  and a result line in Claude Code's form.
+- logs Codex's notifications, without the streaming deltas and the user's message, to the
+  conversation's log (`codex-<time>.jsonl`), between a start line and a result line in Claude Code's form.
 
 Both receive the item key, the attachment key, the PDF path, the output directory
 `<data dir>/tmp/scholium/<attachment key>` and the profile's path (or that there is none, so that the
 defaults apply and no profile is created), and are told not to ask questions or start sub-agents. A
 question is told to read the paper with the skill's `status` and `extract` and to write to Zotero only
-when it asks for that. A follow-up adds to the paper's log; one that changes or adds annotations is told to edit the configuration
-they were written from, the paper's whole set, and apply it whole with `cleanup: true`. Besides the agent's
-events, the log holds the plugin's own lines: the start of each run with its agent and the user's words, the
-user's words as shown (a question's marked as one), an annotation that continues a question's conversation, a
-continuation, a session the agent no longer has, and the end of a run that has started and has no result of its
-own (cancelled, failed, interrupted). The logs of earlier versions, `claude-run.jsonl` and `codex-run.jsonl`, are
-read as before, and a conversation in one goes on in the paper's log.
+when it asks for that. A session that has not seen the paper's annotations of the tool is told how many
+there are and, when the plugin saw them written, the configuration that wrote them, the agent and the time
+(kept in `<out dir>/applied.json`); a session that goes on is told when another conversation rewrote them since
+its last run, or that they are gone. A follow-up that changes or adds annotations is told to edit the
+configuration they were written from, the paper's whole set, and apply it whole with `cleanup: true`. Besides the
+agent's events, a conversation's log holds the plugin's own lines: the start of each run with the user's words,
+the user's words or **Annotate** as shown (a question's marked as one), a continuation, a session the agent no
+longer has, the end of a run that has started and has no result of its own (cancelled, failed, interrupted), and
+when each run ended.
 
-One conversation per paper is shared by both agents. Each agent has its own session in it (Claude Code's
-session, Codex's thread). A message, or **Annotate** in a question's conversation, goes to the chosen agent:
-in its session when it has one, else in a new one, and with the turns it has not seen at the start of the
-message, each the user's words and the answer (each answer cut to 4000 characters, and only the latest
-turns that fit in 12000 characters). The files in the output directory, such as the configuration the
-annotations were written from, are the same whichever agent works on them.
+As in llm-for-zotero, each agent has its own conversations of a paper, a log each in `<out dir>/conversations/`,
+with an index of their titles and of the one each agent goes on with. A message and **Annotate** go to that
+conversation, in the agent's session there (`claude -p --resume <session>`, Codex's `thread/resume`). When the
+conversation has no session, or the agent no longer has it (deleted in the Codex app, or cleaned up by Claude
+Code), a new session goes on with it and is given the conversation first: Codex as items of the new thread
+(`thread/inject_items`), Claude Code, and a Codex that does not take items, as text before the message. It gets
+each exchange's words and final answer; beyond ten exchanges, the latest five whole and the earlier ones as
+excerpts (250 characters of the words, 400 of the answer). A continuation after a limit or an update has nothing
+to go on with in a new session, and ends with that reason. The logs of earlier versions, `claude-run.jsonl` and
+`codex-run.jsonl`, are each agent's first conversation and go on where they are. The files in the output
+directory, such as the configuration the annotations were written from, are the same for every conversation.
 
 The *Scholium* section of the item pane, in the library and in the reader's side pane, holds the
 controls and the process of the selected paper:
 
-- **Agent** chooses Claude Code or Codex for the papers started afterwards.
+- **Agent** chooses Claude Code or Codex. As in llm-for-zotero, a switch starts a new conversation of the
+  paper shown; other papers show the conversation that agent goes on with.
 - **Model** lists the models the chosen agent reports, asked once per Zotero session without calling
   a model: Claude Code through the initialize request of its stream-json protocol, Codex through
   `model/list` (hidden models are left out). For Claude Code, the latest Opus (`opus`) is used until
@@ -99,16 +106,24 @@ controls and the process of the selected paper:
 - The choices apply to the papers started afterwards, are saved for each agent, and are shared by all
   panes.
 - **Annotate**, **Cancel** and **Delete annotations** act on the selected paper; **Cancel** also takes
-  a queued paper out of the queue. **Show log** above the transcript shows the log file.
+  a queued paper out of the queue.
+- Above the transcript, **New chat** starts a new conversation with the chosen agent (its first message
+  starts it); **History** lists the agent's conversations of the paper, newest first, by day (today,
+  yesterday, the previous 7 and 30 days, older), titled by their first message, to open one, rename it
+  (Enter keeps the new title, Esc the old one) or delete it (**Undo** brings it back for six seconds; a
+  deleted Codex conversation's thread is archived at the next Codex run); **Show log** shows the
+  conversation's log file. While the paper runs or waits, its section's **Agent**, **New chat** and
+  **History** are disabled.
 - A state line shows the step of six (for a question, the step's name only) and the elapsed time while
   the paper runs (and, while the agent has lost its connection and tries again, the attempt, until it
   answers again), its place in the queue, its latest outcome with the minutes, turns and tokens of the
   run (the tooltip splits the tokens into input, cache and output), or the deletion; other papers' runs
   are not shown there. For a paper run earlier, the outcome comes from the saved log.
-- The process is shown as Claude Code shows it: the agent's text, each tool call with its command or
-  file, and the first lines of each result (errors in red); a failed run ends with its error. A
-  running paper is shown live; for a paper run earlier the latest saved log, of either agent, is
-  shown. The box is resized at its lower edge, and its height is kept. Web addresses and `zotero://`
+- The process is shown as Claude Code shows it: the user's words or **Annotate**, the agent and model, the
+  agent's text, each tool call with its command or file, and the first lines of each result (errors in red),
+  and under each run the time it ended; a failed run ends with its error. A running paper is shown live,
+  otherwise the conversation the chosen agent goes on with; when that agent has none of the paper and the
+  other one has, the section says so. The box is resized at its lower edge, and its height is kept. Web addresses and `zotero://`
   links in a message open on a click or with Enter, in the browser or in Zotero; links to files are
   shown, not followed.
 - **Personal profile ↗** opens the annotation profile `<data dir>/zotero-scholium/profile.md`, which
@@ -121,17 +136,14 @@ controls and the process of the selected paper:
   text shows the file's current content when Zotero is focused again. A missing profile starts as
   the empty `## User's rules (always win)` section of `scholium profile`'s template, which keeps that
   section when it later writes the statistics, and is written on saving.
-- The box below the transcript takes the user's words. Until the paper's conversation has an
-  annotation, **Send** (or Ctrl+Enter) sends them as a question and **Annotate** as extra instructions.
-  A question about a paper without a conversation starts one, which answers without annotating;
-  further words continue it, and so does **Annotate**, keeping the transcript. Once the conversation
-  has an annotation, **Send** continues it with the words (`claude -p --resume <session>`, Codex's
-  `thread/resume`, or a new session given the turns), for example to change some annotations;
-  **Annotate** then starts a new conversation and leaves the words in the box. Each goes to the chosen
-  agent, and the transcript names the agent and model of each run. When the agent no longer has its
-  session (deleted in the Codex app, or cleaned up by Claude Code), a new session of it takes the
-  conversation over and the transcript says so; a continuation after a limit or an update ends there
-  with that reason.
+- The box below the transcript takes the user's words. **Send** (or Ctrl+Enter) sends them to the
+  conversation: its first message is a question, answered without annotating, and later ones continue it,
+  for example to change some annotations. **Annotate** takes them as extra instructions and goes on in the
+  same conversation; a redo there still has the earlier run in its context. Words typed and not sent are
+  kept for each conversation.
+- Beside the hint under the box: the context the conversation's session took up in its latest request,
+  out of the model's context window once the agent named it; from 80% it is orange, and **New chat**
+  starts afresh.
 
 While Zotero is in front, a notice in the corner of the window appears when a paper starts and when it
 ends, and closes by itself; while Zotero is in the background, a system notification reports the end

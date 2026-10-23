@@ -49,9 +49,9 @@ const settle = async (n = 20) => { for (let i = 0; i < n; i++) await tick(); };
 
 const CLAUDE = '/appdata/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe';
 const ev = (obj) => JSON.stringify(obj) + '\n';
-const tool = (name, input) => ev({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input }] } });
+const tool = (name, input, id = undefined) => ev({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } });
 const said = (text) => ev({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
-const answer = (content, is_error = false) => ev({ type: 'user', message: { content: [{ type: 'tool_result', content, is_error }] } });
+const answer = (content, is_error = false, id = undefined) => ev({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content, is_error }] } });
 const SCRIPT = [
   ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S1' }),
   said('先加载技能，再提取句子。'),
@@ -63,8 +63,8 @@ const SCRIPT = [
   tool('Write', { file_path: 'D:\\Zotero\\tmp\\scholium\\ATT1\\config.json' }),
   tool('PowerShell', { command: 'python C:/skills/scholium.py --config c.json' }),
   answer('Exit code 2\nstyle_warnings: 1', true),
-  tool('PowerShell', { command: 'python C:/skills/scholium.py --config c.json --apply' }),
-  answer('{"applied": true}'),
+  tool('PowerShell', { command: 'python C:/skills/scholium.py --config c.json --apply' }, 'toolu_apply'),
+  answer('{"applied": true}', false, 'toolu_apply'),
   ev({ type: 'rate_limit_event', session_id: 'S1', rate_limit_info: { status: 'allowed_warning', rateLimitType: 'seven_day', utilization: 0.84,
        resetsAt: Math.floor(Date.now() / 1000) + 259200, unifiedWindows: {
          five_hour: { utilization: 0.16, resetsAt: Math.floor(Date.now() / 1000) + 7200 },
@@ -278,7 +278,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
                 ftl: [], tabs: [], selected: [], opened: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
                 madeDirs: [], trashed: [], versionCalls: [], codexCalls: [], codexProcs: [], codexKills: 0, codexTurns: 0,
-                mtimes: Object.assign({}, logTimes), clock: 10, copied: [] };
+                mtimes: Object.assign({}, logTimes), clock: Date.now(), copied: [], removed: [], threads: 0 };
   const co = Object.assign({ versions: CODEX_VERSIONS, scripts: [], skillAt: '/data', fail: null, failMessage: '' }, codex);
   const files = new Set((claudeExists ? [claudeAt] : []).concat(Object.keys(co.versions)));
   // 97-character chunks split JSON lines; 'WAIT' holds the stream open until the process is killed; 'STDERR:…' is what
@@ -359,6 +359,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       const answer = result => this.emit([ev({ id: msg.id, result })]);
       const p = msg.params || {};
       if (co.fail === msg.method) return this.emit([ev({ id: msg.id, error: { code: -32600, message: co.failMessage } })]);
+      if (co.refuse && msg.method in co.refuse) return this.emit([ev({ id: msg.id, error: { code: -32600, message: co.refuse[msg.method] } })]);
       // a notification ahead of the answer: the request is still waiting while it is handled
       if (co.noticeBefore === msg.method) this.emit([ev({ method: 'thread/started', params: { thread: { id: 'T1' } } })]);
       switch (msg.method) {
@@ -373,7 +374,10 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
           { id: 'superpowers@m', installed: true, enabled: true }, { id: 'off@m', installed: true, enabled: false },
           { id: 'offered@m', installed: false, enabled: false }] }, { name: 'remote', plugins: [{ id: 'zotero@remote', installed: true, enabled: true }] }],
           marketplaceLoadErrors: [] });
-        case 'thread/start': return answer({ thread: { id: 'T1' }, model: p.model || 'gpt-6-astra' });
+        // each new thread its own id when co.newThreads: T1, T2, …
+        case 'thread/start': return answer({ thread: { id: co.newThreads ? 'T' + (++log.threads) : 'T1' }, model: p.model || 'gpt-6-astra' });
+        case 'thread/inject_items': return answer({});
+        case 'thread/archive': return answer({});
         case 'thread/resume': return answer({ thread: { id: p.threadId }, model: p.model || 'gpt-6-astra' });
         case 'turn/start': {
           log.codexTurns += 1;
@@ -539,8 +543,15 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     }, parent: p => p.replace(/\/[^/]*$/, '') },
     IOUtils: {
       exists: async p => files.has(p) || p in log.writes,
-      makeDirectory: async p => { log.madeDirs.push(p); if (holdDirs && p.includes('/tmp/scholium/')) await new Promise(r => { log.releaseDir = r; }); },
-      getChildren: async p => { if (p !== CODEX_BIN) throw Error('NotFoundError'); return [CODEX_BIN + '/h0', CODEX_BIN + '/h1']; },
+      // holdDirs: a run's output folder is made once log.releaseDir() is called
+      makeDirectory: async p => { log.madeDirs.push(p); if (holdDirs && /\/tmp\/scholium\/\w+$/.test(p)) await new Promise(r => { log.releaseDir = r; }); },
+      getChildren: async p => {
+        if (p === CODEX_BIN) return [CODEX_BIN + '/h0', CODEX_BIN + '/h1'];
+        const inside = Object.keys(log.writes).filter(f => f.startsWith(p + '/') && !f.slice(p.length + 1).includes('/'));
+        if (!inside.length) throw Error('NotFoundError');
+        return inside;
+      },
+      remove: async p => { log.removed.push(p); delete log.writes[p]; },
       stat: async p => { if (!(p in log.writes)) throw Error('NotFoundError'); return { lastModified: log.mtimes[p] || 0, size: log.writes[p].length }; },
       readUTF8: async p => {
         if (readFails && p === PROFILE_PATH) throw Error('NotReadableError');
@@ -549,7 +560,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       },
       writeUTF8: async (p, t, o) => {
         if (writeFails && p === PROFILE_PATH) throw Error('NotAllowedError');
-        if (failLogWrites && /conversation\.jsonl$/.test(p) && String(t).includes(failLogWrites)) throw Error('NotWritableError');
+        if (failLogWrites && /\/conversations\/[\w-]+\.jsonl$/.test(p) && String(t).includes(failLogWrites)) throw Error('NotWritableError');
         log.writes[p] = (o && o.mode === 'append' ? (log.writes[p] || '') : '') + t;
         log.mtimes[p] = ++log.clock;
       },
@@ -577,7 +588,10 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                cancelHidden: p.cancel.hidden, logDisabled: p.log.disabled, shownKey: p.shownKey, history: p.history,
                entries: p.list.children.map(c => [c.className, c.textContent]), stateTitle: p.state.title,
                resumeHidden: p.resume.hidden, stateDisplay: p.state.style.display, cancelDisplay: p.cancel.style.display,
-               sendHidden: p.send.hidden, sendDisabled: p.send.disabled, placeholder: p.input.placeholder };
+               sendHidden: p.send.hidden, sendDisabled: p.send.disabled, placeholder: p.input.placeholder,
+               shownConv: p.shownConv, newChatDisabled: p.newChat.disabled, historyDisabled: p.historyButton.disabled,
+               agentDisabled: p.agent.disabled, gauge: p.gauge.hidden ? null : p.gauge.textContent, gaugeClass: p.gauge.className,
+               historyRows: p.historyBox.hidden ? null : p.historyBox.children.map(c => [c.className, c.textContent]) };
     }, pane: () => runner.panes.get(body) };
   };
   const styles = () => mainDoc.documentElement.children.map(c => [c.tagName, c.id, c.attrs.rel, c.attrs.href]);
@@ -585,7 +599,15 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
            chromePackage: context.chromePackage, replacing: context.replacing, takingOver: context.takingOver,
            live: () => timers.filter(t => t.live).map(t => t.ms), toolbarItems: () => mainDoc.bar.children.length };
 }
+const untimed = e => e[0] !== 'scholium-entry time';   // the transcript without the times runs ended at
 const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descriptions: n.descriptions, closeTimer: n.closeTimer, shown: n.shown });
+// a paper's conversations, in the order they were started, and the lines of one (the latest by default); the plugin's
+// files of the papers, to start another harness with
+const convs = (h, key = 'ATT1') => Object.keys(h.log.writes).filter(p => p.startsWith(`/data/tmp/scholium/${key}/conversations/`) && p.endsWith('.jsonl'));
+const convText = (h, key = 'ATT1', i = -1) => h.log.writes[convs(h, key).at(i)] || '';
+const convLines = (h, key = 'ATT1', i = -1) => convText(h, key, i).trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
+const ours = h => Object.fromEntries(Object.entries(h.log.writes).filter(([p]) => p.startsWith('/data/tmp/scholium/')));
+const CONV1 = '/data/tmp/scholium/ATT1/conversations/claude-20261001-120000.jsonl';   // a conversation logged before
 
 (async () => {
   const facts = {};
@@ -628,7 +650,10 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     facts.call = { command: call.command, args: call.arguments, workdir: call.workdir, env: call.environment, append: call.environmentAppend };
     facts.prompt = log.stdin[0];
     facts.notices = log.notices.map(notice);
-    facts.logLines = (log.writes['/data/tmp/scholium/ATT1/conversation.jsonl'] || '').trim().split('\n').length;
+    facts.logLines = convText(h).trim().split('\n').length;
+    facts.firstConversation = { files: convs(h).map(p => p.replace(/\d{8}-\d{6}/, 'TIME')),
+                                index: JSON.parse(log.writes['/data/tmp/scholium/ATT1/conversations/index.json'].replace(/\d{8}-\d{6}/g, 'TIME')),
+                                applied: JSON.parse(log.writes['/data/tmp/scholium/ATT1/applied.json'] || 'null') };
     facts.confirmsWithoutExisting = log.confirms.length;
     facts.paneAfter = before.view();
     facts.otherAfter = other.view();
@@ -654,22 +679,22 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
   // the saved log of an earlier run is shown for a paper that has one
   {
     const earlier = SCRIPT.slice(0, 4).concat([LAST, RESULT]).join('');
-    const h = harness({ logs: { '/data/tmp/scholium/ATT1/conversation.jsonl': earlier } });
+    const h = harness({ logs: { [CONV1]: earlier } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     facts.history = p.view();
   }
   {
-    const h = harness({ logs: { '/data/tmp/scholium/ATT1/conversation.jsonl': SCRIPT.slice(0, 4).concat([RESULT]).join('') } });
+    const h = harness({ logs: { [CONV1]: SCRIPT.slice(0, 4).concat([RESULT]).join('') } });
     h.runner.start('x');
     facts.historyWithoutLastMessage = (await h.pane(h.item1)).view().entries;
   }
   {
     const failed = SCRIPT.slice(0, 3).concat([ev({ type: 'result', subtype: 'error_during_execution', is_error: true,
                                                    result: 'scholium.py: style_warnings remain' })]).join('');
-    const h = harness({ logs: { '/data/tmp/scholium/ATT1/conversation.jsonl': failed } });
+    const h = harness({ logs: { [CONV1]: failed } });
     h.runner.start('x');
-    facts.failedHistory = (await h.pane(h.item1)).view().entries.at(-1);
+    facts.failedHistory = (await h.pane(h.item1)).view().entries.filter(untimed).at(-1);
   }
 
   // the saved effort is shown and passed; an unknown one gives medium; an empty model preference passes no --model
@@ -813,7 +838,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     await settle(40);
     await h.runner.annotate([h.item1]);
     await settle(300);
-    facts.stdinFails = { kills: h.log.kills, running: !!h.runner.current, state: p.view().state, last: p.view().entries.at(-1) };
+    facts.stdinFails = { kills: h.log.kills, running: !!h.runner.current, state: p.view().state, last: p.view().entries.filter(untimed).at(-1) };
   }
 
   // the plugin stops while the program is looked up: no process is started afterwards
@@ -886,7 +911,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     await settle(40);
     await h.runner.annotate([h.item1]);
     await settle(400);
-    facts.claudeLogFails = { kills: h.log.kills, running: !!h.runner.current, state: p.view().state, last: p.view().entries.at(-1) };
+    facts.claudeLogFails = { kills: h.log.kills, running: !!h.runner.current, state: p.view().state, last: p.view().entries.filter(untimed).at(-1) };
   }
   {
     const h = harness({ failLogWrites: '"thread/started"', prefs: { 'extensions.scholium-bridge.agent': 'codex' },
@@ -896,7 +921,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     await settle(200);
     await h.runner.annotate([h.item1]);
     await settle(500);
-    facts.codexLogFails = { kills: h.log.codexKills, running: !!h.runner.current, state: p.view().state, last: p.view().entries.at(-1) };
+    facts.codexLogFails = { kills: h.log.codexKills, running: !!h.runner.current, state: p.view().state, last: p.view().entries.filter(untimed).at(-1) };
   }
 
   // an empty message box is as tall as its placeholder (two lines here), a typed line as tall as the text
@@ -927,7 +952,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     p.pane().input.value = '只标注方法部分';
     p.pane().annotate.click();
     await settle(300);
-    const logPath = '/data/tmp/scholium/ATT1/conversation.jsonl';
+    const logPath = convs(h)[0];
     facts.extra = { before, after: look(), prompt: h.log.stdin[0], cleared: p.pane().input.value,
                     firstLogLine: h.log.writes[logPath].trim().split('\n').map(l => JSON.parse(l)).find(l => l.subtype === 'prompt'), firstEntry: p.view().entries[0] };
     p.pane().input.value = '第 5 页那条译文改短';
@@ -941,9 +966,9 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const lines = h.log.writes[logPath].trim().split('\n').map(l => JSON.parse(l));
     facts.followUp = { calls: h.log.calls.length, resume: args[args.indexOf('--resume') + 1], prompt: h.log.stdin[1], prevented,
                        cleared: p.pane().input.value, prompts: entries.filter(e => e[0] === 'scholium-entry prompt').map(e => e[1]),
-                       entries: entries.length, markers: lines.filter(l => l.type === 'scholium' && l.subtype !== 'run').map(l => l.text),
+                       entries: entries.length, markers: lines.filter(l => l.type === 'scholium' && !['run', 'time'].includes(l.subtype)).map(l => l.text),
                        inits: lines.filter(l => l.type === 'system' && l.subtype === 'init').length, state: p.view().state,
-                       withoutSession: await h.runner.followUp(h.att2, 'x'), calls2: h.log.calls.length };
+                       conversations: convs(h).length, times: entries.filter(e => e[0] === 'scholium-entry time').length };
   }
   {
     // the agent's answer in a continued conversation is Markdown: set as such, with a button that copies its source
@@ -955,7 +980,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     await settle(40);
     await h.runner.annotate([h.item1]);
     await settle(300);
-    await h.runner.followUp(h.att1, '第 5 页那条译文改短');
+    await h.runner.send(h.att1, '第 5 页那条译文改短');
     await settle(300);
     const last = pane => pane.pane().list.children.filter(c => c.className === 'scholium-entry text').at(-1);
     const node = last(p);
@@ -983,10 +1008,10 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     await h.runner.annotate([h.item1]);
     await settle(300);
     const notified = h.log.notifications.length;
-    await h.runner.followUp(h.att1, '用的什么模型？');
+    await h.runner.send(h.att1, '用的什么模型？');
     await settle(100);
     await new Promise(r => setTimeout(r, 150));   // the draft is set a moment after its pieces
-    const last = () => p.pane().list.children.at(-1);
+    const last = () => p.pane().list.children.filter(c => !c.className.includes('time')).at(-1);
     const again = (await h.pane(h.item1)).pane();   // a pane rendered meanwhile shows it too, scrolled to it
     const writing = { tree: tree(last()), draft: h.runner.draft && h.runner.draft.text, again: tree(again.list.children.at(-1)),
                       againAtEnd: again.list.scrollTop === again.list.scrollHeight && again.list.scrollTop > 0 };
@@ -996,9 +1021,8 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const whole = { drafts: drafts(), left: h.runner.draft, running: !!h.runner.job };   // the whole message, before the run ends
     h.log.release();
     await settle(300);
-    const logPath = '/data/tmp/scholium/ATT1/conversation.jsonl';
     facts.streamed = { writing, whole, done: tree(last()), drafts: drafts(),
-                       left: h.runner.draft, streamLines: h.log.writes[logPath].split('\n').filter(l => l.includes('stream_event')).length,
+                       left: h.runner.draft, streamLines: convText(h).split('\n').filter(l => l.includes('stream_event')).length,
                        prompt: h.log.stdin[1], args: h.log.calls[1].opts.arguments, notifications: h.log.notifications.slice(notified),
                        notice: h.log.notices.at(-1).descriptions };
   }
@@ -1027,10 +1051,9 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     h.runner.cancel();
     await settle(300);
     const list = q.pane().list.children;
-    const logPath = '/data/tmp/scholium/ATT1/conversation.jsonl';
-    const logged = h.log.writes[logPath].trim().split('\n').map(l => JSON.parse(l)).filter(e => e.subtype === 'unfinished');
-    const fromLog = (await h.runner.readLog('ATT1', 'claude')).entries.filter(e => e.unfinished);
-    facts.unfinished = { restored, during, last: [tree(list.at(-2)), [list.at(-1).className, list.at(-1).textContent]],
+    const logged = convLines(h).filter(e => e.subtype === 'unfinished');
+    const fromLog = (await h.runner.readLog('ATT1', await h.runner.currentConv('ATT1', 'claude'))).entries.filter(e => e.unfinished);
+    facts.unfinished = { restored, during, last: [tree(list.at(-3)), [list.at(-2).className, list.at(-2).textContent]],
                          logged: logged.map(e => e.text), fromLog: fromLog.map(e => e.text), removeHiddenAfter: q.view().removeHidden,
                          durations: [8000, 59400, 59600, 376500, 3725000].map(ms => h.runner.duration(ms)) };
   }
@@ -1045,12 +1068,11 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
       await settle(40);
       await h.runner.annotate([h.item1]);
       await settle(400);
-      const logPath = "/data/tmp/scholium/ATT1/conversation.jsonl";
       const kinds = e => (e.unfinished ? 'unfinished' : e.kind);
-      return { shown: p.pane().list.children.slice(-2).map(c => c.className.replace('scholium-entry ', '')),
-               logged: h.log.writes[logPath].trim().split('\n').map(l => JSON.parse(l)).filter(e => e.subtype === 'unfinished' || e.type === 'result')
+      return { shown: p.pane().list.children.slice(-3).map(c => c.className.replace('scholium-entry ', '')),
+               logged: convLines(h).filter(e => e.subtype === 'unfinished' || e.type === 'result')
                  .map(e => e.subtype === 'unfinished' ? 'unfinished' : 'result'),
-               read: (await h.runner.readLog('ATT1', agent)).entries.slice(-2).map(kinds) };
+               read: (await h.runner.readLog('ATT1', await h.runner.currentConv('ATT1', agent))).entries.slice(-3).map(kinds) };
     };
     facts.failedInside = {
       claude: await order(harness({ exitCode: 1, script: [SCRIPT[0], piece('写到一半'),
@@ -1068,6 +1090,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const p = await h.pane(h.item1);
     h.runner.transcriptKey = 'ATT1';
     p.pane().shownKey = 'ATT1';
+    p.pane().live = true;
     h.runner.growDraft('第一段', 0);
     h.runner.paintDraft();
     const node = p.pane().draft.node;
@@ -1088,11 +1111,10 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const h = harness();
     h.runner.start('x');
     h.runner.draining = true;   // the queue is only looked at
-    h.runner.sessions.set('ATT1', { agent: 'claude', id: 'S1' });
     const order = async (queue, paused = null) => {
       h.runner.queue = queue.map(([key, more]) => Object.assign({ att: { key }, title: key }, more));
       h.runner.paused = paused;
-      await h.runner.followUp(h.att1, '再短一点');
+      await h.runner.send(h.att1, '再短一点');
       const keys = h.runner.queue.map(j => j.att.key + (j.say ? ':' + j.say : ''));
       h.runner.queue = [];
       h.runner.paused = null;
@@ -1102,7 +1124,8 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     facts.followUpOrder = {
       fresh: await order([['ATT2'], ['ATT3']]),
       afterTalk: await order([['ATT2', { resume: 'S2', say: '早先的问题' }], ['ATT3']]),
-      afterTalkElsewhere: await order([['ATT2', { conversation: true, say: '换个智能体问' }], ['ATT3']]),
+      afterQuestion: await order([['ATT2', { question: true, say: '新的问题' }], ['ATT3']]),
+      beforeAnnotation: await order([['ATT2', { annotate: true, resume: 'S2' }], ['ATT3']]),
       afterRetry: await order([['ATT2', { retried: true, retryAt: Date.now() + 30000 }], ['ATT3']]),
       afterPause: await order([['ATT2', { interrupted: true }], ['ATT3']], paused),
       pausedHeadCancelled: await order([['ATT2'], ['ATT3']], paused),   // the interrupted paper was taken out
@@ -1141,11 +1164,11 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
                     queue: h.runner.queue.map(j => [j.att.key, j.resume || null, j.say === undefined ? null : j.say]), waits: h.live(),
                     state1: p1.view().state, kind1: p1.view().stateKind, state2: p2.view().state, resumeShown: !p1.view().resumeHidden,
                     cancelShown: !p2.pane().cancel.hidden, notices: h.log.notices.map(notice), notifications: h.log.notifications.slice(),
-                    last: p1.view().entries.at(-1),
-                    followUpWhileQueued: await h.runner.followUp(h.att1, 'x'), queued: h.runner.queue.length };
+                    last: p1.view().entries.filter(untimed).at(-1),
+                    followUpWhileQueued: await h.runner.send(h.att1, 'x'), queued: h.runner.queue.length };
     h.fire();
     await settle(800);
-    const lines = h.log.writes['/data/tmp/scholium/ATT1/conversation.jsonl'].trim().split('\n').map(l => JSON.parse(l));
+    const lines = convLines(h);
     const args = h.log.calls[1].opts.arguments;
     facts.limitResumed = { calls: h.log.calls.length, resume: args[args.indexOf('--resume') + 1], prompt: h.log.stdin[1],
                            order: h.log.stdin.map(s => (s.match(/附件 key：(\w+)/) || [null, 'continue'])[1]),
@@ -1478,7 +1501,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]); await settle(300);
     facts.failure = { notices: h.log.notices.map(notice), notifications: h.log.notifications,
-                      last: p.view().entries.at(-1), state: p.view().state, kind: p.view().stateKind };
+                      last: p.view().entries.filter(untimed).at(-1), state: p.view().state, kind: p.view().stateKind };
   }
 
   // cancel while running, from the item pane
@@ -1491,7 +1514,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     facts.whileRunning = { view: p.view() };
     p.pane().cancel.click();
     await done; await settle(80);
-    facts.cancel = { kills: h.log.kills, current: h.runner.current, last: p.view().entries.at(-1), view: p.view(), state: p.view().state,
+    facts.cancel = { kills: h.log.kills, current: h.runner.current, last: p.view().entries.filter(untimed).at(-1), view: p.view(), state: p.view().state,
                      notices: h.log.notices.map(notice), notifications: h.log.notifications.map(n => n.title) };
   }
 
@@ -1585,7 +1608,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]); await settle(80);
     facts.noClaude = { calls: h.log.calls.length, modelCalls: h.log.modelCalls.length, notices: h.log.notices.map(notice),
-                       notifications: h.log.notifications.map(n => n.title), last: p.view().entries.at(-1), models: p.view().models,
+                       notifications: h.log.notifications.map(n => n.title), last: p.view().entries.filter(untimed).at(-1), models: p.view().models,
                        state: p.view().state };
   }
   {
@@ -1702,7 +1725,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const call = h.log.codexCalls[before];
     const sent = h.log.codexProcs[before].sent;
     const req = m => sent.find(x => x.method === m);
-    const logPath = '/data/tmp/scholium/ATT1/conversation.jsonl';
+    const logPath = convs(h)[0];
     const lines = () => h.log.writes[logPath].trim().split('\n').map(l => JSON.parse(l));
     const turn = req('turn/start').params;
     facts.codexRun = {
@@ -1717,8 +1740,10 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
       dirs: h.log.madeDirs.slice(),
       entries: p.view().entries, state: p.view().state, stateTitle: p.view().stateTitle,
       logged: lines().filter(l => l.subtype !== 'run').map(l => l.method || l.type), init: lines().find(l => l.type === 'system'), result: lines().find(l => l.type === 'result'),
-      killed: h.log.codexProcs[before].killed, session: h.runner.sessions.get('ATT1'), notices: h.log.notices.map(notice),
-      sendShown: !p.view().sendHidden, claudeCalls: h.log.calls.length,
+      killed: h.log.codexProcs[before].killed, session: (await h.runner.readLog('ATT1', p.view().shownConv)).session,
+      notices: h.log.notices.map(notice), sendShown: !p.view().sendHidden, claudeCalls: h.log.calls.length, gauge: p.view().gauge,
+      userMessages: lines().filter(l => l.params && l.params.item && l.params.item.type === 'userMessage').length,
+      applied: JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']).config,
     };
     p.pane().log.click();
     facts.codexRun.revealed = h.log.revealed.slice();
@@ -1731,28 +1756,41 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
                             resume: sent2.find(m => m.method === 'thread/resume').params, input: sent2.find(m => m.method === 'turn/start').params.input,
                             effort: sent2.find(m => m.method === 'turn/start').params.effort, state: p.view().state,
                             disabled: sent2.find(m => m.method === 'turn/start').params.disabledPluginIds,
-                            entries: p.view().entries.slice(-4), results: lines().filter(l => l.type === 'result').length,
+                            entries: p.view().entries.filter(untimed).slice(-4), results: lines().filter(l => l.type === 'result').length,
                             markers: lines().filter(l => l.type === 'scholium' && l.subtype === 'prompt').map(l => l.text) };
+    // Claude Code chosen: a new conversation of its own, which knows nothing of Codex's
+    const codexLog = h.log.writes[logPath];
     p.pane().agent.change('claude');
     await settle(100);
+    const switched = { entries: p.view().entries, shownConv: p.view().shownConv, newChatDisabled: p.view().newChatDisabled, gauge: p.view().gauge,
+                       placeholder: p.view().placeholder, index: JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/conversations/index.json']).current };
     p.pane().input.type('它和 FNO 比怎么样？');
     p.pane().send.click();
     await settle(500);
     const args = h.log.calls.at(-1).opts.arguments;
-    facts.sharedClaude = { calls: h.log.calls.length, resumed: args.includes('--resume'), prompt: h.log.stdin.at(-1),
-                           entries: p.view().entries.slice(-3).map(e => [e[0], e[1].slice(0, 40)]), session: h.runner.sessions.get('ATT1') };
+    facts.switchedToClaude = { switched, calls: h.log.calls.length, resumed: args.includes('--resume'), prompt: h.log.stdin.at(-1),
+                               conversations: convs(h).map(c => c.split('/').pop().split('-')[0]), codexKept: h.log.writes[logPath] === codexLog };
+    // Codex chosen again: a new conversation too; History opens the earlier one, which goes on in its thread
     p.pane().agent.change('codex');
     await settle(200);
+    const again = { entries: p.view().entries, shownConv: p.view().shownConv };
+    p.pane().historyButton.click();
+    await settle(100);
+    const rows = p.view().historyRows;
+    p.pane().historyBox.children[1].children[0].click();   // the row of the one conversation, under its day
+    await settle(200);
+    const opened = { shownConv: p.view().shownConv === logPath.split('/').pop().replace('.jsonl', ''), historyRows: p.view().historyRows,
+                     entries: p.view().entries.length, placeholder: p.view().placeholder };
     p.pane().input.type('再短一点');
     p.pane().send.click();
     await settle(500);
     const sent3 = h.log.codexProcs.at(-1).sent;
     const turn3 = sent3.find(m => m.method === 'turn/start');
-    facts.sharedBack = { methods: sent3.map(m => m.method).filter(m => typeof m === 'string' && m.startsWith('thread/')),
-                         threadId: (sent3.find(m => m.method === 'thread/resume') || { params: {} }).params.threadId,
-                         text: turn3 && turn3.params.input[0].text, skill: !!(turn3 && turn3.params.input.some(i => i.type === 'skill')),
-                         runs: lines().filter(l => l.type === 'scholium' && l.subtype === 'run').map(l => [l.agent, l.user]),
-                         session: h.runner.sessions.get('ATT1') };
+    facts.switchedBack = { again, rows, opened, methods: sent3.map(m => m.method).filter(m => typeof m === 'string' && m.startsWith('thread/')),
+                           threadId: (sent3.find(m => m.method === 'thread/resume') || { params: {} }).params.threadId,
+                           text: turn3 && turn3.params.input[0].text, skill: !!(turn3 && turn3.params.input.some(i => i.type === 'skill')),
+                           runs: lines().filter(l => l.type === 'scholium' && l.subtype === 'run').map(l => [l.agent, l.user]),
+                           conversations: convs(h).length };
   }
 
   // a Codex step by step: the skill, then the extraction, while the turn runs; cancelling interrupts the turn
@@ -1766,9 +1804,9 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     p.pane().cancel.click();
     await settle(300);
     const proc = h.log.codexProcs.at(-1);
-    const logged = h.log.writes['/data/tmp/scholium/ATT1/conversation.jsonl'].trim().split('\n').map(l => JSON.parse(l));
+    const logged = convLines(h);
     facts.codexCancel = { during, interrupt: proc.sent.find(m => m.method === 'turn/interrupt').params, killed: proc.killed,
-                          last: p.view().entries.at(-1), state: p.view().state, results: logged.filter(l => l.type === 'result').length,
+                          last: p.view().entries.filter(untimed).at(-1), state: p.view().state, results: logged.filter(l => l.type === 'result').length,
                           waits: h.live(), current: h.runner.current };
   }
   {
@@ -1826,7 +1864,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
       const turn = sent.find(m => m.method === 'turn/start'), thread = sent.find(m => m.method === 'thread/start');
       found[skillAt || 'none'] = { methods: sent.filter(m => typeof m.method === 'string').map(m => m.method).filter(m => m.startsWith('skills/')),
                                    input: turn ? turn.params.input.slice(1) : null, model: thread ? 'model' in thread.params : null,
-                                   outcome: (h.runner.notes.get('ATT1') || {}).text, log: h.log.writes['/data/tmp/scholium/ATT1/conversation.jsonl'] };
+                                   outcome: (h.runner.notes.get('ATT1') || {}).text, log: convText(h) || undefined };
     }
     facts.codexSkillFound = found;
   }
@@ -1841,7 +1879,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     facts.codexLimit = { clock: h.runner.paused && h.runner.clock(h.runner.paused.until), expected: h.runner.clock(CODEX_RESET * 1000 + 60000),
                          known: h.runner.paused && h.runner.paused.known,
                          queue: h.runner.queue.map(j => [j.att.key, j.agent, j.resume || null]), notifications: h.log.notifications.map(n => n.title),
-                         last: p1.view().entries.at(-1), state: p1.view().state };
+                         last: p1.view().entries.filter(untimed).at(-1), state: p1.view().state };
     h.fire();
     await settle(900);
     const resumed = h.log.codexProcs.find(c => c.sent.some(m => m.method === 'thread/resume'));
@@ -1863,7 +1901,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]);
     await settle(400);
-    facts.codexFailed = { entries: p.view().entries.slice(-2), state: p.view().state, kind: p.view().stateKind, paused: h.runner.paused,
+    facts.codexFailed = { entries: p.view().entries.filter(untimed).slice(-2), state: p.view().state, kind: p.view().stateKind, paused: h.runner.paused,
                           notices: h.log.notices.map(notice), turns: h.log.codexTurns, queue: h.runner.queue.length };
   }
   {
@@ -1873,7 +1911,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]);
     await settle(400);
-    facts.codexRefused = { last: p.view().entries.at(-1), state: p.view().state, killed: h.log.codexProcs.at(-1).killed, turns: h.log.codexTurns };
+    facts.codexRefused = { last: p.view().entries.filter(untimed).at(-1), state: p.view().state, killed: h.log.codexProcs.at(-1).killed, turns: h.log.codexTurns };
   }
   {
     const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { versions: {} } });
@@ -1882,7 +1920,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     await settle(40);
     await h.runner.annotate([h.item1]);
     await settle(100);
-    facts.noCodex = { codexCalls: h.log.codexCalls.length, last: p.view().entries.at(-1), state: p.view().state, models: p.view().models,
+    facts.noCodex = { codexCalls: h.log.codexCalls.length, last: p.view().entries.filter(untimed).at(-1), state: p.view().state, models: p.view().models,
                       labels: p.view().modelLabels };
   }
 
@@ -1902,14 +1940,14 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
       await h.runner.annotate([h.item1], { extra: '只标注方法部分' });
       await settle(400);
       const v = p.view();
-      const waiting = { state: v.state, kind: v.stateKind, last: v.entries.slice(-2), cancelShown: !v.cancelHidden, queue: h.runner.queue.map(j => [j.att.key, !!j.retried]),
+      const waiting = { state: v.state, kind: v.stateKind, last: v.entries.filter(untimed).slice(-2), cancelShown: !v.cancelHidden, queue: h.runner.queue.map(j => [j.att.key, !!j.retried]),
                         job: h.runner.job, notices: h.log.notices.length, notifications: h.log.notifications.length, turns: h.log.codexTurns };
       h.runner.queue[0].retryAt = 0;
       await new Promise(r => setTimeout(r, 60));
       await settle(600);
-      const lines = h.log.writes['/data/tmp/scholium/ATT1/conversation.jsonl'].trim().split('\n').map(l => JSON.parse(l));
+      const lines = convLines(h);
       retry[name] = { waiting, turns: h.log.codexTurns, state: p.view().state, queue: h.runner.queue.length,
-                      marks: lines.filter(l => l.type === 'scholium' && l.subtype !== 'run').map(l => l.subtype), inits: lines.filter(l => l.type === 'system').length,
+                      marks: lines.filter(l => l.type === 'scholium' && !['run', 'time'].includes(l.subtype)).map(l => l.subtype), inits: lines.filter(l => l.type === 'system').length,
                       runs: lines.filter(l => l.subtype === 'run').map(l => [l.agent, l.user]),
                       entries: p.view().entries.slice(0, 4), notifications: h.log.notifications.map(n => n.title) };
     }
@@ -1961,35 +1999,40 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
       .map(([m, i]) => h.runner.transient(m, i));
   }
 
-  // the logs of an earlier version, one per agent: the latest is shown, as the agent's
+  // the logs of an earlier version, one per agent: each is that agent's first conversation
   {
     const codexLog = [CODEX_INIT].concat(CODEX_SCRIPT.filter(l => l.includes('item/')), [CODEX_RESULT]).join('');
     const claudeLog = SCRIPT.slice(0, 4).concat([LAST, RESULT]).join('');
     const shown = {};
-    for (const [name, times] of [['codex', { claude: 1, codex: 2 }], ['claude', { claude: 3, codex: 2 }]]) {
+    for (const agent of ['codex', 'claude']) {
       const h = harness({ logs: { '/data/tmp/scholium/ATT1/claude-run.jsonl': claudeLog, '/data/tmp/scholium/ATT1/codex-run.jsonl': codexLog },
-                          logTimes: { '/data/tmp/scholium/ATT1/claude-run.jsonl': times.claude, '/data/tmp/scholium/ATT1/codex-run.jsonl': times.codex } });
+                          prefs: { 'extensions.scholium-bridge.agent': agent } });
       h.runner.start('x');
       const p = await h.pane(h.item1);
       p.pane().log.click();
-      shown[name] = { first: p.view().entries[0], count: p.view().entries.length, state: p.view().state, session: h.runner.sessions.get('ATT1'),
-                      revealed: h.log.revealed[0] };
+      shown[agent] = { first: p.view().entries[0], count: p.view().entries.length, state: p.view().state, shownConv: p.view().shownConv,
+                       session: (await h.runner.readLog('ATT1', p.view().shownConv)).session, revealed: h.log.revealed[0],
+                       title: await h.runner.convTitle('ATT1', p.view().shownConv) };
     }
     facts.latestLog = shown;
   }
 
   // an unchanged log is parsed once; one that grew is parsed again
   {
-    const path = '/data/tmp/scholium/ATT1/conversation.jsonl';
-    const h = harness({ logs: { [path]: SCRIPT.slice(0, 4).concat([LAST, RESULT]).join('') }, logTimes: { [path]: 1 } });
+    const h = harness({ logs: { [CONV1]: SCRIPT.slice(0, 4).concat([LAST, RESULT]).join('') }, logTimes: { [CONV1]: 1 } });
     h.runner.start('x');
     let parsed = 0;
     const entries = h.runner.entries.bind(h.runner);
     h.runner.entries = event => { parsed++; return entries(event); };
-    const first = (await h.runner.readLog('ATT1')).entries.length, once = parsed;
-    const again = (await h.runner.readLog('ATT1')).entries.length, unchanged = parsed - once;
-    h.log.writes[path] += said('one more');   // the same time stamp: the size tells
-    const after = (await h.runner.readLog('ATT1')).entries.length;
+    const id = 'claude-20261001-120000';
+    // a run that ended well without a word: its answer is none, not an unfinished one
+    const quiet = await harness({ logs: { [CONV1]: JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'claude', user: '只写入' }) + '\n' + SCRIPT[0]
+                                                   + ev({ type: 'result', subtype: 'success', is_error: false, result: '', session_id: 'S1' }) } }).runner.readLog('ATT1', id);
+    facts.quietTurn = quiet.turns;
+    const first = (await h.runner.readLog('ATT1', id)).entries.length, once = parsed;
+    const again = (await h.runner.readLog('ATT1', id)).entries.length, unchanged = parsed - once;
+    h.log.writes[CONV1] += said('one more');   // the same time stamp: the size tells
+    const after = (await h.runner.readLog('ATT1', id)).entries.length;
     facts.logCache = { first, again, unchanged, after, reparsed: parsed - once - unchanged };
   }
 
@@ -2030,7 +2073,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
       const c = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex });
       c.runner.start('x');
       await c.runner.annotate([c.item1]); await settle(400);
-      said[name] = [c.runner.transcript.at(-1).text, (c.runner.notes.get('ATT1') || {}).text.slice(0, 2)];
+      said[name] = [c.runner.transcript.filter(e => e.kind !== 'time').at(-1).text, (c.runner.notes.get('ATT1') || {}).text.slice(0, 2)];
       c.runner.stop();
     }
     facts.codexSkillIssues = said;
@@ -2058,8 +2101,8 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]); await settle(200);
-    const lines = h.log.writes['/data/tmp/scholium/ATT1/conversation.jsonl'].trim().split('\n');
-    facts.noSkill = { kills: h.log.kills, last: p.view().entries.at(-1), state: p.view().state, end: JSON.parse(lines.at(-1)) };
+    const lines = convLines(h);
+    facts.noSkill = { kills: h.log.kills, last: p.view().entries.filter(untimed).at(-1), state: p.view().state, end: lines.at(-2) };
     const ok = harness({ script: [ev({ type: 'system', subtype: 'init', model: 'm', session_id: 'S1', skills: ['zotero-scholium:zotero-scholium'] }),
                                   LAST, RESULT] });
     ok.runner.start('x');
@@ -2069,19 +2112,19 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
   // an update while a paper runs: its log records the interruption, and the new copy continues the paper's
   // conversation, then the paper still waiting; a disabled plugin hands nothing over
   {
-    const logPath = '/data/tmp/scholium/ATT1/conversation.jsonl';
     const h = harness({ gateFirst: true });
     h.runner.start('x');
     await h.runner.annotate([h.item1]); await h.runner.annotate([h.item2]);
     await settle(80);
     h.runner.stop(true);
     await settle(40);
+    const logPath = convs(h)[0];
     const carried = h.store.get('extensions.scholium-bridge.carryOver');
-    const h2 = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried }, logs: { [logPath]: h.log.writes[logPath] } });
+    const h2 = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried }, logs: ours(h) });
     h2.runner.start('x', true);
     const p2 = await h2.pane(h2.item1);
     await settle(600);
-    const h3 = harness({ logs: { [logPath]: h.log.writes[logPath] } });
+    const h3 = harness({ logs: ours(h) });
     h3.runner.start('x');
     const history = await h3.pane(h3.item1);
     const d = harness({ gateFirst: true });
@@ -2099,13 +2142,11 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     facts.update = { kills: h.log.kills, end: JSON.parse(h.log.writes[logPath].trim().split('\n').at(-1)), carried: JSON.parse(carried),
                      prompts: h2.log.stdin, resume: h2.log.calls[0].opts.arguments.includes('--resume'),
                      cleared: h2.store.get('extensions.scholium-bridge.carryOver'), entries: p2.view().entries.map(e => e[1]),
-                     history: history.view().state, historyLast: history.view().entries.at(-1),
-                     disabled: { carried: d.store.get('extensions.scholium-bridge.carryOver') ?? null,
-                                 end: JSON.parse(d.log.writes[logPath].trim().split('\n').at(-1)).outcome } };
+                     history: history.view().state, historyLast: history.view().entries.filter(untimed).at(-1), conversations: convs(h2).length,
+                     disabled: { carried: d.store.get('extensions.scholium-bridge.carryOver') ?? null, end: convLines(d).at(-1).outcome } };
   }
   // a cancelled run's end is in its log, and its history shows it
   {
-    const logPath = '/data/tmp/scholium/ATT1/conversation.jsonl';
     const h = harness({ script: SCRIPT.slice(0, 3).concat(['WAIT']) });
     h.runner.start('x');
     const p = await h.pane(h.item1);
@@ -2113,9 +2154,9 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     await settle(80);
     p.pane().cancel.click();
     await done; await settle(80);
-    const later = harness({ logs: { [logPath]: h.log.writes[logPath] } });
+    const later = harness({ logs: ours(h) });
     later.runner.start('x');
-    facts.cancelLogged = { end: JSON.parse(h.log.writes[logPath].trim().split('\n').at(-1)), history: (await later.pane(later.item1)).view().state };
+    facts.cancelLogged = { end: convLines(h).at(-2), time: convLines(h).at(-1).subtype, history: (await later.pane(later.item1)).view().state };
   }
   // the service's limit ("not your usage limit") waits as long as its message says, and says what it is
   {
@@ -2146,19 +2187,21 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const missing = Object.assign({}, h.item2, { getBestAttachment: async () => Object.assign({}, h.att2, { getFilePathAsync: async () => null }) });
     await h.runner.annotate([missing]);
     facts.otherLibrary = { state: p.view().state, annotateDisabled: p.view().annotateDisabled, queued, alerts: h.log.alerts.slice(), calls: h.log.calls.length,
-                           sendHidden: p.view().sendHidden, asked: await h.runner.ask(group, '这篇讲什么？') };
-    facts.otherLibrary.askedMissing = [await h.runner.ask(missing, '这篇讲什么？'), h.log.alerts.slice(facts.otherLibrary.alerts.length), h.log.calls.length];
+                           sendHidden: p.view().sendHidden, asked: await h.runner.send(group, '这篇讲什么？') };
+    facts.otherLibrary.askedMissing = [await h.runner.send(missing, '这篇讲什么？'), h.log.alerts.slice(facts.otherLibrary.alerts.length), h.log.calls.length];
   }
-  // while the paper has a conversation, Annotate leaves the words in the box for Send
+  // Annotate goes on in the conversation shown, with the words in the box as extra instructions
   {
     const h = harness();
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]); await settle(300);
-    p.pane().input.type('第 5 页那条译文改短');
+    p.pane().input.type('只标方法部分');
     p.pane().annotate.click(); await settle(300);
-    facts.annotateInConversation = { calls: h.log.calls.length, prompt: h.log.stdin[1], resumed: h.log.calls[1].opts.arguments.includes('--resume'),
-                                     kept: p.pane().input.value };
+    const args = h.log.calls[1].opts.arguments;
+    facts.annotateInConversation = { calls: h.log.calls.length, prompt: h.log.stdin[1], resume: args.includes('--resume') ? args[args.indexOf('--resume') + 1] : null,
+                                     kept: p.pane().input.value, conversations: convs(h).length,
+                                     prompts: p.view().entries.filter(e => e[0] === 'scholium-entry prompt').map(e => e[1]) };
   }
   // a question about a paper without a conversation starts one that answers; Annotate continues it with the box's
   // words as extra instructions, and once it has an annotation a redo starts afresh and leaves the box alone
@@ -2167,55 +2210,54 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const ANSWER = [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'Q1' }),
                     tool('Skill', { skill: 'zotero-scholium' }), answer('Launching skill: zotero-scholium'), said(reply), 'HOLD',
                     ev({ type: 'result', subtype: 'success', is_error: false, result: reply, session_id: 'Q1' })];
-    const logPath = '/data/tmp/scholium/ATT1/conversation.jsonl';
-    const marks = () => h.log.writes[logPath].trim().split('\n').map(l => JSON.parse(l)).filter(l => l.type === 'scholium' && l.subtype !== 'run');
+    const marks = () => convLines(h).filter(l => l.type === 'scholium' && !['run', 'time'].includes(l.subtype));
     const h = harness({ scripts: [ANSWER, SCRIPT.concat([LAST, RESULT]), SCRIPT.concat([LAST, RESULT])] });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
-    const look = () => ({ placeholder: p.view().placeholder, sendHidden: p.view().sendHidden, cancel: p.pane().cancel.textContent,
-                          session: h.runner.sessions.get('ATT1') || null });
+    const session = async (x = h) => { const id = await x.runner.currentConv('ATT1', 'claude'); const log = id && await x.runner.readLog('ATT1', id); return log ? log.session : null; };
+    const look = () => ({ placeholder: p.view().placeholder, sendHidden: p.view().sendHidden, cancel: p.pane().cancel.textContent });
     p.pane().input.type('这篇怎么估计后验？');
     const sent = key(p.pane().input, { key: 'Enter', ctrlKey: true }).defaultPrevented;
     await settle(200);
     const during = Object.assign(look(), { state: p.view().state, cleared: p.pane().input.value });
     h.log.release();
     await settle(300);
-    const asked = { sent, during, after: look(), state: p.view().state, args: h.log.calls[0].opts.arguments, prompt: h.log.stdin[0],
-                    lines: marks(), notices: h.log.notices.map(n => n.descriptions), entries: p.view().entries.map(e => e[1]) };
-    const questionLog = h.log.writes[logPath];
+    const asked = { sent, during, after: Object.assign(look(), { session: await session() }), state: p.view().state, args: h.log.calls[0].opts.arguments,
+                    prompt: h.log.stdin[0], lines: marks(), notices: h.log.notices.map(n => n.descriptions), entries: p.view().entries.map(e => e[1]) };
+    const questionLog = ours(h);
     p.pane().input.type('重点标方法部分');
     p.pane().annotate.click();
     await settle(400);
     const args1 = h.log.calls[1].opts.arguments;
     const annotated = { resume: args1.includes('--resume') ? args1[args1.indexOf('--resume') + 1] : null, prompt: h.log.stdin[1],
-                        cleared: p.pane().input.value, after: look(), lines: marks(),
+                        cleared: p.pane().input.value, after: Object.assign(look(), { session: await session() }), lines: marks(),
                         prompts: p.view().entries.filter(e => e[0] === 'scholium-entry prompt').map(e => e[1]),
                         notices: h.log.notices.slice(asked.notices.length).map(n => n.descriptions) };
-    const annotatedLog = h.log.writes[logPath];
+    const annotatedLog = ours(h);
     p.pane().input.type('第 5 页那条译文改短');
     p.pane().annotate.click();
     await settle(400);
     const redo = { calls: h.log.calls.length, resumed: h.log.calls[2].opts.arguments.includes('--resume'), kept: p.pane().input.value,
-                   lines: marks() };
-    // after a restart the log names the question's conversation: Annotate from the context menu continues it, with the
-    // profile; a conversation that went on with an annotation is one of an annotation
-    const r = harness({ logs: { [logPath]: questionLog, [PROFILE_PATH]: PROFILE } });
+                   lines: marks(), conversations: convs(h).length };
+    // after a restart the log names the question's conversation: Annotate continues it, with the profile; a
+    // conversation that went on with an annotation is one of an annotation
+    const r = harness({ logs: Object.assign({ [PROFILE_PATH]: PROFILE }, questionLog) });
     r.runner.start('x');
     await r.runner.annotate([r.item1]); await settle(300);
-    const shown = harness({ logs: { [logPath]: questionLog } });
+    const shown = harness({ logs: questionLog });
     shown.runner.start('x');
     const sp = await shown.pane(shown.item1);
     await settle(100);
-    const later = harness({ logs: { [logPath]: annotatedLog } });
+    const later = harness({ logs: annotatedLog });
     later.runner.start('x');
     const lp = await later.pane(later.item1);
     await settle(100);
     facts.ask = { asked, annotated, redo,
                   restarted: { resumed: r.log.calls[0].opts.arguments.includes('Q1'), prompt: r.log.stdin[0].split('\n')[0],
                                profile: r.log.stdin[0].split('\n').find(l => l.startsWith('- 画像')) },
-                  shown: { placeholder: sp.view().placeholder, session: shown.runner.sessions.get('ATT1') },
-                  later: { placeholder: lp.view().placeholder, session: later.runner.sessions.get('ATT1') } };
+                  shown: { placeholder: sp.view().placeholder, session: await session(shown) },
+                  later: { placeholder: lp.view().placeholder, session: await session(later) } };
   }
   // the box while a question and then its annotation start, before the agent names the conversation: a question's
   // words, then a follow-up's
@@ -2226,11 +2268,11 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
-    await h.runner.ask(h.item1, '这篇怎么估计后验？'); await settle(50);
+    await h.runner.send(h.item1, '这篇怎么估计后验？'); await settle(50);
     const asking = p.view().placeholder;
     h.log.releaseDir(); await settle(300);
     await h.runner.annotate([h.item1]); await settle(50);
-    facts.askBox = { asking, annotating: p.view().placeholder, state: p.view().state, session: h.runner.sessions.get('ATT1') };
+    facts.askBox = { asking, annotating: p.view().placeholder, state: p.view().state, queued: h.runner.queue.map(j => [j.conv, !!j.annotate]) };
     h.log.releaseDir(); await settle(300);
   }
   // a follow-up in a question's conversation is not told of a configuration; an annotation there that ends before the
@@ -2245,20 +2287,23 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
-    await h.runner.ask(h.item1, '这篇怎么估计后验？'); await settle(300);
-    await h.runner.followUp(h.att1, '那它的损失函数呢？'); await settle(300);
+    await h.runner.send(h.item1, '这篇怎么估计后验？'); await settle(300);
+    await h.runner.send(h.att1, '那它的损失函数呢？'); await settle(300);
     await h.runner.annotate([h.item1]); await settle(300);
-    const failed = { session: h.runner.sessions.get('ATT1'), placeholder: p.view().placeholder };
+    const log = await h.runner.readLog('ATT1', p.view().shownConv);
+    const failed = { session: log.session, question: log.question, placeholder: p.view().placeholder };
     await h.runner.annotate([h.item1]); await settle(300);
     facts.askEdges = { owned: h.log.stdin[0].split('\n').find(l => l.startsWith('这篇论文已有')), followUp: h.log.stdin[1],
                        resumes: h.log.calls.map(c => c.opts.arguments.includes('--resume')), failed };
   }
-  // the agent no longer has the paper's conversation (deleted in Codex's app, cleaned up by Claude Code): the words go
-  // to a new conversation as a question, the transcript kept; a continuation after a limit says so and stops
-  {
-    const logPath = '/data/tmp/scholium/ATT1/conversation.jsonl';
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' },
-                        codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW], fail: 'thread/resume', failMessage: 'no rollout found for thread id T1' } });
+  // the agent no longer has the conversation's session (deleted in Codex's app, cleaned up by Claude Code): a new one
+  // goes on with it, given its turns (Codex as items of the new thread, as text when it does not take them); a
+  // continuation after a limit says so and stops
+  for (const inject of [true, false]) {
+    // any failure to resume the thread; a Codex that does not take items
+    const refuse = inject ? { 'thread/resume': 'thread T1 is archived' }
+                          : { 'thread/resume': 'no rollout found for thread id T1', 'thread/inject_items': 'unknown method thread/inject_items' };
+    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW], newThreads: true, refuse } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
@@ -2266,14 +2311,17 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     p.pane().input.type('AdLN的作用是什么');
     p.pane().send.click();
     await settle(800);
-    const lines = h.log.writes[logPath].trim().split('\n').map(l => JSON.parse(l));
+    const lines = convLines(h);
     const methods = h.log.codexProcs.slice(-2).map(c => c.sent.map(m => m.method).filter(m => typeof m === 'string' && m.startsWith('thread/')));
-    const turn = h.log.codexProcs.at(-1).sent.find(m => m.method === 'turn/start');
-    facts.goneCodex = { methods, marks: lines.filter(l => l.type === 'scholium' && l.subtype !== 'run').map(l => Object.assign({}, l, { text: l.text && l.text.slice(0, 40) })),
-                        prompt: turn && turn.params.input[0].text, say: turn && turn.params.input[0].text.includes('\nAdLN的作用是什么\n'),
-                        skill: !!(turn && turn.params.input.some(i => i.type === 'skill')),
-                        entries: p.view().entries.slice(-6).map(e => [e[0], e[1].slice(0, 60)]), state: p.view().state,
-                        session: h.runner.sessions.get('ATT1'), placeholder: p.view().placeholder, notices: h.log.notices.map(n => n.descriptions) };
+    const sent = h.log.codexProcs.at(-1).sent;
+    const turn = sent.find(m => m.method === 'turn/start');
+    const injected = sent.find(m => m.method === 'thread/inject_items');
+    facts[inject ? 'goneCodex' : 'goneCodexText'] = {
+      methods, marks: lines.filter(l => l.type === 'scholium' && !['run', 'time'].includes(l.subtype)).map(l => Object.assign({}, l, { text: l.text && l.text.slice(0, 40) })),
+      runs: lines.filter(l => l.subtype === 'run').map(l => l.user), items: injected && injected.params.items,
+      prompt: turn && turn.params.input[0].text, skill: !!(turn && turn.params.input.some(i => i.type === 'skill')),
+      entries: p.view().entries.filter(untimed).slice(-5).map(e => [e[0], e[1].slice(0, 60)]), state: p.view().state,
+      session: (await h.runner.readLog('ATT1', p.view().shownConv)).session, placeholder: p.view().placeholder, conversations: convs(h).length };
   }
   {
     const answer = '它是自适应层归一化。';
@@ -2284,36 +2332,35 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     const p = await h.pane(h.item1);
     await settle(40);
     await h.runner.annotate([h.item1]); await settle(300);
-    await h.runner.followUp(h.att1, 'AdLN的作用是什么'); await settle(500);
-    facts.goneClaude = { resumes: h.log.calls.map(c => c.opts.arguments.includes('--resume')), prompt: h.log.stdin[2].split('\n')[0],
+    await h.runner.send(h.att1, 'AdLN的作用是什么'); await settle(500);
+    facts.goneClaude = { resumes: h.log.calls.map(c => c.opts.arguments.includes('--resume')), prompt: h.log.stdin[2],
                          prompts: p.view().entries.filter(e => e[0] === 'scholium-entry prompt').map(e => e[1]),
-                         info: p.view().entries.filter(e => e[0] === 'scholium-entry info').map(e => e[1]).filter(t => t.includes('不存在')),
-                         session: h.runner.sessions.get('ATT1'), state: p.view().state,
-                         finals: p.view().entries.filter(e => e[0].includes('final')).map(e => e[1]) };
+                         info: p.view().entries.filter(e => e[0] === 'scholium-entry info').map(e => e[1]),
+                         session: (await h.runner.readLog('ATT1', p.view().shownConv)).session, state: p.view().state,
+                         finals: p.view().entries.filter(e => e[0].includes('final')).map(e => e[1]), conversations: convs(h).length };
     const e = harness({ script: [ev({ type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 0, session_id: 'S9',
                                       errors: ['Credit balance is too low'] }), 'EXIT:1'] });
     e.runner.start('x');
     const ep = await e.pane(e.item1);
     await e.runner.annotate([e.item1]); await settle(300);
-    facts.goneClaude.errorsShown = { last: ep.view().entries.at(-1), notice: e.log.notices.at(-1) && e.log.notices.at(-1).descriptions };
+    facts.goneClaude.errorsShown = { last: ep.view().entries.filter(untimed).at(-1), notice: e.log.notices.at(-1) && e.log.notices.at(-1).descriptions };
   }
   {
-    const logPath = '/data/tmp/scholium/ATT1/conversation.jsonl';
     const h = harness({ scripts: [SCRIPT.slice(0, 3).concat(LIMIT_HIT), CLAUDE_GONE] });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
     await h.runner.annotate([h.item1]); await settle(300);
     h.fire(); await settle(500);
-    const lines = h.log.writes[logPath].trim().split('\n').map(l => JSON.parse(l));
-    const later = harness({ logs: { [logPath]: h.log.writes[logPath] } });
+    const lines = convLines(h);
+    const later = harness({ logs: ours(h) });
     later.runner.start('x');
     const lp = await later.pane(later.item1);
     await settle(100);
     facts.goneStopped = { calls: h.log.calls.length, queued: h.runner.queue.length, gone: lines.find(l => l.subtype === 'gone'),
-                          state: p.view().state, last: p.view().entries.at(-1), session: h.runner.sessions.get('ATT1') || null,
+                          state: p.view().state, last: p.view().entries.filter(untimed).at(-1), session: (await h.runner.readLog('ATT1', p.view().shownConv)).session,
                           placeholder: p.view().placeholder,
-                          later: { session: later.runner.sessions.get('ATT1') || null, placeholder: lp.view().placeholder } };
+                          later: { session: (await later.runner.readLog('ATT1', lp.view().shownConv)).session, placeholder: lp.view().placeholder } };
   }
   // a question to Codex starts a question's conversation
   {
@@ -2321,91 +2368,124 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
-    await h.runner.ask(h.item1, '这篇讲什么？'); await settle(500);
-    facts.codexQuestion = { session: h.runner.sessions.get('ATT1'), placeholder: p.view().placeholder };
+    await h.runner.send(h.item1, '这篇讲什么？'); await settle(500);
+    const log = await h.runner.readLog('ATT1', p.view().shownConv);
+    facts.codexQuestion = { session: log.session, question: log.question, placeholder: p.view().placeholder, title: await h.runner.convTitle('ATT1', p.view().shownConv) };
   }
-  // a conversation logged by an earlier version (one agent's log) goes on in the paper's log: Claude Code chosen gets a
-  // session of its own and the Codex turn; the earlier log stays as it was
+  // the log of an earlier version is its agent's conversation: that agent goes on with it in place, the other one
+  // starts its own
   {
     const legacy = '/data/tmp/scholium/ATT1/codex-run.jsonl';
     const codexLog = [CODEX_INIT].concat(CODEX_SCRIPT.filter(l => l.includes('item/')), [CODEX_RESULT]).join('');
-    const h = harness({ logs: { [legacy]: codexLog } });
+    const h = harness({ logs: { [legacy]: codexLog }, codex: { scripts: [CODEX_FOLLOW] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(100);
-    const before = { placeholder: p.view().placeholder, session: h.runner.sessions.get('ATT1') };
+    const claude = { placeholder: p.view().placeholder, entries: p.view().entries };
     p.pane().input.type('AdLN的作用是什么');
     p.pane().send.click();
     await settle(400);
-    const lines = h.log.writes['/data/tmp/scholium/ATT1/conversation.jsonl'].trim().split('\n').map(l => JSON.parse(l));
-    facts.legacyGoesOn = { before, resumed: h.log.calls[0].opts.arguments.includes('--resume'), prompt: h.log.stdin[0], first: lines[0],
-                           legacyKept: h.log.writes[legacy] === codexLog, shown: p.view().entries[0][1],
-                           runs: lines.filter(l => l.subtype === 'run').map(l => [l.agent, l.user]), session: h.runner.sessions.get('ATT1') };
+    claude.resumed = h.log.calls[0].opts.arguments.includes('--resume');
+    claude.prompt = h.log.stdin[0].split('\n')[0];
+    claude.conversations = convs(h).length;
+    h.store.set('extensions.scholium-bridge.agent', 'codex');
+    await h.runner.send(h.att1, '再短一点'); await settle(500);
+    const sent = h.log.codexProcs.at(-1).sent;
+    const lines = h.log.writes[legacy].slice(codexLog.length).trim().split('\n').map(l => JSON.parse(l));
+    facts.legacyGoesOn = { claude, resume: sent.find(m => m.method === 'thread/resume').params.threadId,
+                           text: sent.find(m => m.method === 'turn/start').params.input[0].text.split('\n')[0],
+                           appended: lines.filter(l => l.type === 'scholium').map(l => l.subtype), conversations: convs(h).length };
   }
-  // the turns an agent is given: the latest within the budget, each answer cut to its share, an unfinished one said so
+  // the conversation for a new session: beyond ten exchanges the latest five whole and the earlier ones as excerpts; an
+  // unfinished answer and one without text said so; a cut never splits a character
   {
     const h = harness();
-    h.runner.start('x');
-    const turns = Array.from({ length: 8 }, (_, i) => ({ agent: i % 2 ? 'claude' : 'codex', user: '问题 ' + (i + 1), reply: 'x'.repeat(5000), ended: '' }));
-    turns.push({ agent: 'claude', user: '最后', reply: '', ended: 'Invalid API key' });
+    const turns = Array.from({ length: 11 }, (_, i) => ({ user: '问题 ' + (i + 1) + ' ' + 'q'.repeat(300), reply: 'x'.repeat(500), ended: '', done: true }));
+    turns.push({ user: '最后', reply: '', ended: 'Invalid API key' });
+    turns.push({ user: '只写入', reply: '', ended: '', done: true });
     const text = h.runner.historyText(turns);
-    facts.historyCap = { omitted: (text.match(/（更早的 (\d+) 轮从略）/) || [])[1] || null, first: (text.match(/\[第 (\d+) 轮 · ([^\]]+)\]/) || []).slice(1),
-                         unfinished: text.includes('[第 9 轮 · Claude Code]\n用户：最后\n回答：（没有完成：Invalid API key）'),
-                         cut: text.includes('回答：' + 'x'.repeat(3999) + '…\n'), length: text.length, none: h.runner.historyText([]) };
+    const items = h.runner.historyItems(turns);
+    const few = h.runner.historyText(turns.slice(0, 2));
+    const excerpted = n => h.runner.historyText(turns.slice(0, n)).includes('轮对话（摘录）');
+    facts.historyParts = { head: text.split('\n\n')[0], summary: text.split('\n\n')[1], excerpts: (text.match(/^用户：问题 \d+/gm) || []).length,
+                           whole: (text.match(/^\[第 (\d+) 轮\]/gm) || []), excerpt: text.split('\n\n')[2],
+                           unfinished: text.includes('[第 12 轮]\n用户：最后\n回答：（没有完成：Invalid API key）'),
+                           noText: text.includes('[第 13 轮]\n用户：只写入\n回答：（没有文字回答）'), end: text.split('\n\n').at(-1),
+                           few: few.split('\n\n').map(b => b.split('\n')[0]), none: h.runner.historyText([]), noItems: h.runner.historyItems([]),
+                           boundary: [excerpted(10), excerpted(11)],
+                           items: items.map(i => [i.role, i.content[0].type, i.content[0].text.split('\n')[0].slice(0, 20)]),
+                           cut: [h.runner.cut('ab\u{1d465}cd', 4), h.runner.cut('abc\u{1d465}d', 4), h.runner.cut('abc', 4)] };
   }
-  // a redo after an annotation starts a new conversation: the other agent's session is left behind
+  // Annotate again goes on in the conversation, in its thread
   {
     const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, CODEX_SCRIPT] } });
     h.runner.start('x');
-    const p = await h.pane(h.item1);
+    await h.pane(h.item1);
     await settle(200);
     await h.runner.annotate([h.item1]); await settle(500);
-    p.pane().agent.change('claude');
-    await settle(100);
-    await h.runner.followUp(h.att1, '它和 FNO 比怎么样？'); await settle(400);
-    const both = h.runner.sessions.get('ATT1');
-    p.pane().agent.change('codex');
-    await settle(200);
     await h.runner.annotate([h.item1]); await settle(500);
-    const lines = h.log.writes['/data/tmp/scholium/ATT1/conversation.jsonl'].trim().split('\n').map(l => JSON.parse(l));
-    facts.redoAfterShared = { both, after: h.runner.sessions.get('ATT1'), runs: lines.filter(l => l.subtype === 'run').map(l => [l.agent, l.user]),
-                              started: h.log.codexProcs.at(-1).sent.some(m => m.method === 'thread/start') };
+    const sent = h.log.codexProcs.at(-1).sent;
+    facts.annotateAgain = { conversations: convs(h).length, threads: sent.map(m => m.method).filter(m => typeof m === 'string' && m.startsWith('thread/')),
+                            text: sent.find(m => m.method === 'turn/start').params.input[0].text.split('\n')[0],
+                            runs: convLines(h).filter(l => l.subtype === 'run').map(l => l.user) };
   }
-  // an update hands over a follow-up for an agent without a session yet: the new copy sends it with the turns it needs
+  // an update hands over a follow-up its agent has not received yet: the new copy sends it, without logging it again
   {
-    const conv = '/data/tmp/scholium/ATT1/conversation.jsonl';
-    const codexLog = JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'codex', user: '批注这篇' }) + '\n'
-      + [CODEX_INIT].concat(CODEX_SCRIPT.filter(l => l.includes('item/')), [CODEX_RESULT]).join('');
-    const h = harness({ logs: { [conv]: codexLog }, scripts: [[SCRIPT[0], 'WAIT']] });
+    const h = harness({ scripts: [SCRIPT.concat([LAST, RESULT]), [SCRIPT[0], 'WAIT']] });
     h.runner.start('x');
     await h.pane(h.item1);
-    await settle(100);
-    await h.runner.followUp(h.att1, 'AdLN的作用是什么'); await settle(150);
+    await settle(40);
+    await h.runner.annotate([h.item1]); await settle(300);
+    await h.runner.send(h.att1, 'AdLN的作用是什么'); await settle(150);
     h.runner.stop(true);
     const carried = h.store.get('extensions.scholium-bridge.carryOver');
-    const h2 = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried }, logs: { [conv]: h.log.writes[conv] } });
+    const h2 = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried }, logs: ours(h) });
     h2.runner.start('x', true);
     await settle(400);
     const job = JSON.parse(carried).jobs[0];
-    const lines2 = h2.log.writes[conv].trim().split('\n').map(l => JSON.parse(l));
-    facts.handedShared = { handed: [job.agent, job.resume, job.say, job.conversation, job.logged], resumed: h2.log.calls[0].opts.arguments.includes('--resume'),
-                           head: h2.log.stdin[0].split('\n\n').slice(0, 2), turns: h2.log.stdin[0].split('\n\n').filter(b => b.startsWith('[第')).length,
-                           runs: lines2.filter(l => l.subtype === 'run').map(l => [l.agent, l.user]), prompts: lines2.filter(l => l.subtype === 'prompt').length,
-                           newMessage: h2.log.stdin[0].includes('\n用户的新消息：\nAdLN的作用是什么\n') };
+    const lines2 = convLines(h2);
+    facts.handedFollowUp = { handed: [job.resume, job.say, !!job.conv, job.logged], resumed: h2.log.calls[0].opts.arguments.includes('--resume'),
+                             prompt: h2.log.stdin[0], runs: lines2.filter(l => l.subtype === 'run').map(l => l.user),
+                             prompts: lines2.filter(l => l.subtype === 'prompt').length, conversations: convs(h2).length };
     h2.runner.stop();
   }
-  // a follow-up in a new session knows the paper's annotations of the tool
+  // a new conversation knows the paper's annotations of the tool and the configuration that wrote them; one that goes on
+  // is told when another conversation rewrote them since, or that they are gone
   {
+    const answered = [SCRIPT[0], said('讲的是方法。'), ev({ type: 'result', subtype: 'success', is_error: false, result: '讲的是方法。', session_id: 'S1' })];
     const h = harness({ existing: [['zotero-scholium'], ['zotero-scholium']], prefs: { 'extensions.scholium-bridge.agent': 'codex' },
-                        codex: { scripts: [CODEX_SCRIPT] } });
+                        codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW, CODEX_FOLLOW, CODEX_FOLLOW, CODEX_FOLLOW] }, scripts: [answered] });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
-    await h.runner.annotate([h.item1]); await settle(500);
+    await h.runner.annotate([h.item1]); await settle(500);   // Codex, conversation A
     p.pane().agent.change('claude');
     await settle(100);
-    await h.runner.followUp(h.att1, '第 3 页那条讲了什么？'); await settle(400);
-    facts.ownInFollowUp = h.log.stdin.at(-1).split('\n').find(l => /^这篇论文(已有|目前)/.test(l));
+    await h.runner.send(h.att1, '第 3 页那条讲了什么？'); await settle(400);   // Claude Code, conversation B
+    const fresh = h.log.stdin.at(-1).split('\n').find(l => /^这篇论文(已有|目前)/.test(l));
+    h.store.set('extensions.scholium-bridge.agent', 'codex');
+    await h.runner.send(h.att1, '再短一点'); await settle(500);   // Codex, conversation A: nothing changed since
+    const unchanged = h.log.codexProcs.at(-1).sent.find(m => m.method === 'turn/start').params.input[0].text;
+    const applied = JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']);
+    // rewritten in another conversation before this one's last run: nothing to tell
+    h.log.writes['/data/tmp/scholium/ATT1/applied.json'] = JSON.stringify(Object.assign({}, applied, { agent: 'claude', conv: 'claude-x', at: 1 }));
+    await h.runner.send(h.att1, '再短一点'); await settle(500);
+    const older = h.log.codexProcs.at(-1).sent.find(m => m.method === 'turn/start').params.input[0].text;
+    h.log.writes['/data/tmp/scholium/ATT1/applied.json'] = JSON.stringify(Object.assign({}, applied, { agent: 'claude', conv: 'claude-x',
+                                                                                                         config: '/data/tmp/scholium/ATT1/b.json', at: Date.now() + 1000 }));
+    await h.runner.send(h.att1, '还是太长'); await settle(500);
+    const rewritten = h.log.codexProcs.at(-1).sent.find(m => m.method === 'turn/start').params.input[0].text;
+    h.att1.getAnnotations = () => [];
+    await h.runner.send(h.att1, '重新写'); await settle(500);
+    const gone = h.log.codexProcs.at(-1).sent.find(m => m.method === 'turn/start').params.input[0].text;
+    facts.appliedConfig = { fresh, applied: [applied.agent, applied.config, applied.conv === p.view().shownConv],
+                            unchanged: unchanged.split('\n').filter(l => /上次之后|现在没有|改已经写入/.test(l)),
+                            older: older.split('\n').filter(l => /上次之后|现在没有|改已经写入/.test(l)),
+                            rewritten: rewritten.split('\n').filter(l => /上次之后|现在没有|改已经写入/.test(l)),
+                            gone: gone.split('\n').filter(l => /上次之后|现在没有|改已经写入/.test(l)),
+                            commands: ['python C:/s/scholium.py --config "D:\\x y\\c.json" --apply', "scholium --config='c.json' --apply",
+                                       'scholium --config c.json', 'python scholium.py --config /abs/c.json --apply']
+                              .map(c => h.runner.appliedConfig(c)) };
   }
   // an earlier version's log of two Codex turns: Codex goes on in its thread without being given its own turns
   {
@@ -2418,7 +2498,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     h.runner.start('x');
     await h.pane(h.item1);
     await settle(200);
-    await h.runner.followUp(h.att1, '再短一点'); await settle(500);
+    await h.runner.send(h.att1, '再短一点'); await settle(500);
     const turn = h.log.codexProcs.at(-1).sent.find(m => m.method === 'turn/start');
     facts.legacyTwoTurns = turn && turn.params.input[0].text.split('\n')[0];
   }
@@ -2430,62 +2510,57 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     h.runner.start('x');
     await h.pane(h.item1);
     await settle(40);
-    await h.runner.ask(h.item1, '这篇讲什么？'); await settle(300);
+    await h.runner.send(h.item1, '这篇讲什么？'); await settle(300);
     h.runner.stop(true);
     facts.handedInterrupted = JSON.parse(h.store.get('extensions.scholium-bridge.carryOver')).jobs.map(j => [j.interrupted, j.logged]);
   }
-  // a session Claude Code opened but that never had the message is not noted for the conversation
+  // a session Claude Code opened but that never had the message is not the conversation's: the next message starts a new
+  // one, given the turn that did not get through
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT] },
-                        scripts: [[ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S7' }),
-                                   ev({ type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 0, session_id: 'S7', errors: ['Invalid API key'] })]] });
-    h.runner.start('x');
-    const p = await h.pane(h.item1);
-    await settle(200);
-    await h.runner.annotate([h.item1]); await settle(500);
-    p.pane().agent.change('claude');
-    await settle(100);
-    await h.runner.followUp(h.att1, '它和 FNO 比怎么样？'); await settle(400);
-    facts.unreachedClaude = h.runner.sessions.get('ATT1');
-  }
-  // a turn that never reached its agent is not one it has seen, and a thread opened for it is not its session
-  {
-    const conv = '/data/tmp/scholium/ATT1/conversation.jsonl';
-    const run = (agent, user) => JSON.stringify({ type: 'scholium', subtype: 'run', agent, user }) + '\n';
-    const log = run('codex', '批注这篇') + [CODEX_INIT].concat(CODEX_SCRIPT.filter(l => l.includes('item/')), [CODEX_RESULT]).join('')
-      + run('claude', '它和 FNO 比怎么样？') + JSON.stringify({ type: 'scholium', subtype: 'prompt', text: '它和 FNO 比怎么样？' }) + '\n'
-      + SCRIPT[0] + said('差别在正则性特征。') + ev({ type: 'result', subtype: 'success', is_error: false, result: '差别在正则性特征。', session_id: 'S1' })
-      + run('codex', '再短一点') + JSON.stringify({ type: 'scholium', subtype: 'prompt', text: '再短一点' }) + '\n'
-      + ev({ type: 'system', subtype: 'init', agent: 'codex', model: 'gpt-6-luna', session_id: 'T9' })
-      + JSON.stringify({ type: 'scholium', subtype: 'end', outcome: 'failed', text: 'turn/start refused' }) + '\n';
-    const h = harness({ logs: { [conv]: log }, prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_FOLLOW] } });
-    h.runner.start('x');
-    await h.pane(h.item1);
-    await settle(200);
-    const before = h.runner.sessions.get('ATT1');
-    await h.runner.followUp(h.att1, '还是太长'); await settle(500);
-    const sent = h.log.codexProcs.at(-1).sent;
-    const turn = sent.find(m => m.method === 'turn/start');
-    facts.unreached = { before, thread: (sent.find(m => m.method === 'thread/resume') || { params: {} }).params.threadId,
-                        blocks: turn.params.input[0].text.split('\n\n').filter(b => b.startsWith('[第')).map(b => b.split('\n')[0]) };
-  }
-  // the second try of a continuation is the agent's own turn again: no turns are given twice
-  {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT] },
-                        scripts: [[SCRIPT[0]].concat(LIMIT_HIT),
-                                  [SCRIPT[0], ev({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'API Error: 500 Internal server error' })],
+    const h = harness({ scripts: [[ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S7' }),
+                                   ev({ type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 0, session_id: 'S7', errors: ['Invalid API key'] })],
                                   SCRIPT.concat([LAST, RESULT])] });
     h.runner.start('x');
     const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.send(h.item1, '它和 FNO 比怎么样？'); await settle(400);
+    const session = (await h.runner.readLog('ATT1', p.view().shownConv)).session;
+    await h.runner.send(h.att1, '那它的损失函数呢？'); await settle(400);
+    facts.unreachedClaude = { session, resumed: h.log.calls[1].opts.arguments.includes('--resume'), prompt: h.log.stdin[1].split('\n\n').slice(1, 2),
+                              conversations: convs(h).length };
+  }
+  // a turn that never reached its agent is not one it has seen, and a thread opened for it is not its session
+  {
+    const legacy = '/data/tmp/scholium/ATT1/codex-run.jsonl';
+    const log = [CODEX_INIT].concat(CODEX_SCRIPT.filter(l => l.includes('item/')), [CODEX_RESULT]).join('')
+      + JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'codex', user: '再短一点' }) + '\n'
+      + JSON.stringify({ type: 'scholium', subtype: 'prompt', text: '再短一点' }) + '\n'
+      + ev({ type: 'system', subtype: 'init', agent: 'codex', model: 'gpt-6-luna', session_id: 'T9' })
+      + JSON.stringify({ type: 'scholium', subtype: 'end', outcome: 'failed', text: 'turn/start refused' }) + '\n';
+    const h = harness({ logs: { [legacy]: log }, prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_FOLLOW] } });
+    h.runner.start('x');
+    await h.pane(h.item1);
     await settle(200);
-    await h.runner.annotate([h.item1]); await settle(500);
-    p.pane().agent.change('claude');
-    await settle(100);
-    await h.runner.followUp(h.att1, '它和 FNO 比怎么样？'); await settle(300);
+    const before = (await h.runner.readLog('ATT1', 'codex-run')).session;
+    await h.runner.send(h.att1, '还是太长'); await settle(500);
+    const sent = h.log.codexProcs.at(-1).sent;
+    facts.unreached = { before, thread: (sent.find(m => m.method === 'thread/resume') || { params: {} }).params.threadId,
+                        text: sent.find(m => m.method === 'turn/start').params.input[0].text.split('\n')[0] };
+  }
+  // the second try of a continuation goes on as the continuation
+  {
+    const h = harness({ scripts: [[SCRIPT[0]].concat(LIMIT_HIT),
+                                  [SCRIPT[0], ev({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'API Error: 500 Internal server error' })],
+                                  SCRIPT.concat([LAST, RESULT])] });
+    h.runner.start('x');
+    await h.pane(h.item1);
+    await settle(40);
+    await h.runner.send(h.item1, '它和 FNO 比怎么样？'); await settle(300);
     h.fire(); await settle(400);
     await new Promise(r => setTimeout(r, 120));   // the second try's wait
     await settle(600);
-    facts.retriedContinuation = { calls: h.log.calls.length, prompts: h.log.stdin.map(t => t.split('\n')[0]) };
+    facts.retriedContinuation = { calls: h.log.calls.length, prompts: h.log.stdin.map(t => t.split('\n')[0]),
+                                  resumes: h.log.calls.map(c => c.opts.arguments.includes('--resume')) };
   }
   // a question whose agent named no session before the usage limit is sent again as the same turn
   {
@@ -2495,32 +2570,32 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     h.runner.start('x');
     await h.pane(h.item1);
     await settle(40);
-    await h.runner.ask(h.item1, '这篇讲什么？'); await settle(300);
+    await h.runner.send(h.item1, '这篇讲什么？'); await settle(300);
     const queued = h.runner.queue.map(j => [j.interrupted, j.logged, j.resume || null]);
     h.fire(); await settle(500);
-    const lines = h.log.writes['/data/tmp/scholium/ATT1/conversation.jsonl'].trim().split('\n').map(l => JSON.parse(l));
+    const lines = convLines(h);
     facts.interruptedTurn = { queued, calls: h.log.calls.length, runs: lines.filter(l => l.subtype === 'run').map(l => [l.agent, l.user]),
-                              prompts: lines.filter(l => l.subtype === 'prompt').length, second: h.log.stdin[1].split('\n')[0] };
+                              prompts: lines.filter(l => l.subtype === 'prompt').length, second: h.log.stdin[1].split('\n')[0], conversations: convs(h).length };
   }
-  // a redo whose agent is missing keeps the conversation and its log
+  // an agent that is missing: its new conversation fails, the other agent's stays as it was
   {
-    const conv = '/data/tmp/scholium/ATT1/conversation.jsonl';
     const h = harness({ claudeExists: false, prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
     await h.runner.annotate([h.item1]); await settle(500);
-    const logged = h.log.writes[conv].length;
+    const codexLog = convText(h);
     p.pane().agent.change('claude');
     await settle(100);
     await h.runner.annotate([h.item1]); await settle(300);
-    facts.redoWithoutAgent = { session: h.runner.sessions.get('ATT1'), kept: h.log.writes[conv].length >= logged, state: p.view().state };
+    facts.redoWithoutAgent = { kept: convText(h, 'ATT1', 0) === codexLog, conversations: convs(h).length, state: p.view().state,
+                               last: p.view().entries.filter(untimed).at(-1) };
   }
   // Annotate and a question for the same paper at once: one of them is queued
   {
     const h = harness({ gateFirst: true });
     h.runner.start('x');
-    const both = await Promise.all([h.runner.annotate([h.item1]), h.runner.ask(h.item1, '这篇讲什么？')]);
+    const both = await Promise.all([h.runner.annotate([h.item1]), h.runner.send(h.item1, '这篇讲什么？')]);
     await settle(80);
     facts.askRace = { both, queued: h.runner.queue.length, calls: h.log.calls.length, prompt: h.log.stdin[0].split('\n')[0] };
     h.runner.stop();
@@ -2533,7 +2608,8 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     h.runner.start('x', true);
     await settle(100);
     h.runner.stop(true);
-    facts.handedTwice = { calls: h.log.calls.length, updated: JSON.parse(h.store.get('extensions.scholium-bridge.carryOver')).jobs[0].updated };
+    const job = JSON.parse(h.store.get('extensions.scholium-bridge.carryOver')).jobs[0];
+    facts.handedTwice = { calls: h.log.calls.length, updated: job.updated, conv: job.conv };
   }
   // a question goes before the papers still waiting for their first run, after the questions before it
   {
@@ -2541,12 +2617,12 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     h.runner.start('x');
     await h.runner.annotate([h.item1]); await settle(80);
     await h.runner.annotate([h.item2]);
-    for (const k of ['ATT3', 'ATT4']) await h.runner.ask(Object.assign({}, h.att1, { key: k, id: k }), '这篇讲什么？');
+    for (const k of ['ATT3', 'ATT4']) await h.runner.send(Object.assign({}, h.att1, { key: k, id: k }), '这篇讲什么？');
     facts.askOrder = h.runner.queue.map(j => j.att.key);
     h.runner.stop();
   }
-  // after a question to Claude Code, Annotate with Codex chosen goes on with the conversation: a Codex thread of its own,
-  // given the question and its answer
+  // after a question to Claude Code, Annotate with Codex chosen is a new conversation of Codex's, given nothing of the
+  // question
   {
     const reply = '用变分推断估计后验。';
     const h = harness({ scripts: [[ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'Q1' }), said(reply),
@@ -2555,14 +2631,14 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
-    await h.runner.ask(h.item1, '这篇怎么估计后验？'); await settle(300);
+    await h.runner.send(h.item1, '这篇怎么估计后验？'); await settle(300);
     p.pane().agent.change('codex');
     await settle(200);
     await h.runner.annotate([h.item1]); await settle(500);
     const sent = h.log.codexProcs.at(-1).sent;
     const turn = sent.find(m => m.method === 'turn/start');
     facts.askThenCodex = { claudeCalls: h.log.calls.length, threads: sent.map(m => m.method).filter(m => typeof m === 'string' && m.startsWith('thread/')),
-                           session: h.runner.sessions.get('ATT1'), placeholder: p.view().placeholder, text: turn && turn.params.input[0].text,
+                           placeholder: p.view().placeholder, text: turn && turn.params.input[0].text.split('\n')[0], conversations: convs(h).length,
                            entries: p.view().entries.map(e => e[1].slice(0, 30)) };
   }
   // the usage limit in a question and in the annotation that continued its conversation: each goes on there with the
@@ -2576,24 +2652,24 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
-    await h.runner.ask(h.item1, '这篇怎么估计后验？'); await settle(300);
+    await h.runner.send(h.item1, '这篇怎么估计后验？'); await settle(300);
     const paused = { cancel: p.pane().cancel.textContent, queued: h.runner.queue.map(j => [j.resume || null, !!j.question, j.say]) };
     h.fire(); await settle(400);
-    const answered = { prompt: h.log.stdin[1], session: h.runner.sessions.get('ATT1'), state: p.view().state };
+    const session = async () => (await h.runner.readLog('ATT1', p.view().shownConv)).session;
+    const answered = { prompt: h.log.stdin[1], session: await session(), state: p.view().state };
     await h.runner.annotate([h.item1]); await settle(300);
     const annotating = { cancel: p.pane().cancel.textContent, queued: h.runner.queue.map(j => [j.resume || null, !!j.annotate]) };
     h.fire(); await settle(400);
     facts.askLimit = { paused, answered, annotating, annotatePrompt: h.log.stdin[2].split('\n')[0], continued: h.log.stdin[3],
-                       resumes: h.log.calls.map(c => c.opts.arguments.includes('--resume')), session: h.runner.sessions.get('ATT1') };
+                       resumes: h.log.calls.map(c => c.opts.arguments.includes('--resume')), session: await session() };
   }
   // an update hands over a question not yet received with its words, and an annotation in a question's conversation
   // as it stands: before the agent answered with its whole task, after that with the plain continuation
   {
     const reply = '用变分推断估计后验。';
-    const logPath = '/data/tmp/scholium/ATT1/conversation.jsonl';
     const init = ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'Q1' });
     const ANSWERED = [init, said(reply), ev({ type: 'result', subtype: 'success', is_error: false, result: reply, session_id: 'Q1' })];
-    const question = h => h.runner.ask(h.item1, '这篇怎么估计后验？');
+    const question = h => h.runner.send(h.item1, '这篇怎么估计后验？');
     const annotate = async h => { await question(h); await settle(300); await h.runner.annotate([h.item1]); };
     const hand = async (scripts, act) => {
       const h = harness({ scripts });
@@ -2602,7 +2678,7 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
       h.runner.stop(true);
       const carried = h.store.get('extensions.scholium-bridge.carryOver');
       const job = JSON.parse(carried).jobs[0];
-      const n = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried }, logs: { [logPath]: h.log.writes[logPath] || '' } });
+      const n = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried }, logs: ours(h) });
       n.runner.start('x', true);
       await settle(400);
       const out = { handed: [job.question, job.annotate, job.say, job.resume, !!job.updated], prompt: (n.log.stdin[0] || '').split('\n')[0],
@@ -2613,6 +2689,298 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
     facts.askUpdate = { question: await hand([[init, 'WAIT']], question),
                         annotateSent: await hand([ANSWERED, [init, 'WAIT']], annotate),
                         annotateAnswered: await hand([ANSWERED, [init, said('先读论文。'), 'WAIT']], annotate) };
+  }
+  // New chat, and History: the agent's conversations of the paper by day, each opened, renamed or deleted; a deletion can
+  // be undone a moment, then the log goes; the words typed to each conversation stay with it
+  {
+    const reply = n => [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'Q' + n }), said('回答 ' + n),
+                        ev({ type: 'result', subtype: 'success', is_error: false, result: '回答 ' + n, session_id: 'Q' + n })];
+    const h = harness({ scripts: [reply(1), reply(2), reply(3)] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    const typeIn = text => p.pane().input.type(text);
+    typeIn('第一个问题'); p.pane().send.click(); await settle(300);
+    const first = p.view().shownConv;
+    const before = { newChatDisabled: p.view().newChatDisabled, historyDisabled: p.view().historyDisabled };
+    typeIn('写给第一段对话的话');
+    p.pane().newChat.click(); await settle(100);
+    const fresh = { entries: p.view().entries, shownConv: p.view().shownConv, newChatDisabled: p.view().newChatDisabled, input: p.pane().input.value,
+                    placeholder: p.view().placeholder, current: JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/conversations/index.json']).current.claude };
+    typeIn('第二个问题'); p.pane().send.click(); await settle(300);
+    const second = p.view().shownConv;
+    const resumedSecond = h.log.calls[1].opts.arguments.includes('--resume');
+    // two conversations of yesterday and an older one, besides today's
+    const old = '/data/tmp/scholium/ATT1/conversations/claude-20260901-090000.jsonl';
+    h.log.writes[old] = JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'claude', user: '很早的问题' }) + '\n' + SCRIPT[0];
+    h.log.mtimes[old] = Date.now() - 40 * 86400000;
+    h.log.mtimes[convs(h)[0]] = Date.now() - 86400000;
+    p.pane().historyButton.click(); await settle(100);
+    const rows = p.view().historyRows;
+    // renamed: Enter keeps the new title, Esc the old one
+    const rowOf = id => p.pane().historyBox.children.find(r => r.children[0] && r.children[0].title !== undefined
+                                                          && r.children[0].children && r.children[0].children[0] && r.children[0].children[0].textContent.startsWith(id));
+    const firstRow = rowOf('第一个问题');
+    firstRow.children[1].click();
+    const box = firstRow.children[0];
+    box.value = '估计方法';
+    key(box, { key: 'Enter' }); await settle(100);
+    const renamed = p.view().historyRows;
+    const again = rowOf('第二个问题');
+    again.children[1].click();
+    again.children[0].value = '不要这个名字';
+    key(again.children[0], { key: 'Escape' }); await settle(100);
+    const kept = p.view().historyRows.filter(r => r[0].includes('row')).map(r => r[1]);
+    // opened: the first conversation, with the words typed to it, which goes on in its session
+    rowOf('估计方法').children[0].click(); await settle(200);
+    const opened = { shownConv: p.view().shownConv === first, entries: p.view().entries.map(e => e[1]), input: p.pane().input.value,
+                     historyOpen: p.view().historyRows !== null };
+    p.pane().input.type('接着第一段');
+    p.pane().send.click(); await settle(300);
+    const resumedFirst = h.log.calls[2].opts.arguments[h.log.calls[2].opts.arguments.indexOf('--resume') + 1];
+    const followPrompt = h.log.stdin[2];
+    // deleted: the second one, then brought back; the first (shown) one, which a new conversation follows, for good
+    p.pane().historyButton.click(); await settle(100);
+    rowOf('第二个问题').children[2].click(); await settle(100);
+    const deleting = { rows: p.view().historyRows.map(r => r[1]), files: convs(h).length, timers: h.live() };
+    p.pane().historyBox.children.find(r => r.className.includes('deleted')).children[1].click(); await settle(100);
+    const undone = { rows: p.view().historyRows.filter(r => r[0].includes('row')).length, timers: h.live() };
+    rowOf('估计方法').children[2].click(); await settle(100);
+    const deletedShown = { entries: p.view().entries, shownConv: p.view().shownConv };
+    // the one shown comes back with its place, then goes for good
+    p.pane().historyBox.children.find(r => r.className.includes('deleted')).children[1].click(); await settle(100);
+    deletedShown.back = p.view().shownConv === first;
+    rowOf('估计方法').children[2].click(); await settle(100);
+    h.fire(); await settle(200);
+    const index = JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/conversations/index.json']);
+    facts.conversations = { first: !!first, before, fresh, second: second !== first, resumedSecond, rows, renamed, kept, opened, resumedFirst, followPrompt, deleting, undone,
+                            deletedShown, removed: h.log.removed.map(r => r.split('/').pop() === first + '.jsonl'),
+                            files: convs(h).length, titles: Object.values(index.titles), current: index.current.claude,
+                            busy: null };
+    // while the paper runs, its conversations stay as they are
+    const g = harness({ gateFirst: true });
+    g.runner.start('x');
+    const gp = await g.pane(g.item1);
+    await g.runner.annotate([g.item1]); await settle(80);
+    facts.conversations.busy = { newChat: gp.view().newChatDisabled, history: gp.view().historyDisabled, agent: gp.view().agentDisabled };
+    g.log.calls[0].proc.kill(); await settle(200);
+  }
+  // a deleted Codex conversation's thread is archived at the next Codex run
+  {
+    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, CODEX_SCRIPT], newThreads: true } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(200);
+    await h.runner.annotate([h.item1]); await settle(500);
+    p.pane().historyButton.click(); await settle(100);
+    p.pane().historyBox.children[1].children[2].click(); await settle(100);
+    h.fire(); await settle(200);
+    const queued = h.store.get('extensions.scholium-bridge.codexArchive');
+    await h.runner.annotate([h.item2]); await settle(500);
+    const sent = h.log.codexProcs.at(-1).sent;
+    facts.archived = { queued, archived: sent.filter(m => m.method === 'thread/archive').map(m => m.params.threadId),
+                       order: sent.map(m => m.method).filter(m => /^(initialize|thread\/)/.test(m || '')), left: h.store.get('extensions.scholium-bridge.codexArchive') };
+  }
+  // the context the conversation's session takes up: live while it runs, then from its log; orange near the limit
+  {
+    const used = (input, read, made, out) => ev({ type: 'assistant', session_id: 'S1', message: { content: [{ type: 'text', text: '读论文。' }],
+                                                                                              usage: { input_tokens: input, cache_read_input_tokens: read, cache_creation_input_tokens: made, output_tokens: out } } });
+    const done = window => ev({ type: 'result', subtype: 'success', is_error: false, result: '好', session_id: 'S1',
+                                modelUsage: { 'claude-opus-5-5': { contextWindow: window }, 'claude-haiku-4-5': { contextWindow: 200000 } } });
+    const sub = ev({ type: 'assistant', session_id: 'S1', parent_tool_use_id: 'toolu_1', message: { content: [], usage: { input_tokens: 900000 } } });
+    const h = harness({ scripts: [[SCRIPT[0], used(2, 40000, 5000, 100), sub, 'HOLD', done(1000000)], [SCRIPT[0], used(2, 700000, 110000, 900), done(1000000)]] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.send(h.item1, '这篇讲什么？'); await settle(200);
+    await new Promise(r => setTimeout(r, 20)); await settle(50);   // a tick of the state line
+    const running = p.view().gauge;
+    const runningLog = [!!p.view().shownConv, p.view().logDisabled];   // the new conversation's log, while its first run goes on
+    h.log.release(); await settle(300);
+    const after = { gauge: p.view().gauge, cls: p.view().gaugeClass };
+    const later = harness({ logs: ours(h) });
+    later.runner.start('x');
+    const lp = await later.pane(later.item1);
+    await settle(50);
+    await h.runner.send(h.att1, '再详细一点'); await settle(300);
+    const windowed = CODEX_FOLLOW.map(l => l.replace('"modelContextWindow":null', '"modelContextWindow":828400'));
+    const codex = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, windowed] } });
+    codex.runner.start('x');
+    const cp = await codex.pane(codex.item1);
+    await settle(200);
+    await codex.runner.annotate([codex.item1]); await settle(500);
+    const codexBare = cp.view().gauge;
+    await codex.runner.send(codex.att1, '再短一点'); await settle(500);
+    facts.gauge = { running, runningLog, after, logged: lp.view().gauge, near: { gauge: p.view().gauge, cls: p.view().gaugeClass, title: p.pane().gauge.title },
+                    none: await (async () => { const b = harness(); b.runner.start('x'); return (await b.pane(b.item1)).view().gauge; })(),
+                    codex: [codexBare, cp.view().gauge],
+                    en: (() => { const e = harness({ locale: 'en-US' }); return e.runner.text('context', '45k', '200k', 23); })() };
+  }
+  // when each run ended, under what it showed
+  {
+    const h = harness();
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await h.runner.annotate([h.item1]); await settle(300);
+    const time = convLines(h).at(-1);
+    facts.runTime = { last: p.view().entries.at(-1), logged: [time.type, time.subtype, time.at > 0], shown: h.runner.clock(time.at),
+                      read: (await h.runner.readLog('ATT1', p.view().shownConv)).entries.at(-1) };
+  }
+  // the plugin stops before a run's line is written: nothing of it is logged, and the paper is handed over as queued
+  {
+    const h = harness({ holdDirs: true });
+    h.runner.start('x');
+    await h.pane(h.item1);
+    const queued = h.runner.send(h.item1, '这篇讲什么？');
+    for (let i = 0; i < 200 && !h.log.releaseDir; i++) await tick();
+    h.runner.stop(true);
+    h.log.releaseDir(); await queued; await settle(100);
+    const job = JSON.parse(h.store.get('extensions.scholium-bridge.carryOver')).jobs[0];
+    facts.stopBeforeLine = { logs: convs(h).map(c => h.log.writes[c]), handed: [job.say, job.logged, job.conv] };
+  }
+  // a paper with two PDFs: History opens a conversation of either; a conversation without a line is not listed
+  {
+    const conv3 = '/data/tmp/scholium/ATT3/conversations/claude-20261002-120000.jsonl';
+    const empty = '/data/tmp/scholium/ATT1/conversations/claude-20261003-120000.jsonl';
+    const h = harness({ secondPdf: true, logs: { [CONV1]: JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'claude', user: '第一份' }) + '\n' + SCRIPT[0],
+                                                  [conv3]: JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'claude', user: '第二份' }) + '\n' + SCRIPT[0],
+                                                  [empty]: '' },
+                        logTimes: { [CONV1]: Date.now() - 2000, [conv3]: Date.now() - 1000, [empty]: Date.now() } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(50);
+    const before = [p.view().shownKey, p.view().shownConv];
+    p.pane().historyButton.click(); await settle(100);
+    const rows = p.view().historyRows.map(r => r[1].replace(/\d+月\d+日 \d{2}:\d{2}|\d{2}:\d{2}/, ''));
+    p.pane().historyBox.children.find(r => r.children[0] && r.children[0].title === '第二份').children[0].click(); await settle(100);
+    facts.twoPdfs = { before, rows, after: [p.view().shownKey, p.view().shownConv], first: p.view().entries[0] };
+    p.pane().annotate.click(); await settle(300);
+    facts.twoPdfs.annotated = (h.log.stdin[0] || '').match(/附件 key：(\w+)/)[1];
+  }
+  // the words typed while a run starts a new conversation go on with it
+  {
+    const h = harness();
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(20);
+    const q = p.pane();
+    Object.assign(q, { live: true, shownKey: 'ATT1', shownConv: null });
+    const before = h.runner.unsentKey(q);
+    h.runner.unsent.set(before, '还没发的话');
+    h.runner.livePanes('ATT1', 'claude-x');
+    facts.livePanes = { shownConv: q.shownConv, shownPath: q.shownPath, moved: h.runner.unsent.get(h.runner.unsentKey(q)) || null,
+                        left: h.runner.unsent.has(before) };
+  }
+  // a paper an earlier version had paused without a session is handed over as logged, in that version's log
+  {
+    const carried = JSON.stringify({ jobs: [{ key: 'ATT1', libraryID: 1, agent: 'codex', say: '这篇讲什么？', question: true, interrupted: true },
+                                            { key: 'ATT2', libraryID: 1, agent: 'claude', extra: '只标方法' }] });
+    const h = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried } });
+    h.runner.draining = true;   // the queue is only looked at
+    h.runner.start('x', true);
+    await settle(100);
+    facts.legacyHandOver = h.runner.queue.map(j => [j.att.key, j.conv, !!j.logged, !!j.annotate, !!j.asking]);
+    h.runner.queue = [];
+    h.runner.draining = false;
+  }
+  // a switch of the agent in one section: the paper there gets a new conversation, the other sections show their
+  // papers' conversations of that agent; New chat asked for while the paper runs changes nothing; a deletion not yet
+  // done when the plugin stops is done then
+  {
+    const conv2 = '/data/tmp/scholium/ATT2/conversations/claude-20261002-120000.jsonl';
+    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, gateFirst: true,
+                        logs: { [CONV1]: JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'claude', user: '甲' }) + '\n' + SCRIPT[0],
+                                [conv2]: JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'claude', user: '乙' }) + '\n' + SCRIPT[0] } });
+    h.runner.start('x');
+    const p1 = await h.pane(h.item1), p2 = await h.pane(h.item2);
+    await settle(100);
+    const before = [p1.view().shownConv, p2.view().shownConv];
+    p1.pane().agent.change('claude');
+    await settle(200);
+    const switched = [p1.view().shownConv, p2.view().shownConv];
+    // the other paper runs: New chat there does nothing
+    p2.pane().input.type('丙');
+    p2.pane().send.click(); await settle(100);
+    const running = h.runner.job && h.runner.job.key;
+    await h.runner.newChat(p2.pane());
+    const current = h.log.writes['/data/tmp/scholium/ATT2/conversations/index.json'] || 'not written';
+    h.log.calls[0].proc.kill(); await settle(200);
+    // a deletion the plugin stops in the middle of
+    p1.pane().agent.change('claude');
+    await settle(100);
+    await h.runner.deleteConv(p1.pane(), { key: 'ATT1', id: 'claude-20261001-120000', agent: 'claude', path: CONV1, at: 0, title: '甲' });
+    const pending = [h.runner.deleting.size, CONV1 in h.log.writes];
+    h.runner.stop();
+    await settle(100);
+    facts.otherSections = { before, switched, running, current, pending, removed: !(CONV1 in h.log.writes) };
+  }
+  // the configuration of a write that succeeded is kept whatever the run's end; a write that was refused is not; a
+  // relative configuration is the one in the output folder when it is there
+  {
+    const applyCall = (cmd, id) => tool('PowerShell', { command: cmd }, id);
+    const overloaded = ev({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'API Error: 529 overloaded', session_id: 'S1' });
+    const h = harness({ logs: { '/data/tmp/scholium/ATT1/config.json': '{}' },
+                        scripts: [[SCRIPT[0], applyCall('python s/scholium.py --config config.json --apply', 't1'), answer('{"applied": true}', false, 't1'), overloaded],
+                                  [SCRIPT[0], applyCall('python s/scholium.py --config other.json --apply', 't2'), answer('Exit code 2\nstyle_warnings: 1', true, 't2'),
+                                   LAST, RESULT]] });
+    h.runner.start('x');
+    await h.runner.annotate([h.item1]); await settle(400);
+    const kept = JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']);
+    await h.runner.annotate([h.item1]); await settle(400);
+    const after = JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']);
+    facts.appliedKept = { kept: [kept.config, kept.agent], state: (h.runner.notes.get('ATT1') || {}).text, refused: after.config, at: after.at === kept.at };
+    // Codex: a write whose command failed is not kept
+    const failedApply = [note('turn/started', { threadId: 'T1', turn: { id: 'TURN', status: 'inProgress' } }),
+                         shell('c5', 'python C:/skills/scholium.py --config c.json --apply'),
+                         shell('c5', 'python C:/skills/scholium.py --config c.json --apply', { exitCode: 2, status: 'failed', output: 'style_warnings: 1' }),
+                         coItem('completed', { type: 'agentMessage', id: 'a9', text: '没写入。' }), turnDone({ status: 'completed', durationMs: 1000 })];
+    const c = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [failedApply] } });
+    c.runner.start('x');
+    await c.runner.annotate([c.item1]); await settle(500);
+    facts.appliedKept.codexFailed = '/data/tmp/scholium/ATT1/applied.json' in c.log.writes;
+  }
+  // a follow-up an earlier version handed over: its paper's annotations counted again, its conversation a question's
+  {
+    const legacy = '/data/tmp/scholium/ATT1/claude-run.jsonl';
+    const log = JSON.stringify({ type: 'scholium', subtype: 'prompt', text: '这篇讲什么？', question: true }) + '\n' + SCRIPT[0]
+      + said('讲的是方法。') + ev({ type: 'result', subtype: 'success', is_error: false, result: '讲的是方法。', session_id: 'S1' });
+    const carried = JSON.stringify({ jobs: [{ key: 'ATT1', libraryID: 1, agent: 'claude', say: '再问一句', resume: 'S1', question: false }] });
+    const h = harness({ existing: [['zotero-scholium'], ['zotero-scholium']], logs: { [legacy]: log }, prefs: { 'extensions.scholium-bridge.carryOver': carried } });
+    h.runner.draining = true;   // the queue is only looked at
+    h.runner.start('x', true);
+    await settle(100);
+    facts.legacyFollowUp = h.runner.queue.map(j => [j.conv, j.own, !!j.asking, j.resume]);
+    h.runner.queue = [];
+    h.runner.draining = false;
+  }
+  // the words typed to the new conversation of one agent stay with it when the agent changes; Undo after the deletion
+  // has begun does nothing; the gauge takes the window of the latest run, and a session that is gone starts again
+  {
+    const h = harness();
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    p.pane().input.type('写给 Claude 的话');
+    p.pane().agent.change('codex'); await settle(200);
+    const codexBox = p.pane().input.value;
+    p.pane().agent.change('claude'); await settle(200);
+    const claudeBox = p.pane().input.value;
+    const g = harness({ logs: { [CONV1]: SCRIPT[0] } });
+    g.runner.start('x');
+    await g.pane(g.item1);
+    await settle(40);
+    const gp = [...g.runner.panes.values()][0];
+    await g.runner.deleteConv(gp, { key: 'ATT1', id: 'claude-20261001-120000', agent: 'claude', path: CONV1, at: 0, title: 'x' });
+    const finishing = g.runner.finishDelete(CONV1);
+    const again = g.runner.finishDelete(CONV1);
+    await g.runner.undoDelete(CONV1);
+    const pendingAfterUndo = g.runner.deleting.has(CONV1);
+    await finishing; await again;
+    const context = [g.runner.contextAfter({ type: 'result', modelUsage: { a: { contextWindow: 200000 } } }, { used: 5, window: 1000000 }),
+                     g.runner.contextAfter({ type: 'scholium', subtype: 'gone' }, { used: 5, window: 1000000 }),
+                     g.runner.contextAfter({ type: 'result', modelUsage: {} }, { used: 5, window: 1000000 })];
+    facts.reviewEdges = { codexBox, claudeBox, undoLate: [CONV1 in g.log.writes, g.runner.deleting.size, gp.shownConv, pendingAfterUndo, g.log.removed.length],
+                          context };
   }
   // a failed deletion while the paper's section is on screen: its state line says so, once
   {
@@ -2651,8 +3019,7 @@ CLAUDE = "/appdata/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 SUMMARY = "高亮 28 条（核心 12 条），页边批注 9 条，笔记《Deep latent》，无剩余警告。"
 BRIEF = "高亮 28 条（核心 12 条）\n页边批注 9 条\n无剩余警告"   # the summary in a notice
 ASK = "向这篇论文提问；或写附加要求，随「批注这篇」发送"   # the message box's placeholder before an annotation
-HISTORY_HEAD = ("这篇论文在 Zotero 里已有一段对话，下面是其中你还没看到的部分（由另一个智能体完成，或在你已经结束的会话里）。"
-                "先读一遍，再处理后面的新消息；输出目录里的文件（配置、句子、笔记）就是那时留下的。")
+HISTORY_HEAD = "下面是这段对话之前的内容。原来的会话已经接不上了，这是 Zotero 里保存的记录："   # a new session's conversation, as text
 HISTORY_END = "——以上是之前的对话，新消息如下——"
 CLOSING = "改了批注时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。"   # the end of a follow-up's prompt
 DONE_NOTICE = ["完成 · Ns"] + BRIEF.split("\n")   # a harness run's own time, read through run_time
@@ -2660,10 +3027,11 @@ DONE_STATE = "完成 · 6m 17s · 26 轮 · 257 万 token"
 
 
 def run_time(value):
-    """A harness run's own time (a fraction of a second, which a slow machine may round up) as Ns, in a string
-    or in the strings of a list or dict; a time taken from a result, such as 6m 17s, stays."""
+    """A harness run's own time (a fraction of a second, which a slow machine may round up) as Ns, and the clock time
+    a run ended at as HH:MM, in a string or in the strings of a list or dict; a time taken from a result, such as
+    6m 17s, stays."""
     if isinstance(value, str):
-        return re.sub(r"(?<!m )(?<![\d.])\d+s\b", "Ns", value)
+        return re.sub(r"^\d{2}:\d{2}$", "HH:MM", re.sub(r"(?<!m )(?<![\d.])\d+s\b", "Ns", value))
     if isinstance(value, list):
         return [run_time(v) for v in value]
     if isinstance(value, dict):
@@ -2687,6 +3055,9 @@ TRANSCRIPT = [
     ["scholium-entry result", '⎿ {"applied": true}'],
     ["scholium-entry text", "⏺ Done.\n" + SUMMARY],
 ]
+ANNOTATE = ["scholium-entry prompt", "批注这篇"]   # the user's Annotate, as the transcript shows it
+ENDED = ["scholium-entry time", "HH:MM"]          # when a run ended, under it
+RUN = [ANNOTATE] + TRANSCRIPT + [ENDED]
 
 
 def test_section_is_registered_and_removed_without_menus_or_toolbar_status(facts):
@@ -2759,8 +3130,8 @@ def css_rules():
 
 def test_section_is_styled_by_its_stylesheet(facts):
     look = facts["look"]
-    assert look["parts"] == ["scholium-settings", "scholium-actions", "scholium-state ok", "scholium-caption", "scholium-log",
-                             "scholium-composer"]
+    assert look["parts"] == ["scholium-settings", "scholium-actions", "scholium-state ok", "scholium-caption", "scholium-history",
+                             "scholium-log", "scholium-composer"]
     assert look["buttons"] == ["scholium-button primary", "scholium-button", "scholium-button", "scholium-button quiet",
                                "scholium-button quiet danger", "scholium-button quiet", "scholium-button primary small"]
     assert look["selects"] == ["scholium-select"] * 3 and look["input"] == "scholium-input"
@@ -2770,7 +3141,9 @@ def test_section_is_styled_by_its_stylesheet(facts):
     for cls in ["scholium-pane", "scholium-settings", "scholium-field", "scholium-select", "scholium-actions", "scholium-spacer",
                 "scholium-button", "scholium-state", "scholium-caption", "scholium-log", "scholium-entry", "scholium-bullet",
                 "scholium-content", "scholium-composer", "scholium-input", "scholium-send-row", "scholium-hint", "scholium-copy",
-                "scholium-markdown"]:
+                "scholium-markdown", "scholium-caption-tools", "scholium-history", "scholium-history-group", "scholium-history-row",
+                "scholium-history-open", "scholium-history-title", "scholium-history-time", "scholium-history-rename",
+                "scholium-history-empty", "scholium-send-info", "scholium-context"]:
         assert any(re.search(r"\." + re.escape(cls) + r"(?![\w-])", sel) for sel in rules), cls
     log = rules[".scholium-log"]
     for part in ("background: var(--material-background)", "color: var(--fill-primary)", "border: var(--material-border-quarternary)",
@@ -2794,6 +3167,9 @@ def test_section_is_styled_by_its_stylesheet(facts):
     for kind, colour in (("running", "blue"), ("ok", "green"), ("error", "red"), ("paused", "orange")):
         assert f"var(--accent-{colour})" in rules[f".scholium-state.{kind}::before"], kind
     assert "animation: scholium-pulse" in rules[".scholium-state.running::before"]
+    assert "var(--accent-orange)" in rules[".scholium-context.warn"] and "flex-end" in rules[".scholium-entry.time"]
+    assert "opacity: 0" in rules[".scholium-history-row .scholium-button.icon"]
+    assert "text-overflow: ellipsis" in rules[".scholium-history-title"] and "overflow-y: auto" in rules[".scholium-history"]
 
 
 def test_transcript_box_keeps_its_dragged_height(facts):
@@ -2827,17 +3203,21 @@ def test_prompt_names_the_paper_and_the_unattended_rules(facts):
 
 def test_section_shows_the_transcript_like_claude_code(facts):
     a = facts["paneAfter"]
-    assert a["entries"] == TRANSCRIPT
+    assert run_time(a["entries"]) == RUN
     assert not any(kind.startswith("scholium-entry final") for kind, _ in a["entries"])
     assert a["state"] == DONE_STATE and a["stateKind"] == "scholium-state ok" and a["stateTitle"] == TOKEN_DETAIL
     assert a["stateDisplay"] == ""
     assert (a["annotateDisabled"], a["cancelHidden"], a["logDisabled"], a["shownKey"]) == (False, True, False, "ATT1")
-    assert facts["paneRerendered"]["entries"] == TRANSCRIPT
+    assert run_time(facts["paneRerendered"]["entries"]) == RUN
     o = facts["otherAfter"]
     assert o["entries"] == [["scholium-entry info", "这篇还没有运行记录。"]]
     assert o["state"] is None and o["stateKind"] == "scholium-state info", "nothing of another paper's run"
-    assert facts["logLines"] == 16, "the run's own line, then Claude Code's events"
-    assert facts["revealed"] == ["/data/tmp/scholium/ATT1/conversation.jsonl"]
+    assert facts["logLines"] == 18, "the run's own line, the Annotate line, Claude Code's events, when it ended"
+    assert re.fullmatch(r"/data/tmp/scholium/ATT1/conversations/claude-\d{8}-\d{6}\.jsonl", facts["revealed"][0])
+    c = facts["firstConversation"]
+    assert c["files"] == ["/data/tmp/scholium/ATT1/conversations/claude-TIME.jsonl"]
+    assert c["index"] == {"current": {"claude": "claude-TIME"}, "titles": {"claude-TIME": "批注这篇"}}
+    assert c["applied"]["config"] == "/data/c.json" and c["applied"]["agent"] == "claude" and c["applied"]["conv"] in facts["revealed"][0]
     h = facts["history"]
     assert h["history"] is True and h["shownKey"] == "ATT1" and h["logDisabled"] is False
     assert h["entries"] == TRANSCRIPT[:4] + [TRANSCRIPT[-1]]
@@ -2879,7 +3259,7 @@ def test_section_shows_running_and_finished_state(facts):
     w = facts["whileRunning"]["view"]
     assert run_time(w["state"]) == "第 1/6 步 加载技能 · 已用 Ns" and w["stateKind"] == "scholium-state running"
     assert (w["cancelHidden"], w["annotateDisabled"], w["removeDisabled"]) == (False, True, True)
-    assert w["entries"] == TRANSCRIPT[:3]
+    assert w["entries"] == [ANNOTATE] + TRANSCRIPT[:3]
     assert facts["otherRunning"] == {"state": None, "kind": "scholium-state info"}, "another paper's run is not shown here"
     assert facts["finished"]["notifications"] == [], "Zotero is in front: the corner notice tells"
 
@@ -2926,7 +3306,7 @@ def test_papers_run_one_after_another_without_duplicates(facts):
     done = facts["queueDone"]
     assert done["calls"] == 2 and done["prompts"] == ["ATT1", "ATT2"]
     assert done["notifications"] == []
-    assert done["pane2"]["shownKey"] == "ATT2" and done["pane2"]["entries"][-1] == TRANSCRIPT[-1]
+    assert done["pane2"]["shownKey"] == "ATT2" and run_time(done["pane2"]["entries"][-2:]) == [TRANSCRIPT[-1], ENDED]
     assert done["pane2"]["state"] == DONE_STATE
     assert facts["raceWhileFirstStarts"] == {"calls": 1, "queued": 1}
     assert facts["raceDone"] == 2
@@ -3172,9 +3552,9 @@ def test_a_cancelled_message_stays_marked_and_typed_words_stay_with_their_item(f
 def test_an_unfinished_message_comes_before_the_failure(facts):
     for agent in ("claude", "codex"):
         f = facts["failedInside"][agent]
-        assert f["shown"] == ["text", "final error"], agent
+        assert f["shown"] == ["text", "final error", "time"], agent
         assert f["logged"] == ["unfinished", "result"], agent
-        assert f["read"] == ["unfinished", "final"], agent
+        assert f["read"] == ["unfinished", "final", "time"], agent
 
 
 def test_a_selection_in_the_draft_holds_it_still(facts):
@@ -3185,7 +3565,8 @@ def test_a_message_in_a_conversation_goes_before_waiting_papers(facts):
     assert facts["followUpOrder"] == {
         "fresh": ["ATT1:再短一点", "ATT2", "ATT3"],
         "afterTalk": ["ATT2:早先的问题", "ATT1:再短一点", "ATT3"],
-        "afterTalkElsewhere": ["ATT2:换个智能体问", "ATT1:再短一点", "ATT3"],   # a follow-up for an agent without a session there
+        "afterQuestion": ["ATT2:新的问题", "ATT1:再短一点", "ATT3"],
+        "beforeAnnotation": ["ATT1:再短一点", "ATT2", "ATT3"],   # a follow-up for an agent without a session there
         "afterRetry": ["ATT2", "ATT1:再短一点", "ATT3"],
         "afterPause": ["ATT2", "ATT1:再短一点", "ATT3"],
         "pausedHeadCancelled": ["ATT1:再短一点", "ATT2", "ATT3"],
@@ -3301,8 +3682,8 @@ def test_extra_instructions_and_follow_ups_continue_the_conversation(facts):
     e = facts["extra"]
     assert e["before"] == {"placeholder": ASK, "sendHidden": False, "sendDisabled": True, "sendRowHidden": False}
     assert "用户的附加要求：\n只标注方法部分\n\n结束时" in e["prompt"] and e["cleared"] == ""
-    assert e["firstLogLine"] == {"type": "scholium", "subtype": "prompt", "text": "附加要求：只标注方法部分"}
-    assert e["firstEntry"] == ["scholium-entry prompt", "附加要求：只标注方法部分"]
+    assert e["firstLogLine"] == {"type": "scholium", "subtype": "prompt", "text": "批注这篇\n附加要求：只标注方法部分", "annotate": True}
+    assert e["firstEntry"] == ["scholium-entry prompt", "批注这篇\n附加要求：只标注方法部分"]
     follow = "接着对话，例如：第 5 页那条译文改短一些"
     assert e["after"] == {"placeholder": follow, "sendHidden": False, "sendDisabled": True, "sendRowHidden": False}
     assert e["typed"] == {"placeholder": follow, "sendHidden": False, "sendDisabled": False, "sendRowHidden": False}
@@ -3311,11 +3692,10 @@ def test_extra_instructions_and_follow_ups_continue_the_conversation(facts):
     assert f["prompt"].startswith("下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
                                   "只是提问就直接回答；要改批注时按技能的流程修改配置，再写入 Zotero。")
     assert f["prompt"].endswith("\n\n第 5 页那条译文改短\n\n" + CLOSING)
-    assert f["prompts"] == ["附加要求：只标注方法部分", "第 5 页那条译文改短"]
-    assert f["entries"] == 2 * (1 + len(TRANSCRIPT))
-    assert f["markers"] == ["附加要求：只标注方法部分", "第 5 页那条译文改短"] and f["inits"] == 2
-    assert f["state"] == DONE_STATE
-    assert f["withoutSession"] is False and f["calls2"] == 2
+    assert f["prompts"] == ["批注这篇\n附加要求：只标注方法部分", "第 5 页那条译文改短"]
+    assert f["entries"] == 2 * (2 + len(TRANSCRIPT)), "each run: the user's words, the transcript, when it ended"
+    assert f["markers"] == f["prompts"] and f["inits"] == 2 and f["times"] == 2
+    assert f["state"] == DONE_STATE and f["conversations"] == 1
 
 
 def test_a_paper_outside_the_queue_shows_nothing_of_a_pause(facts):
@@ -3337,7 +3717,7 @@ def test_usage_limit_pauses_the_queue_and_continues_after_the_reset(facts):
     r = facts["limitResumed"]
     assert r["calls"] == 3 and r["resume"] == "S1" and r["order"] == ["ATT1", "continue", "ATT2"]
     assert r["prompt"] == "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。"
-    assert "额度已恢复，接着中断的地方继续" in r["entries"] and r["markers"] == ["continue"] and r["inits"] == 2
+    assert "额度已恢复，接着中断的地方继续" in r["entries"] and r["markers"] == ["prompt", "continue", "time"] and r["inits"] == 2
     assert r["runs"] == [["claude", "批注这篇"], ["claude", None]], "the continuation is the same turn"
     assert r["state1"] == DONE_STATE and r["paused"] is None and r["waits"] == []
     assert r["notifications"] == []
@@ -3419,30 +3799,32 @@ def test_codex_runs_the_skill_in_a_sandbox_through_its_app_server(facts):
     # questions that reach the plugin are declined: nobody is there to answer
     assert r["answers"] == [{"id": "q1", "result": {"decision": "decline"}}, {"id": "q2", "result": {"answers": {}}},
                             {"id": "q3", "error": {"code": -32601, "message": "not handled by scholium-bridge"}}]
-    assert r["killed"] is True and r["session"] == {"question": False, "ids": {"codex": "T1"}} and r["claudeCalls"] == 0
+    assert r["killed"] is True and r["session"] == "T1" and r["claudeCalls"] == 0
+    assert r["applied"] == "/data/tmp/scholium/c.json", "the configuration of its apply, in Codex's folder"
 
 
 def test_codex_transcript_state_and_log_read_like_claude_codes(facts):
     r = facts["codexRun"]
-    assert r["entries"] == CODEX_TRANSCRIPT
-    assert r["state"] == "完成 · 6m 17s · 3 轮 · 265 万 token"
+    assert run_time(r["entries"]) == [ANNOTATE] + CODEX_TRANSCRIPT + [ENDED]
+    assert r["state"] == "完成 · 6m 17s · 3 轮 · 265 万 token" and r["gauge"] == "上下文 133 万"
     assert r["stateTitle"] == "输入 19 万 · 缓存写入 0 · 缓存读取 241 万 · 输出 4.7 万"
     # deltas and start-up chatter stay out of the log; the run starts and ends as Claude Code's does
     assert not any(m.endswith("Delta") or m.endswith("delta") or "startupStatus" in m for m in r["logged"])
-    assert r["logged"][0] == "system" and r["logged"][-1] == "result" and "item/commandExecution/requestApproval" in r["logged"]
+    assert r["logged"][:2] == ["scholium", "system"] and r["logged"][-2:] == ["result", "scholium"]
+    assert "item/commandExecution/requestApproval" in r["logged"] and r["userMessages"] == 0, "the user's message is the plugin's own line"
     assert r["init"] == {"type": "system", "subtype": "init", "agent": "codex", "model": "gpt-6-luna", "session_id": "T1"}
     assert r["result"] == {"type": "result", "agent": "codex", "subtype": "success", "is_error": False, "result": "Done.\n" + SUMMARY,
                            "session_id": "T1", "duration_ms": 376500, "num_turns": 3,
                            "usage": {"input_tokens": 190000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 2410000,
                                      "output_tokens": 46778}}
     assert run_time(r["notices"][-1]["descriptions"]) == DONE_NOTICE
-    assert r["sendShown"] is True and r["revealed"] == ["/data/tmp/scholium/ATT1/conversation.jsonl"]
+    assert r["sendShown"] is True and re.fullmatch(r"/data/tmp/scholium/ATT1/conversations/codex-\d{8}-\d{6}\.jsonl", r["revealed"][0])
     latest = facts["latestLog"]
     assert latest["codex"] == {"first": ["scholium-entry info", "Codex · gpt-6-luna"], "count": len(CODEX_TRANSCRIPT),
-                               "state": "上次：完成 · 6m 17s · 3 轮 · 265 万 token", "session": {"question": False, "ids": {"codex": "T1"}},
-                               "revealed": "/data/tmp/scholium/ATT1/codex-run.jsonl"}
+                               "state": "上次：完成 · 6m 17s · 3 轮 · 265 万 token", "shownConv": "codex-run", "session": "T1",
+                               "revealed": "/data/tmp/scholium/ATT1/codex-run.jsonl", "title": "批注这篇"}, "an earlier version's log is its agent's"
     assert latest["claude"]["first"] == ["scholium-entry info", "Claude Code · claude-opus-5-5"]
-    assert latest["claude"]["session"] == {"question": False, "ids": {"claude": "S1"}}
+    assert latest["claude"]["session"] == "S1" and latest["claude"]["shownConv"] == "claude-run"
     assert latest["claude"]["revealed"] == "/data/tmp/scholium/ATT1/claude-run.jsonl"
 
 
@@ -3450,9 +3832,11 @@ def test_an_unchanged_log_is_parsed_once(facts):
     c = facts["logCache"]
     assert c["first"] == c["again"] and c["unchanged"] == 0
     assert c["after"] == c["first"] + 1 and c["reparsed"] == 7
+    assert facts["quietTurn"] == [{"user": "只写入", "reply": "", "ended": "", "reached": True, "done": True}], \
+        "a run that ended well without a word is not an unfinished one"
 
 
-def test_a_conversation_goes_on_with_the_chosen_agent(facts):
+def test_each_agent_has_its_own_conversations(facts):
     f = facts["codexFollowUp"]
     assert f["claudeCalls"] == 0
     assert f["methods"] == ["initialize", "initialized", "config/read", "plugin/installed", "thread/resume", "turn/start"]
@@ -3466,23 +3850,25 @@ def test_a_conversation_goes_on_with_the_chosen_agent(facts):
     assert f["state"] == "完成 · 1m 05s · 1 轮 · 40.3 万 token"
     assert f["entries"] == [["scholium-entry text", "⏺ Done.\n" + SUMMARY], ["scholium-entry prompt", "第 5 页那条译文改短"],
                             ["scholium-entry info", "Codex · gpt-6-luna"], ["scholium-entry text", "⏺ 改好了：第 5 页的译文已缩短。"]]
-    assert f["results"] == 2 and f["markers"] == ["第 5 页那条译文改短"]
-    c = facts["sharedClaude"]
-    assert c["calls"] == 1 and c["resumed"] is False, "Claude Code has no session in the conversation yet"
-    assert c["prompt"].startswith(HISTORY_HEAD + "\n\n[第 1 轮 · Codex]\n用户：批注这篇\n回答：Done.\n" + SUMMARY
-                                  + "\n\n[第 2 轮 · Codex]\n用户：第 5 页那条译文改短\n回答：改好了：第 5 页的译文已缩短。\n\n" + HISTORY_END
-                                  + "\n\n使用 zotero-scholium 技能读下面这篇论文")
-    assert ("\n要改已经写入的批注或补几条时，编辑输出目录里写入它们的那份配置（它是这篇论文的全部批注），设 cleanup: true 整份重写"
-            in c["prompt"]), "a follow-up after an annotation"
-    assert "\n\n用户的新消息：\n它和 FNO 比怎么样？\n\n" in c["prompt"]
-    assert c["session"] == {"question": False, "ids": {"codex": "T1", "claude": "S1"}}
-    b = facts["sharedBack"]
+    assert f["results"] == 2 and f["markers"] == ["批注这篇", "第 5 页那条译文改短"]
+    # Claude Code chosen: a new conversation of its own, given nothing of Codex's; Codex's log stays as it was
+    c = facts["switchedToClaude"]
+    s = c["switched"]
+    assert s["entries"] == [["scholium-entry info", "这篇论文在 Codex 里有对话，把智能体换成 Codex 就能接着聊。"]]
+    assert (s["shownConv"], s["newChatDisabled"], s["gauge"], s["placeholder"]) == (None, True, None, ASK)
+    assert s["index"]["claude"] is None and s["index"]["codex"].startswith("codex-"), "as llm-for-zotero's switch, a new conversation"
+    assert c["calls"] == 1 and c["resumed"] is False
+    assert c["prompt"].startswith("使用 zotero-scholium 技能读下面这篇论文") and HISTORY_HEAD not in c["prompt"]
+    assert "\n\n用户的问题：\n它和 FNO 比怎么样？\n\n" in c["prompt"]
+    assert c["conversations"] == ["codex", "claude"] and c["codexKept"] is True
+    # Codex chosen again: a new conversation too; History opens the earlier one, which goes on in its thread
+    b = facts["switchedBack"]
+    assert b["again"] == {"entries": [["scholium-entry info", "新对话。之前的对话在「历史」里。"]], "shownConv": None}
+    assert b["rows"][0] == ["scholium-history-group", "今天"] and re.fullmatch(r"批注这篇\d{2}:\d{2}✎✕", b["rows"][1][1])
+    assert b["opened"] == {"shownConv": True, "historyRows": None, "entries": 18, "placeholder": "接着对话，例如：第 5 页那条译文改短一些"}
     assert b["methods"] == ["thread/resume"] and b["threadId"] == "T1" and b["skill"] is False, "Codex goes on in its own thread"
-    assert b["text"].startswith(HISTORY_HEAD + "\n\n[第 1 轮 · Claude Code]\n用户：它和 FNO 比怎么样？\n回答：Done.\n" + SUMMARY + "\n\n"
-                                + HISTORY_END + "\n\n下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。"), "only the turn it has not seen"
-    assert b["text"].endswith("\n\n再短一点\n\n" + CLOSING)
-    assert b["runs"] == [["codex", "批注这篇"], ["codex", "第 5 页那条译文改短"], ["claude", "它和 FNO 比怎么样？"], ["codex", "再短一点"]]
-    assert b["session"] == {"question": False, "ids": {"codex": "T1", "claude": "S1"}}
+    assert b["text"].startswith("下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。") and b["text"].endswith("\n\n再短一点\n\n" + CLOSING)
+    assert b["runs"] == [["codex", "批注这篇"], ["codex", "第 5 页那条译文改短"], ["codex", "再短一点"]] and b["conversations"] == 2
 
 
 def test_codex_steps_and_cancel(facts):
@@ -3498,7 +3884,7 @@ def test_codex_steps_and_cancel(facts):
     none = s["none"]
     assert none["methods"] == ["skills/list", "skills/list"] and none["input"] is None and none["model"] is None, "no conversation opens"
     assert none["outcome"].startswith("失败")
-    end = json.loads(none["log"].strip().splitlines()[-1])
+    end = json.loads(none["log"].strip().splitlines()[-2])   # before when the run ended
     assert end["subtype"] == "end" and end["outcome"] == "failed" and "Codex 找不到 zotero-scholium 技能" in end["text"]
 
 
@@ -3550,7 +3936,7 @@ def test_a_failed_connection_gets_one_more_try(facts):
     # one log, the first try kept: two starts, the retry line between them
     assert ok["marks"] == ["prompt", "retry"] and ok["inits"] == 2   # the extra instructions are logged once
     assert ok["runs"] == [["codex", "批注这篇\n附加要求：只标注方法部分"], ["codex", None]], "the second try is the same turn"
-    assert ok["entries"][:4] == [["scholium-entry prompt", "附加要求：只标注方法部分"], ["scholium-entry info", "Codex · gpt-6-astra"],
+    assert ok["entries"][:4] == [["scholium-entry prompt", "批注这篇\n附加要求：只标注方法部分"], ["scholium-entry info", "Codex · gpt-6-astra"],
                                  ["scholium-entry final error", "workspace routing discovery timed out"],
                                  ["scholium-entry info", "连接失败，30 秒后自动重试一次"]]
     assert ok["notifications"] == []
@@ -3582,9 +3968,12 @@ def test_the_prompt_names_the_profile_or_the_defaults(facts):
 
 
 def test_a_follow_up_says_how_to_change_written_annotations(facts):
-    prompt = facts["followUp"]["prompt"]
+    prompt = facts["appliedConfig"]["unchanged"][0]
     assert "改已经写入的批注或补几条时，都编辑写入它们的那份配置（它是这篇论文的全部批注），设 cleanup: true 整份重写" in prompt
     assert "不要另写只含新条目的配置，否则下次整份重写时会把它们删掉。" in prompt
+    # the harness's paper never gets the annotations: as after a deletion, the follow-up says they are gone
+    assert "\n这篇论文现在没有本工具的批注（可能已在 Zotero 里删除）。\n" in facts["followUp"]["prompt"]
+    assert "整份重写" not in facts["followUp"]["prompt"]
 
 
 def test_claude_code_without_the_skill_stops_at_once(facts):
@@ -3635,10 +4024,11 @@ def test_papers_outside_my_library_and_missing_files_are_not_run(facts):
     assert o["askedMissing"] == [False, ["这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）。"], 0]
 
 
-def test_annotate_leaves_a_follow_up_in_the_box(facts):
+def test_annotate_goes_on_in_the_conversation_with_the_box_as_extra_instructions(facts):
     a = facts["annotateInConversation"]
-    assert a["calls"] == 2 and a["resumed"] is False and "第 5 页那条译文改短" not in a["prompt"]
-    assert a["kept"] == "第 5 页那条译文改短"
+    assert a["calls"] == 2 and a["resume"] == "S1" and a["kept"] == "" and a["conversations"] == 1
+    assert a["prompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注：") and "用户的附加要求：\n只标方法部分\n\n结束时" in a["prompt"]
+    assert a["prompts"] == ["批注这篇", "批注这篇\n附加要求：只标方法部分"]
 
 
 def test_a_question_starts_a_conversation_that_answers_without_annotating(facts):
@@ -3661,17 +4051,17 @@ def test_a_question_starts_a_conversation_that_answers_without_annotating(facts)
         "",
         "写入了 Zotero 时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。",
     ])
-    question = {"question": True, "ids": {"claude": "Q1"}}
-    assert run_time(a["during"]) == {"placeholder": ASK, "sendHidden": False, "cancel": "取消提问", "session": question,
-                                     "state": "加载技能 · 已用 Ns", "cleared": ""}, "the steps a question reaches, without their count"
+    assert run_time(a["during"]) == {"placeholder": ASK, "sendHidden": False, "cancel": "取消提问", "state": "加载技能 · 已用 Ns", "cleared": ""}, \
+        "the steps a question reaches, without their count"
     assert a["lines"] == [{"type": "scholium", "subtype": "prompt", "text": "这篇怎么估计后验？", "question": True}]
     assert run_time(a["notices"]) == [["已在后台开始回答。过程见条目侧栏的 Scholium 区块。"], ["完成 · Ns", "用变分推断估计后验。"]]
-    assert a["entries"][0] == "这篇怎么估计后验？" and a["entries"][-1] == "⏺ 用变分推断估计后验。"
-    assert a["after"]["placeholder"] == ASK and a["after"]["session"] == question
-    assert facts["ask"]["shown"] == {"placeholder": ASK, "session": question}, "a restart reads the question's conversation from the log"
+    assert a["entries"][0] == "这篇怎么估计后验？" and a["entries"][-2:] == ["⏺ 用变分推断估计后验。", a["entries"][-1]]
+    assert a["after"]["placeholder"] == ASK and a["after"]["session"] == "Q1"
+    assert facts["ask"]["shown"] == {"placeholder": ASK, "session": "Q1"}, "a restart reads the question's conversation from the log"
 
 
 def test_annotate_continues_a_questions_conversation_with_the_box_as_extra_instructions(facts):
+    follow = "接着对话，例如：第 5 页那条译文改短一些"
     n = facts["ask"]["annotated"]
     assert n["resume"] == "Q1" and n["cleared"] == ""
     assert n["prompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注：")
@@ -3679,118 +4069,230 @@ def test_annotate_continues_a_questions_conversation_with_the_box_as_extra_instr
     assert n["lines"][-1] == {"type": "scholium", "subtype": "prompt", "text": "批注这篇\n附加要求：重点标方法部分", "annotate": True}
     assert n["prompts"] == ["这篇怎么估计后验？", "批注这篇\n附加要求：重点标方法部分"], "the question's transcript stays"
     assert n["notices"][0] == [STARTED]
-    assert n["after"] == {"placeholder": "接着对话，例如：第 5 页那条译文改短一些", "sendHidden": False, "cancel": "取消批注",
-                          "session": {"question": False, "ids": {"claude": "S1"}}}
-    assert facts["ask"]["redo"] == {"calls": 3, "resumed": False, "kept": "第 5 页那条译文改短", "lines": []}, "a redo starts afresh"
+    assert n["after"] == {"placeholder": follow, "sendHidden": False, "cancel": "取消批注", "session": "S1"}
+    r = facts["ask"]["redo"]
+    assert r["calls"] == 3 and r["resumed"] is True and r["kept"] == "" and r["conversations"] == 1, "Annotate again goes on in the conversation"
+    assert [line["text"] for line in r["lines"]] == ["这篇怎么估计后验？", "批注这篇\n附加要求：重点标方法部分", "批注这篇\n附加要求：第 5 页那条译文改短"]
     assert facts["ask"]["restarted"] == {"resumed": True, "prompt": n["prompt"].split("\n")[0], "profile": "- 画像：/data/zotero-scholium/profile.md"}
-    assert facts["ask"]["later"] == {"placeholder": "接着对话，例如：第 5 页那条译文改短一些",
-                                     "session": {"question": False, "ids": {"claude": "S1"}}}, "the log keeps the annotation"
+    assert facts["ask"]["later"] == {"placeholder": follow, "session": "S1"}, "the log keeps the annotation"
     assert facts["askOrder"] == ["ATT3", "ATT4", "ATT2"], "questions go before the papers still waiting, in their order"
-    assert run_time(facts["askBox"]) == {"asking": ASK, "annotating": "接着对话，例如：第 5 页那条译文改短一些", "state": "启动 Claude Code · 已用 Ns",
-                                         "session": {"question": True, "ids": {"claude": "Q1"}}}, "an annotation that starts takes the box's next words as a follow-up"
+    assert run_time(facts["askBox"]) == {"asking": ASK, "annotating": follow, "state": "启动 Claude Code · 已用 Ns", "queued": []}, \
+        "an annotation that starts takes the box's next words as a follow-up"
     c = facts["askThenCodex"]
-    assert c["claudeCalls"] == 1 and c["threads"] == ["thread/start"], "Codex has no session in the conversation yet"
-    assert c["session"] == {"question": False, "ids": {"claude": "Q1", "codex": "T1"}} and c["placeholder"] == "接着对话，例如：第 5 页那条译文改短一些"
-    assert c["text"].startswith(HISTORY_HEAD + "\n\n[第 1 轮 · Claude Code]\n用户：这篇怎么估计后验？\n回答：用变分推断估计后验。\n\n" + HISTORY_END + "\n\n"
-                                "使用 zotero-scholium 技能，为下面这篇论文做整篇标注"), "the question and its answer, then the task"
-    assert c["entries"][0] == "这篇怎么估计后验？" and "Codex · gpt-6-astra" in c["entries"], "one transcript for both agents"
+    assert c["claudeCalls"] == 1 and c["threads"] == ["thread/start"] and c["conversations"] == 2, "Codex starts a conversation of its own"
+    assert c["text"] == "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论、页边批注、阅读笔记，按画像和默认值。"
+    assert c["entries"][0] == "批注这篇" and "Codex · gpt-6-astra" in c["entries"] and "这篇怎么估计后验？" not in c["entries"]
+    assert c["placeholder"] == follow
 
 
 def test_a_questions_follow_ups_failures_and_races(facts):
     e = facts["askEdges"]
-    assert e["owned"] == "这篇论文已有 1 条本工具的批注；问到它们的内容时，写一份只含 pdf、item_key、attachment_key、out_dir 的配置，用 --config <配置> --list --full 列出。"
+    assert e["owned"] == ("这篇论文已有 1 条本工具的批注；问到它们的内容时，写一份只含 pdf、item_key、attachment_key、out_dir 的配置，"
+                          "用 --config <配置> --list --full 列出。要改批注或补几条时，编辑输出目录里写入它们的那份配置（它是这篇论文的全部批注），"
+                          "设 cleanup: true 整份重写（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置。")
     assert e["followUp"] == ("下面是用户在 Zotero 里针对这篇论文发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
                              "只是提问就直接回答；用户明确要求写批注或笔记时，才按技能的流程写入 Zotero。\n\n那它的损失函数呢？\n\n"
                              "写入了 Zotero 时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。"), "no configuration to rewrite whole"
-    assert e["resumes"] == [False, True, True, False], "after a failed annotation in the question's conversation a redo starts afresh"
-    assert e["failed"] == {"session": {"question": False, "ids": {"claude": "Q1"}}, "placeholder": "接着对话，例如：第 5 页那条译文改短一些"}
-    assert facts["askRace"] == {"both": [0, True], "queued": 0, "calls": 1,
-                                "prompt": "使用 zotero-scholium 技能读下面这篇论文（status 给出题录，extract 给出正文），回答用户在 Zotero 里提的问题。"}
-    assert facts["handedTwice"] == {"calls": 0, "updated": True}
+    assert e["resumes"] == [False, True, True, True], "after a failed annotation the conversation goes on in its session"
+    assert e["failed"] == {"session": "Q1", "question": False, "placeholder": "接着对话，例如：第 5 页那条译文改短一些"}
+    race = facts["askRace"]
+    assert sorted(bool(x) for x in race["both"]) == [False, True] and race["queued"] == 0 and race["calls"] == 1, "one of them runs"
+    assert facts["handedTwice"] == {"calls": 0, "updated": True, "conv": "claude-run"}, "an earlier version's paper goes on in that version's log"
 
 
-def test_a_conversation_the_agent_no_longer_has_goes_on_in_a_new_one(facts):
+def test_a_session_the_agent_no_longer_has_is_rebuilt_from_the_conversation(facts):
     question = "使用 zotero-scholium 技能读下面这篇论文（status 给出题录，extract 给出正文），回答用户在 Zotero 里提的问题。"
-    c = facts["goneCodex"]
-    assert c["methods"] == [["thread/resume"], ["thread/start"]]
-    assert c["marks"] == [{"type": "scholium", "subtype": "prompt", "text": "AdLN的作用是什么"},
-                          {"type": "scholium", "subtype": "gone", "agent": "codex", "resent": True}]
-    assert c["prompt"].startswith(HISTORY_HEAD + "\n\n[第 1 轮 · Codex]\n用户：批注这篇\n回答：Done.\n" + SUMMARY + "\n\n" + HISTORY_END + "\n\n" + question)
-    assert "\n\n用户的新消息：\nAdLN的作用是什么\n\n" in c["prompt"] and c["skill"] is True, "a new thread with the conversation, the paper, the words and the skill"
-    assert c["entries"][-4:] == [["scholium-entry prompt", "AdLN的作用是什么"],
-                                 ["scholium-entry info", "Codex 里原来的会话已经不存在了（例如在 Codex 应用里删掉了），已开一个新会话接着这段对话。"],
-                                 ["scholium-entry info", "Codex · gpt-6-astra"], ["scholium-entry text", "⏺ 改好了：第 5 页的译文已缩短。"]]
-    assert c["state"].startswith("完成") and not any(d[0].startswith("失败") for d in c["notices"])
-    assert c["session"] == {"question": False, "ids": {"codex": "T1"}} and c["placeholder"] == "接着对话，例如：第 5 页那条译文改短一些", "still the annotation's conversation"
+    turn = "[第 1 轮]\n用户：批注这篇\n回答：Done.\n" + SUMMARY
+    items = [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "批注这篇"}]},
+             {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Done.\n" + SUMMARY}]}]
+    for name in ("goneCodex", "goneCodexText"):
+        c = facts[name]
+        assert c["methods"] == [["thread/resume"], ["thread/start", "thread/inject_items"]], name
+        assert c["marks"][1:] == [{"type": "scholium", "subtype": "prompt", "text": "AdLN的作用是什么"},
+                                  {"type": "scholium", "subtype": "gone", "agent": "codex", "resent": True}], name
+        assert c["runs"] == ["批注这篇", "AdLN的作用是什么", None], "the new session's run is the same turn"
+        assert c["items"] == items, name
+        assert "\n\n用户的新消息：\nAdLN的作用是什么\n\n" in c["prompt"] and c["skill"] is True, name
+        assert c["entries"][-3:] == [["scholium-entry prompt", "AdLN的作用是什么"], ["scholium-entry info", "Codex · gpt-6-astra"],
+                                     ["scholium-entry text", "⏺ 改好了：第 5 页的译文已缩短。"]], "nothing shows the session was rebuilt"
+        assert c["state"].startswith("完成") and c["session"] == "T2" and c["conversations"] == 1, name
+        assert c["placeholder"] == "接着对话，例如：第 5 页那条译文改短一些", name
+    assert facts["goneCodex"]["prompt"].startswith(question), "the turns are items of the new thread, not text"
+    assert facts["goneCodexText"]["prompt"].startswith(HISTORY_HEAD + "\n\n" + turn + "\n\n" + HISTORY_END + "\n\n" + question), \
+        "a Codex that does not take items gets them as text"
     k = facts["goneClaude"]
-    assert k["resumes"] == [False, True, False] and k["prompt"] == HISTORY_HEAD
-    assert k["prompts"] == ["AdLN的作用是什么"], "the words are not shown twice"
-    assert k["info"] == ["Claude Code 里原来的会话已经不存在了（例如已被 Claude Code 清理），已开一个新会话接着这段对话。"]
-    assert k["session"] == {"question": False, "ids": {"claude": "Q2"}} and k["state"].startswith("完成")
-    assert k["finals"] == [], "Claude Code's own error for the missing conversation is not shown beside the plugin's line"
+    assert k["resumes"] == [False, True, False]
+    assert k["prompt"].startswith(HISTORY_HEAD + "\n\n" + turn + "\n\n" + HISTORY_END + "\n\n" + question)
+    assert "\n\n用户的新消息：\nAdLN的作用是什么\n\n" in k["prompt"]
+    assert k["prompts"] == ["批注这篇", "AdLN的作用是什么"], "the words are not shown twice"
+    assert k["info"] == ["Claude Code · claude-opus-5-5"] * 2 and k["finals"] == [], "Claude Code's own error for the missing session is not shown"
+    assert k["session"] == "Q2" and k["state"].startswith("完成") and k["conversations"] == 1
     assert k["errorsShown"] == {"last": ["scholium-entry final error", "Credit balance is too low"], "notice": ["失败 · Credit balance is too low"]}
     s = facts["goneStopped"]
-    stopped = "Claude Code 里原来的会话已经不存在了（例如已被 Claude Code 清理），刚才的任务没法接着做；再发一条消息，会开一个新会话接着这段对话。"
-    assert s["calls"] == 2 and s["queued"] == 0, "a continuation is not sent to a new conversation"
+    stopped = "Claude Code 里原来的会话已经不存在了（例如已被 Claude Code 清理），刚才的任务没法接着做；再发一条消息，会开一个新会话，带着这段对话接着聊。"
+    assert s["calls"] == 2 and s["queued"] == 0, "a continuation is not sent to a new session"
     assert s["gone"] == {"type": "scholium", "subtype": "gone", "agent": "claude", "resent": False}
     assert run_time(s["state"]) == "失败 · Ns" and s["last"] == ["scholium-entry final error", stopped]
-    assert s["session"] == {"question": False, "ids": {"claude": None}} and s["placeholder"] == "接着对话，例如：第 5 页那条译文改短一些", "the conversation stays, without the session"
-    assert s["later"] == {"session": {"question": False, "ids": {"claude": None}}, "placeholder": "接着对话，例如：第 5 页那条译文改短一些"}, "after a restart the log no longer names the session"
+    assert s["session"] is None and s["placeholder"] == "接着对话，例如：第 5 页那条译文改短一些", "the conversation stays, without the session"
+    assert s["later"] == {"session": None, "placeholder": "接着对话，例如：第 5 页那条译文改短一些"}, "after a restart the log no longer names it"
 
 
-def test_a_conversation_is_shared_across_versions_restarts_and_redos(facts):
-    assert facts["codexQuestion"] == {"session": {"question": True, "ids": {"codex": "T1"}}, "placeholder": ASK}
+def test_conversations_of_earlier_versions_and_the_history_given(facts):
+    assert facts["codexQuestion"] == {"session": "T1", "question": True, "placeholder": ASK, "title": "这篇讲什么？"}
     g = facts["legacyGoesOn"]
-    assert g["before"] == {"placeholder": "接着对话，例如：第 5 页那条译文改短一些", "session": {"question": False, "ids": {"codex": "T1"}}}
-    assert g["resumed"] is False and g["prompt"].startswith(
-        HISTORY_HEAD + "\n\n[第 1 轮 · Codex]\n用户：批注这篇\n回答：Done.\n" + SUMMARY + "\n\n" + HISTORY_END + "\n\n")
-    assert g["first"] == {"type": "scholium", "subtype": "run", "agent": "codex", "user": None}, "the earlier log, as Codex's"
-    assert g["legacyKept"] is True and g["shown"] == "Codex · gpt-6-luna"
-    assert g["runs"] == [["codex", None], ["claude", "AdLN的作用是什么"]]
-    assert g["session"] == {"question": False, "ids": {"codex": "T1", "claude": "S1"}}
-    c = facts["historyCap"]
-    assert c["omitted"] == "6" and c["first"] == ["7", "Codex"], "the latest turns within the budget"
-    assert c["unfinished"] is True and c["cut"] is True and c["length"] < 12000 + 2000 and c["none"] == ""
-    r = facts["redoAfterShared"]
-    assert r["both"] == {"question": False, "ids": {"codex": "T1", "claude": "S1"}}
-    assert r["after"] == {"question": False, "ids": {"codex": "T1"}} and r["runs"] == [["codex", "批注这篇"]] and r["started"] is True
-    h = facts["handedShared"]
-    assert h["handed"] == ["claude", None, "AdLN的作用是什么", True, True] and h["resumed"] is False
-    assert h["newMessage"] is True, "still a message of the conversation"
-    assert h["turns"] == 1 and h["runs"] == [["codex", "批注这篇"], ["claude", "AdLN的作用是什么"], ["claude", None]] and h["prompts"] == 1, \
-        "the handed message is the same turn, and the agent is not given it as an earlier one"
-    assert h["head"] == [HISTORY_HEAD, "[第 1 轮 · Codex]\n用户：批注这篇\n回答：Done.\n" + SUMMARY]
+    assert g["claude"] == {"placeholder": ASK, "entries": [["scholium-entry info", "这篇论文在 Codex 里有对话，把智能体换成 Codex 就能接着聊。"]],
+                           "resumed": False, "conversations": 1,
+                           "prompt": "使用 zotero-scholium 技能读下面这篇论文（status 给出题录，extract 给出正文），回答用户在 Zotero 里提的问题。"}, \
+        "Claude Code starts its own conversation, given nothing of Codex's"
+    assert g["resume"] == "T1" and g["text"].startswith("下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。")
+    assert g["appended"] == ["run", "prompt", "time"] and g["conversations"] == 1, "Codex goes on in the earlier log itself"
+    h = facts["historyParts"]
+    assert h["head"] == HISTORY_HEAD and h["end"] == HISTORY_END
+    assert h["summary"] == "之前的 8 轮对话（摘录）：" and h["whole"] == ["[第 %d 轮]" % n for n in range(9, 14)]
+    assert h["excerpt"] == "用户：问题 1 " + "q" * 244 + "…\n回答：" + "x" * 399 + "…", "the user's words cut to 250, the answer to 400"
+    assert h["excerpts"] == 11 and h["unfinished"] is True and h["noText"] is True
+    assert h["few"] == [HISTORY_HEAD, "[第 1 轮]", "[第 2 轮]", HISTORY_END] and h["none"] == "" and h["noItems"] == []
+    assert [i[:2] for i in h["items"]] == [["user", "input_text"], ["assistant", "output_text"]] * 6, "the excerpts, then five exchanges"
+    assert h["items"][0][2] == "之前的 8 轮对话（摘录）：" and h["items"][1][2] == "明白，我已了解之前的对话。"
+    assert h["cut"] == ["ab…", "abc…", "abc"], "never half of a character that takes two"
+    assert h["boundary"] == [False, True], "excerpts from the eleventh exchange on"
+    a = facts["annotateAgain"]
+    assert a == {"conversations": 1, "threads": ["thread/resume"], "runs": ["批注这篇", "批注这篇"],
+                 "text": "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论、页边批注、阅读笔记，按画像和默认值。"}
+    f = facts["handedFollowUp"]
+    assert f["handed"] == ["S1", "AdLN的作用是什么", True, True] and f["resumed"] is True
+    assert f["prompt"].startswith("下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。") and "AdLN的作用是什么" in f["prompt"]
+    assert f["runs"] == ["批注这篇", "AdLN的作用是什么", None] and f["prompts"] == 2 and f["conversations"] == 1, \
+        "the handed message is the same turn, logged once"
 
 
-def test_review_cases_of_the_shared_conversation(facts):
-    assert facts["ownInFollowUp"] == "这篇论文已有 2 条本工具的批注；问到它们的内容时，写一份只含 pdf、item_key、attachment_key、out_dir 的配置，用 --config <配置> --list --full 列出。"
-    assert facts["unreachedClaude"] == {"question": False, "ids": {"codex": "T1"}}, "Claude Code never had the message"
+def test_new_and_resumed_sessions_know_the_annotations_and_turns(facts):
+    a = facts["appliedConfig"]
+    assert re.sub(r"\d{2}:\d{2}", "HH:MM", a["fresh"]) == (
+        "这篇论文已有 2 条本工具的批注，是 Codex 在 HH:MM 用配置 /data/tmp/scholium/c.json 写入的，这份配置就是它们的全部；问到批注的内容时读这份配置。"
+        "要改批注或补几条时，编辑它并设 cleanup: true 整份重写（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置。")
+    assert a["applied"] == ["codex", "/data/tmp/scholium/c.json", True], "the configuration of Codex's apply, in its folder"
+    edit = ("改已经写入的批注或补几条时，都编辑写入它们的那份配置（它是这篇论文的全部批注），设 cleanup: true 整份重写（阅读笔记也改时再设 "
+            "note_replace: true）；不要另写只含新条目的配置，否则下次整份重写时会把它们删掉。")
+    assert a["unchanged"] == [edit], "nothing changed since its last run"
+    assert a["older"] == [edit], "another conversation's rewrite before this one's last run is nothing new"
+    assert [re.sub(r"\d{2}:\d{2}", "HH:MM", t) for t in a["rewritten"]] == [
+        edit, "上次之后，Claude Code 在这篇论文的另一段对话里用配置 /data/tmp/scholium/ATT1/b.json 重写了批注（HH:MM）；改批注前先读这份配置，不要用你记得的版本。"]
+    assert a["gone"] == ["这篇论文现在没有本工具的批注（可能已在 Zotero 里删除）。"]
+    assert a["commands"] == ["D:\\x y\\c.json", "c.json", None, "/abs/c.json"]
+    assert facts["unreachedClaude"] == {"session": None, "resumed": False, "conversations": 1,
+                                        "prompt": ["[第 1 轮]\n用户：它和 FNO 比怎么样？\n回答：（没有完成：Invalid API key）"]}, \
+        "a session that never had the message is not the conversation's"
     assert facts["legacyTwoTurns"] == "下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。" \
                                       "只是提问就直接回答；要改批注时按技能的流程修改配置，再写入 Zotero。", "both turns of the earlier log reached Codex"
     assert facts["handedInterrupted"] == [[True, True]]
     u = facts["unreached"]
-    assert u["before"] == {"question": False, "ids": {"codex": "T1", "claude": "S1"}}, "a thread that never had the message is not Codex's session"
-    assert u["thread"] == "T1" and u["blocks"] == ["[第 1 轮 · Claude Code]", "[第 2 轮 · Codex]"], "the turns after Codex's last one that reached it"
+    assert u["before"] == "T1" and u["thread"] == "T1", "a thread that never had the message is not Codex's session"
+    assert u["text"].startswith("下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。")
     r = facts["retriedContinuation"]
-    assert r["calls"] == 3 and r["prompts"][1:] == ["额度已恢复。请从中断的地方继续完成上面的任务，规则不变。"] * 2, "no turns given twice"
-    assert r["prompts"][0] == HISTORY_HEAD
+    assert r["calls"] == 3 and r["prompts"][1:] == ["额度已恢复。请从中断的地方继续完成上面的任务，规则不变。"] * 2 and r["resumes"] == [False, True, True]
     i = facts["interruptedTurn"]
-    assert i["queued"] == [[True, True, None]] and i["calls"] == 2
+    assert i["queued"] == [[True, True, None]] and i["calls"] == 2 and i["conversations"] == 1
     assert i["runs"] == [["claude", "这篇讲什么？"], ["claude", None]] and i["prompts"] == 1, "the same turn, its words logged once"
     assert i["second"].startswith("使用 zotero-scholium 技能读下面这篇论文")
     w = facts["redoWithoutAgent"]
-    assert w["session"] == {"question": False, "ids": {"codex": "T1"}} and w["kept"] is True and w["state"].startswith("失败")
+    assert w == {"kept": True, "conversations": 1, "state": "失败",
+                 "last": ["scholium-entry final error", "找不到 Claude Code（claude.exe）。请在 设置 → 高级 → 配置编辑器 中设置 extensions.scholium-bridge.claudePath。"]}
+
+
+def test_new_chat_and_history(facts):
+    c = facts["conversations"]
+    new = [["scholium-entry info", "新对话。之前的对话在「历史」里。"]]
+    assert c["first"] is True and c["before"] == {"newChatDisabled": False, "historyDisabled": False}
+    assert c["fresh"] == {"entries": new, "shownConv": None, "newChatDisabled": True, "input": "", "placeholder": ASK, "current": None}
+    assert c["second"] is True and c["resumedSecond"] is False, "the next message starts a conversation of its own"
+    rows = [[cls, re.sub(r"\d{2}:\d{2}", "HH:MM", text)] for cls, text in c["rows"]]
+    assert rows[0] == ["scholium-history-group", "今天"] and rows[1] == ["scholium-history-row current", "第二个问题HH:MM✎✕"]
+    assert rows[2] == ["scholium-history-group", "昨天"] and re.fullmatch(r"第一个问题\d+月\d+日 HH:MM✎✕", rows[3][1])
+    assert rows[4] == ["scholium-history-group", "更早"] and rows[5][1].startswith("很早的问题"), "an earlier version's title is its first words"
+    assert c["renamed"][3][1].startswith("估计方法") and [r[1] for r in c["renamed"]][1] == c["rows"][1][1]
+    assert [k[:5] for k in c["kept"]] == ["第二个问题", c["kept"][1][:5], "很早的问题"] and c["kept"][1].startswith("估计方法"), "Esc keeps the old title"
+    o = c["opened"]
+    assert o["shownConv"] is True and o["input"] == "写给第一段对话的话" and o["historyOpen"] is False, "the words typed to it come back with it"
+    assert run_time(o["entries"]) == ["第一个问题", "Claude Code · claude-opus-5-5", "⏺ 回答 1", "HH:MM"]
+    assert c["resumedFirst"] == "Q1", "an earlier conversation goes on in its session"
+    assert c["followPrompt"] == ("下面是用户在 Zotero 里针对这篇论文发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
+                                 "只是提问就直接回答；用户明确要求写批注或笔记时，才按技能的流程写入 Zotero。\n\n接着第一段\n\n"
+                                 "写入了 Zotero 时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。"), \
+        "a question's conversation without annotations is not told they are gone"
+    d = c["deleting"]
+    assert d["rows"][2] == "已删除「第二个问题」撤销" and d["files"] == 3 and d["timers"] == [6000], "for a moment it can be brought back"
+    assert c["undone"] == {"rows": 3, "timers": []}
+    assert c["deletedShown"] == {"entries": new, "shownConv": None, "back": True}, \
+        "the conversation shown is followed by a new one, and comes back with Undo"
+    assert c["removed"] == [True] and c["files"] == 2 and c["titles"] == ["第二个问题"] and c["current"] is None
+    assert c["busy"] == {"newChat": True, "history": True, "agent": True}, "the conversations stay as they are while the paper runs"
+    a = facts["archived"]
+    assert a["queued"] == '["T1"]' and a["archived"] == ["T1"] and a["left"] == ""
+    assert a["order"] == ["initialize", "initialized", "thread/archive", "thread/start"], "archived at the next Codex run"
+
+
+def test_conversations_of_a_paper_with_two_pdfs_and_hand_overs(facts):
+    t = facts["twoPdfs"]
+    assert t["before"] == ["ATT1", "claude-20261001-120000"]
+    assert t["rows"] == ["今天", "第二份✎✕", "第一份✎✕"], "a conversation without a line is not listed"
+    assert t["after"] == ["ATT3", "claude-20261002-120000"] and t["first"] == ["scholium-entry info", "Claude Code · claude-opus-5-5"]
+    assert t["annotated"] == "ATT3", "Annotate goes to the PDF whose conversation is shown, as Send does"
+    assert facts["livePanes"] == {"shownConv": "claude-x", "shownPath": "/data/tmp/scholium/ATT1/conversations/claude-x.jsonl",
+                                  "moved": "还没发的话", "left": False}
+    assert facts["legacyHandOver"] == [["ATT1", "codex-run", True, False, True], ["ATT2", None, False, True, False]], \
+        "an earlier version's paused question has its turn in that version's log; its annotation is one"
+
+
+def test_a_switch_of_the_agent_shows_each_papers_conversation(facts):
+    o = facts["otherSections"]
+    assert o["before"] == [None, None] and o["switched"] == [None, "claude-20261002-120000"], \
+        "the paper switched gets a new conversation, another section its paper's conversation of that agent"
+    assert o["running"] == "ATT2" and o["current"] == "not written", "New chat while the paper runs changes nothing"
+    assert o["pending"] == [1, True] and o["removed"] is True, "a deletion not done yet is done when the plugin stops"
+
+
+def test_review_cases_of_the_conversations(facts):
+    k = facts["appliedKept"]
+    assert k["kept"] == ["/data/tmp/scholium/ATT1/config.json", "claude"], "a write that succeeded, though the run then failed"
+    assert k["refused"] == k["kept"][0] and k["at"] is True, "a refused write changes nothing"
+    assert k["codexFailed"] is False, "nor does a Codex write whose command failed"
+    assert facts["legacyFollowUp"] == [["claude-run", 2, True, "S1"]], "an earlier version's follow-up: the annotations counted, a question's conversation"
+    e = facts["reviewEdges"]
+    assert e["codexBox"] == "" and e["claudeBox"] == "写给 Claude 的话", "words stay with the conversation they were typed to"
+    assert e["undoLate"] == [False, 0, None, True, 1], "Undo after the deletion began does nothing; the log goes once"
+    assert e["context"] == [{"used": 5, "window": 200000}, {"used": 0, "window": 1000000}, {"used": 5, "window": 1000000}]
+
+
+def test_the_context_gauge(facts):
+    g = facts["gauge"]
+    assert g["running"] == "上下文 4.5 万", "live, before the model's window is known"
+    assert g["runningLog"] == [True, False], "a new conversation's log can be opened while its first run goes on"
+    assert g["after"] == {"gauge": "上下文 4.5 万 / 100 万（5%）", "cls": "scholium-context"} and g["logged"] == g["after"]["gauge"]
+    assert g["near"] == {"gauge": "上下文 81.1 万 / 100 万（81%）", "cls": "scholium-context warn",
+                         "title": "这段对话的会话占用的上下文。接近上限时，可以点「新对话」重新开始。"}
+    assert g["none"] is None and g["en"] == "Context 45k / 200k (23%)"
+    assert g["codex"] == ["上下文 133 万", "上下文 40.3 万 / 82.8 万（49%）"], "Codex's latest request, in the window it names"
+
+
+def test_when_a_run_ended_is_shown_under_it(facts):
+    t = facts["runTime"]
+    assert run_time(t["last"]) == ENDED and t["logged"] == ["scholium", "time", True] and t["last"][1] == t["shown"]
+    assert t["read"] == {"kind": "time", "text": t["shown"]}
+
+
+def test_a_stop_before_the_run_line_logs_nothing(facts):
+    assert facts["stopBeforeLine"] == {"logs": [], "handed": ["这篇讲什么？", False, None]}
 
 
 def test_a_question_and_its_annotation_go_on_after_a_limit_and_an_update(facts):
     lim = facts["askLimit"]
-    assert lim["paused"] == {"cancel": "取消提问", "queued": [["S1", True, ""]]}
-    assert run_time(lim["answered"]) == {"prompt": "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。",
-                                         "session": {"question": True, "ids": {"claude": "Q1"}}, "state": "完成 · Ns"}
+    assert lim["paused"] == {"cancel": "取消提问", "queued": [["S1", False, ""]]}
+    assert run_time(lim["answered"]) == {"prompt": "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。", "session": "Q1", "state": "完成 · Ns"}
     assert lim["annotating"] == {"cancel": "取消批注", "queued": [["S1", False]]}
     assert lim["annotatePrompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注")
     assert lim["continued"] == "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。", "the task is not sent twice"
-    assert lim["resumes"] == [False, True, True, True] and lim["session"] == {"question": False, "ids": {"claude": "S1"}}
+    assert lim["resumes"] == [False, True, True, True] and lim["session"] == "S1"
     u = facts["askUpdate"]
     assert u["question"] == {"handed": [True, False, "这篇怎么估计后验？", None, False],
                              "prompt": "使用 zotero-scholium 技能读下面这篇论文（status 给出题录，extract 给出正文），回答用户在 Zotero 里提的问题。",
@@ -3800,8 +4302,6 @@ def test_a_question_and_its_annotation_go_on_after_a_limit_and_an_update(facts):
                                  "resume": True}
     assert u["annotateAnswered"] == {"handed": [False, False, "", "Q1", True], "prompt": "插件更新打断了上面的任务。请从中断的地方继续完成，规则不变。",
                                      "resume": True}
-
-
 def test_a_failed_deletion_in_view_is_told_once(facts):
     assert facts["deleteFailsInView"] == {"notices": 0, "state": "删除失败：library is read-only", "kind": "scholium-state error"}
 

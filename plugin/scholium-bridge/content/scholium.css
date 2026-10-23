@@ -215,6 +215,117 @@
   font-size: 11px;
 }
 
+.scholium-caption-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* the chosen agent's conversations of the paper, under the caption */
+
+.scholium-history {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 240px;
+  margin-top: 4px;
+  padding: 4px;
+  overflow-y: auto;
+  border: var(--material-border-quarternary);
+  border-radius: 8px;
+  background: var(--material-background);
+}
+
+.scholium-history-group {
+  padding: 6px 6px 2px;
+  color: var(--fill-secondary);
+  font-size: 11px;
+}
+
+.scholium-history-empty {
+  padding: 6px;
+  color: var(--fill-secondary);
+}
+
+.scholium-history-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 6px;
+}
+
+.scholium-history-row:hover,
+.scholium-history-row.current {
+  background: var(--fill-quinary);
+}
+
+.scholium-history-row.deleted {
+  padding-inline-start: 6px;
+  color: var(--fill-secondary);
+}
+
+.scholium-history-open {
+  appearance: none;
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 6px;
+  border: none;
+  background: transparent;
+  color: var(--fill-primary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.scholium-history-open:focus-visible {
+  outline: 2px solid var(--color-focus-border, var(--accent-blue));
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
+.scholium-history-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scholium-history-time {
+  flex: none;
+  color: var(--fill-secondary);
+  font-size: 11px;
+}
+
+/* rename and delete show while the pointer is over their row */
+.scholium-history-row .scholium-button.icon {
+  height: 22px;
+  padding: 0 6px;
+  opacity: 0;
+}
+
+.scholium-history-row:hover .scholium-button.icon,
+.scholium-history-row .scholium-button.icon:focus-visible {
+  opacity: 1;
+}
+
+.scholium-history-rename {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  margin: 1px 0;
+  padding: 0 6px;
+  border: 1px solid var(--accent-blue);
+  border-radius: 6px;
+  background: var(--material-background);
+  color: var(--fill-primary);
+  font: inherit;
+}
+
 /* the box takes the section's width: a line that cannot wrap (code, a wide table) scrolls inside it
    instead of widening Zotero's item pane */
 .scholium-log {
@@ -344,6 +455,18 @@
   color: var(--accent-red);
 }
 
+/* when a run ended, at the right under it */
+.scholium-entry.time {
+  justify-content: flex-end;
+  margin-bottom: 8px;
+  color: var(--fill-secondary);
+  font-size: 11px;
+}
+
+.scholium-entry.time .scholium-content {
+  flex: none;
+}
+
 /* the message box */
 
 .scholium-composer {
@@ -389,9 +512,27 @@
   margin-top: 4px;
 }
 
+.scholium-send-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  min-width: 0;
+}
+
 .scholium-hint {
   color: var(--fill-secondary);
   font-size: 11px;
+}
+
+/* the context the conversation's session takes up; orange near the model's limit */
+.scholium-context {
+  color: var(--fill-secondary);
+  font-size: 11px;
+}
+
+.scholium-context.warn {
+  color: var(--accent-orange);
 }
 
 .scholium-hint.error {

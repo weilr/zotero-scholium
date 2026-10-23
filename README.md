@@ -49,7 +49,7 @@ English | [中文](README.zh-CN.md)
 <td><img src="docs/images/f-note.webp" alt="The reading note in Zotero's note editor, scrolled from the summary through Method, Results and Open questions, with rendered equations"></td>
 </tr>
 <tr>
-<td><b>One click in Zotero</b><br>The Scholium section runs Claude Code or Codex on the selected paper and shows each step. Ask about the paper before annotating it, or afterwards ask for changes in the same conversation, such as <i>shorten the translation on page 5</i>; switch between the agents and the conversation goes on.</td>
+<td><b>One click in Zotero</b><br>The Scholium section runs Claude Code or Codex on the selected paper and shows each step. Ask about the paper before annotating it, or afterwards ask for changes in the same conversation, such as <i>shorten the translation on page 5</i>; earlier conversations stay under History.</td>
 <td><img src="docs/images/f-pane.webp" alt="Page 2 beside the Scholium section during a run: the extra instructions typed, Annotate pressed, the steps and the transcript, and the annotations arriving on the page"></td>
 </tr>
 <tr>
