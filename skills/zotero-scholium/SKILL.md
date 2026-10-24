@@ -21,7 +21,7 @@ Sticky notes (`kind: "note"`) only when the profile shows that habit or the user
 
 ## Requirements
 
-`scripts/scholium.py` needs Python 3.9 or later and PyMuPDF (if missing, ask the user to run `pip install -U pymupdf`). Zotero must be running. The write channel (the bridge plugin when installed, else the local API on Zotero 10, a JavaScript file as fallback) is selected automatically; read `references/backends.md` only when `--apply` does not write.
+`scripts/scholium.py` needs Python 3.9 or later and PyMuPDF (if missing, ask the user to run `pip install -U pymupdf`). Zotero must be running. Only items in My Library are supported, not group libraries. The write channel (the bridge plugin when installed, else the local API on Zotero 10, a JavaScript file as fallback) is selected automatically; read `references/backends.md` only when `--apply` does not write.
 
 ## Workflow
 
@@ -44,7 +44,7 @@ python <skill dir>/scripts/scholium.py status <ITEM_KEY>                # the pa
 ```bash
 python <skill dir>/scripts/scholium.py extract --pdf <pdf> --sentences <out_dir>/sentences.json --out <out_dir>/sentences.txt
 ```
-For a whole-paper task, read `sentences.txt` in full, appendices included; for a selected scope, read that scope with enough context. It contains page markers, headings and numbered sentences grouped by paragraph; headers, footers and bibliography are removed. The command prints the file's length; when one read cannot hold it, issue reads of consecutive line ranges together in one response. Do not also read the PDF or full-text cache.
+For a whole-paper task, read `sentences.txt` in full, appendices included; for a selected scope, read that scope with enough context. It contains page markers, headings and numbered sentences grouped by paragraph; headers, footers, bibliography and paper checklist are removed. The command prints the file's length; when one read cannot hold it, issue reads of consecutive line ranges together in one response. Do not also read the PDF or full-text cache.
 
 Extraction creates output directories and binds `sentences.json` to the PDF's SHA-256. Re-extract old caches without a fingerprint, or after replacing the PDF. If an id is reported as ambiguous, check the page's matching passages and set `occurrence` explicitly; do not guess a position.
 
@@ -66,8 +66,8 @@ First run without `--apply`. Review the report and correct the configuration; th
 - `missed`: unknown ids, or phrases not found (each with the closest passage, `closest`).
 - `style_warnings`: formatting, banned phrases, duplicate or overlapping highlights, text the tool already wrote on the page (`duplicate_existing`), the user's changes in Zotero that a rewrite would undo (`user_edit`), note math. `core_count` only informs. For a deliberate exception the user asked for, `--accept KIND` lets that kind through.
 - `translation_warnings` (advisory): terms or numbers absent from the sentence, or a comment much longer or shorter than it. Correct a translation that adds or omits content, or extend the highlight to its source; never alter a faithful translation only to silence a warning.
-- `layout_warnings`: a margin box without room says what to change (shorter text, the other `side`, another page, or drop it); previews are not needed. A top or bottom band without room is set smaller, down to 8 pt, and listed under `fitted`; when even that is too small, the warning says how many characters fit and where they end: shorten the text by at least the excess in one edit and keep its place.
-- `colors`, `fitted`, `snapped`, `existing_annotations`, `pdf_sha256`, `now_in_zotero` only inform; `ambiguous_matches` lists phrases that occur more than once on their page, placed at the first occurrence unless `occurrence` is set.
+- `layout_warnings`: a margin box without room says what to change (shorter text, the other `side`, another page, or drop it). A top or bottom band without room is set smaller, down to 8 pt (`fitted`), or else written as a sticky note beside the first or last line of text (`as_notes`).
+- `colors`, `fitted`, `as_notes`, `snapped`, `existing_annotations`, `pdf_sha256`, `now_in_zotero` only inform; `ambiguous_matches` lists phrases that occur more than once on their page, placed at the first occurrence unless `occurrence` is set.
 
 The report names each problem and what to change; reading `scholium.py`'s source is not needed.
 

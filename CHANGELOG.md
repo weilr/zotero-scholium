@@ -30,6 +30,20 @@
   failure kinds are named in the user's language.
 - The plugin's apply returns `removeError` when the earlier notes cannot be moved to the trash after the new items
   are written.
+- A top or bottom band that has no room even at `band_min_font_size` is written as a sticky note with its whole
+  text, beside the column's first line of text (top) or its last above the footer (bottom), and listed under
+  `as_notes`; it no longer gets a layout warning.
+- `--apply` refuses `--ignore-existing` when the configuration has `cleanup: true`; when the annotations already on
+  the attachment cannot be read, the message offers `--ignore-existing` only without cleanup.
+- No preview image is rendered by default (`preview_pages` is `[]`); the report lists `previews` only when pages
+  were rendered.
+- `extract` also removes the bibliography under numbered and other reference headings ("7 References",
+  "VII. REFERENCES", "Literature Cited", "参考文献") and, after it, a paper checklist ("NeurIPS Paper Checklist",
+  "Reproducibility Checklist", "Checklist") up to the next appendix heading or the end. The marker of a rotated page
+  reads `--- p.N (rotated: not annotatable) ---`.
+- When removing the earlier annotations or notes fails after the new ones are written, the report gives
+  `applied: "partial"` with `result.removeError`.
+- An item that is not in My Library is reported as not found there; group libraries are not supported.
 
 ## 0.1.9 (2026-10-20)
 

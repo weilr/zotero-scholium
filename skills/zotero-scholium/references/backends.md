@@ -15,11 +15,11 @@ Do not write to `zotero.sqlite` directly (the database is locked while Zotero is
 `apply_error` names the cause:
 
 - `missed`, `style_warnings` or `layout_warnings` non-empty: correct the configuration and run again.
-- The annotations already on the attachment could not be read: run again once Zotero answers. Writing without them (`--ignore-existing`) can add a second copy of what the tool wrote before.
+- The annotations already on the attachment could not be read: run again once Zotero answers. Writing without them (`--ignore-existing`) can add a second copy of what the tool wrote before; with `cleanup: true`, `--apply` refuses `--ignore-existing`.
 - Zotero 7–9 without the plugin: guide the installation, then run again.
 - No write channel: `backend_reason` says why each channel was unavailable (Zotero not running, a Zotero before 10, the plugin missing or its token not matching); fix the cause, or let the user run `create_annotations.js` (path in `fallback`).
 - An HTTP error from the local API: report it verbatim; a renewed authorisation dialog after reinstalling Zotero or moving the data directory is expected, since keys are bound to the instance's `Zotero-Server-ID`.
-- Partial writes or failed read-back: inspect any available `result` and run `--list` to reconcile actual stored annotations and notes before retrying. HTTP exceptions may leave no result; `applied: false` does not mean nothing was written.
+- Partial writes or failed read-back: inspect any available `result` and run `--list` to reconcile actual stored annotations and notes before retrying. HTTP exceptions may leave no result; `applied: false` does not mean nothing was written. `applied: "partial"`: the new items were written, but removing the earlier ones failed (`result.removeError`).
 
 ## Pitfalls
 

@@ -6,9 +6,6 @@
   "sentences": "out/ATTACHKEY/sentences.json",
   "note_html": "out/ATTACHKEY/reading_note.html",
   "note_title_prefix": "Full title of the paper",
-  "preview_pages": [
-    1
-  ],
   "cleanup": false,
   "core_range": [10, 15],
   "banned_phrases": [],

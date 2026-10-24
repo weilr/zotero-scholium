@@ -49,12 +49,12 @@ editable, are synchronised as data, and leave the PDF file untouched.
 
 Every annotation and note created by the tool carries the tag `zotero-scholium`. Earlier versions
 used the tags `zotero-marginalia` and `zotero-paper-annotate`; all three are recognised. On a repeated run the tool deletes only
-annotations that carry one of these tags, after the new ones have been created; identical content alone
-does not establish ownership. Annotations that Zotero imported from the PDF file stay unless
+annotations that carry one of these tags, after the new ones have been created (when that removal fails through
+the local API, the run reports `applied: "partial"`); identical content alone does not establish ownership. Annotations that Zotero imported from the PDF file stay unless
 `cleanup_external` is set. The user's child notes are never touched; if a note with the same title prefix
 exists, the new note receives a versioned title (`… (v2, 2026-08-26)`), and a note of the tool with the
 same text is not written again. With `note_replace` the tool's earlier notes go to Zotero's trash after the
-new one is written.
+new one is written; when that fails, the run reports `applied: "partial"`.
 
 ## Margin layout
 
@@ -76,13 +76,14 @@ obtained from PyMuPDF (`get_image_info`, `cluster_drawings`) and filtered to exc
 page-sized frames, are added as obstacles. New boxes are placed below such an interval, or above it
 when the footer leaves no room; a box for which neither direction has space keeps its requested
 position and is reported in `layout_warnings`. `--ignore-existing` skips reading the existing
-annotations; figures are always considered.
+annotations (`--apply` refuses it with `cleanup: true`); figures are always considered.
 
 A summary may also be placed as a band across the text column at the top or bottom of a page (`place`),
 at an explicit rectangle (`rect`), on a forced side (`side`), or as a sticky note (`kind`). Bands treat
 the page's text lines as obstacles in addition to figures and existing annotations, so a band at the
 top of page 1 settles into the gap between a header line and the title; a top band stays within the top
-30 % of the page and a bottom band within the bottom 30 % (between the text and the footer, or beneath the footer when that gap is too small), and a band that does not fit is reported
-rather than moved to the other end. Boxes are laid out in the order explicit rectangles, bands, margin
+30 % of the page and a bottom band within the bottom 30 % (between the text and the footer, or beneath the footer when that gap is too small). A band
+without room is set smaller, down to `band_min_font_size`; without room even then it becomes a sticky note beside the
+column's first text line (top) or its last above the footer (bottom) rather than moving to the other end. Boxes are laid out in the order explicit rectangles, bands, margin
 boxes, each joining the obstacle set of the next group. Colour and font size can be set per summary;
 the defaults remain `text_color` and `font_size`.

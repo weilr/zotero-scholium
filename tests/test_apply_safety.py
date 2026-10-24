@@ -96,7 +96,7 @@ def test_failed_creation_reports_failure_and_preserves_previous_annotations(tmp_
     assert result["noteCreated"] is (fail_type != "note")
 
 
-def run_main(tmp_path, monkeypatch, capsys, api, with_note=False, args=("--ignore-existing",)):
+def run_main(tmp_path, monkeypatch, capsys, api, with_note=False, args=("--ignore-existing",), **options):
     """A run of `scholium --apply`; with `api` None the backend is picked as usual."""
     pdf = tmp_path / "paper.pdf"
     with pymupdf.open() as doc:
@@ -105,7 +105,7 @@ def run_main(tmp_path, monkeypatch, capsys, api, with_note=False, args=("--ignor
         doc.save(pdf)
     cfg = {"pdf": str(pdf), "item_key": "ITEM", "attachment_key": "ATT",
            "out_dir": str(tmp_path), "preview_pages": [], "cleanup": False,
-           "highlights": [{"page": 1, "text": "The method improves the result.", "comment": ""}]}
+           "highlights": [{"page": 1, "text": "The method improves the result.", "comment": ""}], **options}
     if with_note:
         note = tmp_path / "note.html"
         note.write_text("<h1>Paper</h1><p>A reading note.</p>", encoding="utf8")
@@ -144,6 +144,21 @@ def test_main_reports_readback_error_after_writing(tmp_path, monkeypatch, capsys
     assert "createdKeys" not in report["result"], "the keys go to a file, not into the report"
     keys = json.loads(open(report["result"]["keys"], encoding="utf8").read())
     assert keys["createdKeys"] == ["NEW1"]
+
+
+def test_a_failed_removal_after_writing_is_reported_as_partial(tmp_path, monkeypatch, capsys):
+    """The new annotations are in Zotero when removing the old ones fails: the report says so instead of applied: false."""
+    class FailingDelete(MemoryApi):
+        def delete(self, keys):
+            raise RuntimeError("delete failed (HTTP 500): busy")
+    api = FailingDelete([annotation("OWN", ["zotero-scholium"], text="Old result.")])
+    code, report = run_main(tmp_path, monkeypatch, capsys, api, args=(), cleanup=True)
+    assert code == 2 and report["applied"] == "partial" and list(report)[-1] == "apply_error"
+    assert report["result"]["created"] == {"highlight": 1} and report["result"]["removeError"] == "delete failed (HTTP 500): busy"
+    assert "removing the earlier ones failed: delete failed (HTTP 500): busy" in report["apply_error"]
+    assert "run --list" in report["apply_error"] and report["verification"]["missing_annotations"] == []
+    assert json.load(open(report["result"]["keys"], encoding="utf8"))["createdKeys"] == ["NEW1"]
+    assert set(api.rows) == {"OWN", "NEW1"}
 
 
 def test_main_reports_verified_annotation_and_note(tmp_path, monkeypatch, capsys):

@@ -529,12 +529,41 @@ def test_top_band_settles_between_header_and_title(tmp_path):
     assert "layout_warning" not in a
 
 
-def test_top_band_that_does_not_fit_is_reported(tmp_path):
+def test_a_top_band_without_room_becomes_a_sticky_note_beside_the_first_line(tmp_path):
     pdf = _page_pdf(tmp_path / "full.pdf", lambda pg: pg.insert_textbox(pymupdf.Rect(55, 8, 543, 780), LEFT * 12, fontsize=10, fontname="helv"))
-    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top"))
-    a = out[0]; _, y0, _, y1 = a["position"]["rects"][0]
-    assert "no free space at the top" in a["layout_warning"]
-    assert y1 == 792 - cli.BAND_MARGIN, "the band keeps its requested position"
+    text = "A short summary of the paper written by the reader."
+    out, missed = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text))
+    assert missed == [] and len(out) == 1
+    a = out[0]; x0, y0, x1, y1 = a["position"]["rects"][0]
+    assert a["type"] == "note" and a["comment"] == text and a["as_note"] and "layout_warning" not in a
+    pi = cli.PageIndex(pymupdf.open(pdf)[0])
+    first = max(pi.text_line_rects(), key=lambda r: r[3])
+    assert y0 < first[3] and y1 > first[1], "beside the first text line"
+    assert x0 >= pi.body_x1 and x1 - x0 == pytest.approx(cli.NOTE_ICON), "in the margin, hugging the text column"
+    assert "fontSize" not in a["position"]
+
+
+def _one_column(pg, repeat):
+    """One column of `repeat` times LEFT from y = 72 (18 times reach down to about y = 736), and a page number."""
+    pg.insert_textbox(pymupdf.Rect(55, 72, 543, 730), LEFT * repeat, fontsize=10, fontname="helv")
+    pg.insert_text((300, 770), "7", fontsize=9)
+
+
+def test_a_bottom_band_without_room_becomes_a_sticky_note_beside_the_last_line(tmp_path):
+    pdf = _page_pdf(tmp_path / "bottom.pdf", lambda pg: _one_column(pg, 18))
+    text = " ".join([BAND_SENTENCE] * 9)
+    out, missed = cli.build(_band_cfg(pdf, tmp_path, place="bottom", text=text))
+    assert missed == [] and len(out) == 1
+    a = out[0]; x0, y0, x1, y1 = a["position"]["rects"][0]
+    assert a["type"] == "note" and a["comment"] == text and a["as_note"] and "layout_warning" not in a
+    pi = cli.PageIndex(pymupdf.open(pdf)[0])
+    last = min((r for r in pi.text_line_rects() if r[1] > 40), key=lambda r: r[1])
+    assert y0 < last[3] and y1 > last[1], "beside the last text line above the page number"
+    assert x0 >= pi.body_x1 and x1 - x0 == pytest.approx(cli.NOTE_ICON)
+    # the same text fits as a band when the body ends higher on the page
+    pdf = _page_pdf(tmp_path / "short.pdf", lambda pg: _one_column(pg, 4))
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="bottom", text=text))
+    assert out[0]["type"] == "text" and "as_note" not in out[0]
 
 
 def _gap_pdf(tmp_path):
@@ -560,47 +589,49 @@ def test_a_band_without_room_is_set_smaller_down_to_the_minimum(tmp_path):
     assert a["position"]["fontSize"] == a["fitted"]["to"]
     bigger = a["fitted"]["to"] + 0.5
     out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text, font_size=bigger, band_min_font_size=bigger))
-    assert "layout_warning" in out[0], "the size taken is the largest that fits"
+    assert out[0]["type"] == "note", "the size taken is the largest that fits"
     # a band that fits at its own size keeps it
     out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=BAND_SENTENCE, font_size=9))
     assert "fitted" not in out[0] and out[0]["position"]["fontSize"] == 9
 
 
-def test_a_band_too_long_even_at_the_minimum_says_where_to_cut(tmp_path):
-    """The warning gives how many characters fit at the smallest size and how they end; that many fit."""
+def test_a_band_too_long_even_at_the_minimum_becomes_a_sticky_note(tmp_path):
+    """The whole text goes into the note, at the band's colour; band_min_font_size sets the smallest size tried."""
     pdf = _gap_pdf(tmp_path)
     text = " ".join([BAND_SENTENCE] * 9)
-    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text, font_size=9))
-    warning = out[0]["layout_warning"]
-    m = re.search(r"at font_size 8: the first (\d+) of its (\d+) characters fit, ending with “(.*?)”; shorten the text by at "
-                  r"least (\d+) characters", warning)
-    assert m and int(m[2]) == len(text), warning
-    fit = int(m[1])
-    assert 0 < fit < len(text) and text[:fit].endswith(m[3]) and int(m[4]) == len(text) - fit
-    assert "place: bottom" not in warning, "moving to the bottom is no cure for a long text"
-    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text[:fit], font_size=9))
-    assert "layout_warning" not in out[0] and out[0]["fitted"]["to"] == 8
-    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text[:fit + 60], font_size=9))
-    assert "layout_warning" in out[0], "the count is close to the limit"
-    # band_min_font_size sets the smallest size
-    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text, font_size=9, band_min_font_size=9))
-    assert "at font_size 9:" in out[0]["layout_warning"] and "fitted" not in out[0]
+    out, missed = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text, font_size=9, color="#aa0000"))
+    a = out[0]
+    assert missed == [] and a["type"] == "note" and a["comment"] == text and a["color"] == "#aa0000"
+    assert "layout_warning" not in a and "fitted" not in a
+    words = text.split()
+    fitted = next(t for t in (" ".join(words[:n]) for n in range(10, len(words), 3))
+                  if cli.build(_band_cfg(pdf, tmp_path, place="top", text=t, font_size=9))[0][0].get("fitted"))
+    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=fitted, font_size=9, band_min_font_size=9))
+    assert out[0]["type"] == "note" and "fitted" not in out[0]
 
 
-def test_the_report_lists_bands_set_smaller(tmp_path, capsys):
+def test_the_report_lists_bands_set_smaller_and_bands_turned_into_notes(tmp_path, capsys):
     pdf = _gap_pdf(tmp_path)
     words = " ".join([BAND_SENTENCE] * 9).split()
     text = next(t for t in (" ".join(words[:n]) for n in range(10, len(words), 3))
                 if cli.build(_band_cfg(pdf, tmp_path, place="top", text=t, font_size=9))[0][0].get("fitted"))
     cfg = _band_cfg(pdf, tmp_path, place="top", text=text, font_size=9)
     path = tmp_path / "config.json"
-    path.write_text(json.dumps({k: v for k, v in cfg.items() if k in cli.CONFIG_KEYS}), encoding="utf8")
-    try:
-        cli.main(["--config", str(path), "--ignore-existing"])
-    except SystemExit:
-        pass
-    report = json.loads(capsys.readouterr().out)
-    assert report["layout_warnings"] == [] and report["fitted"][0]["font_size"].startswith("9 -> ")
+
+    def report_of(cfg, *args):
+        path.write_text(json.dumps({k: v for k, v in cfg.items() if k in cli.CONFIG_KEYS}), encoding="utf8")
+        try:
+            cli.main(["--config", str(path), "--ignore-existing", *args])
+        except SystemExit:
+            pass
+        return json.loads(capsys.readouterr().out)
+    report = report_of(cfg)
+    assert report["layout_warnings"] == [] and report["fitted"][0]["font_size"].startswith("9 -> ") and report["as_notes"] == []
+    long = " ".join(words)
+    cfg["summaries"][0]["text"] = long
+    report = report_of(cfg, "--apply", "--backend", "js")
+    assert report["as_notes"] == [{"page": "1", "text": long[:60]}] and report["sticky_notes"] == 1 and report["margin_texts"] == 0
+    assert report["layout_warnings"] == [] and report["backend"] == "js", "a band turned into a note does not block --apply"
 
 
 def _crowded_first_page(pg):
@@ -620,12 +651,10 @@ def test_top_band_without_room_goes_into_the_strip_beside_the_logo(tmp_path):
     assert "layout_warning" not in a
     assert y1 == 792 - cli.EDGE_MARGIN and y0 >= 792 - 28, "between the page edge and the header line"
     assert x1 <= 480 - 3, "beside the logo, not over it"
-    # too long for the strip: the warning says how much fits, and that much does fit
+    # too long for the strip even at the smallest size: a sticky note
     text = "The method fits a surrogate model to the measured field and reports its error. " * 6
     out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text, font_size=9))
-    fit = int(re.search(r"the first (\d+) of", out[0]["layout_warning"])[1])
-    out, _ = cli.build(_band_cfg(pdf, tmp_path, place="top", text=text[:fit], font_size=9))
-    assert "layout_warning" not in out[0] and out[0]["position"]["rects"][0][3] == 792 - cli.EDGE_MARGIN
+    assert out[0]["type"] == "note" and out[0]["comment"] == text.strip() and "layout_warning" not in out[0]
 
 
 def test_bottom_band_sits_above_the_page_number(tmp_path):
@@ -855,6 +884,70 @@ def test_extract_text_dehyphenates_pages_and_cuts_references(tmp_path):
     assert "Running Head" not in text, "the running header is dropped"
     assert "[references removed]" in text and "Vaswani" not in text
     assert "Appendix A Results" in text and "Extra ablation details." in text
+
+
+@pytest.mark.parametrize("heading", ["7 References", "References:", "VII. REFERENCES", "References and Notes", "Literature Cited",
+                                     "参考文献"])
+def test_extract_cuts_numbered_and_other_reference_headings(tmp_path, heading):
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_text((72, 100), "The conclusion of the paper is stated here.", fontsize=10)
+    page.insert_text((72, 140), heading, fontsize=12, fontname="china-s" if heading == "参考文献" else "helv")
+    page.insert_text((72, 170), "[1] A. Vaswani, Attention is all you need. NeurIPS, 2017.", fontsize=9)
+    page.insert_text((72, 200), "Appendix A Results", fontsize=12)
+    page.insert_text((72, 230), "Extra ablation details.", fontsize=10)
+    fp = tmp_path / "refs.pdf"; doc.save(str(fp)); doc.close()
+    text = cli.extract_text(str(fp))
+    assert "[references removed]" in text and "Vaswani" not in text and heading not in text
+    assert "The conclusion of the paper" in text and "Extra ablation details." in text
+    assert "Vaswani" in cli.extract_text(str(fp), keep_references=True)
+
+
+def _checklist_pdf(path, heading, appendix=True):
+    """A section about a checklist, a section called like a paper checklist, the bibliography, the paper checklist (its
+    answers point to an appendix), and optionally the appendix."""
+    doc = pymupdf.open()
+    pages = [[("3 A Checklist for Robust Evaluation", 12), ("We list the checks that every benchmark run should pass.", 10),
+              ("2 Checklist", 12), ("Our own checklist for the reader, part of the paper.", 10)],
+             [("References", 12), ("[1] A. Vaswani, Attention is all you need. NeurIPS, 2017.", 9)],
+             [(heading, 12), ("1. Claims", 10), ("Answer: [Yes] The claims are supported by the proofs in", 10),
+              ("Appendix B of the paper.", 10)]]
+    if appendix:
+        pages.append([("Appendix A Proofs", 12), ("The proof of the first theorem follows.", 10)])
+    for lines in pages:
+        page = doc.new_page(width=612, height=792)
+        for i, (text, size) in enumerate(lines):
+            page.insert_text((72, 100 + 30 * i), text, fontsize=size)
+    doc.save(str(path)); doc.close()
+    return str(path)
+
+
+@pytest.mark.parametrize("heading", ["NeurIPS Paper Checklist", "Reproducibility Checklist", "Checklist"])
+def test_extract_cuts_a_paper_checklist_up_to_the_appendix(tmp_path, heading):
+    text = cli.extract_text(_checklist_pdf(tmp_path / "c.pdf", heading), keep_references=True)
+    assert "3 A Checklist for Robust Evaluation" in text and "We list the checks" in text, "a section about a checklist stays"
+    assert "Our own checklist for the reader" in text, "before the bibliography a section called so stays"
+    assert "--- p.3 ---\n[checklist removed]\n" in text and "Answer: [Yes]" not in text
+    assert "Appendix B of the paper." not in text, "a line of the checklist that starts with Appendix is no appendix heading"
+    assert "Appendix A Proofs" in text and "The proof of the first theorem follows." in text
+    text = cli.extract_text(_checklist_pdf(tmp_path / "end.pdf", heading, appendix=False))
+    assert text.rstrip().endswith("[checklist removed]"), "without an appendix after it, the checklist runs to the end"
+
+
+def test_extract_marks_a_rotated_page(tmp_path, capsys):
+    """Nothing is written on a rotated page: its page marker says so, and its text is still listed."""
+    doc = pymupdf.open()
+    for i in range(2):
+        page = doc.new_page(width=612, height=792)
+        page.insert_textbox(pymupdf.Rect(72, 72, 540, 700), f"Page {i + 1} says that the method improves the result. "
+                            "It also runs fast on every benchmark.", fontsize=10, fontname="helv")
+    doc[1].set_rotation(90)
+    fp = tmp_path / "rotated.pdf"; doc.save(str(fp)); doc.close()
+    text = cli.extract_text(str(fp))
+    assert "--- p.1 ---\nPage 1 says" in text and "--- p.2 (rotated: not annotatable) ---\nPage 2 says" in text
+    cli.extract_main(["--pdf", str(fp), "--sentences", str(tmp_path / "s.json"), "--out", str(tmp_path / "s.txt")])
+    listing = (tmp_path / "s.txt").read_text(encoding="utf8")
+    assert listing.startswith("--- p.1 ---\n") and "--- p.2 (rotated: not annotatable) ---\n3 | Page 2 says" in listing
 
 
 def test_duplicate_sentence_reports_occurrences(tmp_path):

@@ -44,6 +44,7 @@ LEGACY_TAGS = {"zotero-marginalia", "zotero-paper-annotate"}   # tags written by
 OWN_TAGS = {TAG} | LEGACY_TAGS
 APP_NAME = "zotero-scholium"
 BASE = "http://127.0.0.1:23119"
+NOT_IN_MY_LIBRARY = "the item was not found in My Library; items in group libraries are not supported"
 
 DEFAULTS = {
     "levels": {},               # named colour levels, e.g. {"claim": "#ff6666", "method": "#ffd400"}; referenced by "level" in highlights
@@ -53,7 +54,7 @@ DEFAULTS = {
     "font_size": 8,
     "margin_side": "auto",      # margin used for summaries: "auto" (paragraph's side / wider margin), "left", "right"
     "summary_kind": "text",     # "text": visible margin text; "note": sticky notes (only when the user has that habit)
-    "preview_pages": [1],
+    "preview_pages": [],        # pages rendered as preview PNGs
     "note_title": None,
     "note_title_prefix": None,
     "note_html": None,
@@ -63,7 +64,8 @@ DEFAULTS = {
     "cleanup": False,           # True: a complete redo; the tool's earlier annotations on the attachment are deleted once the new
                                 # ones are written. False: keep every existing annotation (the tool's own included); only add
     "cleanup_external": False,  # bridge backend only: additionally delete annotations Zotero imported from the PDF file
-    "band_min_font_size": 8,    # a top or bottom band without room at its font size is set smaller, down to this size
+    "band_min_font_size": 8,    # a top or bottom band without room at its font size is set smaller, down to this size;
+                                # without room even then it becomes a sticky note
     "core_range": None,         # [low, high]: expected number of highlights in core_color; outside it an advisory style warning
     "banned_phrases": [],       # strings that must not occur in comments, margin texts or the note (reported as style warnings)
     "sentences": None,          # sentences.json written by `extract --sentences` (default: <out_dir>/sentences.json)
@@ -528,6 +530,8 @@ def _summary_annotation(pi, sp, rect, warning=None):
         ann["occurrences"] = sp["occurrences"]
     if sp.get("fitted_from"):
         ann["fitted"] = {"from": sp["fitted_from"], "to": sp["font_size"]}
+    if sp.get("as_note"):
+        ann["as_note"] = True
     return ann
 
 
@@ -564,33 +568,14 @@ def smaller_sizes(sp):
     return sizes + ([floor] if floor < sp["font_size"] else [])
 
 
-def band_warning(sp, fits):
-    """The warning of a top or bottom band that has no room even at its smallest font size: how many characters of its
-    text fit there and where they end; `fits(sp)` says whether a band has room."""
-    end = sp["place"]
-    other = "bottom" if end == "top" else "top"
-    text = TAG_RE.sub("", sp["text"])
-    lo, hi = 0, len(text)
-    while lo < hi:                                     # the longest beginning of the text that fits
-        mid = (lo + hi + 1) // 2
-        if fits(dict(sp, text=text[:mid])):
-            lo = mid
-        else:
-            hi = mid - 1
-    if not lo:
-        return f"no free space at the {end} of the page; use place: {other}"
-    return (f"no room at the {end} of the page for all of this text at font_size {sp['font_size']:g}: the first {lo} of its "
-            f"{len(text)} characters fit, ending with “{text[max(0, lo - 12):lo]}”; shorten the text by at least "
-            f"{len(text) - lo} characters in one edit")
-
-
 def layout_page_summaries(pi, specs, page_obstacles, missed):
     """Lay out one page's summaries and return their annotations.
 
     Order: explicit rectangles (never moved; an overlap is only reported), then top/bottom bands across the text
     column, then margin boxes and sticky notes beside their anchors. Every placed box joins the obstacle set of the
-    following groups. Bands avoid the page's text lines; margin boxes lie outside the text column by construction
-    and avoid the text in the margins.
+    following groups. Bands avoid the page's text lines; a band without room even at its smallest font size becomes
+    a sticky note beside the column's first text line (top) or its last above the footer (bottom). Margin boxes lie
+    outside the text column by construction and avoid the text in the margins.
     """
     p = pi.page.number
     anns, occupied = [], list(page_obstacles)
@@ -605,6 +590,7 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
         anns.append(_summary_annotation(pi, sp, rect, warn)); occupied.append(rect)
     # 2. bands across the text column
     bx0, bx1 = pi.body_x0, pi.body_x1
+    band_notes = []
     for sp in [s for s in specs if not s["rect"] and s["kind"] == "text" and s["place"] in ("top", "bottom")]:
         occ = [(r[1], r[3]) for r in occupied + text_lines if r[0] < bx1 and r[2] > bx0]
         # the footer (page number, running line) is any text line inside the column within 8 % of the page bottom;
@@ -637,36 +623,43 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
 
         if not fits(sp):   # without room at its own font size the band is set smaller, down to min_font_size
             smaller = next((f for f in smaller_sizes(sp) if fits(dict(sp, font_size=f))), None)
-            sp = dict(sp, font_size=smaller, fitted_from=sp["font_size"]) if smaller else \
-                dict(sp, font_size=min(sp["font_size"], sp.get("min_font_size", sp["font_size"])))
+            if smaller is None:   # no room even then: a sticky note beside the column's first line, or its last above the footer
+                top = sp["place"] == "top"
+                lines = [r for r in text_lines if r[0] < bx1 and r[2] > bx0 and r not in footer]
+                edge = [bx0, pi.H if top else 0.0, bx1, pi.H if top else 0.0]   # a column without text: the page edge
+                ln = (max(lines, key=lambda r: r[3]) if top else min(lines, key=lambda r: r[1])) if lines else edge
+                band_notes.append(dict(sp, kind="note", as_note=True,
+                                       line=pymupdf.Rect(ln[0], pi.H - ln[3], ln[2], pi.H - ln[1])))
+                continue
+            sp = dict(sp, font_size=smaller, fitted_from=sp["font_size"])
         h = _box_height(sp, bx1 - bx0)
         blk = place(h)
-        rect, warn = [bx0, blk["y_top"] - h, bx1, blk["y_top"]], None
-        if blk.get("layout_warning"):
-            if in_strip(sp):
-                hs = _box_height(sp, strip[1] - strip[0])
-                rect = [strip[0], strip[2] - hs, strip[1], strip[2]]
-            else:
-                warn = band_warning(sp, fits)
-        anns.append(_summary_annotation(pi, sp, rect, warn)); occupied.append(rect)
-    # 3. margin boxes and sticky notes beside their anchors (a sticky note ignores `place`); text in the margins
-    # is occupied space, and in a one-column layout a box takes the other margin when its own has text beside it
+        rect = [bx0, blk["y_top"] - h, bx1, blk["y_top"]]
+        if blk.get("layout_warning"):   # no room across the column, but in the strip above the first line
+            hs = _box_height(sp, strip[1] - strip[0])
+            rect = [strip[0], strip[2] - hs, strip[1], strip[2]]
+        anns.append(_summary_annotation(pi, sp, rect)); occupied.append(rect)
+    # 3. margin boxes and sticky notes beside their anchors (a sticky note ignores `place`), and the bands turned
+    # into sticky notes beside their lines; text in the margins is occupied space, and in a one-column layout a box
+    # takes the other margin when its own has text beside it
     margin_text = pi.margin_text_rects()
     groups = {}
-    for sp in [s for s in specs if not s["rect"] and (s["kind"] == "note" or s["place"] == "margin")]:
-        occ = sp.get("occurrence")
-        ws = pi.match(sp["anchor"], occ or 1)
-        if not ws:
-            entry = {"kind": "summary", "page": p + 1, "anchor": sp["anchor"]}
-            if occ:
-                n = pi.count(sp["anchor"])
-                if n:
-                    entry["reason"] = f"occurrence {occ} requested but the anchor occurs {n} time(s) on the page"
-            missed.append(entry); continue
-        n = pi.count(" ".join(w[4] for w in ws))
-        if n > 1 and not occ:                     # the box sits beside the first occurrence
-            sp["occurrences"] = n
-        r = pi.line_rects(ws)[0]
+    for sp in [s for s in specs if not s["rect"] and (s["kind"] == "note" or s["place"] == "margin")] + band_notes:
+        r = sp.get("line")
+        if r is None:
+            occ = sp.get("occurrence")
+            ws = pi.match(sp["anchor"], occ or 1)
+            if not ws:
+                entry = {"kind": "summary", "page": p + 1, "anchor": sp["anchor"]}
+                if occ:
+                    n = pi.count(sp["anchor"])
+                    if n:
+                        entry["reason"] = f"occurrence {occ} requested but the anchor occurs {n} time(s) on the page"
+                missed.append(entry); continue
+            n = pi.count(" ".join(w[4] for w in ws))
+            if n > 1 and not occ:                     # the box sits beside the first occurrence
+                sp["occurrences"] = n
+            r = pi.line_rects(ws)[0]
         mx0, mx1 = pi.margin_box(r, sp["side"])
         y_top = pi.H - r.y0 + 1
         if sp["side"] == "auto" and not pi.two_col and sp["kind"] != "note":
@@ -1272,15 +1265,22 @@ def read_text(path):
 # HTTP helper
 # ---------------------------------------------------------------------------
 PAGE_NUM_RE = re.compile(r"^(?:\d{1,4}|[ivxlcdm]{1,7})$", re.I)
+# headings as norm_str gives them: "7 References", "VII. REFERENCES", "Literature Cited" -> "7references", "vii.references", …
+REFERENCES_RE = re.compile(r"(?:\d+|[ivxl]+)?\.?(?:references(?:andnotes)?|bibliography|literaturecited|workscited|参考文献)[.:：]?")
+CHECKLIST_RE = re.compile(r"(?:[a-z]|\d+)?\.?(?:neurips|icml|iclr|aaai|ijcai|acl|emnlp|naacl|cvpr|iccv|eccv|ml)?"
+                          r"(?:paper|reproducibility|responsiblenlp(?:research)?)?checklist:?")
+APPENDIX_RE = re.compile(r"(?:[a-z]|\d+)?\.?(?:technical)?(?:appendix|appendices|supplementa(?:ry|l))")
+ROTATED_MARK = " (rotated: not annotatable)"   # in the page marker of a rotated page
 
 
 def extract_paragraphs(pdf_path, pages=None, keep_references=False):
-    """[(page number, [(kind, text), ...]), ...] with kind "heading", "para" or "marker".
+    """[(page number, [(kind, text), ...], rotated), ...] with kind "heading", "para" or "marker".
 
     Lines are de-hyphenated and ligatures expanded with the same rules the matcher uses, so a phrase
     copied from this output matches. Running headers and footers (lines recurring on most pages) and
     standalone page numbers are dropped; the bibliography between the References heading and the next
-    heading (judged by font size and weight) is replaced by a marker line unless keep_references is set."""
+    heading (judged by font size and weight) is replaced by a marker line unless keep_references is set,
+    and so is a paper checklist after the bibliography, from its heading to the next appendix heading or the end."""
     doc = pymupdf.open(pdf_path)
     sel = list(range(len(doc))) if not pages else [p - 1 for p in pages if 1 <= p <= len(doc)]
     page_rows, weighted = [], []
@@ -1315,7 +1315,7 @@ def extract_paragraphs(pdf_path, pages=None, keep_references=False):
         for t in {norm_str(t) for _, t, _, _ in rows[:3] + rows[-3:]}:
             counts[t] += 1
     recurring = {t for t, n in counts.items() if t and len(page_rows) >= 3 and n > len(page_rows) / 2}
-    out, in_refs = [], False
+    out, in_refs, in_checklist, after_refs = [], False, False, False
     for p, rows in zip(sel, page_rows):
         paras = []
         # blocks of nothing but lone numbers or numerals: line numbers beside the text, axis ticks, a page number
@@ -1327,8 +1327,14 @@ def extract_paragraphs(pdf_path, pages=None, keep_references=False):
             # number or letter is part of the text (a variable of a formula set on its own line)
             if (PAGE_NUM_RE.match(t) and (edge or blk in numeric)) or (edge and n in recurring):
                 continue
+            if in_checklist:
+                if not (heading(t, size, bold) and APPENDIX_RE.match(n)):
+                    continue
+                in_checklist = False              # the checklist ends at the appendix
+            is_refs = bool(REFERENCES_RE.fullmatch(n))
+            after_refs = after_refs or is_refs
             if not keep_references:
-                if not in_refs and n in ("references", "bibliography"):
+                if not in_refs and is_refs:
                     in_refs = True
                     paras.append([None, "[references removed]", "marker"])
                     continue
@@ -1337,6 +1343,11 @@ def extract_paragraphs(pdf_path, pages=None, keep_references=False):
                         in_refs = False           # the bibliography ends at the next heading
                     else:
                         continue
+            # a paper checklist follows the bibliography; before it, a section may be called "Checklist"
+            if after_refs and heading(t, size, bold) and CHECKLIST_RE.fullmatch(n):
+                in_checklist = True
+                paras.append([None, "[checklist removed]", "marker"])
+                continue
             t = "".join(LIG.get(c, c) for c in t)
             kind = "heading" if heading(t, size, bold) else "para"
             if paras and paras[-1][0] == blk and kind == "para" and paras[-1][2] == "para":
@@ -1344,14 +1355,15 @@ def extract_paragraphs(pdf_path, pages=None, keep_references=False):
                 paras[-1][1] = prev[:-1] + t if prev.endswith("-") and t[:1].islower() else prev + " " + t
             else:
                 paras.append([blk, t, kind])
-        out.append((p + 1, [(kind, re.sub(r"([A-Za-z])-\s+([a-z])", r"\1\2", t)) for _, t, kind in paras]))
+        out.append((p + 1, [(kind, re.sub(r"([A-Za-z])-\s+([a-z])", r"\1\2", t)) for _, t, kind in paras],
+                    bool(doc[p].rotation % 360)))
     return out
 
 
 def extract_text(pdf_path, pages=None, keep_references=False):
     """The paper's text with page markers, one paragraph per line (see extract_paragraphs)."""
-    return "\n\n".join(f"--- p.{p} ---\n" + "\n".join(t for _, t in paras)
-                       for p, paras in extract_paragraphs(pdf_path, pages, keep_references)) + "\n"
+    return "\n\n".join(f"--- p.{p}{ROTATED_MARK if rotated else ''} ---\n" + "\n".join(t for _, t in paras)
+                       for p, paras, rotated in extract_paragraphs(pdf_path, pages, keep_references)) + "\n"
 
 
 ABBREV_RE = re.compile(r"(?:\b(?:e\.g|i\.e|et al|cf|vs|viz|resp|approx|ca|Fig|Figs|Eq|Eqs|Sec|Secs|Tab|Ref|Refs|No|Nos|Dr|Prof|Mr|Ms|Mrs|St|Vol|pp|Ch|Def|Thm|Lem|Prop|Cor|Alg|App)|\b[A-Z])\.$")
@@ -1387,9 +1399,10 @@ def extract_sentences(pdf_path, pages=None, keep_references=False):
     """Numbered sentences plus headings and markers, in reading order.
 
     A sentence is {"id", "page", "para", "text"} with ids counted from 1 across the document; a heading is
-    {"page", "para", "heading"}; a marker is {"page", "para", "marker"}."""
+    {"page", "para", "heading"}; a marker is {"page", "para", "marker"}. Items of a rotated page carry "rotated"."""
     items, sid, para = [], 0, 0
-    for p, paras in extract_paragraphs(pdf_path, pages, keep_references):
+    for p, paras, rotated in extract_paragraphs(pdf_path, pages, keep_references):
+        start = len(items)
         for kind, text in paras:
             para += 1
             if kind == "heading":
@@ -1400,6 +1413,9 @@ def extract_sentences(pdf_path, pages=None, keep_references=False):
                 for sent in split_sentences(text):
                     sid += 1
                     items.append({"id": sid, "page": p, "para": para, "text": sent})
+        if rotated:   # nothing is written on a rotated page; its page marker says so
+            for it in items[start:]:
+                it["rotated"] = True
     return items
 
 
@@ -1410,7 +1426,7 @@ def render_sentences(items):
         if it["page"] != page:
             if out:
                 out.append("")
-            out.append(f"--- p.{it['page']} ---"); page, para = it["page"], None
+            out.append(f"--- p.{it['page']}{ROTATED_MARK if it.get('rotated') else ''} ---"); page, para = it["page"], None
         elif "id" in it and para is not None and it["para"] != para:
             out.append("")                        # a blank line between two sentence paragraphs
         para = it["para"] if "id" in it else None
@@ -1460,7 +1476,8 @@ def _unmatched_ids(pg, ids, recs):
 
 def extract_main(argv):
     ap = argparse.ArgumentParser(prog="scholium extract",
-                                 description="Print the PDF's text with page markers, de-hyphenated, without running headers, footers, page numbers and the bibliography.")
+                                 description="Print the PDF's text with page markers, de-hyphenated, without running headers, footers, page numbers, "
+                                             "the bibliography and a paper checklist.")
     ap.add_argument("--pdf", help="path of the PDF (default: the \"pdf\" key of --config)")
     ap.add_argument("--config", help="JSON configuration file to take the pdf path from")
     ap.add_argument("--out", help="write to this file instead of standard output")
@@ -1496,7 +1513,7 @@ def extract_main(argv):
         summary = f"{n} sentences -> {args.sentences}; {text.count(chr(10))} lines, {len(text)} characters"
     else:
         text = extract_text(pdf, pages=pages, keep_references=args.keep_references)
-        if not pages and not re.sub(r"--- p\.\d+ ---|\s", "", text):
+        if not pages and not re.sub(r"--- p\.\d+.*? ---|\s", "", text):
             sys.exit(no_text)
         summary = f"{text.count(chr(10))} lines, {len(text)} characters"
     if args.out:
@@ -1631,7 +1648,7 @@ class LocalApi:
         q = f"?itemType={item_type}" if item_type else ""
         s, h, t = http("GET", f"/api/users/0/items/{key}/children{q}")
         if s != 200:
-            raise RuntimeError(f"failed to read children (HTTP {s}): {t[:200]}")
+            raise RuntimeError(f"failed to read children (HTTP {s}): {NOT_IN_MY_LIBRARY if s == 404 else t[:200]}")
         return json.loads(t)
 
     def create(self, items):
@@ -1757,8 +1774,11 @@ def api_apply(cfg, out, api):
         counts[a["type"]] = counts.get(a["type"], 0) + 1
     result["created"] = counts
     # Do not remove earlier work if either creation call failed.
-    result["removed"] = api.delete(to_delete) if to_delete else 0
-    result["notesTrashed"] = api.trash(victims) if victims else 0
+    try:   # the new items are written; a failure here leaves earlier ones in place
+        result["removed"] = api.delete(to_delete) if to_delete else 0
+        result["notesTrashed"] = api.trash(victims) if victims else 0
+    except Exception as e:
+        result["removeError"] = str(e)
     result["ok"] = True
     return result
 
@@ -2268,6 +2288,8 @@ def pick_backend(requested, cfg):
 def _get(path):
     """A read of the local API (Zotero 7 and later), as JSON."""
     s, _, t = http("GET", "/api/users/0" + path)
+    if s == 404:
+        raise RuntimeError(f"GET {path}: HTTP 404: {NOT_IN_MY_LIBRARY}")
     if s != 200:
         raise RuntimeError(f"GET {path}: HTTP {s}: {t[:160]}" if s else "Zotero does not answer on 127.0.0.1:23119; is it running?")
     return json.loads(t)
@@ -2522,7 +2544,8 @@ def main(argv=None):
     ap.add_argument("--accept", default="", metavar="KIND[,KIND]",
                     help="apply despite style warnings of these kinds (e.g. user_overlap) and, with \"layout\", despite layout warnings")
     ap.add_argument("--ignore-existing", action="store_true",
-                    help="do not read the attachment's existing annotations before laying out margin notes (they may then be overlapped)")
+                    help="do not read the attachment's existing annotations before laying out margin notes (they may then be "
+                         "overlapped); --apply refuses it with cleanup: true")
     ap.add_argument("--version", action="version", version=f"scholium {__version__}")
     args = ap.parse_args(argv)
     try:
@@ -2588,8 +2611,12 @@ def main(argv=None):
               "layout_warnings": [{"page": a["pageLabel"], "text": a["comment"][:60], "reason": a["layout_warning"]} for a in out if a.get("layout_warning")],
               "fitted": [{"page": a["pageLabel"], "text": a["comment"][:60], "font_size": f"{a['fitted']['from']:g} -> {a['fitted']['to']:g}"}
                          for a in out if a.get("fitted")],
-              "existing_annotations": existing_info, "js": js_path,
-              "previews": [os.path.join(cfg["out_dir"], f"preview_p{p}.png") for p in cfg["preview_pages"]]}
+              "as_notes": [{"page": a["pageLabel"], "text": a["comment"][:60]} for a in out if a.get("as_note")],
+              "existing_annotations": existing_info, "js": js_path}
+    previews = [os.path.join(cfg["out_dir"], f"preview_p{p}.png") for p in cfg["preview_pages"]]
+    previews = [path for path in previews if os.path.exists(path)]   # pages outside the document are not rendered
+    if previews:
+        report["previews"] = previews
 
     if args.apply:
         accepted = {k.strip() for k in args.accept.split(",") if k.strip()}
@@ -2602,9 +2629,11 @@ def main(argv=None):
                             "); correct them, or accept a deliberate exception with --accept KIND")
         if report["layout_warnings"] and not args.allow_warnings and "layout" not in accepted:
             blockers.append("layout warnings are reported; move, shorten or drop those notes, or pass --accept layout")
+        if args.ignore_existing and cfg.get("cleanup"):
+            blockers.append("--ignore-existing cannot be combined with cleanup: true; run without --ignore-existing")
         if unread:
             blockers.append(f"the annotations already on the attachment could not be read ({unread}); run again when Zotero "
-                            "answers, or pass --ignore-existing")
+                            "answers" + ("" if cfg.get("cleanup") else ", or pass --ignore-existing"))
         if blockers:
             report["applied"] = False
             report["apply_error"] = "; ".join(blockers)
@@ -2644,6 +2673,11 @@ def main(argv=None):
                     report["applied"] = True
                 except Exception as e:
                     report["apply_error"] = f"write returned success, but verification failed: {e}; inspect --list before retrying"
+                if res.get("removeError"):   # the new items are written; earlier ones are still there
+                    report["applied"] = "partial" if report["applied"] else False
+                    removal = (f"the new items were written, but removing the earlier ones failed: {res['removeError']}; "
+                               "run --list to see what is stored before running again")
+                    report["apply_error"] = report["apply_error"] + "; " + removal if "apply_error" in report else removal
             else:
                 report["apply_error"] = (res.get("error") or "some items could not be created; inspect result.failed and --list before retrying") if res else err
                 if name == "js":
@@ -2654,7 +2688,7 @@ def main(argv=None):
         if key in report:
             report[key] = report.pop(key)
     print(json.dumps(report, ensure_ascii=False, indent=1))
-    if missed or (args.apply and not report.get("applied")):
+    if missed or (args.apply and report.get("applied") is not True):
         sys.exit(2)
 
 

@@ -105,10 +105,16 @@ def test_status_lists_matching_items_and_reports_failures(zotero, capsys, monkey
     out, code = run(capsys, "status", "--query", "paper t")
     assert code == 0 and [m["key"] for m in out["matches"]] == ["I2", "I3"]
     out, code = run(capsys, "status", "NOPE")
-    assert code == 1 and "HTTP 404" in out["error"]
+    assert code == 1 and "HTTP 404: the item was not found in My Library; items in group libraries are not supported" in out["error"]
     monkeypatch.setattr(cli, "http", lambda *a, **k: (0, {}, "refused"))
     out, code = run(capsys, "status", "I1")
     assert code == 1 and "is it running" in out["error"]
+
+
+def test_an_attachment_outside_my_library_is_named_as_such(monkeypatch):
+    monkeypatch.setattr(cli, "http", lambda *a, **k: (404, {}, "Not found"))
+    with pytest.raises(RuntimeError, match="HTTP 404.*not found in My Library; items in group libraries are not supported"):
+        cli.LocalApi("SID").children("GROUPATT", "annotation")
 
 
 def test_samples_give_a_few_examples_of_other_papers(zotero, capsys):

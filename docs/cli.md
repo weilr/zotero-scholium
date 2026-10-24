@@ -59,7 +59,7 @@ Inside the skill the same file is `skills/zotero-scholium/scripts/scholium.py`; 
    scholium --config config.json --list     # counts, the annotations that are not the tool's own, note titles (--full: everything)
    ```
 
-   Every run writes `annotations.json`, a fallback `create_annotations.js`, and `preview_p<N>.png` for the configured pages, and reports `missed` entries (each with the closest passage found on the page), `style_warnings`, `translation_warnings`, `layout_warnings`, and the PDF's hash before and after. `--apply` refuses to write while `missed`, `style_warnings` (other than `core_count`) or `layout_warnings` is non-empty (`--accept KIND`, `--allow-missed`, `--allow-warnings`). A top or bottom band without room is set smaller, down to 8 pt.
+   Every run writes `annotations.json`, a fallback `create_annotations.js`, and `preview_p<N>.png` for the pages in `preview_pages` (none by default), and reports `missed` entries (each with the closest passage found on the page), `style_warnings`, `translation_warnings`, `layout_warnings`, and the PDF's hash before and after. `--apply` refuses to write while `missed`, `style_warnings` (other than `core_count`) or `layout_warnings` is non-empty (`--accept KIND`, `--allow-missed`, `--allow-warnings`). A top or bottom band without room is set smaller, down to 8 pt; without room even then it becomes a sticky note.
 
 [`examples/direct_api_example.py`](../examples/direct_api_example.py) demonstrates the underlying Zotero 10 local API calls in approximately thirty lines for use in other applications.
 

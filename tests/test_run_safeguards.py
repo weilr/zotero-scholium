@@ -228,7 +228,35 @@ def test_a_failed_read_of_the_attachment_is_reported_not_raised(paper, monkeypat
     broken = Broken()
     code, report = run(paper, monkeypatch, capsys, {"highlights": hl}, "--apply", api=broken)
     assert code == 2 and report["applied"] is False and "could not be read (failed to read children (HTTP 403)" in report["apply_error"]
+    assert "or pass --ignore-existing" in report["apply_error"]
     assert broken.n == 0, "nothing was written"
+    code, report = run(paper, monkeypatch, capsys, {"highlights": hl, "cleanup": True}, "--apply", api=broken)
+    assert code == 2 and "could not be read" in report["apply_error"] and "--ignore-existing" not in report["apply_error"]
+    assert broken.n == 0
+
+
+def test_a_redo_is_not_applied_without_reading_the_attachment(paper, monkeypatch, capsys):
+    """--ignore-existing skips the listing the user_edit check reads: with cleanup: true --apply refuses it."""
+    api = Api([ann_row("OWN1", ["zotero-scholium"], text="Another sentence.")])
+    hl = [{"page": 1, "text": SENTENCE, "comment": "该方法提升了结果。"}]
+    code, report = run(paper, monkeypatch, capsys, {"highlights": hl, "cleanup": True}, "--apply", "--ignore-existing", api=api)
+    assert code == 2 and report["applied"] is False and "backend" not in report
+    assert "--ignore-existing cannot be combined with cleanup: true" in report["apply_error"]
+    assert api.n == 0 and api.deleted == [], "nothing was written or removed"
+    code, report = run(paper, monkeypatch, capsys, {"highlights": hl, "cleanup": True}, "--apply", api=api)
+    assert code == 0 and report["applied"] is True and api.deleted == ["OWN1"]
+    code, report = run(paper, monkeypatch, capsys, {"highlights": hl}, "--apply", "--ignore-existing", api=Api())
+    assert code == 0 and report["applied"] is True, "without cleanup --ignore-existing still writes"
+
+
+def test_no_preview_is_rendered_unless_pages_are_named(paper, monkeypatch, capsys):
+    tmp, pdf = paper
+    hl = [{"page": 1, "text": SENTENCE, "comment": "该方法提升了结果。"}]
+    raw = json.dumps({"pdf": pdf, "item_key": "ITEM", "attachment_key": "ATT", "out_dir": str(tmp / "out"), "highlights": hl})
+    code, report = run(paper, monkeypatch, capsys, {}, "--ignore-existing", raw=raw)
+    assert code == 0 and "previews" not in report and not list((tmp / "out").glob("preview_*.png"))
+    code, report = run(paper, monkeypatch, capsys, {"highlights": hl, "preview_pages": [1, 9]}, "--ignore-existing")
+    assert report["previews"] == [str(tmp / "out" / "preview_p1.png")], "a page outside the document is not rendered"
 
 
 # --- commands --------------------------------------------------------------------------------------------------
@@ -290,6 +318,11 @@ def test_the_plugins_keys_are_kept_and_checked_after_writing(paper, monkeypatch,
     del result["createdKeys"], result["noteKeys"]
     code, report = run(paper, monkeypatch, capsys, {"highlights": hl}, "--apply", "--ignore-existing")
     assert code == 0 and report["applied"] is True and "verification" not in report
+    # the earlier notes could not go to the trash: the new items are there
+    listing["annotations"] = [{"key": "NEW1", "tags": ["zotero-scholium"]}]
+    result.update(createdKeys=["NEW1"], noteKeys=[], removeError="the trash is not available")
+    code, report = run(paper, monkeypatch, capsys, {"highlights": hl}, "--apply", "--ignore-existing")
+    assert code == 2 and report["applied"] == "partial" and "the trash is not available" in report["apply_error"]
 
 
 def test_an_older_plugin_says_it_left_the_earlier_notes(tmp_path, monkeypatch):
