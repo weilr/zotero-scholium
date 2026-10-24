@@ -222,7 +222,10 @@ const context = vm.createContext({ Zotero: {
   Items: {
     getByLibraryAndKey: (lib, key) => key === 'PARENT01' ? parent : key === 'ATTACH01' ? attachment : null,
     get: ids => Array.isArray(ids) ? ids.map(id => notes.find(n => n.id === id)) : ids === 2 ? parent : notes.find(n => n.id === ids),
-    trashTx: async ids => { trashed.push(...ids.map(id => notes.find(n => n.id === id).key)); },
+    trashTx: async ids => {
+      if (input.trashFails) throw new Error('the trash is not available');
+      trashed.push(...ids.map(id => notes.find(n => n.id === id).key));
+    },
   },
   DB: { executeTransaction: async callback => callback() },
   Item: class {
@@ -253,12 +256,12 @@ EARLIER_NOTES = [
 NEW_NOTE = "<h1>Paper</h1><p>The new reading note.</p>"
 
 
-def run_notes(channel, notes, html, replace, prefix=""):
+def run_notes(channel, notes, html, replace, prefix="", trash_fails=False):
     """A note written by the bridge or by the generated JavaScript: (result, notes created, keys moved to the trash)."""
     if channel == "bridge":
         data = {"attachmentKey": "ATTACH01", "itemKey": "PARENT01", "tag": "zotero-scholium", "legacyTags": ["zotero-marginalia"],
                 "annotations": [], "note": {"html": html, "titlePrefix": "", "trashOwn": replace, "trashTitlePrefix": prefix}}
-        payload = {"data": data, "notes": notes, "script": None}
+        payload = {"data": data, "notes": notes, "script": None, "trashFails": trash_fails}
     else:
         import tempfile, os
         with tempfile.NamedTemporaryFile("w", suffix=".html", delete=False, encoding="utf8") as f:
@@ -284,6 +287,14 @@ def test_note_replace_moves_only_the_tools_notes_to_the_trash(channel):
     assert len(created) == 1 and trashed == [], "without note_replace nothing goes"
     if channel == "bridge":
         assert result["noteKeys"] == ["NOTE1"]
+
+
+def test_the_bridge_says_when_the_earlier_notes_could_not_go():
+    result, created, trashed = run_notes("bridge", EARLIER_NOTES, NEW_NOTE, True, trash_fails=True)
+    assert result["ok"] is True and len(created) == 1 and trashed == [], "the new note is written"
+    assert result["notesTrashed"] == 0 and result["removeError"] == "the trash is not available"
+    result, created, trashed = run_notes("bridge", EARLIER_NOTES, NEW_NOTE, True)
+    assert "removeError" not in result
 
 
 @pytest.mark.parametrize("channel", ["bridge", "generated-js"])

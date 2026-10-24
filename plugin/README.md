@@ -30,8 +30,9 @@ the plugin shows them again in open readers.
 
 **Annotate** in the *Scholium* section of the item pane starts the Claude Code CLI or the Codex CLI
 in the background for the selected paper; papers started while another runs wait in a queue and run
-one at a time. A regular item is annotated through its best PDF attachment. Only papers in My Library are
-annotated: for a paper in a group library the section says so and **Annotate** is off.
+one at a time, and a paper moved to the trash meanwhile is left out. A regular item is annotated through its
+best PDF attachment. Only papers in My Library are annotated: for a paper in a group library the section says
+so, **Annotate**, **Agent**, **New chat** and **History** are off, and the message box is hidden.
 
 Requirements: Claude Code or Codex installed and signed in, and the zotero-scholium skill installed for
 it (`~/.claude/skills/zotero-scholium` for Claude Code; for Codex, `~/.codex/skills/`,
@@ -48,7 +49,9 @@ Each Claude Code run:
   directory added;
 - runs without the user's MCP servers and hooks (`--strict-mcp-config`, `disableAllHooks`); the
   user's skills stay;
-- logs every event to the conversation's log, `<data dir>/tmp/scholium/<attachment key>/conversations/claude-<time>.jsonl`.
+- logs its events, without the streaming deltas, to the conversation's log,
+  `<data dir>/tmp/scholium/<attachment key>/conversations/claude-<time>.jsonl`; a tool's result is kept without
+  Claude Code's own copy of it and without the data of images (the pages the agent looked at).
 
 Each Codex run:
 
@@ -61,8 +64,11 @@ Each Codex run:
   macOS and Linux), and may use the network, which the skill needs for Zotero's local server;
 - has Codex's automatic reviewer (`auto_review`) decide on requests beyond the sandbox; a request or
   question that reaches the plugin is declined;
-- logs Codex's notifications, without the streaming deltas and the user's message, to the
+- logs Codex's notifications, without the streaming deltas, the user's message and the turn's diff, to the
   conversation's log (`codex-<time>.jsonl`), between a start line and a result line in Claude Code's form.
+
+A line that the log file does not take at once (locked a moment by a virus scanner or a backup) is written
+with the next ones; the run goes on.
 
 Both receive the item key, the attachment key, the PDF path, the output directory
 `<data dir>/tmp/scholium/<attachment key>` and the profile's path (or that there is none, so that the
@@ -106,7 +112,8 @@ controls and the process of the selected paper:
 - The choices apply to the papers started afterwards, are saved for each agent, and are shared by all
   panes.
 - **Annotate**, **Cancel** and **Delete annotations** act on the selected paper; **Cancel** also takes
-  a queued paper out of the queue.
+  a queued paper out of the queue, and a paper that waits for its second try or for a limit to reset ends
+  as cancelled.
 - Above the transcript, **New chat** starts a new conversation with the chosen agent (its first message
   starts it); **History** lists the agent's conversations of the paper, newest first, by day (today,
   yesterday, the previous 7 and 30 days, older), titled by their first message, to open one, rename it
@@ -116,9 +123,10 @@ controls and the process of the selected paper:
   **History** are disabled.
 - A state line shows the step of six (for a question, the step's name only) and the elapsed time while
   the paper runs (and, while the agent has lost its connection and tries again, the attempt, until it
-  answers again), its place in the queue, its latest outcome with the minutes, turns and tokens of the
-  run (the tooltip splits the tokens into input, cache and output), or the deletion; other papers' runs
-  are not shown there. For a paper run earlier, the outcome comes from the saved log.
+  answers again), its place in the queue, the latest outcome of the conversation shown with the minutes,
+  turns and tokens of the run (the tooltip splits the tokens into input, cache and output), or the
+  deletion; other papers' runs are not shown there. For a conversation run earlier, the outcome comes from
+  its log.
 - The process is shown as Claude Code shows it: the user's words or **Annotate**, the agent and model, the
   agent's text, each tool call with its command or file, and the first lines of each result (errors in red),
   and under each run the time it ended; a failed run ends with its error. A running paper is shown live,
@@ -130,7 +138,8 @@ controls and the process of the selected paper:
   every run follows, in an editor over the Zotero window: the Markdown text as it is on the left, and
   on the right a preview that formats it as it is typed and follows its scrolling; colour codes such
   as `#ff6666` get a dot of their colour, and links open as in a message. **Save** closes the
-  editor, Ctrl+S keeps it open, **Cancel** or Esc closes it. Closing with unsaved changes asks first.
+  editor, Ctrl+S keeps it open, **Cancel** or Esc closes it, and asks first when there are unsaved changes;
+  closing the window, or an update of the plugin, discards them.
   The file keeps its line ends. A file changed elsewhere since it was opened (for example by
   `scholium profile --from-library`) is overwritten only after a confirmation; an unedited
   text shows the file's current content when Zotero is focused again. A missing profile starts as
@@ -140,7 +149,7 @@ controls and the process of the selected paper:
   conversation: its first message is a question, answered without annotating, and later ones continue it,
   for example to change some annotations. **Annotate** takes them as extra instructions and goes on in the
   same conversation; a redo there still has the earlier run in its context. Words typed and not sent are
-  kept for each conversation.
+  kept for each conversation; the words of a message whose agent is not found go back to the box.
 - Beside the hint under the box: the context the conversation's session took up in its latest request,
   out of the model's context window once the agent named it; from 80% it is orange, and **New chat**
   starts afresh.

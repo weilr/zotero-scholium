@@ -273,12 +273,13 @@ const CONTENT = require('node:path').join(require('node:path').dirname(process.a
 
 function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, exitCode = 0, script = null, claudeExists = true, gateFirst = false,
                    home = 'dirsvc', eraseFails = false, logs = {}, models = 'ok', claudeAt = CLAUDE, scripts = [], readFails = false,
-                   writeFails = false, codex = {}, logTimes = {}, notes = [], secondPdf = false, failLogWrites = null, stdinFails = false, holdDirs = false } = {}) {
+                   writeFails = false, codex = {}, logTimes = {}, notes = [], secondPdf = false, failLogWrites = null, stdinFails = false, holdDirs = false,
+                   unreadable = [] } = {}) {
   const log = { calls: [], stdin: [], notices: [], alerts: [], confirms: [], kills: 0, menus: [], unregistered: [], listeners: [],
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
                 ftl: [], tabs: [], selected: [], opened: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
                 madeDirs: [], trashed: [], versionCalls: [], codexCalls: [], codexProcs: [], codexKills: 0, codexTurns: 0,
-                mtimes: Object.assign({}, logTimes), clock: Date.now(), copied: [], removed: [], threads: 0 };
+                mtimes: Object.assign({}, logTimes), clock: Date.now(), copied: [], removed: [], threads: 0, tmpPaths: [], reads: [] };
   const co = Object.assign({ versions: CODEX_VERSIONS, scripts: [], skillAt: '/data', fail: null, failMessage: '' }, codex);
   const files = new Set((claudeExists ? [claudeAt] : []).concat(Object.keys(co.versions)));
   // 97-character chunks split JSON lines; 'WAIT' holds the stream open until the process is killed; 'STDERR:…' is what
@@ -360,6 +361,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       const p = msg.params || {};
       if (co.fail === msg.method) return this.emit([ev({ id: msg.id, error: { code: -32600, message: co.failMessage } })]);
       if (co.refuse && msg.method in co.refuse) return this.emit([ev({ id: msg.id, error: { code: -32600, message: co.refuse[msg.method] } })]);
+      if (co.exitOn === msg.method) { this.killed = true; if (this.wake) { const w = this.wake; this.wake = null; w(); } return; }
       // a notification ahead of the answer: the request is still waiting while it is handled
       if (co.noticeBefore === msg.method) this.emit([ev({ method: 'thread/started', params: { thread: { id: 'T1' } } })]);
       switch (msg.method) {
@@ -421,7 +423,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
   }
   const annotation = (key, tags) => ({ key, id: key, isAnnotation: () => true, getTags: () => tags.map(tag => ({ tag })) });
   const attachment = (key, parentID, anns) => ({
-    key, id: key, parentID, libraryID: 1, attachmentContentType: 'application/pdf',
+    key, id: key, parentID, parentItemKey: parentID, libraryID: 1, attachmentContentType: 'application/pdf', deleted: false,
     isAttachment: () => true, isRegularItem: () => false, isPDFAttachment: () => true,
     getFilePathAsync: async () => `D:/Zotero/storage/${key}/paper.pdf`,
     getAnnotations: () => anns, getDisplayTitle: () => 'att ' + key, getItemTypeIconName: () => 'attachmentPDF',
@@ -555,14 +557,23 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       stat: async p => { if (!(p in log.writes)) throw Error('NotFoundError'); return { lastModified: log.mtimes[p] || 0, size: log.writes[p].length }; },
       readUTF8: async p => {
         if (readFails && p === PROFILE_PATH) throw Error('NotReadableError');
-        if (!(p in log.writes)) throw Error('missing');
+        log.reads.push(p);
+        if (unreadable.includes(p)) throw Object.assign(Error('NotReadableError'), { name: 'NotReadableError' });
+        if (!(p in log.writes)) throw Object.assign(Error('missing'), { name: 'NotFoundError' });
         return log.writes[p];
       },
+      // as IOUtils: "append" needs the file, "appendOrCreate" makes it; a log locked a moment refuses one write
       writeUTF8: async (p, t, o) => {
         if (writeFails && p === PROFILE_PATH) throw Error('NotAllowedError');
-        if (failLogWrites && /\/conversations\/[\w-]+\.jsonl$/.test(p) && String(t).includes(failLogWrites)) throw Error('NotWritableError');
-        log.writes[p] = (o && o.mode === 'append' ? (log.writes[p] || '') : '') + t;
+        if (failLogWrites && /\/conversations\/[\w-]+\.jsonl$/.test(p) && String(t).includes(failLogWrites) && !log.lockedOnce) {
+          log.lockedOnce = true;
+          throw Error('NotWritableError');
+        }
+        const mode = o && o.mode;
+        if (mode === 'append' && !(p in log.writes)) throw Object.assign(Error('NotFoundError: ' + p), { name: 'NotFoundError' });
+        log.writes[p] = (mode === 'append' || mode === 'appendOrCreate' ? (log.writes[p] || '') : '') + t;
         log.mtimes[p] = ++log.clock;
+        if (o && o.tmpPath) log.tmpPaths.push(o.tmpPath);
       },
     },
     ChromeUtils: { importESModule: () => ({ Subprocess }) },
@@ -903,25 +914,23 @@ const CONV1 = '/data/tmp/scholium/ATT1/conversations/claude-20261001-120000.json
                                             toldAfterStop: h.log.notices.length + h.log.notifications.length - told };
   }
 
-  // a run log that cannot be written: the run fails, and the agent is stopped rather than left running
-  {
-    const h = harness({ failLogWrites: '"session_id"' });
-    h.runner.start('x');
-    const p = await h.pane(h.item1);
-    await settle(40);
-    await h.runner.annotate([h.item1]);
-    await settle(400);
-    facts.claudeLogFails = { kills: h.log.kills, running: !!h.runner.current, state: p.view().state, last: p.view().entries.filter(untimed).at(-1) };
-  }
-  {
-    const h = harness({ failLogWrites: '"thread/started"', prefs: { 'extensions.scholium-bridge.agent': 'codex' },
-                        codex: { noticeBefore: 'thread/start' } });
-    h.runner.start('x');
-    const p = await h.pane(h.item1);
-    await settle(200);
-    await h.runner.annotate([h.item1]);
-    await settle(500);
-    facts.codexLogFails = { kills: h.log.codexKills, running: !!h.runner.current, state: p.view().state, last: p.view().entries.filter(untimed).at(-1) };
+  // a run log that refuses a write a moment (a virus scanner, a backup): the run goes on, and the lines go with the next
+  // ones, in order, as in a run whose log took every write
+  for (const agent of ['claude', 'codex']) {
+    const lines = h => convLines(h).filter(l => !(l.type === 'scholium' && l.subtype === 'time')).map(l => JSON.stringify(l).replace(/"at":\d+/g, ''));
+    const runs = [];
+    // Claude Code: the run's last write, which goes when the run ends
+    for (const failLogWrites of [null, agent === 'claude' ? '"num_turns":26' : '"thread/started"']) {
+      const h = harness({ failLogWrites, prefs: { 'extensions.scholium-bridge.agent': agent }, codex: { noticeBefore: 'thread/start' } });
+      h.runner.start('x');
+      const p = await h.pane(h.item1);
+      await settle(200);
+      await h.runner.annotate([h.item1]);
+      await settle(500);
+      runs.push({ kills: h.log.kills + h.log.codexKills, locked: !!h.log.lockedOnce, state: p.view().state, lines: lines(h) });
+    }
+    facts['logLocked_' + agent] = { kills: runs[1].kills - runs[0].kills, locked: runs[1].locked, state: runs[1].state.split(' · ')[0],
+                                    same: JSON.stringify(runs[1].lines) === JSON.stringify(runs[0].lines), lines: runs[1].lines.length };
   }
 
   // an empty message box is as tall as its placeholder (two lines here), a typed line as tall as the text
@@ -2187,7 +2196,8 @@ const CONV1 = '/data/tmp/scholium/ATT1/conversations/claude-20261001-120000.json
     const missing = Object.assign({}, h.item2, { getBestAttachment: async () => Object.assign({}, h.att2, { getFilePathAsync: async () => null }) });
     await h.runner.annotate([missing]);
     facts.otherLibrary = { state: p.view().state, annotateDisabled: p.view().annotateDisabled, queued, alerts: h.log.alerts.slice(), calls: h.log.calls.length,
-                           sendHidden: p.view().sendHidden, asked: await h.runner.send(group, '这篇讲什么？') };
+                           composerHidden: p.pane().composer.hidden, controls: [p.view().agentDisabled, p.view().historyDisabled, p.view().newChatDisabled],
+                           asked: await h.runner.send(group, '这篇讲什么？') };
     facts.otherLibrary.askedMissing = [await h.runner.send(missing, '这篇讲什么？'), h.log.alerts.slice(facts.otherLibrary.alerts.length), h.log.calls.length];
   }
   // Annotate goes on in the conversation shown, with the words in the box as extra instructions
@@ -2982,6 +2992,186 @@ const CONV1 = '/data/tmp/scholium/ATT1/conversations/claude-20261001-120000.json
     facts.reviewEdges = { codexBox, claudeBox, undoLate: [CONV1 in g.log.writes, g.runner.deleting.size, gp.shownConv, pendingAfterUndo, g.log.removed.length],
                           context };
   }
+  // the log keeps a tool's result without Claude Code's own copy and without image data; other lines as they came
+  {
+    const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo' + 'A'.repeat(500) } };
+    const read = ev({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'r1', content: [{ type: 'text', text: 'page 3' }, image] }] },
+                      tool_use_result: { type: 'image', file: { base64: 'iVBORw0KGgo' + 'A'.repeat(500) } } });
+    const h = harness({ scripts: [SCRIPT.slice(0, 4).concat([tool('Read', { file_path: 'p3.png' }, 'r1'), read, LAST, RESULT])] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.annotate([h.item1]); await settle(300);
+    const user = convLines(h).filter(l => l.type === 'user').at(-1);
+    const parts = user.message.content[0].content;
+    facts.slimLog = { copy: 'tool_use_result' in user, data: parts[1].source.data, media: parts[1].source.media_type, text: parts[0].text,
+                      plain: convText(h).includes(SCRIPT[3].trim()), shown: p.view().entries.filter(e => e[0].includes('result')).at(-1)[1] };
+    // Codex: the turn's diff stays out
+    const diff = note('turn/diff/updated', { threadId: 'T1', turnId: 'TURN', diff: 'diff --git a/x b/x\n+line' });
+    const c = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT.slice(0, -1).concat([diff, diff, CODEX_SCRIPT.at(-1)])] } });
+    c.runner.start('x');
+    await c.runner.annotate([c.item1]); await settle(500);
+    facts.slimLog.diff = [convText(c).includes('turn/diff/updated'), convLines(c).some(l => l.type === 'result' && !l.is_error)];
+  }
+  // a relative configuration of a command that ran in a Windows folder is a Windows path
+  {
+    const h = harness({ logs: { 'D:\\Zotero\\tmp\\scholium\\sub\\config.json': '{}' } });
+    h.runner.start('x');
+    const applied = () => JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']).config;
+    await h.runner.noteApplied('ATT1', 'sub/config.json', 'codex', 'c', 'D:\\Zotero\\tmp\\scholium');
+    const found = applied();
+    await h.runner.noteApplied('ATT1', './other.json', 'codex', 'c', 'D:\\Zotero\\tmp\\scholium\\');
+    facts.windowsConfig = [found, applied()];
+  }
+  // the words of a message whose agent is not found go back to the box; no conversation is started
+  {
+    const h = harness({ claudeExists: false });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    p.pane().input.type('这篇讲什么？');
+    p.pane().send.click(); await settle(300);
+    facts.givenBack = { box: p.pane().input.value, conversations: convs(h).length, last: p.view().entries.at(-1)[1].slice(0, 16),
+                        sendDisabled: p.view().sendDisabled, unsent: [...h.runner.unsent.values()] };
+  }
+  // Cancel on a paper the usage limit paused: its log and its section say it was cancelled
+  {
+    const h = harness({ scripts: [SCRIPT.slice(0, 3).concat(LIMIT_HIT)] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.annotate([h.item1]); await settle(300);
+    const paused = [!!h.runner.paused, h.runner.queue.length];
+    p.pane().cancel.click(); await settle(200);
+    facts.cancelPaused = { paused, queue: h.runner.queue.length, pausedAfter: !!h.runner.paused, state: p.view().state,
+                           ends: convLines(h).filter(l => l.subtype === 'end').map(l => l.outcome),
+                           last: p.view().entries.filter(untimed).at(-1)[1], timed: convLines(h).at(-1).subtype };
+  }
+  // a second try that meets the usage limit: after the wait the run continues as any, with a second try of its own
+  {
+    const overloaded = ev({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'API Error: 529 overloaded', session_id: 'S1' });
+    const h = harness({ scripts: [[SCRIPT[0], overloaded], [SCRIPT[0]].concat(LIMIT_HIT), [SCRIPT[0], said('接着做完了。'), RESULT]] });
+    h.runner.start('x');
+    await h.runner.annotate([h.item1]); await settle(200);
+    await new Promise(r => setTimeout(r, 150)); await settle(400);   // the second try's wait
+    const waiting = h.runner.queue[0] && [h.runner.queue[0].retried, h.runner.queue[0].retryAt];
+    h.fire(); await settle(400);
+    facts.pauseAfterRetry = { waiting, calls: h.log.calls.length, marks: convLines(h).filter(l => l.type === 'scholium').map(l => l.subtype) };
+  }
+  // the state line gives the outcome of the conversation shown
+  {
+    const h = harness();
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.annotate([h.item1]); await settle(300);
+    const before = p.view().state;
+    p.pane().newChat.click(); await settle(100);
+    const fresh = p.view().state;
+    p.pane().historyButton.click(); await settle(100);
+    p.pane().historyBox.children.find(r => r.className.startsWith('scholium-history-row')).children[0].click(); await settle(200);
+    facts.stateOfConversation = { before: before.split(' · ')[0], fresh, back: (p.view().state || '').split(' · ')[0] };
+  }
+  // a title being typed stays in its box when the list is drawn again
+  {
+    const CONV2 = '/data/tmp/scholium/ATT1/conversations/claude-20261002-120000.jsonl';
+    const h = harness({ logs: { [CONV1]: SCRIPT[0], [CONV2]: SCRIPT[0] } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    p.pane().historyButton.click(); await settle(100);
+    const row = () => p.pane().historyBox.children.filter(r => r.className.startsWith('scholium-history-row'))[1];
+    row().children[1].click();
+    const box = row().children[0];
+    box.value = '半截标题';
+    await h.runner.renderHistory(p.pane()); await settle(20);
+    const again = row().children[0];
+    const kept = [again.tagName, again.value, again !== box, !!again.focused];
+    for (const f of box.listeners.blur || []) f({});   // the old box, gone, keeps nothing
+    await settle(50);
+    key(again, { key: 'Enter' }); await settle(100);
+    facts.renameKept = { kept, titles: Object.values(JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/conversations/index.json']).titles),
+                         renaming: p.pane().renaming };
+  }
+  // a paper moved to the trash while it waited is left out
+  {
+    const h = harness({ gateFirst: true });
+    h.runner.start('x');
+    await h.runner.annotate([h.item1, h.item2]); await settle(100);
+    const queued = h.runner.queue.length;
+    h.att2.deleted = true;
+    h.runner.cancel(); await settle(300);
+    facts.trashed = { queued, calls: h.log.calls.length, queue: h.runner.queue.length };
+  }
+  // an index that is there and cannot be read is not written over; the choices of the session stay in memory
+  {
+    const index = '/data/tmp/scholium/ATT1/conversations/index.json';
+    const saved = JSON.stringify({ current: { claude: 'claude-20261001-120000' }, titles: { 'claude-20261001-120000': '我的标题' } });
+    const unreadable = [index];
+    const h = harness({ logs: { [CONV1]: SCRIPT[0], [index]: saved }, unreadable });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    p.pane().newChat.click(); await settle(100);
+    const g = harness({ logs: { [CONV1]: SCRIPT[0] } });
+    g.runner.start('x');
+    await g.pane(g.item1); await settle(40);
+    await g.runner.chooseConv('ATT1', 'claude', null);
+    facts.indexUnread = { kept: h.log.writes[index] === saved, shownConv: p.view().shownConv, tmp: h.log.tmpPaths,
+                          written: JSON.parse(g.log.writes[index]).current, tmpWritten: g.log.tmpPaths.includes(index + '.tmp') };
+  }
+  // Codex's server ending while it resumes the thread: the run fails, and the thread stays the conversation's
+  {
+    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW], newThreads: true, exitOn: 'thread/resume' } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(200);
+    await h.runner.annotate([h.item1]); await settle(500);
+    p.pane().input.type('再问一句');
+    p.pane().send.click(); await settle(800);
+    facts.codexExit = { gone: convLines(h).filter(l => l.subtype === 'gone').length, threads: h.log.threads,
+                        session: (await h.runner.readLog('ATT1', p.view().shownConv)).session, state: p.view().state.split(' · ')[0],
+                        last: p.view().entries.filter(untimed).at(-1)[1] };
+  }
+  // the log of a conversation handed over without it is started again
+  {
+    const carried = JSON.stringify({ jobs: [{ key: 'ATT1', libraryID: 1, agent: 'claude', say: '再问一句', conv: 'claude-20261001-120000', question: true }] });
+    const h = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried } });
+    h.runner.start('x', true);
+    await settle(400);
+    facts.logGone = { calls: h.log.calls.length, logged: (h.log.writes[CONV1] || '').includes('"subtype":"run"') };
+  }
+  // the sections that ask for a log at once read it once, and each gets its own copy
+  {
+    const h = harness({ logs: { [CONV1]: SCRIPT[0] + said('你好') } });
+    h.runner.start('x');
+    const id = 'claude-20261001-120000';
+    const [a, b] = await Promise.all([h.runner.readLog('ATT1', id), h.runner.readLog('ATT1', id)]);
+    a.turns.push('changed');
+    facts.sharedReading = { reads: h.log.reads.filter(r => r === CONV1).length, own: b.turns.length, entries: b.entries.length };
+  }
+  // a section that showed the run as it went keeps its transcript when the run ends
+  {
+    const h = harness({ script: SCRIPT.concat(['HOLD', LAST, RESULT]) });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    await h.runner.annotate([h.item1]);
+    for (let i = 0; i < 3000 && !h.log.release; i++) await tick();
+    const first = p.pane().list.children[0];
+    h.log.release(); await settle(300);
+    facts.keptTranscript = { same: p.pane().list.children[0] === first, state: p.view().state.split(' · ')[0],
+                             entries: p.view().entries.filter(untimed).length, again: (await h.pane(h.item1)).view().entries.filter(untimed).length };
+  }
+  // words and texts of the section in each language
+  {
+    const zh = harness().runner, en = harness({ locale: 'en-US' }).runner;
+    facts.texts = { turns: [en.text('turns', 1), en.text('turns', 3), zh.text('turns', 1)],
+                    failures: ['error_max_turns', 'error_new_kind', 'running', undefined].map(s => zh.failureText(s)),
+                    exited: [zh.text('codexExited', 'boom'), en.text('codexExited', '')],
+                    entry: zh.entries({ type: 'result', subtype: 'error_max_turns', is_error: true }).map(e => e.text),
+                    links: ['mailto:a@b.c', 'https://x.y', 'zotero://select/items/1_X', 'file:///C:/x.pdf'].map(a => zh.LINK_SCHEMES.test(a)) };
+  }
   // a failed deletion while the paper's section is on screen: its state line says so, once
   {
     const h = harness({ existing: [['zotero-scholium']], eraseFails: true });
@@ -3076,7 +3266,8 @@ def test_section_is_registered_and_removed_without_menus_or_toolbar_status(facts
 def test_models_come_from_claude_code(facts):
     r = facts["modelRequest"]
     assert r["calls"] == 1 and r["command"] == CLAUDE and r["workdir"] == "/data" and r["stderr"] == "stdout"
-    assert r["args"] == ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
+    assert r["args"] == ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+                         "--strict-mcp-config", "--settings", '{"disableAllHooks":true}'], "without the user's MCP servers and hooks"
     assert r["stdin"] == [{"type": "control_request", "request_id": "scholium-models", "request": {"subtype": "initialize"}}]
     assert r["closed"] is True and r["kills"] == 1 and r["accountKept"] is False
     v = facts["paneBefore"]["view"]
@@ -3665,12 +3856,12 @@ def test_no_run_starts_after_the_plugin_stopped(facts):
     assert facts["stopWhileCreating_codex"] == {"creating": True, "started": 1, "stopped": 1, "turns": 0, "toldAfterStop": 0}
 
 
-def test_a_failed_log_write_stops_the_agent(facts):
-    claude, codex = facts["claudeLogFails"], facts["codexLogFails"]
-    assert claude["kills"] == 1 and not claude["running"] and claude["state"].startswith("失败")
-    assert "NotWritableError" in claude["last"][1]
-    assert codex["kills"] >= 1 and not codex["running"] and codex["state"].startswith("失败")
-    assert "NotWritableError" in codex["last"][1]
+def test_a_log_that_refuses_a_write_a_moment_loses_nothing(facts):
+    for agent in ("claude", "codex"):
+        f = facts["logLocked_" + agent]
+        assert f["locked"] and f["kills"] == 0 and f["state"] == "完成", agent
+        assert f["same"] and f["lines"] > 3, agent + ": every line, in order"
+
 
 
 def test_an_empty_message_box_fits_its_placeholder(facts):
@@ -4020,7 +4211,7 @@ def test_papers_outside_my_library_and_missing_files_are_not_run(facts):
     assert o["queued"] == 0 and o["calls"] == 0
     assert o["alerts"] == ["Scholium 只能批注“我的文库”里的论文。", "这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）。"]
     assert facts["noPdf"]["alerts"] == ["这篇论文没有 PDF 附件。"]
-    assert o["sendHidden"] is True and o["asked"] is False
+    assert o["composerHidden"] is True and o["controls"] == [True, True, True] and o["asked"] is False, "no message box or conversations"
     assert o["askedMissing"] == [False, ["这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）。"], 0]
 
 
@@ -4331,3 +4522,80 @@ def test_codex_skill_problems_are_named(facts):
         "failed": ["Codex 列不出它的技能：invalid type: integer", "失败"],
         "errors": ["Codex 列不出它的技能：invalid YAML", "失败"],
         "off": ["Codex 里的 zotero-scholium 技能被停用了：请在 Codex 里重新启用它。", "失败"]}
+
+
+def test_the_log_keeps_no_image_data_nor_copies(facts):
+    s = facts["slimLog"]
+    assert s["copy"] is False and s["data"] == "" and s["media"] == "image/png" and s["text"] == "page 3"
+    assert s["plain"] is True, "other lines as Claude Code wrote them"
+    assert s["shown"] == "⎿ page 3"
+    assert s["diff"] == [False, True], "Codex's turn diff stays out"
+
+
+def test_a_relative_configuration_in_a_windows_folder(facts):
+    assert facts["windowsConfig"] == ["D:\\Zotero\\tmp\\scholium\\sub\\config.json", "D:\\Zotero\\tmp\\scholium\\other.json"]
+
+
+def test_words_go_back_when_the_agent_is_not_found(facts):
+    g = facts["givenBack"]
+    assert g["box"] == "这篇讲什么？" and g["conversations"] == 0 and g["last"].startswith("找不到 Claude Code")
+    assert g["sendDisabled"] is False and "这篇讲什么？" in g["unsent"]
+
+
+def test_cancel_ends_a_paused_paper_in_its_log_and_section(facts):
+    c = facts["cancelPaused"]
+    assert c["paused"] == [True, 1] and c["queue"] == 0 and c["pausedAfter"] is False
+    assert c["state"] == "已取消" and c["ends"] == ["cancelled"] and c["last"] == "已取消" and c["timed"] == "time"
+
+
+def test_a_second_try_paused_by_the_limit_continues_as_any_run(facts):
+    p = facts["pauseAfterRetry"]
+    assert p["waiting"] == [False, 0] and p["calls"] == 3
+    assert p["marks"] == ["run", "prompt", "retry", "run", "run", "continue", "time"]
+
+
+def test_the_state_line_is_the_conversation_shown(facts):
+    assert facts["stateOfConversation"] == {"before": "完成", "fresh": None, "back": "完成"}
+
+
+def test_a_title_being_typed_survives_the_list_drawn_again(facts):
+    r = facts["renameKept"]
+    assert r["kept"] == ["input", "半截标题", True, True] and r["titles"] == ["半截标题"] and r["renaming"] is None
+
+
+def test_a_paper_in_the_trash_is_left_out(facts):
+    assert facts["trashed"] == {"queued": 1, "calls": 1, "queue": 0}
+
+
+def test_an_unreadable_index_is_not_written_over(facts):
+    i = facts["indexUnread"]
+    assert i["kept"] is True and i["shownConv"] is None and i["tmp"] == []
+    assert i["written"] == {"claude": None} and i["tmpWritten"] is True, "a readable one is written through a temporary file"
+
+
+def test_a_codex_server_that_ends_does_not_lose_the_thread(facts):
+    c = facts["codexExit"]
+    assert c["gone"] == 0 and c["threads"] == 1 and c["session"] == "T1" and c["state"] == "失败"
+    assert c["last"].startswith("Codex app-server 已退出")
+
+
+def test_a_handed_over_conversation_without_its_log(facts):
+    assert facts["logGone"] == {"calls": 1, "logged": True}
+
+
+def test_sections_share_one_reading_of_a_log(facts):
+    assert facts["sharedReading"] == {"reads": 1, "own": 1, "entries": 2}
+
+
+def test_a_section_keeps_the_transcript_it_showed_live(facts):
+    k = facts["keptTranscript"]
+    assert k["same"] is True and k["state"] == "完成" and k["entries"] == k["again"]
+
+
+def test_texts_in_each_language(facts):
+    t = facts["texts"]
+    assert t["turns"] == ["1 turn", "3 turns", "1 轮"]
+    assert t["failures"] == ["达到轮数上限", "失败", "失败", "失败"]
+    assert t["exited"] == ["Codex app-server 已退出：boom", "codex app-server exited"]
+    assert t["entry"] == ["达到轮数上限"]
+    assert t["links"] == [False, True, True, False], "mailto: is not followed"

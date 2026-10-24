@@ -15,6 +15,21 @@
 - Scholium section: a new session is told which configuration, agent and time wrote the paper's annotations, and a
   session that goes on is told when another conversation rewrote them since, or that they are gone. The section
   shows the context the conversation's session takes up, and when each run ended.
+- Scholium section: a conversation's log leaves out the image data in a Claude Code tool's result, Claude Code's own
+  copy of the result and Codex's turn diff. A line the log file does not take at once is written with the next ones,
+  and the run goes on.
+- Scholium section: the state line gives the outcome of the conversation shown. **Cancel** on a paper that waits for
+  its second try or for a limit to reset ends it as cancelled in its log. A paper moved to the trash while it waits
+  is left out. The words of a message whose agent is not found go back to the box. A title being typed in **History**
+  stays when the list is drawn again. For a paper in a group library the message box is hidden and **Agent**,
+  **New chat** and **History** are off.
+- Scholium section: a Codex thread counts as gone only when Codex refuses to resume it. A relative configuration path
+  of a command run in a Windows folder is kept as a Windows path. The model list is asked for without the user's MCP
+  servers and hooks. `mailto:` links are not followed. A conversation index that cannot be read is not written over,
+  and the index is written through a temporary file. English texts say "1 turn"; Codex's end and Claude Code's
+  failure kinds are named in the user's language.
+- The plugin's apply returns `removeError` when the earlier notes cannot be moved to the trash after the new items
+  are written.
 
 ## 0.1.9 (2026-10-20)
 
