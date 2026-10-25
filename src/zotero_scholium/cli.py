@@ -496,8 +496,8 @@ def place_blocks(blocks, occupied, floor, ceiling, gap=3.0):
                     break
         if not ok:
             cand = desired
-            b["layout_warning"] = ("no gap tall enough for this box anywhere in this margin of the page; shorten the text, set side to "
-                                   "the other margin, anchor it on another page, or drop it")
+            b["layout_warning"] = ("no gap tall enough for this box anywhere in this margin of the page; set side to the other "
+                                   "margin, anchor it on another page, or drop it")
         b["y_top"] = cand
         occ.append((cand - h, cand))
         occ.sort()
@@ -575,7 +575,8 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
     column, then margin boxes and sticky notes beside their anchors. Every placed box joins the obstacle set of the
     following groups. Bands avoid the page's text lines; a band without room even at its smallest font size becomes
     a sticky note beside the column's first text line (top) or its last above the footer (bottom). Margin boxes lie
-    outside the text column by construction and avoid the text in the margins.
+    outside the text column by construction and avoid the text in the margins; one without room takes the other margin
+    of a one-column page, or else becomes a sticky note beside its paragraph.
     """
     p = pi.page.number
     anns, occupied = [], list(page_obstacles)
@@ -641,9 +642,10 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
         anns.append(_summary_annotation(pi, sp, rect)); occupied.append(rect)
     # 3. margin boxes and sticky notes beside their anchors (a sticky note ignores `place`), and the bands turned
     # into sticky notes beside their lines; text in the margins is occupied space, and in a one-column layout a box
-    # takes the other margin when its own has text beside it
+    # takes the other margin when its own has text beside it. A margin box without room takes the other margin of a
+    # one-column page (side auto), and without room there either becomes a sticky note beside its paragraph.
     margin_text = pi.margin_text_rects()
-    groups = {}
+    entries = []                                      # (summary, the first line of its anchor)
     for sp in [s for s in specs if not s["rect"] and (s["kind"] == "note" or s["place"] == "margin")] + band_notes:
         r = sp.get("line")
         if r is None:
@@ -660,26 +662,51 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
             if n > 1 and not occ:                     # the box sits beside the first occurrence
                 sp["occurrences"] = n
             r = pi.line_rects(ws)[0]
-        mx0, mx1 = pi.margin_box(r, sp["side"])
-        y_top = pi.H - r.y0 + 1
-        if sp["side"] == "auto" and not pi.two_col and sp["kind"] != "note":
-            ox0, ox1 = pi.margin_box(r, "right" if mx1 <= pi.body_x0 else "left")
-            if (_intersects([mx0, y_top - _box_height(sp, mx1 - mx0), mx1, y_top], margin_text)
-                    and not _intersects([ox0, y_top - _box_height(sp, ox1 - ox0), ox1, y_top], margin_text)):
-                mx0, mx1 = ox0, ox1
-        if sp["kind"] == "note":  # the icon hugs the text column
-            mx0, mx1 = (mx1 - NOTE_ICON, mx1) if mx1 <= pi.body_x0 else (mx0, mx0 + NOTE_ICON)
-        groups.setdefault((mx0, mx1), []).append(({"y_top": y_top, "h": _box_height(sp, mx1 - mx0)}, sp))
-    for (mx0, mx1), items in groups.items():
-        occ = [(r[1], r[3]) for r in occupied + margin_text if r[0] < mx1 and r[2] > mx0]
-        place_blocks([b for b, _ in items], occ, floor=28.0, ceiling=pi.H - 20.0)
-        # a margin narrower than the narrowest box: the box reaches into the text column
-        narrow = mx0 < pi.body_x1 - 1 and mx1 > pi.body_x0 + 1
-        for b, sp in items:
-            rect = [mx0, b["y_top"] - b["h"], mx1, b["y_top"]]
-            warn = b.get("layout_warning") or (f"the margin beside this paragraph is narrower than {MIN_BOX_WIDTH:.0f} pt and the box "
-                                               "covers the text; use place: top or bottom, or drop the note" if narrow else None)
-            anns.append(_summary_annotation(pi, sp, rect, warn)); occupied.append(rect)
+        entries.append((sp, r))
+
+    def lay(ways):
+        """Each entry laid out as `ways` says ("own" margin, the "other" one, or a "note"): [(entry index, summary,
+        rect, warning)] in the order they are placed. Only a box of side auto on a one-column page has another margin."""
+        groups = {}
+        for i, ((sp, r), way) in enumerate(zip(entries, ways)):
+            if way == "note":
+                sp = dict(sp, kind="note", as_note=True)
+            mx0, mx1 = pi.margin_box(r, sp["side"])
+            y_top = pi.H - r.y0 + 1
+            if sp["side"] == "auto" and not pi.two_col and sp["kind"] != "note":
+                ox0, ox1 = pi.margin_box(r, "right" if mx1 <= pi.body_x0 else "left")
+                if (_intersects([mx0, y_top - _box_height(sp, mx1 - mx0), mx1, y_top], margin_text)
+                        and not _intersects([ox0, y_top - _box_height(sp, ox1 - ox0), ox1, y_top], margin_text)):
+                    mx0, mx1, ox0, ox1 = ox0, ox1, mx0, mx1
+                if way == "other":
+                    mx0, mx1 = ox0, ox1
+            if sp["kind"] == "note":  # the icon hugs the text column
+                mx0, mx1 = (mx1 - NOTE_ICON, mx1) if mx1 <= pi.body_x0 else (mx0, mx0 + NOTE_ICON)
+            groups.setdefault((mx0, mx1), []).append(({"y_top": y_top, "h": _box_height(sp, mx1 - mx0)}, sp, i))
+        placed, taken = [], list(occupied)
+        for (mx0, mx1), items in groups.items():
+            occ = [(r[1], r[3]) for r in taken + margin_text if r[0] < mx1 and r[2] > mx0]
+            place_blocks([b for b, _, _ in items], occ, floor=28.0, ceiling=pi.H - 20.0)
+            # a margin narrower than the narrowest box: the box reaches into the text column
+            narrow = mx0 < pi.body_x1 - 1 and mx1 > pi.body_x0 + 1
+            for b, sp, i in items:
+                rect = [mx0, b["y_top"] - b["h"], mx1, b["y_top"]]
+                warn = b.get("layout_warning") or (f"the margin beside this paragraph is narrower than {MIN_BOX_WIDTH:.0f} pt and the "
+                                                   "box covers the text; use place: top or bottom, or drop the note" if narrow else None)
+                placed.append((i, sp, rect, warn)); taken.append(rect)
+        return placed
+
+    # the highest margin box without room goes elsewhere, one at a time, until every box has room or is a sticky note
+    ways = ["own"] * len(entries)
+    while True:
+        placed = lay(ways)
+        stuck = [(rect[3], i) for i, sp, rect, warn in placed if warn and sp["kind"] == "text"]
+        if not stuck:
+            break
+        i = max(stuck)[1]
+        ways[i] = "other" if ways[i] == "own" else "note"
+    for _, sp, rect, warn in placed:
+        anns.append(_summary_annotation(pi, sp, rect, warn)); occupied.append(rect)
     return anns
 
 

@@ -30,6 +30,10 @@
   failure kinds are named in the user's language.
 - The plugin's apply returns `removeError` when the earlier notes cannot be moved to the trash after the new items
   are written.
+- A margin note without room (no gap tall enough, taller than the page allows, or a margin narrower than a box)
+  takes the other margin of a one-column page when its `side` is `auto`, and without room there either is written as
+  a sticky note with its whole text beside the first line of its paragraph, listed under `as_notes`; a two-column
+  page keeps the note on its column's side. Only a sticky note without room still gets a layout warning.
 - A top or bottom band that has no room even at `band_min_font_size` is written as a sticky note with its whole
   text, beside the column's first line of text (top) or its last above the footer (bottom), and listed under
   `as_notes`; it no longer gets a layout warning.

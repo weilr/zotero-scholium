@@ -74,8 +74,10 @@ occupied intervals of the margin they intrude into (with `cleanup: false` the to
 annotations remain in Zotero and are treated the same way). Images and vector drawings of the page,
 obtained from PyMuPDF (`get_image_info`, `cluster_drawings`) and filtered to exclude thin rules and
 page-sized frames, are added as obstacles. New boxes are placed below such an interval, or above it
-when the footer leaves no room; a box for which neither direction has space keeps its requested
-position and is reported in `layout_warnings`. `--ignore-existing` skips reading the existing
+when the footer leaves no room. A box for which neither direction has space, or whose margin is narrower
+than a box, takes the other margin of a one-column page (`side: auto`), and without room there either
+becomes a sticky note beside the first line of its paragraph (`as_notes`); a sticky note without room
+keeps its requested position and is reported in `layout_warnings`. `--ignore-existing` skips reading the existing
 annotations (`--apply` refuses it with `cleanup: true`); figures are always considered.
 
 A summary may also be placed as a band across the text column at the top or bottom of a page (`place`),

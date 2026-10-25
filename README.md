@@ -62,7 +62,7 @@ English | [中文](README.zh-CN.md)
 </tr>
 </table>
 
-The agent does a dry run before writing: unmatched sentences, translations that add terms or numbers, stock phrases, overlapping highlights and margin notes without room are reported and fixed first. The skill follows the [Agent Skills](https://agentskills.io/) format, so Claude Code, Codex, Cursor and other agents can use it.
+The agent does a dry run before writing: unmatched sentences, translations that add terms or numbers, stock phrases and overlapping highlights are reported and fixed first; a margin note without room moves to the other margin or becomes a sticky note. The skill follows the [Agent Skills](https://agentskills.io/) format, so Claude Code, Codex, Cursor and other agents can use it.
 
 ## Quick start
 

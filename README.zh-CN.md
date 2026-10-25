@@ -62,7 +62,7 @@
 </tr>
 </table>
 
-写入前代理会先预演：没对上的句子、多出术语或数字的译文、套话、重叠的高亮和放不下的页边批注都会列出来，改好再写。技能遵循 [Agent Skills](https://agentskills.io/) 规范，Claude Code、Codex、Cursor 等代理都能用。
+写入前代理会先预演：没对上的句子、多出术语或数字的译文、套话、重叠的高亮都会列出来，改好再写；放不下的页边批注会换到另一侧页边，或改成便签。技能遵循 [Agent Skills](https://agentskills.io/) 规范，Claude Code、Codex、Cursor 等代理都能用。
 
 ## 快速上手
 

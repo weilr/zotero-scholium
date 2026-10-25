@@ -80,9 +80,9 @@ Run without `--apply` first and review `missed`, `style_warnings`, `translation_
 | `translation_warnings` | comments with terms or numbers absent from the highlighted text, or a CJK-per-word ratio far outside the usual range |
 | `snapped` | phrases accepted at similarity ≥ 0.95 (`snap: true`) |
 | `ambiguous_matches` | phrases and anchors that occur more than once on their page; the first occurrence is used unless `occurrence` is set |
-| `layout_warnings` | margin boxes with no gap tall enough anywhere in their margin, taller than the page allows, or in a margin narrower than a box (30 pt); explicit rectangles over text, a figure or an annotation |
+| `layout_warnings` | sticky notes with no room in their margin, or in a margin narrower than the icon; explicit rectangles over text, a figure or an annotation |
 | `fitted` | bands set smaller to fit, with the font sizes before and after |
-| `as_notes` | bands without room even at `band_min_font_size`, written as sticky notes beside the first or last line of text |
+| `as_notes` | sticky notes written for boxes without room: a margin box with no gap tall enough in its margin (and, on a one-column page with `side: auto`, in the other one), taller than the page allows, or in a margin narrower than a box (30 pt), beside the first line of its paragraph; a band without room even at `band_min_font_size`, beside the first or last line of text |
 | `existing_annotations` | how many annotations were read from Zotero and how many rectangles were avoided, or why they were unavailable |
 | `pdf_sha256` | the file's hash before and after the run and `unchanged` |
 | `js`, `previews` | paths of the generated JavaScript file and of the preview PNGs (`previews` only when pages were rendered) |

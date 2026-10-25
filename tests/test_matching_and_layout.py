@@ -1036,12 +1036,68 @@ def test_a_box_taller_than_the_room_is_reported():
     assert b["y_top"] == 772.0 and "taller" in b["layout_warning"]
 
 
-def test_a_margin_narrower_than_a_box_is_reported(tmp_path):
+def test_a_margin_too_narrow_even_for_a_sticky_note_is_reported(tmp_path):
     pdf = _page_pdf(tmp_path / "narrow.pdf", lambda pg: pg.insert_textbox(pymupdf.Rect(20, 72, 604, 760), LEFT * 14, fontsize=10, fontname="helv"))
     cfg = _cfg(pdf=pdf, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
                summaries=[{"page": 1, "anchor": "Foundation models have transformed", "text": "A note."}])
     out, missed = cli.build(cfg)
-    assert missed == [] and "covers the text" in out[0]["layout_warning"]
+    assert missed == [] and out[0]["type"] == "note" and "covers the text" in out[0]["layout_warning"]
+
+
+ANCHOR = "Foundation models have transformed"
+
+
+def _one_column_pdf(tmp_path):
+    """One column from x = 100 to 500: the right margin is the wider one."""
+    return _page_pdf(tmp_path / "one.pdf", lambda pg: pg.insert_textbox(pymupdf.Rect(100, 72, 500, 700), LEFT * 8, fontsize=10, fontname="helv"))
+
+
+def _margin_build(pdf, tmp_path, obstacles=None, **item):
+    cfg = _cfg(pdf=pdf, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+               summaries=[dict({"page": 1, "anchor": ANCHOR, "text": "A remark of the reader beside the paragraph."}, **item)])
+    out, missed = cli.build(cfg, obstacles)
+    assert missed == [] and len(out) == 1
+    return out[0], cli.PageIndex(pymupdf.open(pdf)[0])
+
+
+def test_a_margin_box_without_room_takes_the_other_margin_of_a_one_column_page(tmp_path):
+    pdf = _one_column_pdf(tmp_path)
+    a, pi = _margin_build(pdf, tmp_path)
+    assert a["type"] == "text" and a["position"]["rects"][0][0] >= pi.body_x1, "the wider margin first"
+    a, pi = _margin_build(pdf, tmp_path, {0: [[pi.body_x1 + 1, 0, 612, 792]]})   # something fills the right margin
+    x0, y0, x1, y1 = a["position"]["rects"][0]
+    assert a["type"] == "text" and x1 <= pi.body_x0 and "layout_warning" not in a and "as_note" not in a
+
+
+def test_a_margin_box_without_room_in_either_margin_becomes_a_sticky_note(tmp_path):
+    text = " ".join([BAND_SENTENCE] * 40)          # taller than the page in either margin
+    a, pi = _margin_build(_one_column_pdf(tmp_path), tmp_path, text=text)
+    x0, y0, x1, y1 = a["position"]["rects"][0]
+    assert a["type"] == "note" and a["comment"] == text and a["as_note"] and "layout_warning" not in a
+    assert x0 >= pi.body_x1 and x1 - x0 == pytest.approx(cli.NOTE_ICON), "beside the paragraph in its own margin, hugging the column"
+    line = pi.line_rects(pi.match(ANCHOR))[0]
+    assert y1 == pytest.approx(pi.H - line.y0 + 1), "at the first line of its paragraph"
+
+
+def test_a_margin_box_keeps_its_side_on_two_columns_and_when_side_is_set(pdf_path, tmp_path):
+    pi = cli.PageIndex(pymupdf.open(pdf_path)[0])
+    a, _ = _margin_build(pdf_path, tmp_path, {0: [[0, 0, pi.body_x0 - 1, 792]]})   # the left margin is full; the right one is free
+    assert a["type"] == "note" and a["position"]["rects"][0][2] <= pi.body_x0, "no move to the other column's margin"
+    pdf = _one_column_pdf(tmp_path)
+    one = cli.PageIndex(pymupdf.open(pdf)[0])
+    a, _ = _margin_build(pdf, tmp_path, {0: [[one.body_x1 + 1, 0, 612, 792]]}, side="right")
+    assert a["type"] == "note" and a["position"]["rects"][0][0] >= one.body_x1, "a side that is set is kept"
+
+
+def test_a_margin_box_turned_into_a_sticky_note_does_not_block_apply(tmp_path, capsys):
+    cp = tmp_path / "config.json"
+    json.dump({"pdf": _one_column_pdf(tmp_path), "item_key": "I", "attachment_key": "A", "out_dir": str(tmp_path),
+               "summaries": [{"page": 1, "anchor": ANCHOR, "text": " ".join([BAND_SENTENCE] * 40)}]}, open(cp, "w", encoding="utf8"))
+    with pytest.raises(SystemExit):
+        cli.main(["--config", str(cp), "--apply", "--backend", "js", "--ignore-existing"])
+    rep = json.loads(capsys.readouterr().out)
+    assert rep["layout_warnings"] == [] and rep["as_notes"] == [{"page": "1", "text": BAND_SENTENCE[:60]}]
+    assert rep["sticky_notes"] == 1 and rep["backend"] == "js"
 
 
 def test_nothing_is_written_on_a_rotated_page(tmp_path):
