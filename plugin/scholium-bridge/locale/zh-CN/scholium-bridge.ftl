@@ -17,6 +17,7 @@ scholium-settings-followup-queue =
     .label = 排队
 scholium-settings-followup-steer =
     .label = 引导
+scholium-followup-claude-note = Claude Code 不支持引导，它的跟进消息总是排队。
 scholium-settings-ring =
     .label = 显示上下文窗口使用情况
 scholium-settings-claude = Claude Code 程序

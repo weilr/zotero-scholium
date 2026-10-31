@@ -279,7 +279,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
   const log = { calls: [], stdin: [], notices: [], alerts: [], confirms: [], kills: 0, menus: [], unregistered: [], listeners: [],
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
                 ftl: [], tabs: [], selected: [], opened: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
-                prefPanes: [], openedPrefs: [], madeDirs: [], trashed: [], versionCalls: [], codexCalls: [], codexProcs: [], codexKills: 0, codexTurns: 0,
+                prefPanes: [], openedPrefs: [], madeDirs: [], trashed: [], versionCalls: [], codexCalls: [], codexProcs: [], codexKills: 0, codexTurns: 0, steers: [],
                 mtimes: Object.assign({}, logTimes), clock: Date.now(), copied: [], removed: [], threads: 0, tmpPaths: [], reads: [] };
   const co = Object.assign({ versions: CODEX_VERSIONS, scripts: [], skillAt: '/data', fail: null, failMessage: '' }, codex);
   const files = new Set((claudeExists ? [claudeAt] : []).concat(Object.keys(co.versions)));
@@ -401,6 +401,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
             codexNote('thread/status/changed', { threadId: p.threadId, status: { type: 'idle' } }),
             turnDone({ id: 'C1', status: 'completed' })]);
         }
+        case 'turn/steer': log.steers.push(p); return answer({ turnId: p.expectedTurnId });
         case 'turn/interrupt':
           answer({});
           return this.emit([turnDone({ status: 'interrupted' }).split('"TURN"').join(JSON.stringify(p.turnId))]);

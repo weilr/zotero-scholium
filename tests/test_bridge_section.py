@@ -419,8 +419,8 @@ SCENARIOS = r"""
     const followClaude = follow();
     h.store.set('extensions.scholium-bridge.followUpMode', 'steer');
     const followClaudeSteer = follow();
-    const job = h.runner.job, agent = job.agent;
-    job.agent = 'codex';
+    const job = h.runner.job, agent = job.agent, cur = h.runner.current;
+    job.agent = 'codex'; cur.steer = async () => {};                         // a Codex turn under way, which takes words
     const followCodex = follow();
     h.runner.paintSend(pane);
     const steerTitle = pane.send.title;
@@ -428,7 +428,7 @@ SCENARIOS = r"""
     const keys0 = pane.keys; pane.keys = []; const followElsewhere = follow(); pane.keys = keys0;
     h.store.set('extensions.scholium-bridge.followUpMode', 'queue');
     const followCodexQueue = follow();
-    job.agent = agent;
+    job.agent = agent; delete cur.steer;
     pane.input.type('');
     // the live ring: the running paper's context, repainted each second
     job.context = { used: 300000, window: 1000000 };

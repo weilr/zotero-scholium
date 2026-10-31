@@ -168,15 +168,31 @@ history and the annotation sessions are those of that PDF.
 
 - The box at the bottom of each tab takes the user's words. The round button sends them (↑, grey while the box is
   empty); while a run of the tab goes on and the box is empty, it is ■, which stops the run (and takes a waiting
-  paper out of the queue). Esc while a run goes on asks once ("Press Esc again to stop") and stops on a second
-  press within three seconds; with a layer open, Esc closes the layer first. The line under the box names the send
-  shortcut. Words typed and not sent are kept for each tab and conversation; the words of a message whose agent is
-  not found go back to the box.
+  paper out of the queue); a run stopped while it starts ends before its agent's process, and words its
+  conversation does not have yet go back to the box (a queued message to its queue). Esc while a run goes on asks
+  once ("Press Esc again to stop") and stops on a second press within three seconds on the same run; with a layer
+  open, Esc closes the layer first. The line under the box names the send shortcut. Words typed and not sent are
+  kept for each tab and conversation; the words of a message whose agent is not found go back to the box.
+- A message sent while the agent answers is queued or steers the answer under way, as the follow-up behavior on
+  the settings page says; the opposite shortcut does the other for one message: Ctrl+Enter when Enter sends,
+  else Ctrl+Shift+Enter. A steered message joins the answer under way without stopping it (Codex's
+  `turn/steer`); Claude Code does not support steering, and its follow-ups always queue.
+- Queued messages are listed at the top of the box, one line each, at most three tenths of the pane high: ⠿ drags
+  one to another place, a click on its text shows it whole, **Steer** sends it into the answer under way, ✕
+  deletes it (**Undo** for five seconds), and ⋯ offers **Edit message** (back to the box) and **Turn off
+  queueing** (the setting becomes Steer). When an answer ends, the first queued message is sent, marked
+  "Sending". After a stop the queue is held: "Queue paused because you interrupted" with **Resume**, and each row
+  offers **Send**; a new message sent meanwhile asks whether to **Clear queue** or **Send message** first. A queued
+  message that could not be sent is marked ⚠ with **Retry**, and the queue waits until it is retried, edited or
+  deleted. During a compaction, and while a stopped answer ends, follow-ups queue. A follow-up joins the queue
+  after the messages and runs waiting for its own conversation. The queue is kept in memory for each conversation
+  and is handed over with the running paper when the plugin is updated.
 - Context ring: beside the round button, a ring whose arc is the share of the model's context window that the
   conversation's session took up in its latest request (orange from 80%); its tooltip gives the share used and
   left and the tokens in k. A click opens a layer with the numbers, a bar of input, cache and output, and
   **Compact this conversation's context**; `/compact` in the box, optionally followed by what to keep, does the
-  same. Claude Code is sent `/compact` in its session (`claude -p --resume`); Codex compacts its thread with
+  same, and stays in the box while the paper runs or the tab shows no conversation ("Cannot compact now"). Claude
+  Code is sent `/compact` in its session (`claude -p --resume`); Codex compacts its thread with
   `thread/compact/start`. A compaction shows in the transcript as a dashed line, "Compacting context…" and then
   "Context compacted · 850k → 120k"; one the agent made by itself reads "Context compacted automatically".
 - **Personal profile ↗** opens the annotation profile `<data dir>/zotero-scholium/profile.md`, which
@@ -254,7 +270,8 @@ Annotations tab, in place above the box); the new run replaces those annotations
 states the counts, permanently deletes the annotations tagged `zotero-scholium` on every PDF attachment of the
 selected paper, and moves the paper's reading notes tagged `zotero-scholium` to the trash, where they can be
 restored. Annotations and notes without that tag are kept; a paper with an attachment being annotated
-or queued is left alone, notes included. The outcome shows on the Annotations tab's state line.
+or queued is left alone, notes included; messages held after a stop do not count. The outcome shows on the
+Annotations tab's state line.
 The deletion syncs like any deletion in Zotero. The configuration of an earlier run stays in
 `<data dir>/tmp/scholium/<attachment key>/config.json`; applying it with the skill's script writes the
 annotations again.

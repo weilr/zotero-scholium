@@ -17,6 +17,7 @@ scholium-settings-followup-queue =
     .label = Queue
 scholium-settings-followup-steer =
     .label = Steer
+scholium-followup-claude-note = Claude Code does not support steering; its follow-ups always queue.
 scholium-settings-ring =
     .label = Show context window usage
 scholium-settings-claude = Claude Code program

@@ -10,17 +10,24 @@
 - A Scholium page in Zotero's settings: the send shortcut (Enter, Ctrl + Enter for multiline prompts, or always
   Ctrl + Enter), the follow-up behavior (Queue or Steer), whether the context window usage shows, and the Claude
   Code and Codex programs (preferences `sendShortcut`, `followUpMode`, `contextRing`, `claudePath`, `codexPath`).
+- Messages sent while the agent answers are queued in the box, where they can be reordered by dragging, opened,
+  steered, deleted (with **Undo**) and edited, or with Codex steer the answer under way (`turn/steer`);
+  Ctrl+Enter, or Ctrl+Shift+Enter when Ctrl+Enter sends, does the opposite for one message. A stop holds the queue
+  until **Resume**; a queued message that could not be sent is marked and offers **Retry**. A stop also ends a run
+  that is still starting; words its conversation does not have yet go back to the box, a queued message to its
+  queue.
 - A context ring beside the send button: the share of the context window the conversation's session took up in
   its latest request, with a layer of input, cache and output and **Compact this conversation's context**;
-  `/compact` in the box does the same. Compactions, also the agents' own, show in the transcript with the sizes
-  before and after. A compaction under way when the plugin is updated is handed over and runs again.
+  `/compact` in the box does the same, and stays in the box while the paper cannot compact. Compactions, also the
+  agents' own, show in the transcript with the sizes before and after. A compaction under way when the plugin is
+  updated is handed over and runs again.
 - Annotation sessions: each **Annotate** starts a session of its own (`annotate-<agent>-<time>.jsonl`, the
   index's `annotation`), shown on the Annotations tab with the six steps and their times, then a card with the
   highlights (core), margin notes, sticky notes and reading notes counted in Zotero, the warnings left, the turns
   and the tokens. Words typed there continue the session; **Annotate again** asks in place; a failed annotation
   offers **Retry**.
-- An empty conversation offers four starter questions; a failed question offers **Retry**; Esc twice stops a
-  run.
+- An empty conversation offers four starter questions; a failed question offers **Retry**; Esc twice on the same
+  run stops it.
 - Scholium section: as in llm-for-zotero, each agent has its own conversations of a paper. **New chat** starts
   one, **History** lists them by day to open, rename or delete (with **Undo**; a deleted Codex conversation's thread
   is archived), and switching the agent starts a new one. Messages go on in the conversation shown. Each

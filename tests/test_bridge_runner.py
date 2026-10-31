@@ -584,7 +584,9 @@ SCENARIOS = r"""
                     state1: p1.view().state, kind1: p1.view().stateKind, state2: p2.view().state, title1: p1.view().stateTitle, title2: p2.view().stateTitle, resumeShown: !p1.view().resumeHidden, stopShown: p1.view().round[0] === '■',
                     notices: h.log.notices.map(notice), notifications: h.log.notifications.slice(),
                     last: p1.view().flat.filter(untimed).at(-1),
-                    followUpWhileQueued: await h.runner.send(h.att1, 'x', { kind: 'annotate' }), queued: h.runner.queue.length };
+                    followUpWhileQueued: await h.runner.send(h.att1, 'x', { kind: 'annotate' }), queued: h.runner.queue.length,
+                    queuedWords: h.runner.queue.map(j => (j.qid ? [j.att.key, j.kind, j.say] : j.att.key)) };
+    h.runner.removeQueued(null, h.runner.queue.find(j => j.qid).qid);   // taken out again: the rest is the pause's
     h.fire();
     await settle(800);
     const lines = convLines(h);
@@ -3367,7 +3369,8 @@ def test_usage_limit_pauses_the_queue_and_continues_after_the_reset(facts):
     assert m["notices"][-1]["errors"] == 1 and m["notices"][-1]["descriptions"] == [waiting]
     assert m["notifications"] == []
     assert m["last"] == ["scholium-entry text error", "You've hit your limit · resets 9pm"]
-    assert m["followUpWhileQueued"] is False and m["queued"] == 2
+    # a follow-up while the paper waits for the reset is queued behind it
+    assert m["followUpWhileQueued"] is True and m["queued"] == 3 and m["queuedWords"] == ["ATT1", ["ATT1", "annotate", "x"], "ATT2"]
     r = facts["limitResumed"]
     assert r["calls"] == 3 and r["resume"] == "S1" and r["order"] == ["ATT1", "continue", "ATT2"]
     assert r["prompt"] == "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。"

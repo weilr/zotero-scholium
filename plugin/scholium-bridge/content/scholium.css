@@ -635,6 +635,21 @@
   color: var(--fill-secondary);
 }
 
+/* the queued messages above the text: a line while the queue is held, a row per message */
+.scholium-queue { display: flex; flex-direction: column; gap: 2px; overflow: auto; }
+.scholium-queue-held { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--fill-secondary); }
+.scholium-queue-held > span { flex: 1; }
+.scholium-queued, .scholium-queue-removed { display: flex; align-items: center; gap: 4px; font-size: 11.5px; padding: 2px 4px; border-radius: 4px; }
+.scholium-queued:hover { background: var(--fill-quinary); }
+.scholium-queued-handle { cursor: grab; color: var(--fill-tertiary); }
+.scholium-queued-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.scholium-queued.full .scholium-queued-text { white-space: pre-wrap; }
+.scholium-queued.failed .scholium-queued-text { color: var(--accent-red); }
+.scholium-queued .scholium-button { height: 20px; padding: 0 6px; }
+.scholium-queue-removed > span { flex: 1; }
+.scholium-queue-removed, .scholium-queued.sending { color: var(--fill-secondary); }
+.scholium-queued-state { font-size: 10.5px; color: var(--fill-secondary); }
+
 .scholium-send-row {
   display: flex;
   align-items: center;
