@@ -137,7 +137,7 @@ history and the annotation sessions are those of that PDF.
   at the next Codex run). While the paper runs or waits, **＋**, the history and **Agent** are off. An empty
   conversation offers four questions, each sent with a click.
 - The user's words are a bubble on the right. While a run goes on, one blue line names what the agent does at
-  the moment ("Reading sentences.txt", "Running python … scholium.py extract …"), and the answer appears as it is
+  the moment ("Reading sentences.txt", "Running python scholium.py extract …", a path by its last part), and the answer appears as it is
   written; once the answer is there, the steps fold into "Worked for 24s ›", which opens them as Claude Code
   shows them: each tool call with its command or file, and the first lines of each result (errors in red). A fold
   opened or closed by hand stays so. Under an answer, a line gives the model and the time it ended, with a copy
@@ -194,7 +194,7 @@ history and the annotation sessions are those of that PDF.
   and is handed over with the running paper when the plugin is updated.
 - Asking about a passage: in the reader, **Ask Scholium** under the colours of the selection popup shows the Chat
   tab of the reader's section, opening the side pane and the section when they are closed, with the passage and
-  its page quoted above the box; ✕ removes the quote. The message tells the agent that the user quotes that
+  its page quoted above the box, and closes the popup as a colour does; ✕ removes the quote. The message tells the agent that the user quotes that
   passage of page N, counted in the PDF as in `sentences.txt` and the citation chips, with the page's label where
   it differs; the box and the transcript show the label, the transcript above the user's words. The section drawn
   for another item has no quote.

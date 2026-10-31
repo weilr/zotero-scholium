@@ -689,7 +689,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
              const l = log.listeners.find(x => x.type === 'renderTextSelectionPopup');
              const appended = [];
              const doc = { createElement: tag => new El(tag), createElementNS: (ns, tag) => new El(tag) };
-             l.handler({ reader: { itemID: 'ATT1', _window: paneWin, tabID }, doc, params: { annotation: { text, pageLabel, position: { pageIndex, rects: [] } } },
+             l.handler({ reader: { itemID: 'ATT1', _window: paneWin, tabID, _internalReader: { _primaryView: { clearSelection() { log.selectionsCleared = (log.selectionsCleared || 0) + 1; } } } }, doc, params: { annotation: { text, pageLabel, position: { pageIndex, rects: [] } } },
                          append: (...nodes) => appended.push(...nodes) });
              return appended;
            } };

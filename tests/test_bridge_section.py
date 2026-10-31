@@ -762,6 +762,11 @@ SCENARIOS = r"""
              r.liveText(step('Shell', 'Shell(Get-Content a)')), r.liveText(step('Skill', 'Skill(zotero-scholium)')),
              r.liveText(step('WebSearch', 'WebSearch(diffusion)')), r.liveText(step('WebFetch', 'WebFetch(https://x.org/a)')),
              r.liveText(step('node.repl', 'node.repl(x)')), r.liveText(step('WebSearch', 'WebSearch(' + 'q'.repeat(100) + ')'))],
+      // a command's absolute paths by their last part
+      commands: [r.liveText(step('Bash', 'Bash(python C:\\Users\\me\\.claude\\skills\\zotero-scholium\\scripts\\scholium.py extract --pdf "D:\\Zotero data\\storage\\K\\a b.pdf")')),
+                 r.liveText(step('PowerShell', 'PowerShell($o="C:\\T\\scholium\\UFIPQRR7"; python ~/.claude/skills/z/scripts/scholium.py --config "$o\\config.json")')),
+                 r.liveText(step('Bash', 'Bash(cd /home/me/Zotero/tmp/scholium/K && python /opt/s/scholium.py status K)')),
+                 r.liveText(step('Bash', 'Bash(ls -la tmp/x; echo done)'))],
       durations: [0, 59400, 377000, 3725000].map(ms => r.durationWords(ms)),
       worked: [r.workedText({ start: 0, end: 5 }), r.workedText({ start: 1000, end: 378000 }), r.workedText({ start: 5000, end: 0 })],
       labels: [r.modelLabel('Claude Code · claude-opus-5-5'), r.modelLabel('claude-haiku-4-5-20251001'), r.modelLabel('Codex · gpt-6-luna'),
@@ -1350,7 +1355,7 @@ def test_the_section_fills_the_side_pane(facts):
 
 def test_the_transcript_by_runs(facts):
     r = facts["runs"]
-    assert r["liveLine"] == "正在运行 python C:/skills/scholium.py --config c.json --apply"
+    assert r["liveLine"] == "正在运行 python scholium.py --config c.json --apply"
     assert r["parts"] == ["scholium-entry prompt", "scholium-fold", "scholium-entry text", "scholium-meta"]
     assert re.fullmatch(r"已处理 \d+ 秒 ›", r["closed"][0]) and r["closed"][1] == 1, "the steps are folded"
     assert r["opened"][0] == "scholium-entry text" and "scholium-entry tool" in r["opened"] and "scholium-entry result" in r["opened"]
@@ -1361,8 +1366,8 @@ def test_the_transcript_by_runs(facts):
 
 def test_opened_steps_stay_open_and_a_reader_scrolled_up_stays(facts):
     f = facts["foldKept"]
-    assert f["drawnHead"] == "正在运行 python C:/skills/scholium.py extract --pdf x.pdf --sentences s.json", "a section drawn meanwhile shows it live"
-    assert f["during"] == ["正在运行 python C:/skills/scholium.py extract --pdf x.pdf --sentences s.json ⌄", 5, "scholium-fold-head live"]
+    assert f["drawnHead"] == "正在运行 python scholium.py extract --pdf x.pdf --sentences s.json", "a section drawn meanwhile shows it live"
+    assert f["during"] == ["正在运行 python scholium.py extract --pdf x.pdf --sentences s.json ⌄", 5, "scholium-fold-head live"]
     assert re.fullmatch(r"已处理 \d+ 秒 ⌄", f["after"][0]) and f["after"][1:] == [11, "scholium-fold-head"], "the reader's choice wins"
     assert f["runs"] == 1, "the run is drawn again in its place"
     assert f["scrollTop"] == 0
@@ -1435,6 +1440,10 @@ def test_the_runs_drawn_follow_the_transcript_when_its_first_run_goes(facts):
 
 def test_the_words_of_a_runs_line(facts):
     w = facts["words"]
+    assert w["commands"] == ['正在运行 python scholium.py extract --pdf a b.pdf',
+                             r'正在运行 $o=UFIPQRR7; python scholium.py --config "$o\config.json"',
+                             '正在运行 cd K && python scholium.py status K',
+                             '正在运行 ls -la tmp/x; echo done'], "a command's absolute paths by their last part"
     assert w["live"] == ["正在思考", "正在读取 sentences.txt", "正在写 config.json", "正在写 c.json", "正在运行 " + "x" * 79 + "…",
                          "正在运行 Get-Content a", "正在加载技能", "正在搜索 diffusion", "正在搜索 https://x.org/a", "正在调用 node.repl",
                          "正在搜索 " + "q" * 59 + "…"]

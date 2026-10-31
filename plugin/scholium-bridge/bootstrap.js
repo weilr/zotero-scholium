@@ -1552,6 +1552,11 @@ var ScholiumRunner = {
   async askAboutSelection(reader, a) {
     const att = Zotero.Items.get(reader.itemID);
     if (!att) return;
+    // the popup closes, as after a colour: the views' selection is cleared
+    try {
+      const ir = reader._internalReader;
+      for (const view of [ir && ir._primaryView, ir && ir._secondaryView]) if (view && typeof view.clearSelection === "function") view.clearSelection();
+    } catch (e) {}
     const quote = this.quoteOf({ text: String(a.text).replace(/\s+/g, " ").trim(), page: this.pageOf(a), label: a.pageLabel });
     const pane = this.paneFor(reader._window, att.key, reader.tabID || null);
     if (!pane) { this.pendingQuotes.set(att.key, quote); await this.revealSection(reader._window, null, reader.tabID || null); return; }
@@ -4126,10 +4131,19 @@ var ScholiumRunner = {
     const file = arg.split(/[\\/]/).pop();
     if (/^read$/i.test(name)) return this.text("liveRead", file);
     if (/^(write|edit|multiedit|notebookedit)$/i.test(name)) return this.text("liveWrite", file);
-    if (/^(bash|powershell|shell)$/i.test(name)) return this.text("liveRun", this.cut(arg, 80));
+    if (/^(bash|powershell|shell)$/i.test(name)) return this.text("liveRun", this.cut(this.shortCommand(arg), 80));
     if (/^skill$/i.test(name)) return this.text("liveSkill");
     if (/^web(search|fetch)$/i.test(name)) return this.text("liveSearch", this.cut(arg, 60));
     return this.text("liveTool", name);
+  },
+
+  // a command as the live line names it: an absolute path by its last part (python scholium.py extract …)
+  shortCommand(cmd) {
+    const last = p => p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
+    return String(cmd)
+      .replace(/"((?:[A-Za-z]:|~)[\\/][^"]*|\/[^"\s][^"]*)"/g, (m, p) => last(p))
+      .replace(/(^|[\s=(,])((?:[A-Za-z]:|~)[\\/][^\s"';|),]*)/g, (m, pre, p) => pre + last(p))
+      .replace(/(^|[\s=(,])(\/(?:[^\s"';|/),]+\/)+[^\s"';|),]*)/g, (m, pre, p) => pre + last(p));
   },
 
   workedText(run) {

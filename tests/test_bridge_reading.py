@@ -23,6 +23,7 @@ SCENARIOS = r"""
     const [button] = h.selection(PASSAGE, 3, '4');
     const label = button.textContent;
     button.click(); await settle(20);
+    const cleared = h.log.selectionsCleared || 0;
     const quoted = { tab: pane.tab, box: pane.quoteBox.hidden ? null : pane.quoteBox.children[0].textContent };
     // the quote belongs to the chat tab: the annotation tab does not show it
     pane.tabAnnotate.click(); await settle(10);
@@ -32,7 +33,7 @@ SCENARIOS = r"""
     pane.input.type('这个核为什么不变？'); pane.send.click(); await settle(400);
     const prompt = convLines(h).find(l => l.subtype === 'prompt');
     const shown = pane.list.children.at(-1).children[0];
-    facts.selection = { label, quoted, onAnnotate, back, after: pane.quoteBox.hidden, stdin: h.log.stdin[0], quote: prompt.quote,
+    facts.selection = { label, cleared, quoted, onAnnotate, back, after: pane.quoteBox.hidden, stdin: h.log.stdin[0], quote: prompt.quote,
                         shown: [shown.children[0].className, shown.children[0].textContent, shown.children[1].textContent] };
     // the quote can be taken away before sending
     h.selection('Another passage.', 0, '1')[0].click(); await settle(10);
@@ -624,6 +625,7 @@ def test_ask_about_a_selection(facts):
     s = facts["selection"]
     assert s["label"] == "问 Scholium"
     assert s["quoted"] == {"tab": "chat", "box": "p.4 · " + PASSAGE}
+    assert s["cleared"] == 1, "the selection popup closes: the view's selection is cleared"
     assert s["onAnnotate"] is True and s["back"] is False
     assert s["after"] is True
     assert "用户引用了第 4 页的这段原文：\n> " + PASSAGE + "\n\n这个核为什么不变？" in s["stdin"]
