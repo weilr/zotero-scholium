@@ -12,7 +12,8 @@
   Code and Codex programs (preferences `sendShortcut`, `followUpMode`, `contextRing`, `claudePath`, `codexPath`).
 - A context ring beside the send button: the share of the context window the conversation's session took up in
   its latest request, with a layer of input, cache and output.
-- Esc twice stops a run.
+- An empty conversation offers four starter questions; a failed question offers **Retry**; Esc twice stops a
+  run.
 - Scholium section: as in llm-for-zotero, each agent has its own conversations of a paper. **New chat** starts
   one, **History** lists them by day to open, rename or delete (with **Undo**; a deleted Codex conversation's thread
   is archived), and switching the agent starts a new one. Messages and **Annotate** go on in the conversation shown,
@@ -28,7 +29,10 @@
 ### Changed
 
 - Scholium section: the section fills the side pane's height. The state is one line beside the settings chip.
-  ■ stops a run.
+  While a run goes on, one line names what the agent does; once the answer is there, the steps fold into "Worked
+  for 24s ›". The history is a layer of the PDF's conversations by day. ■ stops a run.
+- Scholium section: the conversations and the history are those of one PDF, the item's best PDF in the library
+  and the open PDF in the reader.
 - Token counts are written in k with thousands separators (`2,568k tokens`), in Chinese too.
 - When an agent's program is not found, the message points to Zotero Settings → Scholium.
 - Scholium section: when the agent no longer has a conversation's session (deleted in the Codex app, or cleaned up
@@ -72,6 +76,7 @@
 - Scholium section: the **Agent**, **Model** and **Effort** rows, the row of **Annotate**, **Cancel**,
   **Personal profile** and **Delete annotations**, the status box, the "Transcript" caption, and resizing the
   transcript box (the `logHeight` preference).
+- The history of all PDFs of an item.
 
 ## 0.1.9 (2026-10-20)
 

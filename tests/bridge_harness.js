@@ -208,7 +208,16 @@ class El {
   type(value) { this.value = value; for (const f of this.listeners.input || []) f({}); }
   focus() { this.focused = true; }
   change(value) { this.value = value; for (const f of this.listeners.change || []) f({}); }
-  append(...nodes) { for (const n of nodes) { if (n && typeof n === 'object') n.parent = this; this.children.push(n); } }
+  // as the DOM: a node appended leaves its former parent
+  append(...nodes) {
+    for (const n of nodes) {
+      if (n && typeof n === 'object') {
+        if (n.parent) n.parent.children = n.parent.children.filter(c => c !== n);
+        n.parent = this;
+      }
+      this.children.push(n);
+    }
+  }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
   insertBefore(n) { this.append(n); }
   querySelector() { return null; }
@@ -218,6 +227,15 @@ class El {
   removeEventListener(t, f) { this.listeners[t] = (this.listeners[t] || []).filter(g => g !== f); }
   contains(n) { for (let x = n; x; x = x.parent) if (x === this) return true; return false; }
   remove() { this.removed = true; if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this); this.parent = null; }
+  replaceWith(n) {
+    const p = this.parent;
+    if (!p) return;
+    if (n.parent) n.remove();
+    p.children[p.children.indexOf(this)] = n;
+    n.parent = p; n.removed = false;
+    this.parent = null; this.removed = true;
+  }
+  get lastChild() { return this.children.length ? this.children[this.children.length - 1] : null; }
 }
 // markup as KaTeX writes it (elements, attributes in double quotes, text in the innermost elements) as El
 class DOMParser {
@@ -599,23 +617,31 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                state: p.state.hidden ? null : p.state.textContent, stateKind: p.state.className,
                annotateDisabled: p.annotGo.disabled, removeDisabled: annotMenu.length ? annotMenu[2].disabled : null,
                logDisabled: chatMenu.length ? chatMenu[0].disabled : null, shownKey: p.shownKey, history: p.history,
-               entries: p.list.children.map(c => [c.className, c.textContent]), stateTitle: p.state.title,
+               entries: p.list.children.map(c => [c.className, c.textContent]), flat: flatNodes(runner, p).map(n => [n.className, n.textContent]),
+               stateTitle: p.state.title,
                resumeHidden: p.resume.hidden, stateDisplay: p.state.style.display,
                sendHidden: p.send.hidden, sendDisabled: p.send.disabled, placeholder: p.input.placeholder,
                shownConv: p.shownConv, newChatDisabled: p.newChat.disabled, historyDisabled: p.historyButton.disabled,
                agentDisabled: p.agent.disabled, ring: p.ring.hidden ? null : p.ring.title, ringClass: p.ring.className, ctxUsed: p.context ? p.context.used : null, round: [p.send.textContent, p.send.title],
-               historyRows: p.historyBox.hidden ? null : p.historyBox.children.map(c => [c.className, c.textContent]) };
+               historyRows: !p.popover || p.popover.name !== 'history' ? null : p.popover.node.children.map(c => [c.className, c.textContent]) };
     }, pane: () => runner.panes.get(body) };
   };
   const styles = () => mainDoc.documentElement.children.map(c => [c.tagName, c.id, c.attrs.rel, c.attrs.href]);
   return { runner, log, item1, item2, att1, att2, note, pane, store, see, resize, focus, observers, timers, fire, styles, sheet, paneWin, paneDoc, lastFocus, El,
+           flat: view => flatNodes(runner, view),
            chromePackage: context.chromePackage, replacing: context.replacing, takingOver: context.takingOver,
            live: () => timers.filter(t => t.live).map(t => t.ms), toolbarItems: () => mainDoc.bar.children.length };
 }
+// a view's transcript as nodes with every run's steps opened: each run's parts in order, its folded line as its steps
+const flatNodes = (runner, view) => {
+  const runs = runner.runsOf(view.entries || []);
+  return view.list.children.flatMap((n, i) => n.className !== 'scholium-run' ? [n]
+    : n.children.flatMap(c => c.className !== 'scholium-fold' ? [c] : runs[i].steps.map(e => runner.entryNode(view.doc, e))));
+};
 // the ⋯ menu's personal profile and log items
 const profileFrom = pane => { pane.more.click(); pane.popover.node.children[1].click(); };
 const logFrom = pane => { pane.more.click(); pane.popover.node.children[0].click(); };
-const untimed = e => e[0] !== 'scholium-entry time';   // the transcript without the times runs ended at
+const untimed = e => e[0] !== 'scholium-meta';   // the transcript without the line of the model and the time a run ended at
 const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descriptions: n.descriptions, closeTimer: n.closeTimer, shown: n.shown });
 // a paper's conversations, in the order they were started, and the lines of one (the latest by default); the plugin's
 // files of the papers, to start another harness with

@@ -577,6 +577,15 @@ var ScholiumRunner = {
       logButton: zh ? "打开日志" : "Show log",
       copyMessage: zh ? "复制这条回复（Markdown）" : "Copy this message (Markdown)",
       copiedMessage: zh ? "已复制" : "Copied",
+      worked: d => zh ? `已处理 ${d}` : `Worked for ${d}`,
+      workedPlain: zh ? "已处理" : "Worked",
+      liveThinking: zh ? "正在思考" : "Thinking",
+      liveRead: f => zh ? `正在读取 ${f}` : `Reading ${f}`,
+      liveWrite: f => zh ? `正在写 ${f}` : `Writing ${f}`,
+      liveRun: c => zh ? `正在运行 ${c}` : `Running ${c}`,
+      liveSkill: zh ? "正在加载技能" : "Loading the skill",
+      liveSearch: q => zh ? `正在搜索 ${q}` : `Searching ${q}`,
+      liveTool: n => zh ? `正在调用 ${n}` : `Calling ${n}`,
       profileOpen: zh ? "个人配置 ↗" : "Personal profile ↗",
       profileTitle: zh ? "个人配置" : "Personal profile",
       profileAbout: zh ? "每次批注都遵循这份个人配置。重新统计文库只改写开头的统计，Interpretation 和 User's rules 两节保持不变。"
@@ -665,7 +674,11 @@ var ScholiumRunner = {
       newChat: zh ? "新对话" : "New chat",
       historyButton: zh ? "历史" : "History",
       historyEmpty: zh ? "没有别的对话。" : "No other conversations.",
-      newConversation: zh ? "新对话。之前的对话在「历史」里。" : "A new conversation. Earlier ones are under History.",
+      startersTitle: zh ? "可以这样开始" : "Try asking",
+      starter1: zh ? "这篇论文要解决什么问题？" : "What problem does this paper address?",
+      starter2: zh ? "主要贡献有哪几点？" : "What are its main contributions?",
+      starter3: zh ? "方法的核心思路是什么？" : "What is the core idea of the method?",
+      starter4: zh ? "实验用了哪些数据和对比方法？" : "Which data and baselines do the experiments use?",
       otherAgentHas: name => zh ? `这篇论文在 ${name} 里有对话，把智能体换成 ${name} 就能接着聊。`
                                 : `This paper has a conversation in ${name}; choose ${name} as the agent to go on with it.`,
       groupToday: zh ? "今天" : "Today",
@@ -677,6 +690,7 @@ var ScholiumRunner = {
       deleteConv: zh ? "删除这段对话" : "Delete this conversation",
       convDeleted: title => zh ? `已删除「${title}」` : `Deleted “${title}”`,
       undo: zh ? "撤销" : "Undo",
+      retry: zh ? "重试" : "Retry",
       contextLabel: zh ? "上下文窗口：" : "Context window:",
       contextUsed: (u, r) => zh ? `${u}% 已用（剩余 ${r}%）` : `${u}% used (${r}% left)`,
       contextTokens: (u, w) => zh ? `${u} / ${w} tokens` : `${u} / ${w} tokens used`,
@@ -1245,7 +1259,7 @@ var ScholiumRunner = {
     if (!event || typeof event !== "object") return out;
     if (typeof event.method === "string") return this.codexEntries(event);
     if (event.type === "system" && event.subtype === "init") {
-      out.push({ kind: "info", text: `${this.agentName(event.agent === "codex" ? "codex" : "claude")} · ${event.model || "?"}` });
+      out.push({ kind: "info", model: true, text: `${this.agentName(event.agent === "codex" ? "codex" : "claude")} · ${event.model || "?"}` });
     }
     const content = event.message && Array.isArray(event.message.content) ? event.message.content : [];
     if (event.type === "assistant") {
@@ -1260,6 +1274,7 @@ var ScholiumRunner = {
         if (c && c.type === "tool_result") out.push({ kind: "result", text: this.resultSummary(c.content), error: !!c.is_error });
       }
     }
+    if (event.type === "scholium" && event.subtype === "run") out.push({ kind: "run", at: event.at || 0 });
     if (event.type === "scholium" && event.subtype === "prompt") out.push({ kind: "prompt", text: String(event.text || "") });
     if (event.type === "scholium" && event.subtype === "unfinished" && String(event.text || "").trim()) {
       out.push({ kind: "text", text: String(event.text).trim(), unfinished: true });
@@ -1273,7 +1288,7 @@ var ScholiumRunner = {
     }
     if (event.type === "scholium" && event.subtype === "retry") out.push({ kind: "info", text: this.text("retrying") });
     // when a run ended, under what it showed
-    if (event.type === "scholium" && event.subtype === "time" && event.at > 0) out.push({ kind: "time", text: this.clock(event.at) });
+    if (event.type === "scholium" && event.subtype === "time" && event.at > 0) out.push({ kind: "time", text: this.clock(event.at), at: event.at });
     // a successful result repeats Claude's last message; only a failed run's result is shown, with Claude Code's errors
     // when it has no text, and not when they only say the session is gone (a new one goes on, or the end says why)
     if (event.type === "result" && (event.is_error || (event.subtype && event.subtype !== "success"))) {
@@ -1800,8 +1815,22 @@ var ScholiumRunner = {
     } catch (e) {}
   },
 
+  // Zotero gives a section drawn while collapsed no async render when it is opened: its conversation is shown then
+  watchOpen(pane) {
+    let section = null;
+    try { section = pane.body.closest("collapsible-section"); } catch (e) {}
+    if (!section || typeof section.addEventListener !== "function") return;
+    const opened = () => {
+      if (section.open && this.panes.get(pane.body) === pane && !pane.showing) this.loadHistory(pane.body).catch(e => this.log("history failed: " + e));
+    };
+    section.addEventListener("toggle", opened);
+    pane.unopen = () => { section.removeEventListener("toggle", opened); };
+  },
+
+  // the section's observers and listeners go with its pane
   releaseFit(pane) {
     try { if (pane.unfit) pane.unfit(); } catch (e) {}
+    try { if (pane.unopen) pane.unopen(); } catch (e) {}
   },
 
   // a section's two views: the chat (the section itself, as before) and the annotation tab's
@@ -1829,7 +1858,7 @@ var ScholiumRunner = {
     // shownKey, shownConv, shownPath: the conversation shown; live while that is the transcript of the running or latest
     // run; turns, question, context: what its log says of it
     const pane = { doc, body, item, keys, shownKey: null, shownConv: null, shownPath: null, live: false, history: false, past: null,
-                   turns: 0, question: false, context: null, preferKey: old ? old.preferKey : null, historyOpen: false,
+                   turns: 0, question: false, context: null, preferKey: old ? old.preferKey : null,
                    observer: old ? old.observer : null, seen: !!(old && old.seen), scroller: null, unfit: null };
     this.panes.set(body, pane);
     const win = doc.defaultView;
@@ -1904,19 +1933,18 @@ var ScholiumRunner = {
     line.append(pane.chip, pane.state, pane.resume);
     // the chat view: the earlier conversations and the transcript; the annotation view: its own transcript
     pane.chatView = div("scholium-view chat");
-    pane.historyBox = div("scholium-history");
-    this.show(pane.historyBox, false);
     pane.list = div("scholium-log");
     this.followLinks(pane.list, win);
-    pane.chatView.append(pane.historyBox, pane.list);
+    pane.chatView.append(pane.list);
     pane.annotView = div("scholium-view annotate");
     pane.annot = { kind: "annotate", doc, list: div("scholium-log"), shownKey: null, shownConv: null, shownPath: null, live: false,
-                   history: false, past: null, turns: 0, question: false, context: null, draft: null, foldOpen: new Map() };
+                   history: false, turns: 0, question: false, context: null, draft: null, foldOpen: new Map(), pane };
     this.followLinks(pane.annot.list, win);
     pane.annotIntro = div("scholium-annot-intro");
     pane.annotIntro.append(div("scholium-annot-title", this.text("annotEmptyTitle")), div("scholium-note", this.text("annotEmptyBody")));
     pane.annotView.append(pane.annotIntro, pane.annot.list);
     pane.kind = "chat";
+    pane.pane = pane;               // a view's section: the chat view is the section itself
     pane.foldOpen = new Map();
     pane.tab = old ? old.tab : "chat";
     // below the transcript, a message box as in a chat: a question or extra instructions for a new run, or a
@@ -1966,6 +1994,7 @@ var ScholiumRunner = {
     body.append(box);
     this.fitPane(pane);
     this.watchFit(pane);
+    this.watchOpen(pane);
     // the running paper's transcript at once; another conversation once its log is read (loadHistory)
     if (this.job && keys.includes(this.job.key)) this.showLive(pane, this.job.key, this.job.source.kind || "chat");
     this.paintPane(pane);
@@ -2706,6 +2735,7 @@ var ScholiumRunner = {
         reached = false;
         pending = null;
         if (event.at > 0) lastAt = event.at;
+        this.addEntries(entries, this.entries(event));
         continue;
       }
       if (event.type === "scholium" && event.subtype === "prompt") {
@@ -2837,7 +2867,13 @@ var ScholiumRunner = {
   // what a section shows once it is laid out
   async loadHistory(body) {
     const pane = this.panes.get(body);
-    if (pane) await this.showConversation(pane);
+    if (!pane) return;
+    // one PDF: the best of a regular item (the reader shows its own)
+    if (pane.keys.length > 1) {
+      const job = await this.resolve(pane.item);
+      if (job && this.panes.get(body) === pane) pane.keys = [job.att.key];
+    }
+    await this.showConversation(pane);
   },
 
   // what a section shows: the running paper's transcript, else the conversation of the paper that the chosen agent's
@@ -2869,21 +2905,45 @@ var ScholiumRunner = {
     // showed the run as it went has it already
     const memory = !!path && path === this.transcriptPath && this.transcriptKind === "chat";
     const kept = memory && pane.live && pane.shownPath === path && this.transcript.length > 0;
-    if (kept && pane.draft) pane.draft.node.remove();
+    if (pane.shownPath !== path) pane.foldOpen = new Map();   // the steps a reader opened are of the conversation shown
     Object.assign(pane, { shownKey: shown ? shown.key : null, shownConv: shown ? shown.id : null, shownAgent: agent, shownPath: path, live: memory,
                           history: !!log && !memory, turns: log ? log.turns.length : 0, question: !!(log && log.question),
                           context: log ? log.context : null, draft: null });
     pane.past = log && log.result ? { text: this.text("lastRun") + this.outcome(log.result), error: !this.succeeded(log.result),
                                       title: this.tokenDetail(log.result) } : null;
     const entries = memory ? this.transcript : log ? log.entries : [];
-    const empty = shown || any ? this.text("newConversation") : other ? this.text("otherAgentHas", this.agentName(other)) : this.text("noHistory");
-    if (!kept) {
-      pane.list.replaceChildren(...(entries.length ? entries.map(e => this.entryNode(pane.doc, e)) : [this.entryNode(pane.doc, { kind: "info", text: empty })]));
-      pane.list.scrollTop = pane.list.scrollHeight;   // at the latest, so that what follows is followed
+    // the run shown as it went is drawn again as finished; anything else anew, at the latest, so that what follows is followed;
+    // a chat without entries offers questions, under the note of the other agent's conversation
+    if (kept) this.refreshRun(pane, pane.runCount - 1);
+    else if (entries.length) this.renderTranscript(pane, entries, false);
+    else if (pane.item && pane.item.libraryID !== Zotero.Libraries.userLibraryID) {
+      this.renderTranscript(pane, [{ kind: "info", text: this.text("noHistory") }], false);
+    } else {
+      this.renderTranscript(pane, [], false);
+      if (other) pane.list.append(this.entryNode(pane.doc, { kind: "info", text: this.text("otherAgentHas", this.agentName(other)) }));
+      pane.list.append(this.startersNode(pane));
     }
     this.swapUnsent(pane, before);
     this.paintPane(pane);
-    if (pane.historyOpen) await this.renderHistory(pane);
+    if (pane.popover && pane.popover.name === "history") await this.renderHistory(pane);
+  },
+
+  // the questions an empty chat offers: one sends at once
+  startersNode(pane) {
+    const doc = pane.doc, node = doc.createElement("div");
+    node.className = "scholium-starters";
+    const title = doc.createElement("div");
+    title.className = "scholium-starters-title";
+    title.textContent = this.text("startersTitle");
+    node.append(title);
+    for (const k of ["starter1", "starter2", "starter3", "starter4"]) {
+      const b = doc.createElement("button");
+      b.className = "scholium-starter";
+      b.textContent = this.text(k);
+      b.addEventListener("click", () => { pane.input.value = this.text(k); this.sendFromPane(pane); });
+      node.append(b);
+    }
+    return node;
   },
 
   // the running paper's transcript, as it goes on
@@ -2896,9 +2956,8 @@ var ScholiumRunner = {
                           shownPath: ours ? this.transcriptPath : null, live: true,
                           history: false, past: null, draft: null });
     try {
-      view.list.replaceChildren(...(ours ? this.transcript : []).map(e => this.entryNode(pane.doc, e)));
+      this.renderTranscript(view, ours ? this.transcript : [], true);
       if (ours && this.draft) this.paintDraft();
-      view.list.scrollTop = view.list.scrollHeight;
     } catch (e) {}
     if (view === pane) this.swapUnsent(pane, before);
     else this.paintPane(pane);
@@ -2937,9 +2996,9 @@ var ScholiumRunner = {
   },
 
   async toggleHistory(pane) {
-    pane.historyOpen = !pane.historyOpen;
-    this.show(pane.historyBox, pane.historyOpen);
-    if (pane.historyOpen) await this.renderHistory(pane);
+    if (this.closePopover(pane, "history")) return;
+    this.openPopover(pane, "history", pane.historyButton, () => {});
+    await this.renderHistory(pane);
   },
 
   // today, yesterday, the previous 7 or 30 days, or older
@@ -2960,7 +3019,8 @@ var ScholiumRunner = {
     }
     all.sort((a, b) => b.at - a.at);
     for (const c of all) if (!c.deleted) c.title = await this.convTitle(c.key, c.id);
-    if (this.panes.get(pane.body) !== pane || !pane.historyOpen) return;
+    const p = pane.popover;
+    if (this.panes.get(pane.body) !== pane || !p || p.name !== "history") return;
     const doc = pane.doc;
     const rows = [], rowOf = new Map();
     let group = null;
@@ -2985,10 +3045,11 @@ var ScholiumRunner = {
     // a title being typed stays in its box
     const renaming = pane.renaming;
     if (renaming) renaming.moved = true;
-    pane.historyBox.replaceChildren(...rows);
+    p.node.replaceChildren(...rows);
     const again = renaming && all.find(c => !c.deleted && c.key === renaming.c.key && c.id === renaming.c.id);
     if (again) this.renameRow(pane, rowOf.get(again), again, renaming.input.value);
     else if (renaming) pane.renaming = null;
+    this.placePopover(pane);   // placed again for the size the rows gave it
   },
 
   historyRow(pane, c) {
@@ -3056,9 +3117,8 @@ var ScholiumRunner = {
     if (this.busy(c.key)) return;
     await this.chooseConv(c.key, c.agent, c.id);
     pane.preferKey = c.key;
-    pane.historyOpen = false;
-    this.show(pane.historyBox, false);
     for (const p of [...this.panes.values()]) if (p.keys.includes(c.key)) await this.showConversation(p);
+    this.closePopover(pane, "history");
   },
 
   // a conversation goes after UNDO_MS, until then it can be brought back; the one the agent's messages went to is
@@ -3105,7 +3165,7 @@ var ScholiumRunner = {
     if (index.current[entry.agent] === entry.id) index.current[entry.agent] = null;
     await this.saveIndex(entry.key);
     this.deleting.delete(path);
-    for (const p of [...this.panes.values()]) if (p.historyOpen && p.keys.includes(entry.key)) await this.renderHistory(p);
+    for (const p of [...this.panes.values()]) if (p.popover && p.popover.name === "history" && p.keys.includes(entry.key)) await this.renderHistory(p);
   },
 
   // add entries to a transcript; a failed run's result that repeats Claude Code's last message is
@@ -3121,13 +3181,13 @@ var ScholiumRunner = {
     return added;
   },
 
-  // one transcript entry: a bullet column beside the content, so that wrapped lines keep their indent;
-  // the stylesheet sets Claude's text in the pane's font, tool calls and results in monospace, and the
+  // one transcript entry: a step has a bullet column beside the content, so that wrapped lines keep their indent;
+  // the stylesheet sets the agent's text in the pane's font, tool calls and results in monospace, and the
   // user's words in a bubble on the right
   entryNode(doc, entry) {
     const node = doc.createElement("div");
     node.className = `scholium-entry ${entry.kind}${entry.error ? " error" : ""}${entry.draft ? " draft" : ""}`;
-    const bullet = { text: "⏺ ", tool: "⏺ ", result: "⎿ " }[entry.kind];
+    const bullet = { tool: "⏺ ", result: "⎿ " }[entry.kind];
     if (bullet) {
       const span = doc.createElement("span");
       span.className = "scholium-bullet";
@@ -3135,8 +3195,7 @@ var ScholiumRunner = {
       node.append(span);
     }
     if (entry.kind === "text") {
-      // the agent writes Markdown: set as the profile's preview sets it, with a button that copies the
-      // source once the message is whole
+      // the agent writes Markdown: set as the profile's preview sets it
       const content = doc.createElement("div");
       content.className = "scholium-content scholium-markdown";
       try { content.append(...this.renderMarkdown(doc, entry.text)); }
@@ -3151,7 +3210,6 @@ var ScholiumRunner = {
         content.append(note);
       }
       node.append(content);
-      if (!entry.draft) node.append(this.copyButton(doc, entry.text));
       return node;
     }
     const content = doc.createElement("span");
@@ -3190,6 +3248,162 @@ var ScholiumRunner = {
     return button;
   },
 
+  // a transcript as runs: what each run of the agent showed, from its start line (or, in an earlier version's log, from
+  // the user's words) on. The steps are the tool calls, their results and the agent's words between them; the answer is
+  // what it wrote after its last step; the rest are the run's other lines (a failure, a notice): its lead before its
+  // first step or answer, the others after
+  runsOf(entries) {
+    const runs = [];
+    let run = null, bare = false;   // bare: the run has nothing yet but its start line
+    const open = at => { run = { start: at, end: 0, prompt: null, lead: [], steps: [], answer: [], other: [], model: "" }; runs.push(run); };
+    for (const e of entries) {
+      if (e.kind === "run") { open(e.at); bare = true; continue; }
+      if (!run || (e.kind === "prompt" && !bare)) open(0);
+      bare = false;
+      run.last = e;
+      if (e.kind === "prompt") run.prompt = e;
+      else if (e.kind === "tool" || e.kind === "result") { run.steps.push(...run.answer, e); run.answer = []; }
+      else if (e.kind === "text") run.answer.push(e);
+      else if (e.kind === "info" && e.model) run.model = e.text;
+      else if (e.kind === "time") run.end = e.at;
+      else (run.steps.length || run.answer.length ? run.other : run.lead).push(e);
+    }
+    return runs;
+  },
+
+  // one run: the user's words; the lines before its steps; a line for its steps (what it does now while it runs, else how
+  // long it worked; a click opens the steps); the answer; its other lines; then the model and the time with a copy button
+  renderRun(view, run, index, live) {
+    const doc = view.doc;
+    const node = doc.createElement("div");
+    node.className = "scholium-run";
+    if (run.prompt) node.append(this.entryNode(doc, run.prompt));
+    // the last run of a view that failed without an answer carries a retry on its failure line
+    const failedLast = !live && index === (view.runCount || 0) - 1 && !run.answer.length && !!view.pane && view.kind === "chat" && !this.busy(view.shownKey);
+    let retryable = failedLast ? [...run.lead, ...run.other].filter(e => e.kind === "final" && e.error).pop() : null;
+    const line = e => {
+      const n = this.entryNode(doc, e);
+      if (e === retryable) n.append(this.paneButton(doc, this.text("retry"), () => { this.retryFromView(view).catch(err => this.log("retry failed: " + err)); }, "quiet small retry"));
+      return n;
+    };
+    for (const e of run.lead) node.append(line(e));
+    if (run.steps.length || live) node.append(this.foldNode(view, run, index, live));
+    for (const e of run.answer) node.append(this.entryNode(doc, e));
+    for (const e of run.other) node.append(line(e));
+    if (!live && run.answer.length) node.append(this.metaNode(doc, run));
+    return node;
+  },
+
+  // the steps folded into one line, as in Codex; the reader's opening or closing wins. It is kept by the run's start,
+  // which stays when the transcript's first lines go (an earlier version's run, without one, by its place)
+  foldNode(view, run, index, live) {
+    const doc = view.doc;
+    const key = run.start || index;
+    const open = view.foldOpen.get(key) === true;
+    const node = doc.createElement("div");
+    node.className = "scholium-fold";
+    const head = doc.createElement("button");
+    head.className = "scholium-fold-head" + (live ? " live" : "");
+    const tools = run.steps.filter(e => e.kind === "tool");
+    head.textContent = (live ? this.liveText(tools[tools.length - 1]) : this.workedText(run)) + (open ? " ⌄" : live ? "" : " ›");
+    head.addEventListener("click", () => { view.foldOpen.set(key, !open); this.refreshRun(view, index); });
+    node.append(head);
+    if (open) {
+      const body = doc.createElement("div");
+      body.className = "scholium-fold-body";
+      for (const e of run.steps) body.append(this.entryNode(doc, e));
+      node.append(body);
+    }
+    return node;
+  },
+
+  // what the agent is doing, from its latest step: 正在读取 sentences.txt
+  liveText(step) {
+    if (!step) return this.text("liveThinking");
+    const name = String(step.name);
+    const arg = String(step.text).slice(name.length).replace(/^\(/, "").replace(/\)$/, "");
+    const file = arg.split(/[\\/]/).pop();
+    if (/^read$/i.test(name)) return this.text("liveRead", file);
+    if (/^(write|edit|multiedit|notebookedit)$/i.test(name)) return this.text("liveWrite", file);
+    if (/^(bash|powershell|shell)$/i.test(name)) return this.text("liveRun", this.cut(arg, 80));
+    if (/^skill$/i.test(name)) return this.text("liveSkill");
+    if (/^web(search|fetch)$/i.test(name)) return this.text("liveSearch", this.cut(arg, 60));
+    return this.text("liveTool", name);
+  },
+
+  workedText(run) {
+    return run.start > 0 && run.end >= run.start ? this.text("worked", this.durationWords(run.end - run.start)) : this.text("workedPlain");
+  },
+
+  // 6 分 17 秒 / 6m 17s
+  durationWords(ms) {
+    const all = Math.max(0, Math.round(ms / 1000));
+    const h = Math.floor(all / 3600), m = Math.floor((all % 3600) / 60), s = all % 60;
+    if (this.zh()) return h ? `${h} 小时 ${m} 分` : m ? `${m} 分 ${s} 秒` : `${s} 秒`;
+    return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`;
+  },
+
+  // Opus 5.5 for claude-opus-5-5: the label the agent gave the model, else the name made readable
+  modelLabel(id) {
+    const name = String(id).replace(/^.* · /, "");
+    for (const list of Object.values(this.models)) {
+      const m = list.find(o => o.value === name);
+      if (m) return m.label;
+    }
+    const c = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(name);
+    return c ? `${c[1][0].toUpperCase()}${c[1].slice(1)} ${c[2]}.${c[3]}` : name;
+  },
+
+  // under a finished run's answer: the model and when it ended, and a button that copies the answer
+  metaNode(doc, run) {
+    const node = doc.createElement("div");
+    node.className = "scholium-meta";
+    const left = doc.createElement("span");
+    left.textContent = [run.model ? this.modelLabel(run.model) : "", run.end ? this.clock(run.end) : ""].filter(Boolean).join(" · ");
+    node.append(left, this.copyButton(doc, run.answer.map(e => e.text).join("\n\n")));
+    return node;
+  },
+
+  // a view's whole transcript; the last run is live while the paper's run goes on
+  renderTranscript(view, entries, live) {
+    const runs = this.runsOf(entries);
+    view.entries = entries;
+    view.runCount = runs.length;   // before the runs are drawn: the last one carries the retry
+    view.list.replaceChildren(...runs.map((r, i) => this.renderRun(view, r, i, live && i === runs.length - 1)));
+    view.runCount = runs.length;
+    view.head = this.headOf(runs);
+    view.list.scrollTop = view.list.scrollHeight;
+  },
+
+  // what tells the first run drawn: the last line of the transcript's first run while another run follows it (until
+  // then the first run is the one that grows); it changes when the transcript's first run goes
+  headOf(runs) { return runs.length > 1 ? runs[0].last : null; },
+
+  // whether a view shows the run going on: of the running paper, the view of the run's kind
+  showsRun(view) {
+    return !!this.job && this.job.key === view.shownKey && this.viewOf(view.pane, this.transcriptKind) === view;
+  },
+
+  // one run drawn again, when its steps are opened or closed or it ended; live while it is the view's running run
+  refreshRun(view, index) {
+    const runs = this.runsOf(view.entries);
+    if (!runs[index]) return;
+    const node = this.renderRun(view, runs[index], index, this.showsRun(view) && index === runs.length - 1);
+    view.list.children[index].replaceWith(node);
+    if (view.draft && index === runs.length - 1) node.append(view.draft.node);   // the message being written stays last
+  },
+
+  // the views of the latest run draw its last run again once the agent no longer works on it: a pause, the wait for a
+  // second try, an end before the run had its log
+  settleRun() {
+    for (const pane of this.panes.values()) {
+      const view = this.viewOf(pane, this.transcriptKind);
+      if (view.shownKey === this.transcriptKey) this.refreshRun(view, view.runCount - 1);
+    }
+  },
+
+  // entries of the running paper's transcript: the views that show it draw its last run again, or all of it once
+  // another run begins
   appendEntries(entries) {
     const added = this.addEntries(this.transcript, entries);
     if (!added.length) return;
@@ -3200,10 +3414,10 @@ var ScholiumRunner = {
       try {
         const list = view.list;
         const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
-        if (view.draft) view.draft.node.remove();   // the draft stays last
-        for (const entry of added) list.append(this.entryNode(pane.doc, entry));
-        if (view.draft) list.append(view.draft.node);
-        while (list.children.length > this.MAX_ENTRIES) list.children[0].remove();   // as many as the transcript keeps
+        const runs = this.runsOf(this.transcript), live = this.showsRun(view);
+        if (runs.length !== view.runCount || this.headOf(runs) !== view.head) this.renderTranscript(view, this.transcript, live);
+        else list.children[runs.length - 1].replaceWith(this.renderRun(view, runs[runs.length - 1], runs.length - 1, live));
+        if (view.draft) list.lastChild.append(view.draft.node);   // the draft stays last
         if (atBottom) list.scrollTop = list.scrollHeight;
       } catch (e) {}
     }
@@ -3254,8 +3468,8 @@ var ScholiumRunner = {
         const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
         if (!view.draft) {
           const node = this.entryNode(pane.doc, { kind: "text", text: "", draft: true });
-          list.append(node);
-          view.draft = { node, content: node.children[1] };
+          list.lastChild.append(node);   // in the last run
+          view.draft = { node, content: node.children[0] };
         }
         // text selected in the draft stays selected: the draft is set again once the selection is gone
         const win = pane.doc.defaultView;
@@ -3369,7 +3583,7 @@ var ScholiumRunner = {
       pane.agent.disabled = busy || foreign;
       pane.newChat.disabled = busy || foreign || !pane.shownConv;
       pane.historyButton.disabled = busy || foreign;
-      if ((busy || foreign) && pane.historyOpen) { pane.historyOpen = false; this.show(pane.historyBox, false); }
+      if (busy || foreign) this.closePopover(pane, "history");
       const asking = running ? !!this.job.asking : queuedAt >= 0 && this.asking(this.queue[queuedAt]);
       // a question or extra instructions until the conversation has an annotation, then a follow-up; an annotation
       // waiting or running is one already
@@ -3459,6 +3673,13 @@ var ScholiumRunner = {
   // a job's conversation: the one the agent's messages about the paper go to, its session there when the agent still
   // holds one, and whether its message is the first one; a new conversation (conv null) starts when the job runs
   async place(job) {
+    if (job.retry && job.conv) {
+      const log = await this.readLog(job.att.key, job.conv);
+      job.resume = (log && log.session) || null;
+      job.question = false;
+      if (!job.annotate) job.asking = !!(log && log.question);
+      return;
+    }
     const conv = await this.currentConv(job.att.key, job.agent);
     const log = conv ? await this.readLog(job.att.key, conv) : null;
     job.conv = conv;
@@ -3467,9 +3688,24 @@ var ScholiumRunner = {
     if (!job.annotate) job.asking = job.question || !!(log && log.question);
   },
 
+  // the last turn of a view's conversation again, in the same conversation; its words are in the log already
+  async retryFromView(view) {
+    const pane = view.pane, key = view.shownKey;
+    if (!pane || !key || !view.shownConv) return;
+    const log = await this.readLog(key, view.shownConv);
+    const turn = log && log.turns[log.turns.length - 1];
+    if (!turn) return;
+    const att = Zotero.Items.getByLibraryAndKey(pane.item.libraryID, key);
+    if (this.busy(key)) return;
+    const agent = this.convAgent(view.shownConv);   // the conversation's own agent, whichever is chosen now
+    await this.chooseConv(key, agent, view.shownConv);   // the retried conversation is the one the messages go to
+    await this.send(att, turn.user, { retry: true, conv: view.shownConv, kind: view.kind, agent });
+  },
+
   // the user's words to the paper, in the conversation the chosen agent's messages about it go to: the first message of
-  // a new one, which answers without annotating, or the next one; false when that is not possible now
-  async send(item, say) {
+  // a new one, which answers without annotating, or the next one; false when that is not possible now. opts: retry (the
+  // same words again in conv, already logged), kind, quote
+  async send(item, say, opts = {}) {
     if (!item || !say) return false;
     const job = await this.resolve(item);
     if (!job) {
@@ -3477,7 +3713,9 @@ var ScholiumRunner = {
       return false;
     }
     if (job.att.libraryID !== Zotero.Libraries.userLibraryID || this.busy(job.att.key)) return false;
-    Object.assign(job, { agent: this.agent(), say, own: job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length });
+    Object.assign(job, { agent: opts.retry && opts.agent ? opts.agent : this.agent(), say, own: job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length,
+                         kind: opts.kind || "chat", retry: !!opts.retry, quote: opts.quote || null });
+    if (opts.retry) Object.assign(job, { conv: opts.conv, logged: true });
     await this.place(job);
     if (this.busy(job.att.key)) return false;
     this.enqueue([job], this.conversationAt());
@@ -3587,6 +3825,7 @@ var ScholiumRunner = {
         if (outcome && outcome.retry) {
           this.queue.unshift(Object.assign({}, job, { retried: true, retryAt: Date.now() + this.NET_RETRY_MS }));
           this.refresh();
+          this.settleRun();   // the paper is busy again: no retry button
         }
         if (outcome && outcome.fresh) {
           this.queue.unshift(outcome.fresh);
@@ -3603,6 +3842,7 @@ var ScholiumRunner = {
   // its conversation when the limit resets; nothing else starts meanwhile
   pause(job, { until, session, throttled }) {
     if (this.job && this.job.key === job.att.key) this.job = null;
+    this.settleRun();
     // a question stays one when its conversation continues; an annotation that continued a question's conversation
     // has its prompt there. A run after the wait may have its second try again.
     this.queue.unshift(Object.assign({}, job, { retried: false, retryAt: 0 },
@@ -3670,12 +3910,12 @@ var ScholiumRunner = {
                                   conv: job.conv || null });
     if (!this.focused()) this.notify(title, ok && !answered ? this.brief(summary) : summary || "");
     this.refresh();
-    // the sections of the paper take what its log now says of the conversation
+    // the sections of the paper take what its log now says of the conversation; without a log, they draw the run ended
     if (job.logPath) {
       for (const pane of [...this.panes.values()]) {
         if (pane.keys.includes(job.att.key)) this.showConversation(pane).catch(e => this.log("section not shown: " + e));
       }
-    }
+    } else this.settleRun();
   },
 
   // the run's last line for a notice, a line per part, without the note's title:
@@ -3721,7 +3961,8 @@ var ScholiumRunner = {
     job.since = log ? log.lastAt : 0;
     job.applied = await this.readApplied(key);
     if (this.job !== running) return;   // the plugin stopped meanwhile
-    this.transcript = log ? log.entries : [];
+    // the run is one of the transcript's from its start; its line goes into the log once the log is there
+    this.transcript = (log ? log.entries : []).concat(this.entries({ type: "scholium", subtype: "run", at: started }));
     this.transcriptKey = key;
     this.transcriptKind = job.kind || "chat";
     this.transcriptPath = log ? log.path : null;
@@ -3828,6 +4069,7 @@ var ScholiumRunner = {
         await IOUtils.writeUTF8(logPath, JSON.stringify(mark) + "\n", { mode: "append" });
         this.appendEntries(this.entries(mark));
         if (this.job === running) this.job = null;
+        this.settleRun();
         return { exitCode, result, retry: true };
       }
       this.notice(job, `${this.text("failed")} · ${message}`, true);

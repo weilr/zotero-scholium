@@ -97,6 +97,8 @@ to go on with in a new session, and ends with that reason. The logs of earlier v
 directory, such as the configuration the annotations were written from, are the same for every conversation.
 
 The *Scholium* section of the item pane, in the library and in the reader's side pane, fills the pane's height.
+The library's section works on the item's best PDF, the reader's on the PDF it shows; the conversations and the
+history are those of that PDF.
 
 - Two tabs: **Chat** for questions about the paper, **Annotations** for annotating it. A dot on a tab marks a
   run of that tab going on or waiting while the other tab is shown.
@@ -125,17 +127,20 @@ The *Scholium* section of the item pane, in the library and in the reader's side
 
 **Chat tab**
 
-- **＋** starts a new conversation with the chosen agent (its first message starts it); **History** lists the
-  agent's conversations of the paper, newest first, by day (today, yesterday, the previous 7 and 30 days, older),
-  titled by their first message, to open one, rename it (Enter keeps the new title, Esc the old one) or delete it
-  (**Undo** brings it back for six seconds; a deleted Codex conversation's thread is archived at the next Codex
-  run). While the paper runs or waits, **＋**, **History** and **Agent** are off.
-- The process is shown as Claude Code shows it: the user's words or **Annotate**, the agent and model, the
-  agent's text, each tool call with its command or file, and the first lines of each result (errors in red),
-  and under each run the time it ended; a failed run ends with its error. A running paper is shown live,
-  otherwise the conversation the chosen agent goes on with; when that agent has none of the paper and the
-  other one has, the section says so. Web addresses and `zotero://` links in a message open on a click or with
-  Enter, in the browser or in Zotero; links to files are shown, not followed.
+- **＋** starts a new conversation with the chosen agent (its first message starts it). **🕘** lists the agent's
+  conversations of the PDF by day (today, yesterday, the previous 7 and 30 days, older), titled by their first
+  message, the one shown highlighted: a click opens one, ✎ renames it (Enter keeps the new title, Esc the old
+  one), ✕ deletes it (**Undo** brings it back for six seconds; a deleted Codex conversation's thread is archived
+  at the next Codex run). While the paper runs or waits, **＋**, the history and **Agent** are off. An empty
+  conversation offers four questions, each sent with a click.
+- The user's words are a bubble on the right. While a run goes on, one blue line names what the agent does at
+  the moment ("Reading sentences.txt", "Running python … scholium.py extract …"), and the answer appears as it is
+  written; once the answer is there, the steps fold into "Worked for 24s ›", which opens them as Claude Code
+  shows them: each tool call with its command or file, and the first lines of each result (errors in red). A fold
+  opened or closed by hand stays so. Under an answer, a line gives the model and the time it ended, with a copy
+  button. A failed question ends with its error and **Retry**, which sends the same words again. Web addresses
+  and `zotero://` links in a message open on a click or with Enter, in the browser or in Zotero; links to files
+  are shown, not followed.
 
 **Annotations tab**
 
@@ -202,9 +207,9 @@ the section ends the wait at once.
 When the plugin is updated while a paper runs, the run ends and its log records the interruption; the
 new version continues that paper's conversation, then runs the papers still waiting, and a pause for a
 limit or a wait for a second try goes on; a paper whose agent had not yet received its prompt is handed
-over as it was queued, the user's words with it. Disabling the
-plugin or quitting Zotero ends a run the same way, without handing the papers over: the paper's history
-shows the run as interrupted, and **Send** continues it.
+over as it was queued, the user's words with it. Disabling the plugin or quitting Zotero ends a run the same way,
+without handing the papers over: the paper's history shows the run as interrupted; **Retry** on a run that ended
+before its answer runs it again, and a new message continues the conversation.
 
 Papers that already carry the tool's annotations are annotated again only after a confirmation; the
 new run replaces those annotations.

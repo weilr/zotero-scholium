@@ -314,19 +314,14 @@
 
 /* the transcript */
 
-/* the chosen agent's conversations of the paper, under the caption */
+/* the history: the chosen agent's conversations of the PDF, in a layer */
 
-.scholium-history {
-  display: flex;
-  flex-direction: column;
+.scholium-popover.history {
+  width: min(360px, calc(100vw - 16px));
+  max-height: 60vh;
   gap: 1px;
-  max-height: 240px;
-  margin-top: 4px;
   padding: 4px;
-  overflow-y: auto;
-  border: var(--material-border-quarternary);
-  border-radius: 8px;
-  background: var(--material-background);
+  overflow: auto;
 }
 
 .scholium-history-group {
@@ -398,12 +393,36 @@
 .scholium-history-row .scholium-button.icon {
   height: 22px;
   padding: 0 6px;
-  opacity: 0;
+  visibility: hidden;
 }
 
 .scholium-history-row:hover .scholium-button.icon,
 .scholium-history-row .scholium-button.icon:focus-visible {
-  opacity: 1;
+  visibility: visible;
+}
+
+.scholium-starters {
+  margin: auto 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.scholium-starters-title {
+  text-align: center;
+  color: var(--fill-secondary);
+  font-size: 11px;
+}
+
+/* as tall as its question: Zotero's buttons are one line high */
+.scholium-starter {
+  height: auto;
+  border: 1px solid color-mix(in srgb, var(--accent-blue) 30%, transparent);
+  border-radius: 14px;
+  padding: 4px 10px;
+  background: color-mix(in srgb, var(--accent-blue) 6%, var(--material-background));
+  color: var(--accent-blue);
+  text-align: start;
 }
 
 .scholium-history-rename {
@@ -420,10 +439,12 @@
 }
 
 /* the box takes the section's width: a line that cannot wrap (code, a wide table) scrolls inside it
-   instead of widening Zotero's item pane */
+   instead of widening Zotero's item pane; a column, so that what is alone in it can sit by its auto margins */
 .scholium-log {
   contain: inline-size;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 120px;
   padding: 8px 10px;
@@ -451,7 +472,7 @@
   user-select: none;
 }
 
-/* a message's copy button, shown while the pointer is over the message */
+/* an answer's copy button, shown while the pointer is over its run */
 .scholium-copy {
   appearance: none;
   flex: none;
@@ -469,7 +490,7 @@
   user-select: none;
 }
 
-.scholium-entry:hover .scholium-copy,
+.scholium-run:hover .scholium-copy,
 .scholium-copy:focus-visible,
 .scholium-copy.done {
   opacity: 1;
@@ -510,11 +531,6 @@
   color: var(--accent-green);
 }
 
-/* a message still being written */
-.scholium-entry.draft .scholium-bullet {
-  animation: scholium-pulse 1.4s ease-in-out infinite;
-}
-
 /* the note under a message that a cancelled or failed run left unfinished */
 .scholium-unfinished {
   margin-top: 2px;
@@ -548,17 +564,15 @@
   color: var(--accent-red);
 }
 
-/* when a run ended, at the right under it */
-.scholium-entry.time {
-  justify-content: flex-end;
-  margin-bottom: 8px;
-  color: var(--fill-secondary);
-  font-size: 11px;
-}
-
-.scholium-entry.time .scholium-content {
-  flex: none;
-}
+/* a run: the user's words, its steps folded into one line, the answer, the model and the time */
+.scholium-run { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.scholium-fold-head { appearance: none; align-self: flex-start; border: 0; background: transparent; padding: 0; font-size: 11px;
+  color: var(--fill-secondary); cursor: pointer; }
+.scholium-fold-head.live { color: var(--accent-blue); }
+.scholium-fold-head.live::before { content: "◌ "; }
+.scholium-fold-body { border-inline-start: 2px solid var(--fill-quinary); margin-inline-start: 4px; padding-inline-start: 8px;
+  display: flex; flex-direction: column; gap: 3px; }
+.scholium-meta { display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; color: var(--fill-tertiary); }
 
 /* the message box */
 
@@ -1008,4 +1022,8 @@
     outline: 2px solid Highlight;
     outline-offset: 1px;
   }
+}
+
+.scholium-entry.final .retry {
+  margin-inline-start: auto;
 }
