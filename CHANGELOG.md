@@ -2,25 +2,45 @@
 
 ## Unreleased
 
+### Added
+
+- Scholium section: two tabs, **Chat** and **Annotations**. A settings chip (agent · model · effort) opens a
+  layer with the three choices; ⋯ holds **Show log**, **Personal profile ↗**, **Settings…** and, on the
+  Annotations tab, **Delete annotations**.
+- A Scholium page in Zotero's settings: the send shortcut (Enter, Ctrl + Enter for multiline prompts, or always
+  Ctrl + Enter), the follow-up behavior (Queue or Steer), whether the context window usage shows, and the Claude
+  Code and Codex programs (preferences `sendShortcut`, `followUpMode`, `contextRing`, `claudePath`, `codexPath`).
+- A context ring beside the send button: the share of the context window the conversation's session took up in
+  its latest request, with a layer of input, cache and output.
+- Esc twice stops a run.
 - Scholium section: as in llm-for-zotero, each agent has its own conversations of a paper. **New chat** starts
   one, **History** lists them by day to open, rename or delete (with **Undo**; a deleted Codex conversation's thread
   is archived), and switching the agent starts a new one. Messages and **Annotate** go on in the conversation shown,
   the box's words with **Annotate** as extra instructions. Each conversation has its log in
   `<out dir>/conversations/`; `claude-run.jsonl` and `codex-run.jsonl` of earlier versions are each agent's first
   conversation.
+- Scholium section: a new session is told which configuration, agent and time wrote the paper's annotations, and a
+  session that goes on is told when another conversation rewrote them since, or that they are gone. The section
+  shows when each run ended.
+- The plugin's apply returns `removeError` when the earlier notes cannot be moved to the trash after the new items
+  are written.
+
+### Changed
+
+- Scholium section: the section fills the side pane's height. The state is one line beside the settings chip.
+  ■ stops a run.
+- Token counts are written in k with thousands separators (`2,568k tokens`), in Chinese too.
+- When an agent's program is not found, the message points to Zotero Settings → Scholium.
 - Scholium section: when the agent no longer has a conversation's session (deleted in the Codex app, or cleaned up
   by Claude Code), a new session is given the conversation, Codex as items of its new thread and Claude Code as text,
   beyond ten exchanges the earlier ones as excerpts; a continuation after a limit or an update ends with that
   reason. A failed Claude Code run without text shows its errors.
-- Scholium section: a new session is told which configuration, agent and time wrote the paper's annotations, and a
-  session that goes on is told when another conversation rewrote them since, or that they are gone. The section
-  shows the context the conversation's session takes up, and when each run ended.
 - Scholium section: a conversation's log leaves out the image data in a Claude Code tool's result, Claude Code's own
   copy of the result and Codex's turn diff. A line the log file does not take at once is written with the next ones,
   and the run goes on.
-- Scholium section: the state line gives the outcome of the conversation shown. **Cancel** on a paper that waits for
-  its second try or for a limit to reset ends it as cancelled in its log. A paper moved to the trash while it waits
-  is left out. The words of a message whose agent is not found go back to the box. A title being typed in **History**
+- Scholium section: the state line gives the outcome of the conversation shown. ■ on a paper that waits for its
+  second try or for a limit to reset ends it as cancelled in its log. A paper moved to the trash while it waits is
+  left out. The words of a message whose agent is not found go back to the box. A title being typed in **History**
   stays when the list is drawn again. For a paper in a group library the message box is hidden and **Agent**,
   **New chat** and **History** are off.
 - Scholium section: a Codex thread counts as gone only when Codex refuses to resume it. A relative configuration path
@@ -28,8 +48,6 @@
   servers and hooks. `mailto:` links are not followed. A conversation index that cannot be read is not written over,
   and the index is written through a temporary file. English texts say "1 turn"; Codex's end and Claude Code's
   failure kinds are named in the user's language.
-- The plugin's apply returns `removeError` when the earlier notes cannot be moved to the trash after the new items
-  are written.
 - A margin note without room (no gap tall enough, taller than the page allows, or a margin narrower than a box)
   takes the other margin of a one-column page when its `side` is `auto`, and without room there either is written as
   a sticky note with its whole text beside the first line of its paragraph, listed under `as_notes`; a two-column
@@ -48,6 +66,12 @@
 - When removing the earlier annotations or notes fails after the new ones are written, the report gives
   `applied: "partial"` with `result.removeError`.
 - An item that is not in My Library is reported as not found there; group libraries are not supported.
+
+### Removed
+
+- Scholium section: the **Agent**, **Model** and **Effort** rows, the row of **Annotate**, **Cancel**,
+  **Personal profile** and **Delete annotations**, the status box, the "Transcript" caption, and resizing the
+  transcript box (the `logHeight` preference).
 
 ## 0.1.9 (2026-10-20)
 

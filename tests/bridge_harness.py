@@ -2,6 +2,7 @@
 simulated Zotero, Claude Code and Codex, followed by the scenarios, run once; their facts come back as JSON."""
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
@@ -18,3 +19,11 @@ def run_scenarios(scenarios, tmp_path_factory, timeout=180):
     completed = subprocess.run([NODE, str(script), str(BRIDGE)], encoding="utf-8", capture_output=True, timeout=timeout)
     assert completed.returncode == 0, completed.stderr
     return json.loads(completed.stdout)
+
+
+def css_rules():
+    """The section's stylesheet as {selector: declarations}."""
+    text = re.sub(r"/\*.*?\*/", "", (PLUGIN / "content" / "scholium.css").read_text(encoding="utf8"), flags=re.S)
+    text = re.sub(r"@keyframes[^{]*\{(?:[^{}]*\{[^}]*\})*[^}]*\}", "", text)
+    assert text.count("{") == text.count("}")
+    return {" ".join(sel.split()): body for sel, body in re.findall(r"([^{}]+)\{([^}]*)\}", text)}

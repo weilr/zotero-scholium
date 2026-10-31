@@ -76,7 +76,7 @@ You need Zotero 7 or later with its local API turned on (Settings → Advanced �
    npx skills add weilr/zotero-scholium -g -y
    ```
 3. Download [`scholium-bridge.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium-bridge.xpi) and install it in Zotero: Tools → Plugins → ⚙ → Install Plugin From File.
-4. Select a paper, open the **Scholium** section and press **Annotate**. To only ask about the paper, type the question in the box below the transcript and press **Send**.
+4. Select a paper, open the **Scholium** section and press **Annotate** on its **Annotations** tab. To ask about the paper, type the question on its **Chat** tab and send it.
 
 ### From your agent
 

@@ -185,7 +185,7 @@ const CODEX_RESULT = ev({ type: 'result', agent: 'codex', subtype: 'success', is
 class El {
   constructor(tag) { this.tagName = tag; this.attrs = {}; this.listeners = {}; this.hidden = false; this.disabled = false; this._text = '';
                      this.title = ''; this.className = ''; this.value = ''; this.parent = null; this.children = []; this.removed = false;
-                     this.scrollTop = 0; this.clientHeight = 100; this.isConnected = true; this.style = {}; }
+                     this.scrollTop = 0; this.clientHeight = 100; this.isConnected = true; this.style = { setProperty: (k, v) => { this.style[k.replace(/^--/, '')] = v; } }; }
   get scrollHeight() { return this.children.length * 20; }
   get textContent() { return this.children.length ? this.children.map(c => c.textContent).join('') : this._text; }
   set textContent(v) { this.children = []; this._text = String(v); }
@@ -195,10 +195,16 @@ class El {
   removeAttribute(k) { delete this.attrs[k]; }
   setAttribute(k, v) {
     this.attrs[k] = String(v);
-    if (k === 'style') { const m = /(?:^|;)\s*height:\s*([^;]+)/.exec(String(v)); this.style = { height: m ? m[1].trim() : '' }; }
+    if (k === 'style') { const m = /(?:^|;)\s*height:\s*([^;]+)/.exec(String(v)); this.style = { height: m ? m[1].trim() : '', setProperty: this.style.setProperty }; }
   }
   addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); }
   click() { for (const f of this.listeners.click || []) f({}); }
+  // an event of this type, as the DOM gives it: preventDefault, and a dataTransfer for a drag
+  fire(t, extra = {}) {
+    const e = Object.assign({ preventDefault() { e.prevented = true; }, dataTransfer: { setData() {}, getData() { return ''; } } }, extra);
+    for (const f of this.listeners[t] || []) f(e);
+    return e;
+  }
   type(value) { this.value = value; for (const f of this.listeners.input || []) f({}); }
   focus() { this.focused = true; }
   change(value) { this.value = value; for (const f of this.listeners.change || []) f({}); }
@@ -207,6 +213,9 @@ class El {
   insertBefore(n) { this.append(n); }
   querySelector() { return null; }
   closest() { return null; }
+  getBoundingClientRect() { return this.rect || { top: 0, left: 0, right: 300, bottom: 20, width: 300, height: 20 }; }
+  get offsetWidth() { return this.getBoundingClientRect().width; }
+  removeEventListener(t, f) { this.listeners[t] = (this.listeners[t] || []).filter(g => g !== f); }
   contains(n) { for (let x = n; x; x = x.parent) if (x === this) return true; return false; }
   remove() { this.removed = true; if (this.parent) this.parent.children = this.parent.children.filter(c => c !== this); this.parent = null; }
 }
@@ -251,7 +260,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
   const log = { calls: [], stdin: [], notices: [], alerts: [], confirms: [], kills: 0, menus: [], unregistered: [], listeners: [],
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
                 ftl: [], tabs: [], selected: [], opened: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
-                madeDirs: [], trashed: [], versionCalls: [], codexCalls: [], codexProcs: [], codexKills: 0, codexTurns: 0,
+                prefPanes: [], openedPrefs: [], madeDirs: [], trashed: [], versionCalls: [], codexCalls: [], codexProcs: [], codexKills: 0, codexTurns: 0,
                 mtimes: Object.assign({}, logTimes), clock: Date.now(), copied: [], removed: [], threads: 0, tmpPaths: [], reads: [] };
   const co = Object.assign({ versions: CODEX_VERSIONS, scripts: [], skillAt: '/data', fail: null, failMessage: '' }, codex);
   const files = new Set((claudeExists ? [claudeAt] : []).concat(Object.keys(co.versions)));
@@ -440,7 +449,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
   const observers = { intersection: [], resize: [] };
   let focused = true;
   class IntersectionObserver { constructor(cb) { this.cb = cb; observers.intersection.push(this); } observe(el) { this.el = el; } disconnect() { this.off = true; } }
-  class ResizeObserver { constructor(cb) { this.cb = cb; observers.resize.push(this); } observe(el) { this.el = el; } disconnect() { this.off = true; } }
+  class ResizeObserver { constructor(cb) { this.cb = cb; this.els = []; observers.resize.push(this); } observe(el) { this.el = el; this.els.push(el); } disconnect() { this.off = true; } }
   // the profile sheet goes into the page of the pane's window, over everything; the element that had the focus before
   const lastFocus = new El('button');
   const paneWin = { IntersectionObserver, ResizeObserver, DOMParser, listeners: {},
@@ -449,11 +458,15 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                     dispatch(t) { for (const f of this.listeners[t] || []) f({}); } };
   const paneDoc = { createElement: tag => new El(tag), createTextNode: text => ({ textContent: text }), hasFocus: () => focused,
                     importNode: n => cloneEl(n),
+                    listeners: {},
+                    addEventListener(t, f, c) { (this.listeners[t] = this.listeners[t] || []).push(f); },
+                    removeEventListener(t, f) { this.listeners[t] = (this.listeners[t] || []).filter(g => g !== f); },
+                    dispatch(t, init) { for (const f of (this.listeners[t] || []).slice()) f(Object.assign({}, init)); },
                     defaultView: paneWin, documentElement: new El('window'), activeElement: lastFocus };
   paneWin.document = paneDoc;
   const sheet = () => paneDoc.documentElement.children.find(c => c.id === 'scholium-profile-sheet') || null;
   const see = v => { for (const o of observers.intersection) if (!o.off) o.cb([{ isIntersecting: v }]); };
-  const resize = el => { for (const o of observers.resize) if (!o.off && o.el === el) o.cb([]); };
+  const resize = el => { for (const o of observers.resize) if (!o.off && o.els.includes(el)) o.cb([]); };
   const focus = v => { focused = v; };
   const timers = [];
   const laterTimeout = (f, ms) => { if (ms < 1000) return setTimeout(f, ms); const t = { f, ms, live: true }; timers.push(t); return t; };
@@ -464,7 +477,8 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     Zotero: {
       debug() {}, locale, DataDirectory: { dir: '/data' },
       Libraries: { userLibraryID: 1 },
-      Utilities: { Internal: { copyTextToClipboard: text => log.copied.push(text) } },
+      PreferencePanes: { register: async o => { log.prefPanes.push(o); return 'scholium-pane-id'; } },
+      Utilities: { Internal: { copyTextToClipboard: text => log.copied.push(text), openPreferences: (id, o) => log.openedPrefs.push(id) } },
       Prefs: { get: (n, g) => store.get(n), set: (n, v, g) => store.set(n, v) },
       Items: {
         get: id => (Array.isArray(id) ? id.map(i => items.get(i)).filter(Boolean) : items.get(id) || null),
@@ -555,34 +569,52 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
   const runner = context.ScholiumRunner;
   runner.NET_RETRY_MS = 40;
   // the item pane section as Zotero drives it: onItemChange, onRender, onAsyncRender
-  const pane = async (item) => {
+  const pane = async (item, opts = {}) => {
     const section = log.sections[0];
     const body = new El('div');
+    if (opts.closest) body.closest = opts.closest;
     let enabled = null;
     section.onItemChange({ item, setEnabled: v => { enabled = v; } });
     section.onRender({ doc: paneDoc, body, item });
     await section.onAsyncRender({ body });
-    return { body, enabled, view: () => {
+    // the ⋯ menu's items of a tab, read from the menu and closed again; none while another layer is open
+    const menuOf = (p, tab) => {
+      if (p.popover) return [];
+      const was = p.tab;
+      p.tab = tab;
+      try {
+        runner.openMoreMenu(p);
+        return p.popover.node.children.map(c => ({ text: c.textContent, disabled: !!c.disabled }));
+      } finally { runner.closePopover(p); p.tab = was; }
+    };
+    return { body, enabled,
+      // the annotation tab's button (the run still shows in the chat until the annotation kind is routed)
+      annotate: () => { const q = runner.panes.get(body); q.tabAnnotate.click(); q.annotGo.click(); q.tabChat.click(); },
+      view: () => {
       const p = runner.panes.get(body);
       if (!p) return null;
+      const chatMenu = menuOf(p, 'chat'), annotMenu = menuOf(p, 'annotate');
       return { model: p.model.value, models: p.model.children.map(o => o.value), modelLabels: p.model.children.map(o => o.textContent),
                effort: p.effort.value, efforts: p.effort.children.map(o => o.value), effortDisabled: p.effort.disabled,
                state: p.state.hidden ? null : p.state.textContent, stateKind: p.state.className,
-               annotateDisabled: p.annotate.disabled, removeDisabled: p.remove.disabled, removeHidden: p.remove.hidden,
-               cancelHidden: p.cancel.hidden, logDisabled: p.log.disabled, shownKey: p.shownKey, history: p.history,
+               annotateDisabled: p.annotGo.disabled, removeDisabled: annotMenu.length ? annotMenu[2].disabled : null,
+               logDisabled: chatMenu.length ? chatMenu[0].disabled : null, shownKey: p.shownKey, history: p.history,
                entries: p.list.children.map(c => [c.className, c.textContent]), stateTitle: p.state.title,
-               resumeHidden: p.resume.hidden, stateDisplay: p.state.style.display, cancelDisplay: p.cancel.style.display,
+               resumeHidden: p.resume.hidden, stateDisplay: p.state.style.display,
                sendHidden: p.send.hidden, sendDisabled: p.send.disabled, placeholder: p.input.placeholder,
                shownConv: p.shownConv, newChatDisabled: p.newChat.disabled, historyDisabled: p.historyButton.disabled,
-               agentDisabled: p.agent.disabled, gauge: p.gauge.hidden ? null : p.gauge.textContent, gaugeClass: p.gauge.className,
+               agentDisabled: p.agent.disabled, ring: p.ring.hidden ? null : p.ring.title, ringClass: p.ring.className, ctxUsed: p.context ? p.context.used : null, round: [p.send.textContent, p.send.title],
                historyRows: p.historyBox.hidden ? null : p.historyBox.children.map(c => [c.className, c.textContent]) };
     }, pane: () => runner.panes.get(body) };
   };
   const styles = () => mainDoc.documentElement.children.map(c => [c.tagName, c.id, c.attrs.rel, c.attrs.href]);
-  return { runner, log, item1, item2, att1, att2, note, pane, store, see, resize, focus, observers, timers, fire, styles, sheet, paneWin, paneDoc, lastFocus,
+  return { runner, log, item1, item2, att1, att2, note, pane, store, see, resize, focus, observers, timers, fire, styles, sheet, paneWin, paneDoc, lastFocus, El,
            chromePackage: context.chromePackage, replacing: context.replacing, takingOver: context.takingOver,
            live: () => timers.filter(t => t.live).map(t => t.ms), toolbarItems: () => mainDoc.bar.children.length };
 }
+// the ⋯ menu's personal profile and log items
+const profileFrom = pane => { pane.more.click(); pane.popover.node.children[1].click(); };
+const logFrom = pane => { pane.more.click(); pane.popover.node.children[0].click(); };
 const untimed = e => e[0] !== 'scholium-entry time';   // the transcript without the times runs ended at
 const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descriptions: n.descriptions, closeTimer: n.closeTimer, shown: n.shown });
 // a paper's conversations, in the order they were started, and the lines of one (the latest by default); the plugin's

@@ -96,44 +96,65 @@ to go on with in a new session, and ends with that reason. The logs of earlier v
 `codex-run.jsonl`, are each agent's first conversation and go on where they are. The files in the output
 directory, such as the configuration the annotations were written from, are the same for every conversation.
 
-The *Scholium* section of the item pane, in the library and in the reader's side pane, holds the
-controls and the process of the selected paper:
+The *Scholium* section of the item pane, in the library and in the reader's side pane, fills the pane's height.
 
-- **Agent** chooses Claude Code or Codex. As in llm-for-zotero, a switch starts a new conversation of the
-  paper shown; other papers show the conversation that agent goes on with.
-- **Model** lists the models the chosen agent reports, asked once per Zotero session without calling
-  a model: Claude Code through the initialize request of its stream-json protocol, Codex through
-  `model/list` (hidden models are left out). For Claude Code, the latest Opus (`opus`) is used until
-  another model is chosen, and *Claude Code's default* passes no `--model`. For Codex, *Codex's
-  default* is used until another model is chosen; it names the model of Codex's `config.toml`.
-- **Effort** lists the levels the chosen model accepts. It starts at `medium` and keeps the last
-  choice; a model that does not accept that level gets `medium` (or its lowest level), and a model
-  without levels gets no effort.
-- The choices apply to the papers started afterwards, are saved for each agent, and are shared by all
-  panes.
-- **Annotate**, **Cancel** and **Delete annotations** act on the selected paper; **Cancel** also takes
-  a queued paper out of the queue, and a paper that waits for its second try or for a limit to reset ends
-  as cancelled.
-- Above the transcript, **New chat** starts a new conversation with the chosen agent (its first message
-  starts it); **History** lists the agent's conversations of the paper, newest first, by day (today,
-  yesterday, the previous 7 and 30 days, older), titled by their first message, to open one, rename it
-  (Enter keeps the new title, Esc the old one) or delete it (**Undo** brings it back for six seconds; a
-  deleted Codex conversation's thread is archived at the next Codex run); **Show log** shows the
-  conversation's log file. While the paper runs or waits, its section's **Agent**, **New chat** and
-  **History** are disabled.
-- A state line shows the step of six (for a question, the step's name only) and the elapsed time while
-  the paper runs (and, while the agent has lost its connection and tries again, the attempt, until it
-  answers again), its place in the queue, the latest outcome of the conversation shown with the minutes,
-  turns and tokens of the run (the tooltip splits the tokens into input, cache and output), or the
-  deletion; other papers' runs are not shown there. For a conversation run earlier, the outcome comes from
-  its log.
+- Two tabs: **Chat** for questions about the paper, **Annotations** for annotating it. A dot on a tab marks a
+  run of that tab going on or waiting while the other tab is shown.
+- Under the tabs, a settings chip names the agent, the model and the effort (`Claude Code · Opus 5.5 · medium ▾`)
+  and opens a layer with the three choices; a click outside the layer or Esc closes it:
+  - **Agent**: Claude Code or Codex. As in llm-for-zotero, a switch starts a new conversation of the paper
+    shown; other papers show the conversation that agent goes on with.
+  - **Model**: the models the chosen agent reports, asked once per Zotero session without calling a model:
+    Claude Code through the initialize request of its stream-json protocol, Codex through `model/list`
+    (hidden models are left out). For Claude Code, the latest Opus (`opus`) is used until another model is
+    chosen, and *Claude Code's default* passes no `--model`. For Codex, *Codex's default* is used until
+    another model is chosen; it names the model of Codex's `config.toml`.
+  - **Effort**: the levels the chosen model accepts. It starts at `medium` and keeps the last choice; a model
+    that does not accept that level gets `medium` (or its lowest level), and a model without levels gets no
+    effort.
+
+  The choices apply to the runs started afterwards, are saved for each agent, and are shared by all panes.
+- Beside the chip, one line of state for the tab shown: the step of six and the elapsed time while an
+  annotation runs (for a question, the step's name), the attempt while the agent's connection is tried again,
+  the place in the queue, a pause for the usage limit with **Continue now**, the latest outcome of the
+  conversation shown with its time, turns and tokens (the tooltip splits the tokens into input, cache and
+  output), or the deletion. A narrow pane cuts it with an ellipsis.
+- ⋯ on the Chat tab holds **Show log** (the conversation's log file), **Personal profile ↗** and **Settings…**;
+  on the Annotations tab **Personal profile ↗**, **Show log**, **Delete annotations** and **Settings…**.
+  **Settings…** opens the Scholium page of Zotero's settings.
+
+**Chat tab**
+
+- **＋** starts a new conversation with the chosen agent (its first message starts it); **History** lists the
+  agent's conversations of the paper, newest first, by day (today, yesterday, the previous 7 and 30 days, older),
+  titled by their first message, to open one, rename it (Enter keeps the new title, Esc the old one) or delete it
+  (**Undo** brings it back for six seconds; a deleted Codex conversation's thread is archived at the next Codex
+  run). While the paper runs or waits, **＋**, **History** and **Agent** are off.
 - The process is shown as Claude Code shows it: the user's words or **Annotate**, the agent and model, the
   agent's text, each tool call with its command or file, and the first lines of each result (errors in red),
   and under each run the time it ended; a failed run ends with its error. A running paper is shown live,
   otherwise the conversation the chosen agent goes on with; when that agent has none of the paper and the
-  other one has, the section says so. The box is resized at its lower edge, and its height is kept. Web addresses and `zotero://`
-  links in a message open on a click or with Enter, in the browser or in Zotero; links to files are
-  shown, not followed.
+  other one has, the section says so. Web addresses and `zotero://` links in a message open on a click or with
+  Enter, in the browser or in Zotero; links to files are shown, not followed.
+
+**Annotations tab**
+
+- Before the first annotation, the tab says what an annotation does; its box takes extra instructions, which may
+  stay empty, and **Annotate** starts the run.
+- **Annotate** goes on in the conversation shown on the Chat tab, where its run shows, with the box's words as
+  extra instructions; a redo there still has the earlier run in its context.
+
+**The box**
+
+- The box at the bottom of each tab takes the user's words. The round button sends them (↑, grey while the box is
+  empty); while a run of the tab goes on and the box is empty, it is ■, which stops the run (and takes a waiting
+  paper out of the queue). Esc while a run goes on asks once ("Press Esc again to stop") and stops on a second
+  press within three seconds; with a layer open, Esc closes the layer first. The line under the box names the send
+  shortcut. Words typed and not sent are kept for each tab and conversation; the words of a message whose agent is
+  not found go back to the box.
+- Context ring: beside the round button, a ring whose arc is the share of the model's context window that the
+  conversation's session took up in its latest request (orange from 80%); its tooltip gives the share used and
+  left and the tokens in k. A click opens a layer with the numbers and a bar of input, cache and output.
 - **Personal profile ↗** opens the annotation profile `<data dir>/zotero-scholium/profile.md`, which
   every run follows, in an editor over the Zotero window: the Markdown text as it is on the left, and
   on the right a preview that formats it as it is typed and follows its scrolling; colour codes such
@@ -145,14 +166,20 @@ controls and the process of the selected paper:
   text shows the file's current content when Zotero is focused again. A missing profile starts as
   the empty `## User's rules (always win)` section of `scholium profile`'s template, which keeps that
   section when it later writes the statistics, and is written on saving.
-- The box below the transcript takes the user's words. **Send** (or Ctrl+Enter) sends them to the
-  conversation: its first message is a question, answered without annotating, and later ones continue it,
-  for example to change some annotations. **Annotate** takes them as extra instructions and goes on in the
-  same conversation; a redo there still has the earlier run in its context. Words typed and not sent are
-  kept for each conversation; the words of a message whose agent is not found go back to the box.
-- Beside the hint under the box: the context the conversation's session took up in its latest request,
-  out of the model's context window once the agent named it; from 80% it is orange, and **New chat**
-  starts afresh.
+
+**Settings page**
+
+The Scholium page of Zotero's settings holds:
+
+| Setting | Choices | Default |
+|---|---|---|
+| Send shortcut | Enter / Ctrl + Enter for multiline prompts / Always use Ctrl + Enter | Always use Ctrl + Enter |
+| Follow-up behavior | Queue / Steer | Queue |
+| Show context window usage | on / off | on |
+| Claude Code program | a path, or **Browse…** | empty: found automatically |
+| Codex program | a path, or **Browse…** | empty: found automatically |
+
+When an agent's program is not found, the message points to this page.
 
 While Zotero is in front, a notice in the corner of the window appears when a paper starts and when it
 ends, and closes by itself; while Zotero is in the background, a system notification reports the end
@@ -162,7 +189,7 @@ Zotero window, whose state line says the same.
 
 When a run fails on the connection to the agent's service (a timeout, a lost connection, an
 overloaded or failing server) before the agent has used any tool, the paper is tried once more after
-30 seconds; it waits at the head of the queue meanwhile, and **Cancel** ends the wait. The transcript
+30 seconds; it waits at the head of the queue meanwhile, and ■ ends the wait. The transcript
 and the log keep the failed try.
 
 When the agent reports that the usage limit is reached, the queue waits: the interrupted paper
@@ -185,20 +212,22 @@ new run replaces those annotations.
 | Preference | Default | Meaning |
 |---|---|---|
 | `extensions.scholium-bridge.agent` | `claude` | `claude` or `codex`; set in the Scholium section |
-| `extensions.scholium-bridge.claudePath` | found automatically | path of the `claude` executable |
+| `extensions.scholium-bridge.claudePath` | found automatically | path of the `claude` executable; set on the settings page |
 | `extensions.scholium-bridge.claudeModel` | `opus` (the latest Opus) | value of `--model`, none when empty; set in the Scholium section |
 | `extensions.scholium-bridge.claudeEffort` | `medium` | value of `--effort`; set in the Scholium section |
 | `extensions.scholium-bridge.claudePermissionMode` | `auto` | value of `--permission-mode` |
-| `extensions.scholium-bridge.codexPath` | the newest copy found | path of the `codex` executable |
+| `extensions.scholium-bridge.codexPath` | the newest copy found | path of the `codex` executable; set on the settings page |
 | `extensions.scholium-bridge.codexModel` | empty (Codex's default) | Codex model; set in the Scholium section |
 | `extensions.scholium-bridge.codexEffort` | `medium` | Codex reasoning effort; set in the Scholium section |
-| `extensions.scholium-bridge.logHeight` | `320` | height of the transcript box in pixels; set by resizing it |
+| `extensions.scholium-bridge.sendShortcut` | `cmdAlways` | `enter`, `cmdIfMultiline` or `cmdAlways`; set on the settings page |
+| `extensions.scholium-bridge.followUpMode` | `queue` | `queue` or `steer`; set on the settings page |
+| `extensions.scholium-bridge.contextRing` | `true` | whether the context ring shows; set on the settings page |
 
 ## Deleting the tool's annotations
 
-**Delete annotations** in the Scholium section, after a confirmation that states the counts,
-permanently deletes the annotations tagged `zotero-scholium` on every PDF attachment of the selected
-paper, and moves the paper's reading notes tagged `zotero-scholium` to the trash, where they can be
+**Delete annotations** in the ⋯ menu of the Scholium section's Annotations tab, after a confirmation that
+states the counts, permanently deletes the annotations tagged `zotero-scholium` on every PDF attachment of the
+selected paper, and moves the paper's reading notes tagged `zotero-scholium` to the trash, where they can be
 restored. Annotations and notes without that tag are kept; a paper with an attachment being annotated
 or queued is left alone, notes included.
 The deletion syncs like any deletion in Zotero. The configuration of an earlier run stays in
@@ -236,10 +265,12 @@ Settings → Advanced → *Allow other applications on this computer to communic
 
 ```bash
 cd plugin/scholium-bridge
-zip -r ../scholium-bridge.xpi manifest.json bootstrap.js content locale
+zip -r ../scholium-bridge.xpi manifest.json bootstrap.js prefs.js settings.xhtml settings.js content locale
 ```
 
-`manifest.json`, `bootstrap.js` and the `content/` and `locale/` folders must be located at the root of the archive.
+`manifest.json`, `bootstrap.js`, `prefs.js`, `settings.xhtml`, `settings.js` and the `content/` and `locale/` folders
+must be located at the root of the archive. `prefs.js` holds the defaults of the settings page's preferences,
+`settings.xhtml` and `settings.js` the page.
 `content/` holds the section's icons and its stylesheet `scholium.css`, which uses Zotero's theme variables.
 
 ## Notes for plugin authors

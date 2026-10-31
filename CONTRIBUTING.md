@@ -23,4 +23,4 @@ After changing `src/zotero_scholium/cli.py`, run `python scripts/sync_skill_scri
 
 ## Building the plugin
 
-The plugin is packaged by the release workflow, after the checks of `ci.yml` pass and the tag matches the versions. To build it locally, archive `manifest.json`, `bootstrap.js` and the `content/` and `locale/` folders from `plugin/scholium-bridge/` at the root of a zip file named `scholium-bridge.xpi`.
+The plugin is packaged by the release workflow, after the checks of `ci.yml` pass and the tag matches the versions. To build it locally, archive `manifest.json`, `bootstrap.js`, `prefs.js`, `settings.xhtml`, `settings.js` and the `content/` and `locale/` folders from `plugin/scholium-bridge/` at the root of a zip file named `scholium-bridge.xpi`.

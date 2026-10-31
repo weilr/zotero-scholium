@@ -1,0 +1,36 @@
+<linkset>
+  <html:link rel="localization" href="scholium-bridge.ftl"/>
+</linkset>
+<vbox class="scholium-settings">
+  <groupbox>
+    <label data-l10n-id="scholium-settings-send"/>
+    <description data-l10n-id="scholium-settings-send-desc"/>
+    <menulist preference="extensions.scholium-bridge.sendShortcut" native="true">
+      <menupopup>
+        <menuitem value="enter" data-l10n-id="scholium-settings-send-enter"/>
+        <menuitem value="cmdIfMultiline" data-l10n-id="scholium-settings-send-multiline"/>
+        <menuitem value="cmdAlways" data-l10n-id="scholium-settings-send-always"/>
+      </menupopup>
+    </menulist>
+    <label data-l10n-id="scholium-settings-followup"/>
+    <description data-l10n-id="scholium-settings-followup-desc"/>
+    <radiogroup preference="extensions.scholium-bridge.followUpMode" orient="horizontal">
+      <radio value="queue" data-l10n-id="scholium-settings-followup-queue"/>
+      <radio value="steer" data-l10n-id="scholium-settings-followup-steer"/>
+    </radiogroup>
+    <checkbox preference="extensions.scholium-bridge.contextRing" data-l10n-id="scholium-settings-ring"/>
+  </groupbox>
+  <groupbox>
+    <label data-l10n-id="scholium-settings-claude"/>
+    <description data-l10n-id="scholium-settings-program-desc"/>
+    <hbox align="center">
+      <html:input type="text" style="flex: 1" preference="extensions.scholium-bridge.claudePath"/>
+      <button id="scholium-claude-browse" data-l10n-id="scholium-settings-browse"/>
+    </hbox>
+    <label data-l10n-id="scholium-settings-codex"/>
+    <hbox align="center">
+      <html:input type="text" style="flex: 1" preference="extensions.scholium-bridge.codexPath"/>
+      <button id="scholium-codex-browse" data-l10n-id="scholium-settings-browse"/>
+    </hbox>
+  </groupbox>
+</vbox>

@@ -76,7 +76,7 @@
    npx skills add weilr/zotero-scholium -g -y
    ```
 3. 下载 [`scholium-bridge.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium-bridge.xpi)，在 Zotero 中安装：工具 → 插件 → ⚙ → 从文件安装插件。
-4. 选中一篇论文，打开 **Scholium** 区块，点 **批注这篇**。只想提问时，在运行过程下方的输入框里写问题，点 **发送**。
+4. 选中一篇论文，打开 **Scholium** 区块，在 **批注** 页点 **批注这篇**。想提问时，在 **对话** 页写问题发送。
 
 ### 在代理对话里使用
 
