@@ -17,7 +17,7 @@ English | [中文](README.zh-CN.md)
 
 </div>
 
-<img src="docs/images/hero.webp" alt="A one-click run in Zotero: the extra instructions typed into the Scholium section, Annotate pressed, the run's six steps, then the paper with highlights in three colours, translations in the sidebar, margin notes, sticky notes and underlines" width="100%">
+<img src="docs/images/hero.webp" alt="A one-click run in Zotero: the extra instructions typed on the Scholium section's Annotations tab, Annotate pressed, the six steps, the result card with the numbers counted in Zotero, then the paper with yellow and red (core) highlights, blue margin notes and the translations in the sidebar" width="100%">
 
 <sub>One run of Claude Code on <i>Direct Preference Optimization</i> (CC BY 4.0) with the profile shown below, sped up (it took three minutes). All the examples on this page come from that run.</sub>
 
@@ -50,7 +50,7 @@ English | [中文](README.zh-CN.md)
 </tr>
 <tr>
 <td><b>One click in Zotero</b><br>The Scholium section runs Claude Code or Codex on the selected paper. Its <b>Annotations</b> tab annotates the paper in six steps and counts the result; words typed there afterwards change it, such as <i>shorten the translation on page 5</i>. Its <b>Chat</b> tab answers questions about the paper, also about a passage selected in the reader (<b>Ask Scholium</b>), and cites the paper's sentences with their page, a click away in the PDF; earlier conversations stay under History.</td>
-<td><img src="docs/images/f-pane.webp" alt="Page 2 beside the Scholium section during a run: the extra instructions typed, Annotate pressed, the steps and the transcript, and the annotations arriving on the page"></td>
+<td><img src="docs/images/f-pane.webp" alt="Ask Scholium on a passage of page 2: the passage quoted above the Chat tab's box, the question sent, the answer citing the paper's sentences as page chips, a chip's card with Locate, and the cited sentence found on page 4"></td>
 </tr>
 <tr>
 <td><b>Your profile</b><br>How you annotate, learned from the annotations already in your library, plus your own rules. Every run follows it; edit it inside Zotero.</td>
