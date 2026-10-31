@@ -43,6 +43,13 @@ SCENARIOS = r"""
   {
     const h = harness({ locale: 'en-US' });
     facts.english = ['noClaude', 'noCodex', 'settingsOpen'].map(k => h.runner.text(k));
+    facts.englishCard = h.runner.text('numHighlights', 5, 2);
+    // the card's words follow its numbers: one of each, then two
+    const card = n => h.runner.countsNode(h.paneDoc, { highlights: n, core: 1, margin: n, notes: n, readingNotes: n, turns: 0, tokens: 0 })
+      .children[1].children.map(c => c.textContent);
+    facts.englishCardWords = [card(1), card(2)];
+    facts.chineseCardWords = (() => { const z = harness(); return [1, 2].map(n => ['numMargin', 'numNotes', 'numReading'].map(k => z.runner.text(k, n))
+      .concat(z.runner.text('numHighlights', n, 1))); })();
   }
   // the settings chip opens a layer with the three selects; a click outside or Esc closes it; one layer at a time
   {
@@ -71,10 +78,10 @@ SCENARIOS = r"""
     facts.chip = { chip, open, afterDropdown, afterOutside, afterEsc, menu, oneAtATime: pane.popover.name,
                    parts: pane.chip.children.map(c => [c.className, c.textContent]), tip: pane.chip.title };
     // a finished run's state: its line, and in its tooltip the line and the tokens' detail
-    h.runner.notes.set('ATT1', { text: '完成 · 21s · 4 轮 · 62k tokens', title: '输入 3 · 输出 640', at: Date.now() });
+    h.runner.notes.set('ATT1/chat', { text: '完成 · 21s · 4 轮 · 62k tokens', title: '输入 3 · 输出 640', at: Date.now() });
     h.runner.paintPane(pane);
     facts.chip.done = [pane.state.textContent, pane.state.title];
-    h.runner.notes.delete('ATT1'); h.runner.paintPane(pane);
+    h.runner.notes.delete('ATT1/chat'); h.runner.paintPane(pane);
     facts.chip.none = [pane.state.hidden, pane.state.title];
     pane.model.change('fable'); await settle(10);
     facts.chip.after = pane.chip.textContent;
@@ -279,13 +286,13 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await settle(40);
     const pane = p.pane();
-    const f = { chatBefore: pane.list.children.length, introBefore: !pane.annotIntro.hidden };
+    const f = { chatBefore: pane.list.children.length, introBefore: pane.annot.list.children.includes(pane.annotIntro) };
     await h.runner.annotate([h.item1]); await settle(200);
     f.kind = h.runner.transcriptKind;
     f.chatTab = { entries: pane.list.children.length, state: p.view().state, annotDot: pane.tabAnnotateDot.hidden === false,
                   chatDot: pane.tabChatDot.hidden === false };
     pane.tabAnnotate.click(); await settle(10);
-    f.annotTab = { entries: pane.annot.list.children.length, live: pane.annot.live, running: !!p.view().state, intro: !pane.annotIntro.hidden,
+    f.annotTab = { entries: pane.annot.list.children.length, live: pane.annot.live, running: !!p.view().state, intro: pane.annot.list.children.includes(pane.annotIntro),
                    annotDot: pane.tabAnnotateDot.hidden === false, chatDot: pane.tabChatDot.hidden === false, newChat: pane.newChat.hidden,
                    history: pane.historyButton.hidden };
     f.chatAfter = pane.list.children.length;
@@ -326,7 +333,7 @@ SCENARIOS = r"""
     const pane = p.pane();
     const f = { chatRow: [pane.annotGo.hidden, pane.send.hidden], lists: [pane.chatView.children.includes(pane.list), pane.annotView.children.includes(pane.annot.list)] };
     pane.tabAnnotate.click(); await settle(10);
-    f.row = { intro: !pane.annotIntro.hidden, go: pane.annotGo.hidden, goText: pane.annotGo.textContent, send: pane.send.hidden,
+    f.row = { intro: pane.annot.list.children.includes(pane.annotIntro), go: pane.annotGo.hidden, goText: pane.annotGo.textContent, send: pane.send.hidden,
               annotList: pane.annot.list.hidden, placeholder: pane.input.placeholder, old: [pane.annotate, pane.cancel, pane.remove, pane.profile, pane.log].map(x => x === undefined) };
     pane.more.click();
     f.menu = pane.popover.node.children.map(c => [c.textContent, !!c.disabled]);
@@ -672,11 +679,11 @@ SCENARIOS = r"""
       h.runner.start('x');
       const p1 = await h.pane(h.item1), p2 = await h.pane(h.item2);
       await settle(40);
-      const other = p2.pane().list.children[0];
+      const other = p2.pane().annot.list.children[0];
       await h.runner.annotate([h.item1, h.item2]); await settle(300);
-      ended.paused = [h.runner.job, !!h.runner.paused, headOf(p1.pane()), p2.pane().list.children[0] === other];
+      ended.paused = [h.runner.job, !!h.runner.paused, headOf(p1.pane().annot), p2.pane().annot.list.children[0] === other];
       h.runner.appendEntries([{ kind: 'info', text: '一条提示' }]);
-      ended.lineWhilePaused = headOf(p1.pane());
+      ended.lineWhilePaused = headOf(p1.pane().annot);
       clearTimeout(h.runner.paused.timer);
     }
     // the wait for a second try
@@ -688,7 +695,7 @@ SCENARIOS = r"""
       h.runner.start('x');
       const p = await h.pane(h.item1);
       await h.runner.annotate([h.item1]); await settle(400);
-      ended.retry = [h.runner.job, p.view().state, runOf(p.pane()).children.map(c => c.className)];
+      ended.retry = [h.runner.job, p.view('annotate').state, runOf(p.pane().annot).children.map(c => c.className)];
       h.runner.dequeue(['ATT1']); await settle(100);
     }
     // a missing program, in a conversation that has a run
@@ -697,7 +704,7 @@ SCENARIOS = r"""
       h.runner.start('x');
       const p = await h.pane(h.item1);
       await settle(40);
-      await h.runner.annotate([h.item1]); await settle(300);
+      await h.runner.send(h.att1, '再问一句'); await settle(300);
       ended.noProgram = p.pane().list.children.map(r => r.children.map(c => c.className));
     }
     // the moment a run starts
@@ -706,7 +713,7 @@ SCENARIOS = r"""
       h.runner.start('x');
       const p = await h.pane(h.item1);
       await settle(40);
-      const queued = h.runner.annotate([h.item1]);
+      const queued = h.runner.send(h.att1, '再问一句');
       for (let i = 0; i < 2000 && !h.log.releaseDir; i++) await tick();
       ended.starting = [p.pane().list.children.map(r => r.children.map(c => c.className)), headOf(p.pane())];
       h.log.releaseDir(); await queued; await settle(300);
@@ -907,7 +914,8 @@ SCENARIOS = r"""
                              0];
     clearTimeout(l.runner.paused && l.runner.paused.timer);
   }
-  // the annotation view draws no Retry; a retry runs the conversation's own agent; a retry without a session
+  // the annotation view draws the chat's Retry for words to its session only; a retry runs the conversation's own agent; a
+  // retry without a session
   {
     const h = harness();
     h.runner.start('x');
@@ -919,7 +927,8 @@ SCENARIOS = r"""
     const hasRetry = n => n.children.some(c => c.children.some(k => k.className.includes('retry')));
     const chatView = p.pane();
     chatView.runCount = 1;
-    facts.annotRetry = { annot: hasRetry(h.runner.renderRun(view, run, 0, false)), kind: view.kind, hasPane: !!view.pane, chat: hasRetry(h.runner.renderRun(chatView, run, 0, false)) };
+    facts.annotRetry = { annot: hasRetry(h.runner.renderRun(view, run, 0, false)), kind: view.kind, hasPane: !!view.pane, chat: hasRetry(h.runner.renderRun(chatView, run, 0, false)),
+                         words: hasRetry(h.runner.renderRun(view, Object.assign({}, run, { turn: { kind: 'prompt', text: '改短' } }), 0, false)) };
   }
   {
     const failed = [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'F1' }),
@@ -1026,6 +1035,13 @@ def test_the_settings_page_is_registered_and_opened(facts):
     assert s["settingsOpen"] == "设置…"
     assert facts["english"] == ["Claude Code (claude) was not found. Set its program in Zotero Settings → Scholium.",
                                 "Codex (codex) was not found. Set its program in Zotero Settings → Scholium.", "Settings…"]
+    assert facts["englishCard"] == "highlights (2\u00a0core)", "the count stays with its word"
+
+
+def test_the_english_card_words_follow_their_numbers(facts):
+    assert facts["englishCardWords"] == [["1highlight (1\u00a0core)", "1margin note", "1sticky note", "1reading note"],
+                                         ["2highlights (1\u00a0core)", "2margin notes", "2sticky notes", "2reading notes"]]
+    assert facts["chineseCardWords"] == [["页边批注", "便签", "阅读笔记", "高亮（核心\u00a01）"]] * 2
 
 
 def test_the_program_picker_takes_any_file():
@@ -1186,6 +1202,15 @@ def test_the_section_never_widens_the_item_pane():
     assert "display: inline-block" in rules[".scholium-state::before"]
 
 
+def test_the_empty_states_and_the_card_labels_sit_as_drawn():
+    rules = css_rules()
+    log = rules[".scholium-log"]
+    assert "display: flex" in log and "flex-direction: column" in log, "the auto margins of the starters and the introduction need a column"
+    assert "margin: auto 0" in rules[".scholium-annot-intro"] and "margin: auto 0 4px" in rules[".scholium-starters"]
+    assert "word-break: keep-all" in rules[".scholium-card-nums span"]
+    assert "height: auto" in rules[".scholium-starter"], "a question on two lines gets a button as tall as two"
+
+
 def test_the_menu_items_close_the_layer_and_act(facts):
     f = facts["menuItems"]
     assert f["logDisabled"] is True                       # no log yet
@@ -1233,8 +1258,8 @@ def test_a_waiting_job_of_the_other_kind_shows_the_dot(facts):
 
 def test_the_annotation_tab_and_its_menu(facts):
     f = facts["annotTab"]
-    assert f["row"] == {"intro": True, "go": False, "goText": "批注这篇", "send": True, "annotList": True,
-                    "placeholder": "附加要求（可选），例如：只标注方法部分", "old": [True] * 5}
+    assert f["row"] == {"intro": True, "go": False, "goText": "批注这篇", "send": True, "annotList": False,
+                    "placeholder": "附加要求（可不填），例如：只批注第 3–5 页", "old": [True] * 5}
     assert f["menu"] == [["个人配置 ↗", False], ["打开日志", True], ["删除批注", False], ["", False], ["设置…", False]]
     assert f["chatRow"] == [True, False] and f["lists"] == [True, True]
     assert f["logClosed"] is None and f["extra"] is True
@@ -1475,9 +1500,9 @@ def test_send_with_retry_keeps_the_given_conversation(facts):
     assert r["answered"] is True and r["prompts"] == 1 and r["current"] is None
 
 
-def test_the_annotation_view_draws_no_retry(facts):
+def test_the_annotation_view_draws_retry_for_words_to_its_session_only(facts):
     r = facts["annotRetry"]
-    assert r == {"annot": False, "kind": "annotate", "hasPane": True, "chat": True}
+    assert r == {"annot": False, "kind": "annotate", "hasPane": True, "chat": True, "words": True}, "a run without words of its own has none"
 
 
 def test_a_retry_runs_the_conversations_own_agent(facts):

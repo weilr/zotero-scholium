@@ -489,7 +489,7 @@ var ScholiumRunner = {
   draining: false,
   job: null,                // { title, key, libraryID, started, step } of the running paper
   last: null,               // { ok, title, key, libraryID, summary, log, at } of the latest finished paper
-  notes: new Map(),         // attachment key -> { text, error, at, title }: the latest outcome, shown in its section
+  notes: new Map(),         // <attachment key>/<kind> -> { text, error, at, title, conv }: the latest outcome of each kind
   indexes: new Map(),       // attachment key -> { current: { claude, codex }, titles: { id: title } }: its conversations
   parsedLogs: new Map(),    // log path -> { at, size, log }: a log read before, while it is unchanged; `log` is the reading
                             // (parseLog), done or under way
@@ -541,7 +541,8 @@ var ScholiumRunner = {
 
   text(key, ...args) {
     const zh = this.zh();
-    const plural = (k, one, many) => `${k} ${k === 1 ? one : many}`;
+    const word = (k, one, many) => (k === 1 ? one : many);
+    const plural = (k, one, many) => `${k} ${word(k, one, many)}`;
     const t = {
       headline: zh ? "Scholium 批注" : "Scholium annotation",
       noPdf: zh ? "这篇论文没有 PDF 附件。" : "This paper has no PDF attachment.",
@@ -643,6 +644,7 @@ var ScholiumRunner = {
                         : "The zotero-scholium skill is switched off in Codex: switch it on there.",
       unfinished: zh ? "（这条回复没有写完）" : "(this message was not finished)",
       stepOf: (i, n, label) => zh ? `第 ${i}/${n} 步 ${label}` : `step ${i}/${n} ${label}`,
+      stepCount: (i, n) => zh ? `第 ${i}/${n} 步` : `step ${i}/${n}`,
       running: (step, time) => zh ? `${step} · 已用 ${time}` : `${step} · ${time} so far`,
       reconnecting: (n, max) => zh ? `连接中断，正在重试${n && max ? `（${n}/${max}）` : ""}` : `connection lost, retrying${n && max ? ` (${n}/${max})` : ""}`,
       finished: title => zh ? `批注完成：${title}` : `Finished: ${title}`,
@@ -656,8 +658,7 @@ var ScholiumRunner = {
       escAgain: zh ? "再按一次 Esc 停止" : "Press Esc again to stop",
       sendHintEnter: zh ? "Enter 发送 · Shift+Enter 换行" : "Enter to send · Shift+Enter for a new line",
       sendHintMultiline: key => zh ? `Enter 发送 · 多行时 ${key}+Enter` : `Enter to send · ${key}+Enter for several lines`,
-      askPlaceholder: zh ? "向这篇论文提问；或写附加要求，随「批注这篇」发送" : "Ask about this paper, or write extra instructions to send with Annotate",
-      extraPlaceholder: zh ? "附加要求（可选），例如：只标注方法部分" : "Extra instructions (optional), e.g. annotate the method section only",
+      askPlaceholder: zh ? "向这篇论文提问" : "Ask about this paper",
       followPlaceholder: zh ? "接着对话，例如：第 5 页那条译文改短一些" : "Continue the conversation, e.g. shorten the translation on page 5",
       sendHint: key => zh ? `${key}+Enter 发送` : `${key}+Enter to send`,
       extraLabel: zh ? "附加要求：" : "Extra instructions: ",
@@ -669,8 +670,24 @@ var ScholiumRunner = {
                                : `The session in ${agent === "codex" ? "Codex no longer exists (for example, it was deleted in the Codex app)" : "Claude Code no longer exists (for example, Claude Code cleaned it up)"}, so the task cannot go on; a new message starts a new session that is given this conversation.`,
       tabChat: zh ? "对话" : "Chat",
       tabAnnotate: zh ? "批注" : "Annotations",
-      annotEmptyTitle: zh ? "还没有批注这篇论文" : "This paper is not annotated yet",
-      annotEmptyBody: zh ? "点「批注这篇」开始；输入框里的话会作为附加要求。" : "Press Annotate to start; what is in the box goes with it as extra instructions.",
+      annotEmptyTitle: zh ? "还没有批注这篇" : "Not annotated yet",
+      annotEmptyBody: zh ? "会做重点句高亮（附译文）、页边批注和一篇阅读笔记，按你的个人配置来，通常 10–20 分钟。每次批注都是新会话。"
+                         : "Highlights key sentences with translations, adds margin notes and a reading note, following your profile; usually 10–20 minutes. Each annotation is a new session.",
+      annotExtraHint: zh ? "附加要求（可不填），例如：只批注第 3–5 页" : "Extra instructions (optional), e.g. only pages 3–5",
+      annotFollowUpHint: zh ? "接着这次批注修改，例如：第 5 页那条译文改短" : "Continue this annotation, e.g. shorten the translation on page 5",
+      redoInline: n => zh ? `重新批注会替换这篇的 ${n} 条 Scholium 批注（你自己的不动）。` : `Annotating again replaces this paper's ${n} Scholium annotations (yours stay).`,
+      replace: zh ? "替换" : "Replace",
+      cancelButton: zh ? "取消" : "Cancel",
+      details: zh ? "详情" : "Details",
+      annotDone: zh ? "✓ 批注完成" : "✓ Annotated",
+      annotDoneClean: zh ? "✓ 批注完成，没有剩余警告" : "✓ Annotated, no warnings left",
+      annotDoneWarn: w => zh ? `✓ 批注完成，剩余警告：${w}` : `✓ Annotated, warnings left: ${w}`,
+      // the words beside the card's numbers
+      numHighlights: (n, c) => zh ? `高亮（核心\u00a0${c}）` : `${word(n, "highlight", "highlights")} (${c}\u00a0core)`,
+      numMargin: n => zh ? "页边批注" : word(n, "margin note", "margin notes"),
+      numNotes: n => zh ? "便签" : word(n, "sticky note", "sticky notes"),
+      numReading: n => zh ? "阅读笔记" : word(n, "reading note", "reading notes"),
+      appliedBy: (a, d) => zh ? `上次由 ${a} 在 ${d} 写入` : `Last written by ${a} on ${d}`,
       newChat: zh ? "新对话" : "New chat",
       historyButton: zh ? "历史" : "History",
       historyEmpty: zh ? "没有别的对话。" : "No other conversations.",
@@ -1203,8 +1220,12 @@ var ScholiumRunner = {
 
   stepText(step) {
     const i = this.STEPS.indexOf(step);
-    // a question goes through some of the steps only: their names without the count
-    if (i >= 0) return this.job && this.job.asking ? this.text(step) : this.text("stepOf", i + 1, this.STEPS.length, this.text(step));
+    // a question goes through some of the steps only: their names without the count; an annotation's list of steps names
+    // them, so its line has the count only
+    if (i >= 0) {
+      return this.job && this.job.asking ? this.text(step) : this.job && this.job.annotation ? this.text("stepCount", i + 1, this.STEPS.length)
+        : this.text("stepOf", i + 1, this.STEPS.length, this.text(step));
+    }
     return step && step !== "starting" ? this.text(step) : this.text("starting", this.agentName(this.job && this.job.agent));
   },
 
@@ -1274,8 +1295,12 @@ var ScholiumRunner = {
         if (c && c.type === "tool_result") out.push({ kind: "result", text: this.resultSummary(c.content), error: !!c.is_error });
       }
     }
-    if (event.type === "scholium" && event.subtype === "run") out.push({ kind: "run", at: event.at || 0 });
-    if (event.type === "scholium" && event.subtype === "prompt") out.push({ kind: "prompt", text: String(event.text || "") });
+    // a run that goes on with the turn before (a second try, a continuation) has no words of its own
+    if (event.type === "scholium" && event.subtype === "run") out.push(Object.assign({ kind: "run", at: event.at || 0 }, event.user === null ? { continues: true } : {}));
+    // an annotation's line carries its extra instructions
+    if (event.type === "scholium" && event.subtype === "prompt") {
+      out.push(Object.assign({ kind: "prompt", text: String(event.text || "") }, event.annotate ? { annotate: true, extra: String(event.extra || "") } : {}));
+    }
     if (event.type === "scholium" && event.subtype === "unfinished" && String(event.text || "").trim()) {
       out.push({ kind: "text", text: String(event.text).trim(), unfinished: true });
     }
@@ -1287,6 +1312,12 @@ var ScholiumRunner = {
       out.push({ kind: "final", text: String(event.text || "").trim() || this.text(event.outcome || "failed"), error: true });
     }
     if (event.type === "scholium" && event.subtype === "retry") out.push({ kind: "info", text: this.text("retrying") });
+    // the numbers an annotation's card shows, as counted when it ended
+    if (event.type === "scholium" && event.subtype === "counts") {
+      const n = k => Number(event[k]) || 0;
+      out.push({ kind: "counts", highlights: n("highlights"), core: n("core"), margin: n("margin"), notes: n("notes"), readingNotes: n("readingNotes"),
+                 warnings: typeof event.warnings === "string" ? event.warnings : null, turns: n("turns"), tokens: n("tokens"), at: n("at") });
+    }
     // when a run ended, under what it showed
     if (event.type === "scholium" && event.subtype === "time" && event.at > 0) out.push({ kind: "time", text: this.clock(event.at), at: event.at });
     // a successful result repeats Claude's last message; only a failed run's result is shown, with Claude Code's errors
@@ -1463,10 +1494,10 @@ var ScholiumRunner = {
     return true;
   },
 
-  // the section's own run stops; a paper of it that only waits leaves the queue
+  // the run of the tab shown stops; a paper of it that only waits there leaves the queue, the other tab's wait stays
   stopFromPane(pane) {
     if (this.job && pane.keys.includes(this.job.key) && (this.job.source.kind || "chat") === pane.tab) this.cancel();
-    else this.dequeue(pane.keys);
+    else this.dequeue(pane.keys, pane.tab);
   },
 
   paintHint(pane) {
@@ -1480,7 +1511,7 @@ var ScholiumRunner = {
   // the context ring: an arc of the window's share the shown conversation's session takes up; its tooltip in Codex's words
   paintRing(pane) {
     const view = this.viewOf(pane, pane.tab);
-    const c = view.live && this.job && this.job.key === view.shownKey ? this.job.context : view.context;
+    const c = view.live && this.showsRun(view) ? this.job.context : view.context;
     const used = c && c.used > 0 ? c.used : 0, win = c && c.window > 0 ? c.window : 0;
     const shown = this.contextRingOn() && used > 0 && win > 0;
     this.show(pane.ring, shown);
@@ -1496,7 +1527,7 @@ var ScholiumRunner = {
   openContextLayer(pane) {
     if (this.closePopover(pane, "context")) return;
     const view = this.viewOf(pane, pane.tab);
-    const c = (view.live && this.job && this.job.key === view.shownKey ? this.job.context : view.context) || {};
+    const c = (view.live && this.showsRun(view) ? this.job.context : view.context) || {};
     this.openPopover(pane, "context", pane.ring, node => {
       const doc = pane.doc;
       const row = (cls, ...kids) => { const d = doc.createElement("div"); d.className = cls; d.append(...kids); return d; };
@@ -1844,9 +1875,14 @@ var ScholiumRunner = {
       || this.queue.some(j => pane.keys.includes(j.att.key) && (j.kind || "chat") === kind);
   },
 
+  // each tab keeps the words typed to it
   setTab(pane, kind) {
+    const before = this.unsentKey(pane);
+    this.keepUnsent(pane);
     pane.tab = kind === "annotate" ? "annotate" : "chat";
     this.closePopover(pane);
+    this.show(pane.confirmRow, false);   // a question in place is the tab's it was asked on
+    this.swapUnsent(pane, before);
     this.paintPane(pane);
   },
 
@@ -1940,9 +1976,10 @@ var ScholiumRunner = {
     pane.annot = { kind: "annotate", doc, list: div("scholium-log"), shownKey: null, shownConv: null, shownPath: null, live: false,
                    history: false, turns: 0, question: false, context: null, draft: null, foldOpen: new Map(), pane };
     this.followLinks(pane.annot.list, win);
-    pane.annotIntro = div("scholium-annot-intro");
-    pane.annotIntro.append(div("scholium-annot-title", this.text("annotEmptyTitle")), div("scholium-note", this.text("annotEmptyBody")));
-    pane.annotView.append(pane.annotIntro, pane.annot.list);
+    // the introduction is the list's content until a session or a run is drawn there
+    pane.annotIntro = this.introNode(doc);
+    pane.annot.list.append(pane.annotIntro);
+    pane.annotView.append(pane.annot.list);
     pane.kind = "chat";
     pane.pane = pane;               // a view's section: the chat view is the section itself
     pane.foldOpen = new Map();
@@ -1965,9 +2002,11 @@ var ScholiumRunner = {
       const what = this.sendKey(e, pane.input.value);
       if (!what || pane.composer.hidden) return;
       e.preventDefault();
-      if (pane.tab === "annotate") pane.annotGo.click();
-      else this.sendFromPane(pane, what === "invert");
+      this.sendFromPane(pane, what === "invert");
     });
+    // a question in place of a dialog, above the words
+    pane.confirmRow = div("scholium-confirm");
+    this.show(pane.confirmRow, false);
     pane.sendRow = div("scholium-send-row");
     pane.hint = doc.createElement("span");
     pane.hint.className = "scholium-hint";
@@ -1981,15 +2020,10 @@ var ScholiumRunner = {
       if (pane.send.className.includes("stop")) this.stopFromPane(pane);
       else this.sendFromPane(pane);
     });
-    // the annotation tab's button: the PDF whose conversation is shown, with the words in the box as extra instructions
-    pane.annotGo = this.paneButton(doc, this.text("annotateThis"), () => {
-      const extra = String(pane.input.value || "").trim();
-      const att = pane.shownKey && Zotero.Items.getByLibraryAndKey(item.libraryID, pane.shownKey);
-      this.annotate([att || item], { extra }).then(n => { if (n && extra) this.clearInput(pane); })
-        .catch(e => this.log("annotate failed: " + e));
-    }, "primary small");
+    // the annotation tab's button: Annotate, or Annotate again once the tab shows a session
+    pane.annotGo = this.paneButton(doc, this.text("annotateThis"), () => { this.annotateFromPane(pane); }, "primary small");
     pane.sendRow.append(pane.hint, pane.ring, pane.send, pane.annotGo);
-    talk.append(pane.input, pane.sendRow);
+    talk.append(pane.confirmRow, pane.input, pane.sendRow);
     box.append(head, line, pane.chatView, pane.annotView, talk);
     body.append(box);
     this.fitPane(pane);
@@ -2526,17 +2560,47 @@ var ScholiumRunner = {
 
   // the words in a pane's box go to the paper it shows, in the conversation the chosen agent's messages about it go to
   sendFromPane(pane, invert = false) {
+    // the annotation tab without a session: the words go with a new annotation
+    if (pane.tab === "annotate" && !pane.annot.shownConv && !pane.busy) { this.annotateFromPane(pane); return; }
     const say = String(pane.input.value || "").trim();
     if (!say || !pane.item) return;
-    const att = pane.shownKey && Zotero.Items.getByLibraryAndKey(pane.item.libraryID, pane.shownKey);
-    this.send(att || pane.item, say)
+    const shownKey = this.viewOf(pane, pane.tab).shownKey;   // the paper of the tab's conversation
+    const att = shownKey && Zotero.Items.getByLibraryAndKey(pane.item.libraryID, shownKey);
+    this.send(att || pane.item, say, { kind: pane.tab })
       .then(sent => { if (sent) this.clearInput(pane); })
       .catch(e => this.log("message failed: " + e));
   },
 
-  // the words in a message box are kept for the conversation they are typed to until they are sent, across the
-  // section's renders
-  unsentKey(pane) { return pane.item ? `${pane.item.libraryID}/${pane.item.key}/${pane.shownAgent || this.agent()}/${pane.shownConv || ""}` : ""; },
+  // the annotation tab's button: the tab's paper annotated anew, with the words in the box as extra wishes; over its
+  // Scholium annotations it first asks in place
+  annotateFromPane(pane, { extra = String(pane.input.value || "").trim() } = {}) {
+    const key = pane.annot.shownKey || pane.keys[0];
+    const att = key && pane.item && Zotero.Items.getByLibraryAndKey(pane.item.libraryID, key);
+    if (!att) return;
+    const go = () => this.annotate([att], { extra, confirmed: true })
+      .then(n => { if (n && String(pane.input.value || "").trim() === extra) this.clearInput(pane); })
+      .catch(e => this.log("annotate failed: " + e));
+    const own = att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length;
+    if (!own) { go(); return; }
+    this.askInPlace(pane, this.text("redoInline", own), [[this.text("cancelButton"), "quiet small", () => {}], [this.text("replace"), "small danger", go]]);
+  },
+
+  // a question above the box in place of a dialog: its line and its buttons, each of which closes it first
+  askInPlace(pane, line, choices) {
+    const doc = pane.doc, row = pane.confirmRow;
+    const text = doc.createElement("span");
+    text.className = "scholium-confirm-text";
+    text.textContent = line;
+    row.replaceChildren(text, ...choices.map(([label, cls, fn]) => this.paneButton(doc, label, () => { this.show(row, false); fn(); }, cls)));
+    this.show(row, true);
+  },
+
+  // the words in a message box are kept for the tab and the conversation they are typed to until they are sent, across
+  // the section's renders; of the tab shown unless another view is named
+  unsentKey(pane, view = this.viewOf(pane, pane.tab)) {
+    if (!pane.item) return "";
+    return `${pane.item.libraryID}/${pane.item.key}/${view.kind}/${view.shownAgent || this.agent()}/${view.shownConv || ""}`;
+  },
 
   keepUnsent(pane) {
     const key = this.unsentKey(pane);
@@ -2596,17 +2660,19 @@ var ScholiumRunner = {
     return Object.values(this.LEGACY).includes(id) ? PathUtils.join(this.outDir(key), id + ".jsonl") : PathUtils.join(this.convDir(key), id + ".jsonl");
   },
 
-  convAgent(id) { return /^codex-/.test(String(id)) ? "codex" : "claude"; },
+  convAgent(id) { return /^(?:annotate-)?codex-/.test(String(id)) ? "codex" : "claude"; },
 
-  // { current: { agent: id, or null for a new one }, titles: { id: title } }; an agent without a current one goes on
-  // with its newest. An index that is there but cannot be read is not written over: this session's choices stay in memory.
+  // { current: { agent: id, or null for a new one }, titles: { id: title }, annotation: { agent: its latest annotation
+  // session } }; an agent without a current one goes on with its newest. An index that is there but cannot be read is not
+  // written over: this session's choices stay in memory.
   async index(key) {
     if (this.indexes.has(key)) return this.indexes.get(key);
-    const index = { current: {}, titles: {} };
+    const index = { current: {}, titles: {}, annotation: {} };
     try {
       const saved = JSON.parse(await IOUtils.readUTF8(PathUtils.join(this.convDir(key), "index.json")));
       if (saved && saved.current && typeof saved.current === "object") index.current = saved.current;
       if (saved && saved.titles && typeof saved.titles === "object") index.titles = saved.titles;
+      if (saved && saved.annotation && typeof saved.annotation === "object") index.annotation = saved.annotation;
     } catch (e) {
       if (!["NotFoundError", "SyntaxError"].includes(e && e.name)) {
         this.log("conversation index not read: " + e);
@@ -2664,20 +2730,28 @@ var ScholiumRunner = {
     await this.saveIndex(key);
   },
 
-  // a new conversation of the agent, titled by its first message, which its messages go to from now on
-  async newConv(key, agent, title) {
+  // a new conversation of the agent, titled by its first message, which its messages go to from now on; an annotation
+  // session is the one the annotation tab shows from now on
+  async newConv(key, agent, title, kind = "chat") {
     const d = new Date();
     const two = n => String(n).padStart(2, "0");
-    const base = `${agent}-${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}`;
+    const base = `${kind === "annotate" ? "annotate-" : ""}${agent}-${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}`;
     let id = base;
     for (let n = 2; await this.exists(this.convPath(key, id)); n++) id = `${base}-${n}`;
     await IOUtils.makeDirectory(this.convDir(key), { createAncestors: true, ignoreExisting: true });
     await IOUtils.writeUTF8(this.convPath(key, id), "");
     const index = await this.index(key);
-    index.current[agent] = id;
+    if (kind === "annotate") index.annotation[agent] = id;
+    else index.current[agent] = id;
     index.titles[id] = this.cut(String(title || "").split("\n")[0], 64);
     await this.saveIndex(key);
     return id;
+  },
+
+  // the agent's latest annotation session of the paper, while its log is there
+  async annotationConv(key, agent) {
+    const id = (await this.index(key)).annotation[agent];
+    return id && (await this.exists(this.convPath(key, id))) ? id : null;
   },
 
   // its title: the user's own, or its first message
@@ -2876,12 +2950,12 @@ var ScholiumRunner = {
     await this.showConversation(pane);
   },
 
-  // what a section shows: the running paper's transcript, else the conversation of the paper that the chosen agent's
-  // messages go to (none after New chat or a switch of the agent)
+  // what a section shows: the running paper's chat transcript, else the conversation of the paper that the chosen agent's
+  // messages go to (none after New chat or a switch of the agent); and on its annotation tab, the annotation session
   async showConversation(pane) {
     const seq = pane.showing = (pane.showing || 0) + 1;
     const liveHere = () => this.job && pane.keys.includes(this.job.key) && (this.job.source.kind || "chat") === "chat";
-    if (liveHere()) { this.showLive(pane, this.job.key, "chat"); return; }
+    if (liveHere()) { this.showLive(pane, this.job.key, "chat"); await this.showAnnotation(pane); return; }
     const agent = this.agent();
     const keys = pane.preferKey && pane.keys.includes(pane.preferKey) ? [pane.preferKey].concat(pane.keys.filter(k => k !== pane.preferKey)) : pane.keys;
     let shown = null, any = false;
@@ -2898,7 +2972,7 @@ var ScholiumRunner = {
     }
     const log = shown ? await this.readLog(shown.key, shown.id) : null;
     if (this.panes.get(pane.body) !== pane || pane.showing !== seq) return;   // rendered or shown anew meanwhile
-    if (liveHere()) { this.showLive(pane, this.job.key, "chat"); return; }   // a run started meanwhile
+    if (liveHere()) { this.showLive(pane, this.job.key, "chat"); await this.showAnnotation(pane); return; }   // a run started meanwhile
     const before = this.unsentKey(pane);
     const path = shown ? this.convPath(shown.key, shown.id) : null;
     // the latest run's own transcript, which has what its log may lack (a failure before the run had one); a section that
@@ -2926,6 +3000,57 @@ var ScholiumRunner = {
     this.swapUnsent(pane, before);
     this.paintPane(pane);
     if (pane.popover && pane.popover.name === "history") await this.renderHistory(pane);
+    await this.showAnnotation(pane);
+  },
+
+  // what the annotation tab shows: the paper's annotation session as it runs, else the chosen agent's latest one, else
+  // an introduction
+  async showAnnotation(pane) {
+    const view = pane.annot, seq = view.showing = (view.showing || 0) + 1;
+    const key = pane.keys[0] || null;
+    const agent = this.agent();
+    const id = key ? await this.annotationConv(key, agent) : null;
+    const log = id ? await this.readLog(key, id) : null;
+    const intro = log && log.entries.length ? null : await this.annotIntroNode(pane, key);
+    if (view.showing !== seq) return;   // shown anew meanwhile
+    // the paper's annotation runs, or started meanwhile
+    if (this.job && key === this.job.key && this.job.source.kind === "annotate") { this.showLive(pane, key, "annotate"); return; }
+    const before = this.unsentKey(pane);
+    const path = log ? log.path : null;
+    if (view.shownPath !== path) view.foldOpen = new Map();   // the steps a reader opened are of the session shown
+    Object.assign(view, { shownKey: key, shownConv: log ? id : null, shownAgent: agent, shownPath: path, live: false,
+                          history: !!log, turns: log ? log.turns.length : 0, question: false, context: log ? log.context : null,
+                          entries: log ? log.entries : [], draft: null });
+    if (intro) { view.list.replaceChildren(pane.annotIntro = intro); view.runCount = 0; }
+    else this.renderTranscript(view, log.entries, false);
+    this.swapUnsent(pane, before);
+    this.paintPane(pane);
+  },
+
+  // the annotation tab before its first session: what an annotation does; and, when an earlier version wrote the
+  // paper's annotations, by which agent and when
+  async annotIntroNode(pane, key) {
+    return this.introNode(pane.doc, key ? await this.readApplied(key) : null);
+  },
+
+  introNode(doc, applied = null) {
+    const node = doc.createElement("div");
+    node.className = "scholium-annot-intro";
+    const title = doc.createElement("div");
+    title.className = "scholium-annot-intro-title";
+    title.textContent = this.text("annotEmptyTitle");
+    const body = doc.createElement("div");
+    body.textContent = this.text("annotEmptyBody");
+    node.append(title, body);
+    if (applied && applied.at > 0) {
+      const line = doc.createElement("div");
+      line.className = "scholium-annot-applied";
+      const d = new Date(applied.at);
+      line.textContent = this.text("appliedBy", this.agentName(applied.agent === "codex" ? "codex" : "claude"),
+                                   this.zh() ? `${d.getMonth() + 1}月${d.getDate()}日` : `${d.getMonth() + 1}/${d.getDate()}`);
+      node.append(line);
+    }
+    return node;
   },
 
   // the questions an empty chat offers: one sends at once
@@ -2952,15 +3077,17 @@ var ScholiumRunner = {
     const before = this.unsentKey(pane);
     const job = this.job && this.job.key === key ? this.job.source : null;
     const ours = this.transcriptKey === key;   // a run that has only just started shows its transcript a moment later
-    Object.assign(view, { shownKey: key, shownConv: (job && job.conv) || null, shownAgent: (job && job.agent) || this.agent(),
+    const conv = (job && job.conv) || null;
+    if (view.shownKey !== key || view.shownConv !== conv) view.foldOpen = new Map();   // the steps opened are of the conversation shown
+    Object.assign(view, { shownKey: key, shownConv: conv, shownAgent: (job && job.agent) || this.agent(),
                           shownPath: ours ? this.transcriptPath : null, live: true,
                           history: false, past: null, draft: null });
     try {
       this.renderTranscript(view, ours ? this.transcript : [], true);
       if (ours && this.draft) this.paintDraft();
     } catch (e) {}
-    if (view === pane) this.swapUnsent(pane, before);
-    else this.paintPane(pane);
+    this.swapUnsent(pane, before);
+    if (view !== pane) this.paintPane(pane);
   },
 
   // the sections that show a run's transcript, once the new conversation it started has its log; the words typed
@@ -2969,12 +3096,11 @@ var ScholiumRunner = {
     for (const pane of this.panes.values()) {
       const view = this.viewOf(pane, this.transcriptKind);
       if (!view.live || view.shownKey !== key) continue;
-      const before = this.unsentKey(pane);
+      const before = this.unsentKey(pane, view);
       view.shownConv = id;
       view.shownPath = this.convPath(key, id);
-      if (view !== pane) continue;
       const text = this.unsent.get(before);
-      if (text) { this.unsent.delete(before); this.unsent.set(this.unsentKey(pane), text); }
+      if (text) { this.unsent.delete(before); this.unsent.set(this.unsentKey(pane, view), text); }
     }
   },
 
@@ -2987,9 +3113,10 @@ var ScholiumRunner = {
     for (const p of [...this.panes.values()]) await this.showConversation(p);
   },
 
-  // a new conversation of the paper shown, with the chosen agent: its first message starts it
+  // a new conversation of the paper shown, with the chosen agent: its first message starts it. The paper's chat must be
+  // idle; an annotation may run
   async newChat(pane) {
-    if (pane.keys.some(k => this.busy(k))) return;
+    if (pane.keys.some(k => this.busy(k, "chat"))) return;
     for (const key of pane.keys) await this.chooseConv(key, this.agent(), null);
     pane.preferKey = null;
     for (const p of [...this.panes.values()]) if (p.keys.some(k => pane.keys.includes(k))) await this.showConversation(p);
@@ -3114,7 +3241,7 @@ var ScholiumRunner = {
 
   // an earlier conversation, which the agent's messages about the paper go to from now on
   async openConv(pane, c) {
-    if (this.busy(c.key)) return;
+    if (this.busy(c.key, "chat")) return;
     await this.chooseConv(c.key, c.agent, c.id);
     pane.preferKey = c.key;
     for (const p of [...this.panes.values()]) if (p.keys.includes(c.key)) await this.showConversation(p);
@@ -3124,7 +3251,7 @@ var ScholiumRunner = {
   // a conversation goes after UNDO_MS, until then it can be brought back; the one the agent's messages went to is
   // followed by a new one
   async deleteConv(pane, c) {
-    if (this.busy(c.key) || this.deleting.has(c.path)) return;
+    if (this.busy(c.key, "chat") || this.deleting.has(c.path)) return;
     const index = await this.index(c.key);
     const wasCurrent = (await this.currentConv(c.key, c.agent)) === c.id;
     const entry = { key: c.key, id: c.id, agent: c.agent, title: c.title, at: c.at, wasCurrent, timer: null };
@@ -3251,17 +3378,22 @@ var ScholiumRunner = {
   // a transcript as runs: what each run of the agent showed, from its start line (or, in an earlier version's log, from
   // the user's words) on. The steps are the tool calls, their results and the agent's words between them; the answer is
   // what it wrote after its last step; the rest are the run's other lines (a failure, a notice): its lead before its
-  // first step or answer, the others after
+  // first step or answer, the others after. turn: the words the run answers, its own or, for a run that goes on with the
+  // turn before (a second try, a continuation), those of the run before, which is then continued
   runsOf(entries) {
     const runs = [];
     let run = null, bare = false;   // bare: the run has nothing yet but its start line
-    const open = at => { run = { start: at, end: 0, prompt: null, lead: [], steps: [], answer: [], other: [], model: "" }; runs.push(run); };
+    const open = (at, continues = false) => {
+      if (continues && run) run.continued = true;
+      run = { start: at, end: 0, prompt: null, turn: continues && run ? run.turn : null, lead: [], steps: [], answer: [], other: [], model: "" };
+      runs.push(run);
+    };
     for (const e of entries) {
-      if (e.kind === "run") { open(e.at); bare = true; continue; }
+      if (e.kind === "run") { open(e.at, !!e.continues); bare = true; continue; }
       if (!run || (e.kind === "prompt" && !bare)) open(0);
       bare = false;
       run.last = e;
-      if (e.kind === "prompt") run.prompt = e;
+      if (e.kind === "prompt") run.prompt = run.turn = e;
       else if (e.kind === "tool" || e.kind === "result") { run.steps.push(...run.answer, e); run.answer = []; }
       else if (e.kind === "text") run.answer.push(e);
       else if (e.kind === "info" && e.model) run.model = e.text;
@@ -3274,12 +3406,15 @@ var ScholiumRunner = {
   // one run: the user's words; the lines before its steps; a line for its steps (what it does now while it runs, else how
   // long it worked; a click opens the steps); the answer; its other lines; then the model and the time with a copy button
   renderRun(view, run, index, live) {
+    if (view.kind === "annotate" && run.turn && run.turn.annotate) return this.renderAnnotationRun(view, run, index, live);
     const doc = view.doc;
     const node = doc.createElement("div");
     node.className = "scholium-run";
     if (run.prompt) node.append(this.entryNode(doc, run.prompt));
-    // the last run of a view that failed without an answer carries a retry on its failure line
-    const failedLast = !live && index === (view.runCount || 0) - 1 && !run.answer.length && !!view.pane && view.kind === "chat" && !this.busy(view.shownKey);
+    // the last run of a view that failed without an answer carries a retry on its failure line; on the annotation tab, a
+    // run of words to the session
+    const failedLast = !live && index === (view.runCount || 0) - 1 && !run.answer.length && !!view.pane && (view.kind === "chat" || !!run.turn)
+      && !this.busy(view.shownKey);
     let retryable = failedLast ? [...run.lead, ...run.other].filter(e => e.kind === "final" && e.error).pop() : null;
     const line = e => {
       const n = this.entryNode(doc, e);
@@ -3294,8 +3429,100 @@ var ScholiumRunner = {
     return node;
   },
 
+  // an annotation in the annotation tab: the wishes; while it runs the steps and what it does now (the raw steps on a
+  // click); then its steps folded with the closing words among them, and a card of the numbers or of the failure. The
+  // lines after the card's in the log follow the card. A try that the annotation went on from, or waits to go on from (a
+  // second try, a continuation after a pause), shows its failure as a line: the card is the annotation's end
+  renderAnnotationRun(view, run, index, live) {
+    const doc = view.doc;
+    const node = doc.createElement("div");
+    node.className = "scholium-run";
+    if (run.prompt) node.append(this.entryNode(doc, run.prompt));
+    const lines = run.lead.concat(run.other);
+    const counts = lines.find(e => e.kind === "counts");
+    const goesOn = run.continued || (index === (view.runCount || 0) - 1
+      && this.queue.some(j => j.att.key === view.shownKey && j.conv === view.shownConv && this.started(j)));
+    const failure = live || goesOn ? null : lines.filter(e => e.kind === "final" && e.error).pop();
+    const card = counts || failure;
+    const lead = card && run.lead.includes(card) ? run.lead.slice(0, run.lead.indexOf(card)) : run.lead;
+    for (const e of lead) node.append(this.entryNode(doc, e));
+    if (live) node.append(this.stepsNode(view, this.job));
+    const steps = run.steps.concat(run.answer);
+    if (steps.length || live) node.append(this.foldNode(view, Object.assign({}, run, { steps, answer: [] }), index, live));
+    if (counts) node.append(this.countsNode(doc, counts));
+    else if (failure) node.append(this.failedCard(view, run, failure, index));
+    for (const e of lines.slice(lead.length)) if (e !== card) node.append(this.entryNode(doc, e));
+    return node;
+  },
+
+  // an annotation's six steps while it runs: the ones done ticked with their time, the current one marked
+  stepsNode(view, running) {
+    const doc = view.doc;
+    const node = doc.createElement("div");
+    node.className = "scholium-steps";
+    const seen = (running && running.steps) || [];
+    const now = running ? this.STEPS.indexOf(running.step) : -1;
+    this.STEPS.forEach((step, i) => {
+      const row = doc.createElement("div");
+      row.className = "scholium-step" + (i < now ? " done" : i === now ? " now" : "");
+      const label = doc.createElement("span");
+      const name = this.text(step);
+      label.textContent = this.zh() ? name : name.charAt(0).toUpperCase() + name.slice(1);
+      const time = doc.createElement("span");
+      time.className = "scholium-step-time";
+      const at = seen.find(s => s.step === step), next = seen.find(s => this.STEPS.indexOf(s.step) > i);
+      time.textContent = i < now && at && next ? this.durationWords(next.at - at.at) : "";
+      row.append(label, time);
+      node.append(row);
+    });
+    return node;
+  },
+
+  // the card of a finished annotation: its warnings left, the numbers counted in Zotero, and its turns, tokens and end
+  countsNode(doc, e) {
+    const node = doc.createElement("div");
+    node.className = "scholium-card";
+    const title = doc.createElement("div");
+    title.className = "scholium-card-title";
+    title.textContent = e.warnings === "" ? this.text("annotDoneClean") : e.warnings ? this.text("annotDoneWarn", e.warnings) : this.text("annotDone");
+    const nums = doc.createElement("div");
+    nums.className = "scholium-card-nums";
+    for (const [n, label] of [[e.highlights, "numHighlights"], [e.margin, "numMargin"], [e.notes, "numNotes"], [e.readingNotes, "numReading"]]) {
+      const cell = doc.createElement("div");
+      const b = doc.createElement("b");
+      b.textContent = String(n || 0);
+      const s = doc.createElement("span");
+      s.textContent = this.text(label, n || 0, e.core);
+      cell.append(b, s);
+      nums.append(cell);
+    }
+    const usage = doc.createElement("div");
+    usage.className = "scholium-card-usage";
+    usage.textContent = [e.turns > 0 ? this.text("turns", e.turns) : "", e.tokens > 0 ? this.text("tokens", this.kTokens(e.tokens)) : "",
+                         e.at ? this.clock(e.at) : ""].filter(Boolean).join(" · ");
+    node.append(title, nums, usage);
+    return node;
+  },
+
+  // the card of a failed annotation: the reason, and on the view's last run while the paper does not annotate, Retry,
+  // which annotates again with the same wishes
+  failedCard(view, run, failure, index) {
+    const doc = view.doc;
+    const node = doc.createElement("div");
+    node.className = "scholium-card failed";
+    const text = doc.createElement("div");
+    text.textContent = failure.text;
+    node.append(text);
+    const extra = (run.turn && run.turn.extra) || "";
+    if (view.pane && index === (view.runCount || 0) - 1 && !this.busy(view.shownKey, "annotate")) {
+      node.append(this.paneButton(doc, this.text("retry"), () => { this.annotateFromPane(view.pane, { extra }); }, "small"));
+    }
+    return node;
+  },
+
   // the steps folded into one line, as in Codex; the reader's opening or closing wins. It is kept by the run's start,
-  // which stays when the transcript's first lines go (an earlier version's run, without one, by its place)
+  // which stays when the transcript's first lines go (an earlier version's run, without one, by its place). An
+  // annotation going on offers its raw steps as details
   foldNode(view, run, index, live) {
     const doc = view.doc;
     const key = run.start || index;
@@ -3305,7 +3532,14 @@ var ScholiumRunner = {
     const head = doc.createElement("button");
     head.className = "scholium-fold-head" + (live ? " live" : "");
     const tools = run.steps.filter(e => e.kind === "tool");
-    head.textContent = (live ? this.liveText(tools[tools.length - 1]) : this.workedText(run)) + (open ? " ⌄" : live ? "" : " ›");
+    if (live && view.kind === "annotate") {
+      const more = doc.createElement("span");
+      more.className = "scholium-fold-more";
+      more.textContent = " " + this.text("details") + (open ? " ⌄" : " ›");
+      head.append(doc.createTextNode(this.liveText(tools[tools.length - 1])), more);
+    } else {
+      head.textContent = (live ? this.liveText(tools[tools.length - 1]) : this.workedText(run)) + (open ? " ⌄" : live ? "" : " ›");
+    }
     head.addEventListener("click", () => { view.foldOpen.set(key, !open); this.refreshRun(view, index); });
     node.append(head);
     if (open) {
@@ -3393,8 +3627,8 @@ var ScholiumRunner = {
     if (view.draft && index === runs.length - 1) node.append(view.draft.node);   // the message being written stays last
   },
 
-  // the views of the latest run draw its last run again once the agent no longer works on it: a pause, the wait for a
-  // second try, an end before the run had its log
+  // the views of the latest run draw its last run again once the agent no longer works on it (a pause, the wait for a
+  // second try, an end before the run had its log), or when an annotation reaches a step
   settleRun() {
     for (const pane of this.panes.values()) {
       const view = this.viewOf(pane, this.transcriptKind);
@@ -3531,10 +3765,11 @@ var ScholiumRunner = {
       const tab = pane.tab;
       const running = this.job && pane.keys.includes(this.job.key) && (this.job.source.kind || "chat") === tab;
       const queuedAt = this.queue.findIndex(j => pane.keys.includes(j.att.key) && (j.kind || "chat") === tab);
-      // a run's outcome is its conversation's
-      const note = tab === "annotate" ? pane.annot.past
-        : pane.keys.map(k => [k, this.notes.get(k)]).filter(([k, n]) => n && (!n.conv || (k === pane.shownKey && n.conv === pane.shownConv)))
-          .map(([, n]) => n).sort((a, b) => b.at - a.at)[0] || pane.past;
+      // a chat's outcome is its conversation's; the annotation tab's line has a deletion's only (an annotation's is its card)
+      const latest = notes => notes.filter(Boolean).sort((a, b) => b.at - a.at)[0] || null;
+      const note = tab === "annotate" ? latest(pane.keys.map(k => this.notes.get(`${k}/annotate`)))
+        : latest(pane.keys.map(k => [k, this.notes.get(`${k}/chat`)]).filter(([k, n]) => n && (!n.conv || (k === pane.shownKey && n.conv === pane.shownConv)))
+          .map(([, n]) => n)) || pane.past;
       const paused = this.paused ? this.text(this.paused.throttled ? "throttledState" : this.paused.known ? "pausedState" : "pausedRetry",
                                              this.clock(this.paused.until)) : null;
       const foreign = !!pane.item && pane.item.libraryID !== Zotero.Libraries.userLibraryID;
@@ -3562,7 +3797,7 @@ var ScholiumRunner = {
       pane.state.title = [lines.join(" · "), title].filter(Boolean).join("\n");
       this.show(pane.state, lines.length > 0);
       const busy = !!running || queuedAt >= 0;
-      // any run of the paper keeps a new annotation and the deletion of the old ones away
+      // any run of the paper, of either tab
       const any = pane.keys.some(k => this.busy(k));
       // the views of the tabs and the dot on the tab whose run goes on out of sight
       this.show(pane.chatView, tab === "chat");
@@ -3573,24 +3808,32 @@ var ScholiumRunner = {
       this.show(pane.tabAnnotateDot, tab !== "annotate" && this.busyKind(pane, "annotate"));
       this.show(pane.newChat, tab === "chat");
       this.show(pane.historyButton, tab === "chat");
-      this.show(pane.annotIntro, !pane.annot.live);
-      this.show(pane.annot.list, pane.annot.live);
-      this.show(pane.send, tab === "chat");
-      this.show(pane.annotGo, tab === "annotate");
-      pane.annotGo.disabled = any || foreign;
+      // an annotation waits behind the paper's chat; not behind another annotation
+      pane.annotGo.disabled = this.busyKind(pane, "annotate") || foreign;
       this.show(pane.resume, !!this.paused && queuedAt >= 0);
-      // the conversations stay as they are while the paper runs or waits
-      pane.agent.disabled = busy || foreign;
+      // the conversations of the tab stay as they are while its run goes or waits; the agent while any run of the paper does
+      pane.agent.disabled = any || foreign;
       pane.newChat.disabled = busy || foreign || !pane.shownConv;
       pane.historyButton.disabled = busy || foreign;
       if (busy || foreign) this.closePopover(pane, "history");
       const asking = running ? !!this.job.asking : queuedAt >= 0 && this.asking(this.queue[queuedAt]);
-      // a question or extra instructions until the conversation has an annotation, then a follow-up; an annotation
-      // waiting or running is one already
+      // a question while the conversation is a question's; a follow-up once it has turns of another kind (an earlier
+      // version's annotation), and while such a run goes or waits
       pane.busy = this.busyKind(pane, tab);
       this.show(pane.composer, !foreign);
-      pane.input.placeholder = this.text(tab === "annotate" ? "extraPlaceholder"
-        : (pane.turns && !pane.question && !running) || (busy && !asking) ? "followPlaceholder" : "askPlaceholder");
+      // the annotation tab: extra wishes and Annotate until it shows a session; then words to the session, with Annotate
+      // again beside the send button; while its run goes or waits, ■
+      if (tab === "annotate") {
+        const has = !!pane.annot.shownConv;
+        pane.input.placeholder = this.text(has ? "annotFollowUpHint" : "annotExtraHint");
+        pane.annotGo.textContent = this.text(has ? "redoTitle" : "annotateThis");
+        this.show(pane.annotGo, !pane.busy);
+        this.show(pane.send, has || pane.busy);
+      } else {
+        pane.input.placeholder = this.text((pane.turns && !pane.question && !running) || (busy && !asking) ? "followPlaceholder" : "askPlaceholder");
+        this.show(pane.annotGo, false);
+        this.show(pane.send, true);
+      }
       this.paintRing(pane);
       this.paintHint(pane);
       this.fitInput(pane);
@@ -3604,13 +3847,14 @@ var ScholiumRunner = {
     }
   },
 
-  // whether the Scholium section of the paper with this key is on screen in the focused window; it then
-  // shows what a corner notice or the system notification would say
-  paneInView(key) {
+  // whether the Scholium section of the paper with this key is on screen in the focused window, on the tab of a run of
+  // this kind; it then shows what a corner notice or the system notification would say
+  paneInView(key, kind = "chat") {
     for (const [body, pane] of this.panes) {
       try {
         const win = pane.doc.defaultView;
         if (!pane.seen || !pane.keys.includes(key) || body.isConnected === false || !win || !win.document.hasFocus()) continue;
+        if (pane.tab !== kind) continue;   // the other tab shows nothing of it
         if (typeof body.checkVisibility === "function" && !body.checkVisibility({ visibilityProperty: true })) continue;
         return true;
       } catch (e) {}
@@ -3636,9 +3880,9 @@ var ScholiumRunner = {
     } catch (e) { this.log("notification failed: " + e); }
   },
 
-  // queue the selected papers, each in the conversation the chosen agent's messages about it go to; returns how many
-  // were queued
-  async annotate(items, { extra = "" } = {}) {
+  // queue the selected papers, each for a new annotation session of the chosen agent, behind a chat of the paper that
+  // runs or waits; returns how many were queued. confirmed: the user agreed to replace the paper's Scholium annotations
+  async annotate(items, { extra = "", confirmed = false } = {}) {
     const jobs = [];
     let found = 0, foreign = false;
     for (const item of items || []) {
@@ -3646,7 +3890,7 @@ var ScholiumRunner = {
         const job = await this.resolve(item);
         if (job) found += 1;
         if (job && job.att.libraryID !== Zotero.Libraries.userLibraryID) { foreign = true; continue; }
-        if (job && !jobs.some(j => j.att.key === job.att.key) && !this.busy(job.att.key)) jobs.push(job);
+        if (job && !jobs.some(j => j.att.key === job.att.key) && !this.busy(job.att.key, "annotate")) jobs.push(job);
       } catch (e) { this.log("resolve failed: " + e); }
     }
     const win = Zotero.getMainWindow();
@@ -3658,20 +3902,21 @@ var ScholiumRunner = {
     if (!jobs.length) { this.refresh(); return 0; }   // every paper is already queued or running
     const own = jobs.map(j => j.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length);
     const total = own.reduce((a, b) => a + b, 0);
-    if (total && !Services.prompt.confirm(win, this.text("redoTitle"), this.text("redo", total))) return 0;
+    if (total && !confirmed && !Services.prompt.confirm(win, this.text("redoTitle"), this.text("redo", total))) return 0;
     for (const [i, j] of jobs.entries()) {
-      Object.assign(j, { own: own[i], extra, agent: this.agent(), annotate: true, asking: false });
+      Object.assign(j, { own: own[i], extra, agent: this.agent(), annotate: true, asking: false, kind: "annotate" });
       await this.place(j);
     }
-    // a question or a follow-up may have been queued for a paper meanwhile
-    const ready = jobs.filter(j => !this.busy(j.att.key));
+    // another annotation may have been queued for a paper meanwhile
+    const ready = jobs.filter(j => !this.busy(j.att.key, "annotate"));
     if (!ready.length) { this.refresh(); return 0; }
     this.enqueue(ready);
     return ready.length;
   },
 
-  // a job's conversation: the one the agent's messages about the paper go to, its session there when the agent still
-  // holds one, and whether its message is the first one; a new conversation (conv null) starts when the job runs
+  // a job's conversation: the one the agent's messages about the paper go to (on the annotation tab, its latest annotation
+  // session), its session there when the agent still holds one, and whether its message is the first one; a new
+  // conversation (conv null) starts when the job runs
   async place(job) {
     if (job.retry && job.conv) {
       const log = await this.readLog(job.att.key, job.conv);
@@ -3680,12 +3925,15 @@ var ScholiumRunner = {
       if (!job.annotate) job.asking = !!(log && log.question);
       return;
     }
-    const conv = await this.currentConv(job.att.key, job.agent);
+    // an annotation starts a session of its own when it runs
+    if (job.annotate) { Object.assign(job, { conv: null, resume: null, question: false, asking: false }); return; }
+    const conv = job.kind === "annotate" ? await this.annotationConv(job.att.key, job.agent) : await this.currentConv(job.att.key, job.agent);
     const log = conv ? await this.readLog(job.att.key, conv) : null;
     job.conv = conv;
     job.resume = (log && log.session) || null;
-    job.question = !!job.say && !(log && log.turns.length);
-    if (!job.annotate) job.asking = job.question || !!(log && log.question);
+    // words to an annotation session are not a question
+    job.question = job.kind !== "annotate" && !!job.say && !(log && log.turns.length);
+    job.asking = job.question || !!(log && log.question);
   },
 
   // the last turn of a view's conversation again, in the same conversation; its words are in the log already
@@ -3698,7 +3946,8 @@ var ScholiumRunner = {
     const att = Zotero.Items.getByLibraryAndKey(pane.item.libraryID, key);
     if (this.busy(key)) return;
     const agent = this.convAgent(view.shownConv);   // the conversation's own agent, whichever is chosen now
-    await this.chooseConv(key, agent, view.shownConv);   // the retried conversation is the one the messages go to
+    // the retried conversation is the one the chat's messages go to; the annotation tab's is its latest session already
+    if (view.kind === "chat") await this.chooseConv(key, agent, view.shownConv);
     await this.send(att, turn.user, { retry: true, conv: view.shownConv, kind: view.kind, agent });
   },
 
@@ -3712,12 +3961,18 @@ var ScholiumRunner = {
       Services.prompt.alert(Zotero.getMainWindow(), this.text("headline"), this.text(this.pdfAttachments([item]).length ? "noFile" : "noPdf"));
       return false;
     }
-    if (job.att.libraryID !== Zotero.Libraries.userLibraryID || this.busy(job.att.key)) return false;
+    const kind = opts.kind === "annotate" ? "annotate" : "chat";
+    // the paper's run of the other tab leaves it free
+    if (job.att.libraryID !== Zotero.Libraries.userLibraryID || this.busy(job.att.key, kind)) return false;
+    // words to the annotation tab without a session go with a new annotation, as its extra wishes
+    if (kind === "annotate" && !opts.retry && !(await this.annotationConv(job.att.key, this.agent()))) {
+      return (await this.annotate([job.att], { extra: say })) > 0;
+    }
     Object.assign(job, { agent: opts.retry && opts.agent ? opts.agent : this.agent(), say, own: job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length,
-                         kind: opts.kind || "chat", retry: !!opts.retry, quote: opts.quote || null });
+                         kind, retry: !!opts.retry, quote: opts.quote || null });
     if (opts.retry) Object.assign(job, { conv: opts.conv, logged: true });
     await this.place(job);
-    if (this.busy(job.att.key)) return false;
+    if (this.busy(job.att.key, kind)) return false;
     this.enqueue([job], this.conversationAt());
     return true;
   },
@@ -3727,7 +3982,7 @@ var ScholiumRunner = {
   giveBack(job) {
     if (!job.say || this.started(job) || job.fresh || job.logged) return;
     const att = job.att;
-    const keys = [att.parentItemKey, att.key].filter(Boolean).map(item => `${att.libraryID}/${item}/${job.agent}/${job.conv || ""}`);
+    const keys = [att.parentItemKey, att.key].filter(Boolean).map(item => `${att.libraryID}/${item}/${job.kind || "chat"}/${job.agent}/${job.conv || ""}`);
     for (const k of keys) if (!this.unsent.get(k)) this.unsent.set(k, job.say);
     for (const pane of this.panes.values()) {
       if (!keys.includes(this.unsentKey(pane)) || String(pane.input.value || "").trim()) continue;
@@ -3755,8 +4010,10 @@ var ScholiumRunner = {
     return !!(job && !job.annotate && job.asking);
   },
 
-  busy(key) {
-    return !!(this.job && this.job.key === key) || this.queue.some(j => j.att.key === key);
+  // whether a paper has a run going on or waiting; of one kind only, when given
+  busy(key, kind = null) {
+    const of = j => !kind || (j.kind || "chat") === kind;
+    return !!(this.job && this.job.key === key && of(this.job.source)) || this.queue.some(j => j.att.key === key && of(j));
   },
 
   enqueue(jobs, at = this.queue.length) {
@@ -3765,10 +4022,11 @@ var ScholiumRunner = {
     if (!this.draining) this.drain();
   },
 
-  // take papers out of the queue; when nothing is left, a pause ends
-  dequeue(keys) {
-    const started = this.queue.filter(j => keys.includes(j.att.key) && this.started(j));
-    this.queue = this.queue.filter(j => !keys.includes(j.att.key));
+  // take papers out of the queue, their runs of one kind only when given; when nothing is left, a pause ends
+  dequeue(keys, kind = null) {
+    const ours = j => keys.includes(j.att.key) && (!kind || (j.kind || "chat") === kind);
+    const started = this.queue.filter(j => ours(j) && this.started(j));
+    this.queue = this.queue.filter(j => !ours(j));
     if (!this.queue.length && this.paused) {
       clearTimeout(this.paused.timer);
       this.paused = null;
@@ -3786,7 +4044,8 @@ var ScholiumRunner = {
   // a paper whose run waited ends as cancelled, in its log and its sections
   async endWaiting(job) {
     const key = job.att.key;
-    this.notes.set(key, { text: this.text("cancelled"), error: true, at: Date.now(), conv: job.conv || null });
+    if ((job.kind || "chat") === "chat") this.notes.set(`${key}/chat`, { text: this.text("cancelled"), error: true, at: Date.now(), conv: job.conv || null });
+    else this.notes.delete(`${key}/annotate`);
     if (job.conv) {
       const path = this.convPath(key, job.conv);
       const marks = [await this.logEnd(path, "cancelled", this.text("cancelled")), { type: "scholium", subtype: "time", at: Date.now() }];
@@ -3842,13 +4101,13 @@ var ScholiumRunner = {
   // its conversation when the limit resets; nothing else starts meanwhile
   pause(job, { until, session, throttled }) {
     if (this.job && this.job.key === job.att.key) this.job = null;
-    this.settleRun();
     // a question stays one when its conversation continues; an annotation that continued a question's conversation
     // has its prompt there. A run after the wait may have its second try again.
     this.queue.unshift(Object.assign({}, job, { retried: false, retryAt: 0 },
                                      session ? { resume: session, say: "", extra: "", asked: !!(job.say || job.asked),
                                                  annotate: false, question: false, fresh: false, logged: false,
                                                  throttled: !!throttled, updated: false } : { interrupted: true, logged: true }));
+    this.settleRun();   // the paper waits: no retry
     const wait = until ? Math.max(until - Date.now(), 0) + 60000 : this.RETRY_MS;
     if (this.paused) clearTimeout(this.paused.timer);
     this.paused = { until: Date.now() + wait, known: !!until, throttled: !!throttled, timer: setTimeout(() => { this.resumeQueue(); }, wait) };
@@ -3885,7 +4144,7 @@ var ScholiumRunner = {
   // a short notice in the corner of the window that closes by itself, while Zotero is in front; left out while
   // the paper's Scholium section is on screen, whose state line says the same
   notice(job, text, error = false) {
-    if (!this.focused() || this.paneInView(job.att && job.att.key)) return;
+    if (!this.focused() || this.paneInView(job.att && job.att.key, job.kind || "chat")) return;
     try {
       const pw = new Zotero.ProgressWindow({ closeOnClick: true });
       pw.changeHeadline(this.text("headline"));
@@ -3906,8 +4165,11 @@ var ScholiumRunner = {
   finish(job, ok, summary, outcome, detail, answered = false) {
     if (this.job && this.job.key === job.att.key) this.job = null;
     const title = this.text(answered ? "answered" : ok ? "finished" : this.asking(job) ? "failedAsk" : "failedLine", job.title);
-    this.notes.set(job.att.key, { text: outcome || this.text(ok ? "done" : "failed"), error: !ok, at: Date.now(), title: detail || "",
-                                  conv: job.conv || null });
+    // a chat's outcome is its state line's; an annotation's is its card, and a deletion's note before it goes
+    if ((job.kind || "chat") === "chat") {
+      this.notes.set(`${job.att.key}/chat`, { text: outcome || this.text(ok ? "done" : "failed"), error: !ok, at: Date.now(),
+                                              title: detail || "", conv: job.conv || null });
+    } else this.notes.delete(`${job.att.key}/annotate`);
     if (!this.focused()) this.notify(title, ok && !answered ? this.brief(summary) : summary || "");
     this.refresh();
     // the sections of the paper take what its log now says of the conversation; without a log, they draw the run ended
@@ -3950,6 +4212,7 @@ var ScholiumRunner = {
     const agent = job.agent === "codex" ? "codex" : "claude";
     this.job = { title: job.title, key, libraryID: job.att.libraryID, started, agent, step: job.resume && !job.annotate ? "continuing" : "starting",
                  source: job, session: job.resume || null, log: null, asking: this.asking(job), context: null };
+    this.transcriptKind = job.kind || "chat";   // the tab whose run this is, from its start
     const running = this.job;
     // the conversation goes on in its log; a new one starts its own when the run is under way
     const log = job.conv ? await this.readLog(key, job.conv) : null;
@@ -3961,10 +4224,12 @@ var ScholiumRunner = {
     job.since = log ? log.lastAt : 0;
     job.applied = await this.readApplied(key);
     if (this.job !== running) return;   // the plugin stopped meanwhile
-    // the run is one of the transcript's from its start; its line goes into the log once the log is there
-    this.transcript = (log ? log.entries : []).concat(this.entries({ type: "scholium", subtype: "run", at: started }));
+    // the run is one of the transcript's from its start; its line goes into the log once the log is there. One that goes
+    // on with the turn before is an annotation's when that turn is: its state line counts the steps its list names
+    this.transcript = (log ? log.entries : []).concat(this.entries({ type: "scholium", subtype: "run", at: started, user: again || continuation ? null : "" }));
+    const runs = this.runsOf(this.transcript), turn = runs[runs.length - 1].turn;
+    running.annotation = !!job.annotate || !!(turn && turn.annotate);
     this.transcriptKey = key;
-    this.transcriptKind = job.kind || "chat";
     this.transcriptPath = log ? log.path : null;
     running.context = log ? log.context : null;
     this.startPanes(key, this.transcriptKind);
@@ -3983,7 +4248,7 @@ var ScholiumRunner = {
     }
     await IOUtils.makeDirectory(this.outDir(key), { createAncestors: true, ignoreExisting: true });
     if (this.job !== running) return;   // the plugin stopped while the folder was prepared
-    if (!job.conv) job.conv = await this.newConv(key, agent, job.say || this.text("annotateThis"));
+    if (!job.conv) job.conv = await this.newConv(key, agent, job.say || this.text("annotateThis"), job.kind || "chat");
     const logPath = this.convPath(key, job.conv);
     if (this.transcriptPath !== logPath) {
       this.transcriptPath = logPath;
@@ -4003,7 +4268,8 @@ var ScholiumRunner = {
     // try has them already. A question's line marks its conversation as one.
     const prompted = text => ({ type: "scholium", subtype: "prompt", text });
     const mark = job.retried || job.fresh || job.logged ? null
-      : job.annotate ? Object.assign(prompted(this.text("annotateThis") + (job.extra ? "\n" + this.text("extraLabel") + job.extra : "")), { annotate: true })
+      : job.annotate ? Object.assign(prompted(this.text("annotateThis") + (job.extra ? "\n" + this.text("extraLabel") + job.extra : "")),
+                                     { annotate: true, extra: job.extra || "" })
       : job.question ? Object.assign(prompted(job.say), { question: true })
       : job.say ? prompted(job.say)
       : job.resume ? { type: "scholium", subtype: "continue", reason: job.updated ? "update" : job.throttled ? "throttle" : undefined } : null;
@@ -4042,6 +4308,15 @@ var ScholiumRunner = {
       ok = true;
       message = summary;
       this.notice(job, [`${this.text("done")} · ${this.duration(Date.now() - started)}`, answered ? summary : this.brief(summary)].filter(Boolean).join("\n"));
+      // an annotation's end, also of its second try or of its continuation after a pause: the numbers counted in Zotero
+      if (running.annotation) {
+        const tokens = this.tokenCounts(result).reduce((n, [, c]) => n + c, 0);
+        const counts = Object.assign({ type: "scholium", subtype: "counts" }, await this.countOwn(job.att),
+                                     { warnings: this.warningsOf(text), turns: result.num_turns || 0, tokens, at: Date.now() });
+        try { await IOUtils.writeUTF8(logPath, JSON.stringify(counts) + "\n", { mode: "append" }); }
+        catch (e) { this.log("counts not logged: " + e); }
+        this.appendEntries(this.entries(counts));
+      }
     } else if (limit) {
       // a limit of the service ("not your usage limit") names no reset time, its message may name a wait
       const said = text + "\n" + ctx.stderr;
@@ -4148,7 +4423,10 @@ var ScholiumRunner = {
     if (i <= ctx.lastStep) return;
     ctx.lastStep = i;
     ctx.running.step = step;
+    (ctx.running.steps = ctx.running.steps || []).push({ step, at: Date.now() });
     this.refresh();
+    // the annotation tab's steps show the step reached at once, not with the agent's next line
+    if (this.transcriptKind === "annotate") this.settleRun();
   },
 
   // the agent lost its connection and tries again: attempt n of max, when it says, on the state line
@@ -4638,6 +4916,36 @@ var ScholiumRunner = {
     catch (e) { return []; }
   },
 
+  // the paper's Scholium annotations and reading notes as the annotation card counts them
+  async countOwn(att) {
+    const own = att.getAnnotations().filter(a => ScholiumToggle.isOwn(a));
+    const core = await this.coreColor(att.key);
+    const marks = own.filter(a => ["highlight", "underline"].includes(a.annotationType));
+    let readingNotes = 0;
+    try { if (att.parentID) readingNotes = this.ownNotes(Zotero.Items.get(att.parentID)).length; } catch (e) {}
+    return { highlights: marks.length, core: marks.filter(a => String(a.annotationColor || "").toLowerCase() === core).length,
+             margin: own.filter(a => a.annotationType === "text").length, notes: own.filter(a => a.annotationType === "note").length, readingNotes };
+  },
+
+  // the core colour of the configuration the paper was written with last; Zotero's red without one
+  async coreColor(key) {
+    const applied = await this.readApplied(key);
+    try {
+      const c = applied && JSON.parse(await IOUtils.readUTF8(applied.config)).core_color;
+      if (typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c)) return c.toLowerCase();
+    } catch (e) {}
+    return "#ff6666";
+  },
+
+  // what the agent's closing words say of the warnings left: "" for none, the warnings, or null when they do not say. The
+  // skill's summary is the reply's last line; 无 and 没有 are "none" only on their own (无法定位 2 句 is a warning)
+  warningsOf(text) {
+    const s = String(text || "").trim().split("\n").pop();
+    if (/无剩余警告|没有剩余警告|剩余警告[:：]\s*(?:无|没有)(?=$|[\s。．.，,；;!！)）])|no (?:remaining )?warnings|remaining warnings:\s*none\b/i.test(s)) return "";
+    const m = /剩余警告[:：]\s*([^。\n]+)|remaining warnings:\s*([^.\n]+)/i.exec(s);
+    return m ? (m[1] || m[2]).trim() : null;
+  },
+
   // delete the annotations tagged zotero-scholium, and move the reading notes tagged the same to the
   // trash; the user's annotations and notes stay. A paper with an attachment being annotated or
   // queued is left alone, notes included.
@@ -4671,16 +4979,16 @@ var ScholiumRunner = {
         removed += t.own.length;
         if (t.notes.length) await Zotero.Items.trashTx(t.notes.map(n => n.id));
         trashed += t.notes.length;
-        this.notes.set(t.att.key, { text: this.text("deleteDone", t.own.length, t.notes.length), error: false, at: Date.now() });
+        this.notes.set(`${t.att.key}/annotate`, { text: this.text("deleteDone", t.own.length, t.notes.length), error: false, at: Date.now() });
       }
-      this.notice({ att: targets[0].att, title: this.text("deleteTitle") }, this.text("deleteDone", removed, trashed));
+      this.notice({ att: targets[0].att, title: this.text("deleteTitle"), kind: "annotate" }, this.text("deleteDone", removed, trashed));
     } catch (e) {
       const message = this.text("deleteFailed", String(e && e.message || e))
         + (removed || trashed ? " " + this.text("deleteDone", removed, trashed) : "");
       this.log("delete failed: " + e);
       const att = (current || targets[0]).att;
-      this.notes.set(att.key, { text: message, error: true, at: Date.now() });
-      this.notice({ att, title: this.text("deleteTitle") }, message, true);
+      this.notes.set(`${att.key}/annotate`, { text: message, error: true, at: Date.now() });
+      this.notice({ att, title: this.text("deleteTitle"), kind: "annotate" }, message, true);
     }
     this.refresh();
     return removed + trashed;
@@ -4715,7 +5023,7 @@ var ScholiumRunner = {
     const plain = j => ({ key: j.att.key, libraryID: j.att.libraryID, agent: j.agent, extra: j.extra || "", say: j.say || "",
                           resume: j.resume || null, asked: !!j.asked, question: !!j.question, annotate: !!j.annotate, own: j.own || 0,
                           interrupted: !!j.interrupted, updated: !!j.updated, fresh: !!j.fresh, conv: j.conv || null, asking: !!j.asking,
-                          logged: !!j.logged, throttled: !!j.throttled, retried: !!j.retried, retryAt: j.retryAt || 0 });
+                          logged: !!j.logged, throttled: !!j.throttled, retried: !!j.retried, retryAt: j.retryAt || 0, kind: j.kind || "chat" });
     const jobs = [];
     if (running && running.source) {
       const j = running.source;
@@ -4744,19 +5052,24 @@ var ScholiumRunner = {
     for (const s of (saved && Array.isArray(saved.jobs) && saved.jobs) || []) {
       const att = s && Zotero.Items.getByLibraryAndKey(s.libraryID, s.key);
       const job = att ? await this.resolve(att) : null;
-      if (!job || this.busy(job.att.key) || jobs.some(j => j.att.key === job.att.key)) continue;
+      // a paper's chat and its annotation are handed over each
+      const kind = s && s.kind === "annotate" ? "annotate" : "chat";
+      if (!job || this.busy(job.att.key, kind) || jobs.some(j => j.att.key === job.att.key && j.kind === kind)) continue;
       const agent = s.agent === "codex" ? "codex" : "claude";
       Object.assign(job, { agent, extra: String(s.extra || ""), say: String(s.say || ""), resume: s.resume || null, asked: !!s.asked,
                            question: !!s.question, annotate: !!s.annotate, own: Number(s.own) || 0, updated: !!s.updated, fresh: !!s.fresh,
                            conv: typeof s.conv === "string" && s.conv ? s.conv : null, asking: !!(s.asking || s.question),
                            logged: !!s.logged, interrupted: !!s.interrupted, throttled: !!s.throttled, retried: !!s.retried,
-                           retryAt: Number(s.retryAt) || 0 });
+                           retryAt: Number(s.retryAt) || 0, kind });
       // a copy before the paper's conversations hands over its one conversation per agent, which became that agent's
-      // first: a paper interrupted there has its turn in that log
+      // first: a paper interrupted there has its turn in that log; an annotation not begun starts a session of its own
       if (!("conv" in s)) {
         if (!job.say && !job.resume) job.annotate = true;
         if (job.resume || job.interrupted || job.retried) job.conv = this.LEGACY[agent];
-        else await this.place(job);
+        else {
+          if (job.annotate) job.kind = "annotate";
+          await this.place(job);
+        }
         if (job.interrupted) job.logged = true;
         // that copy kept neither of these for a follow-up
         job.own = job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length;

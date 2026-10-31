@@ -421,7 +421,8 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     }
     changeHeadline() {} addDescription(t) { this.entry.descriptions.push(t); } show() { this.entry.shown = true; } startCloseTimer(ms) { this.entry.closeTimer = ms; }
   }
-  const annotation = (key, tags) => ({ key, id: key, isAnnotation: () => true, getTags: () => tags.map(tag => ({ tag })) });
+  const annotation = (key, tags, type = 'highlight', color = '#ffd400') =>
+    ({ key, id: key, isAnnotation: () => true, getTags: () => tags.map(tag => ({ tag })), annotationType: type, annotationColor: color });
   const attachment = (key, parentID, anns) => ({
     key, id: key, parentID, parentItemKey: parentID, libraryID: 1, attachmentContentType: 'application/pdf', deleted: false,
     isAttachment: () => true, isRegularItem: () => false, isPDFAttachment: () => true,
@@ -586,6 +587,14 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
   vm.runInContext(source, context);
   const runner = context.ScholiumRunner;
   runner.NET_RETRY_MS = 40;
+  // each run's end as finish() is given it: its outcome and the tokens' detail (a chat's state line shows them, an
+  // annotation's card the numbers)
+  log.ended = [];
+  const finish = runner.finish;
+  runner.finish = function (job, ok, summary, outcome, detail) {
+    log.ended.push({ key: job.att.key, kind: job.kind || 'chat', text: outcome || this.text(ok ? 'done' : 'failed'), title: detail || '' });
+    return finish.apply(this, arguments);
+  };
   // the item pane section as Zotero drives it: onItemChange, onRender, onAsyncRender
   const pane = async (item, opts = {}) => {
     const section = log.sections[0];
@@ -606,41 +615,51 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       } finally { runner.closePopover(p); p.tab = was; }
     };
     return { body, enabled,
-      // the annotation tab's button (the run still shows in the chat until the annotation kind is routed)
-      annotate: () => { const q = runner.panes.get(body); q.tabAnnotate.click(); q.annotGo.click(); q.tabChat.click(); },
-      view: () => {
+      // the annotation tab's button; the section stays on that tab, which shows the run
+      annotate: () => { const q = runner.panes.get(body); q.tabAnnotate.click(); q.annotGo.click(); },
+      // what the section shows on a tab: the one it is on, or the one named, painted for the moment
+      view: (tab = null) => {
       const p = runner.panes.get(body);
       if (!p) return null;
-      const chatMenu = menuOf(p, 'chat'), annotMenu = menuOf(p, 'annotate');
-      return { model: p.model.value, models: p.model.children.map(o => o.value), modelLabels: p.model.children.map(o => o.textContent),
-               effort: p.effort.value, efforts: p.effort.children.map(o => o.value), effortDisabled: p.effort.disabled,
-               state: p.state.hidden ? null : p.state.textContent, stateKind: p.state.className,
-               annotateDisabled: p.annotGo.disabled, removeDisabled: annotMenu.length ? annotMenu[2].disabled : null,
-               logDisabled: chatMenu.length ? chatMenu[0].disabled : null, shownKey: p.shownKey, history: p.history,
-               entries: p.list.children.map(c => [c.className, c.textContent]), flat: flatNodes(runner, p).map(n => [n.className, n.textContent]),
-               stateTitle: p.state.title,
-               resumeHidden: p.resume.hidden, stateDisplay: p.state.style.display,
-               sendHidden: p.send.hidden, sendDisabled: p.send.disabled, placeholder: p.input.placeholder,
-               shownConv: p.shownConv, newChatDisabled: p.newChat.disabled, historyDisabled: p.historyButton.disabled,
-               agentDisabled: p.agent.disabled, ring: p.ring.hidden ? null : p.ring.title, ringClass: p.ring.className, ctxUsed: p.context ? p.context.used : null, round: [p.send.textContent, p.send.title],
-               historyRows: !p.popover || p.popover.name !== 'history' ? null : p.popover.node.children.map(c => [c.className, c.textContent]) };
+      const was = p.tab, other = !!tab && tab !== was;
+      if (other) { p.tab = tab; runner.paintPane(p); }
+      try {
+        const v = runner.viewOf(p, p.tab);
+        const chatMenu = menuOf(p, 'chat'), annotMenu = menuOf(p, 'annotate');
+        const logItem = p.tab === 'annotate' ? annotMenu[1] : chatMenu[0];
+        return { model: p.model.value, models: p.model.children.map(o => o.value), modelLabels: p.model.children.map(o => o.textContent),
+                 effort: p.effort.value, efforts: p.effort.children.map(o => o.value), effortDisabled: p.effort.disabled,
+                 state: p.state.hidden ? null : p.state.textContent, stateKind: p.state.className,
+                 annotateDisabled: p.annotGo.disabled, removeDisabled: annotMenu.length ? annotMenu[2].disabled : null,
+                 logDisabled: logItem ? logItem.disabled : null, shownKey: v.shownKey, history: v.history,
+                 entries: v.list.children.map(c => [c.className, c.textContent]), flat: flatNodes(runner, v).map(n => [n.className, n.textContent]),
+                 stateTitle: p.state.title,
+                 resumeHidden: p.resume.hidden, stateDisplay: p.state.style.display,
+                 sendHidden: p.send.hidden, sendDisabled: p.send.disabled, placeholder: p.input.placeholder,
+                 shownConv: v.shownConv, newChatDisabled: p.newChat.disabled, historyDisabled: p.historyButton.disabled,
+                 agentDisabled: p.agent.disabled, ring: p.ring.hidden ? null : p.ring.title, ringClass: p.ring.className, ctxUsed: v.context ? v.context.used : null, round: [p.send.textContent, p.send.title],
+                 historyRows: !p.popover || p.popover.name !== 'history' ? null : p.popover.node.children.map(c => [c.className, c.textContent]) };
+      } finally { if (other) { p.tab = was; runner.paintPane(p); } }
     }, pane: () => runner.panes.get(body) };
   };
   const styles = () => mainDoc.documentElement.children.map(c => [c.tagName, c.id, c.attrs.rel, c.attrs.href]);
   return { runner, log, item1, item2, att1, att2, note, pane, store, see, resize, focus, observers, timers, fire, styles, sheet, paneWin, paneDoc, lastFocus, El,
+           ann: (key, type, color, tags = ['zotero-scholium']) => annotation(key, tags, type, color),
            flat: view => flatNodes(runner, view),
            chromePackage: context.chromePackage, replacing: context.replacing, takingOver: context.takingOver,
            live: () => timers.filter(t => t.live).map(t => t.ms), toolbarItems: () => mainDoc.bar.children.length };
 }
 // a view's transcript as nodes with every run's steps opened: each run's parts in order, its folded line as its steps
+// (an annotation's, on its tab, with its closing words)
 const flatNodes = (runner, view) => {
   const runs = runner.runsOf(view.entries || []);
+  const folded = r => (view.kind === 'annotate' && r.turn && r.turn.annotate ? r.steps.concat(r.answer) : r.steps);
   return view.list.children.flatMap((n, i) => n.className !== 'scholium-run' ? [n]
-    : n.children.flatMap(c => c.className !== 'scholium-fold' ? [c] : runs[i].steps.map(e => runner.entryNode(view.doc, e))));
+    : n.children.flatMap(c => c.className !== 'scholium-fold' ? [c] : folded(runs[i]).map(e => runner.entryNode(view.doc, e))));
 };
-// the ⋯ menu's personal profile and log items
-const profileFrom = pane => { pane.more.click(); pane.popover.node.children[1].click(); };
-const logFrom = pane => { pane.more.click(); pane.popover.node.children[0].click(); };
+// the ⋯ menu's personal profile and log items, on the tab the section is on
+const profileFrom = pane => { pane.more.click(); pane.popover.node.children[pane.tab === 'annotate' ? 0 : 1].click(); };
+const logFrom = pane => { pane.more.click(); pane.popover.node.children[pane.tab === 'annotate' ? 1 : 0].click(); };
 const untimed = e => e[0] !== 'scholium-meta';   // the transcript without the line of the model and the time a run ended at
 const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descriptions: n.descriptions, closeTimer: n.closeTimer, shown: n.shown });
 // a paper's conversations, in the order they were started, and the lines of one (the latest by default); the plugin's
@@ -650,4 +669,7 @@ const convText = (h, key = 'ATT1', i = -1) => h.log.writes[convs(h, key).at(i)] 
 const convLines = (h, key = 'ATT1', i = -1) => convText(h, key, i).trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
 const ours = h => Object.fromEntries(Object.entries(h.log.writes).filter(([p]) => p.startsWith('/data/tmp/scholium/')));
 const CONV1 = '/data/tmp/scholium/ATT1/conversations/claude-20261001-120000.jsonl';   // a conversation logged before
+// the outcome of a paper's latest run that ended, of either kind (the chat's state line shows a chat's)
+const latestNote = (h, key = 'ATT1') => h.log.ended.filter(e => e.key === key).at(-1) || null;
+const noteOf = (h, key = 'ATT1') => (latestNote(h, key) || {}).text || null;
 

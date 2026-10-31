@@ -50,7 +50,8 @@ Each Claude Code run:
 - runs without the user's MCP servers and hooks (`--strict-mcp-config`, `disableAllHooks`); the
   user's skills stay;
 - logs its events, without the streaming deltas, to the conversation's log,
-  `<data dir>/tmp/scholium/<attachment key>/conversations/claude-<time>.jsonl`; a tool's result is kept without
+  `<data dir>/tmp/scholium/<attachment key>/conversations/claude-<time>.jsonl` (an annotation session's
+  `annotate-claude-<time>.jsonl`); a tool's result is kept without
   Claude Code's own copy of it and without the data of images (the pages the agent looked at).
 
 Each Codex run:
@@ -65,7 +66,8 @@ Each Codex run:
 - has Codex's automatic reviewer (`auto_review`) decide on requests beyond the sandbox; a request or
   question that reaches the plugin is declined;
 - logs Codex's notifications, without the streaming deltas, the user's message and the turn's diff, to the
-  conversation's log (`codex-<time>.jsonl`), between a start line and a result line in Claude Code's form.
+  conversation's log (`codex-<time>.jsonl`, an annotation session's `annotate-codex-<time>.jsonl`), between a
+  start line and a result line in Claude Code's form.
 
 A line that the log file does not take at once (locked a moment by a virus scanner or a backup) is written
 with the next ones; the run goes on.
@@ -85,7 +87,7 @@ longer has, the end of a run that has started and has no result of its own (canc
 when each run ended.
 
 As in llm-for-zotero, each agent has its own conversations of a paper, a log each in `<out dir>/conversations/`,
-with an index of their titles and of the one each agent goes on with. A message and **Annotate** go to that
+with an index of their titles and of the one each agent goes on with. A message goes to that
 conversation, in the agent's session there (`claude -p --resume <session>`, Codex's `thread/resume`). When the
 conversation has no session, or the agent no longer has it (deleted in the Codex app, or cleaned up by Claude
 Code), a new session goes on with it and is given the conversation first: Codex as items of the new thread
@@ -97,8 +99,8 @@ to go on with in a new session, and ends with that reason. The logs of earlier v
 directory, such as the configuration the annotations were written from, are the same for every conversation.
 
 The *Scholium* section of the item pane, in the library and in the reader's side pane, fills the pane's height.
-The library's section works on the item's best PDF, the reader's on the PDF it shows; the conversations and the
-history are those of that PDF.
+The library's section works on the item's best PDF, the reader's on the PDF it shows; the conversations, the
+history and the annotation sessions are those of that PDF.
 
 - Two tabs: **Chat** for questions about the paper, **Annotations** for annotating it. A dot on a tab marks a
   run of that tab going on or waiting while the other tab is shown.
@@ -118,9 +120,10 @@ history are those of that PDF.
   The choices apply to the runs started afterwards, are saved for each agent, and are shared by all panes.
 - Beside the chip, one line of state for the tab shown: the step of six and the elapsed time while an
   annotation runs (for a question, the step's name), the attempt while the agent's connection is tried again,
-  the place in the queue, a pause for the usage limit with **Continue now**, the latest outcome of the
-  conversation shown with its time, turns and tokens (the tooltip splits the tokens into input, cache and
-  output), or the deletion. A narrow pane cuts it with an ellipsis.
+  the place in the queue, a pause for the usage limit with **Continue now**, or, on the Chat tab, the latest
+  outcome of the conversation shown with its time, turns and tokens (the tooltip splits the tokens into input,
+  cache and output); on the Annotations tab the outcome of **Delete annotations** (a finished annotation's is its
+  card). A narrow pane cuts it with an ellipsis.
 - ⋯ on the Chat tab holds **Show log** (the conversation's log file), **Personal profile ↗** and **Settings…**;
   on the Annotations tab **Personal profile ↗**, **Show log**, **Delete annotations** and **Settings…**.
   **Settings…** opens the Scholium page of Zotero's settings.
@@ -144,10 +147,22 @@ history are those of that PDF.
 
 **Annotations tab**
 
-- Before the first annotation, the tab says what an annotation does; its box takes extra instructions, which may
-  stay empty, and **Annotate** starts the run.
-- **Annotate** goes on in the conversation shown on the Chat tab, where its run shows, with the box's words as
-  extra instructions; a redo there still has the earlier run in its context.
+- Before the first annotation, the tab says what an annotation does (and, for annotations the plugin saw written
+  earlier, who wrote them and when); its box takes extra instructions, which may stay empty, and **Annotate**
+  starts the run.
+- Each **Annotate** starts an annotation session of its own, which the chat does not see and the history does
+  not list: a log `annotate-<agent>-<time>.jsonl` in `<out dir>/conversations/`, the latest of each agent in the
+  index's `annotation`. **Annotate** in the context menu of several papers starts a session for each.
+- While it runs, the tab shows **Annotate** with the extra instructions, the six steps (loading the skill,
+  extracting sentences, reading the paper, writing the annotations, checking (dry run), writing to Zotero), each
+  done step with its time, and under them what the agent does at the moment, with **Details ›** for the steps.
+- When it ends, the steps fold and a card gives the outcome: the warnings left, from the agent's closing line;
+  the numbers counted on the paper in Zotero (highlights with the core ones, those of the configuration's core
+  colour; margin notes; sticky notes; reading notes); the turns, the tokens and the time. A failed annotation
+  shows its error with **Retry**, which annotates again with the same extra instructions.
+- Words typed afterwards continue that annotation session, for example to change some annotations.
+  **Annotate again** asks in place, above the box, how many Scholium annotations it replaces (the user's own
+  stay); **Replace** starts a new session.
 
 **The box**
 
@@ -211,8 +226,8 @@ over as it was queued, the user's words with it. Disabling the plugin or quittin
 without handing the papers over: the paper's history shows the run as interrupted; **Retry** on a run that ended
 before its answer runs it again, and a new message continues the conversation.
 
-Papers that already carry the tool's annotations are annotated again only after a confirmation; the
-new run replaces those annotations.
+Papers that already carry the tool's annotations are annotated again only after a confirmation (on the
+Annotations tab, in place above the box); the new run replaces those annotations.
 
 | Preference | Default | Meaning |
 |---|---|---|
@@ -234,7 +249,7 @@ new run replaces those annotations.
 states the counts, permanently deletes the annotations tagged `zotero-scholium` on every PDF attachment of the
 selected paper, and moves the paper's reading notes tagged `zotero-scholium` to the trash, where they can be
 restored. Annotations and notes without that tag are kept; a paper with an attachment being annotated
-or queued is left alone, notes included.
+or queued is left alone, notes included. The outcome shows on the Annotations tab's state line.
 The deletion syncs like any deletion in Zotero. The configuration of an earlier run stays in
 `<data dir>/tmp/scholium/<attachment key>/config.json`; applying it with the skill's script writes the
 annotations again.

@@ -67,18 +67,21 @@ SCENARIOS = r"""
                                 index: JSON.parse(log.writes['/data/tmp/scholium/ATT1/conversations/index.json'].replace(/\d{8}-\d{6}/g, 'TIME')),
                                 applied: JSON.parse(log.writes['/data/tmp/scholium/ATT1/applied.json'] || 'null') };
     facts.confirmsWithoutExisting = log.confirms.length;
-    facts.paneAfter = before.view();
+    facts.paneAfter = before.view('annotate');
+    const fold = p1.annot.list.children.at(-1).children.find(c => c.className === 'scholium-fold');
+    facts.annotOutcome = { fold: fold && fold.children[0].textContent, chatState: before.view('chat').state };
     facts.otherAfter = other.view();
-    const toolNode = h.flat(p1).find(c => c.className === 'scholium-entry tool');
+    const toolNode = h.flat(p1.annot).find(c => c.className === 'scholium-entry tool');
     facts.look = { state: p1.state.className, tool: toolNode.children.map(c => [c.tagName, c.className]),
                    name: toolNode.children[1].children.map(c => c.tagName || 'text'),
                    buttons: [p1.annotGo, p1.resume, p1.send].map(b => b.className), tabs: [p1.tabChat, p1.tabAnnotate].map(b => b.className),
                    parts: p1.body.children[0].children.map(c => c.className), selects: [p1.agent.className, p1.model.className, p1.effort.className],
                    input: p1.input.className, inputNative: p1.input.attrs['no-native'], sendRow: p1.sendRow.className };
-    const after = await h.pane(item1);              // rendered anew after the run: the transcript comes from memory
-    facts.paneRerendered = after.view();
+    const after = await h.pane(item1);              // rendered anew after the run: the annotation tab shows its session
+    facts.paneRerendered = after.view('annotate');
     facts.finished = { notifications: log.notifications };
 
+    before.pane().tabAnnotate.click();
     logFrom(before.pane());
     facts.revealed = log.revealed;
 
@@ -157,16 +160,17 @@ SCENARIOS = r"""
     facts.noModelList = { models: v.models, labels: v.modelLabels, efforts: v.efforts, calls: h.log.modelCalls.length, kills: h.log.modelKills };
   }
 
-  // while the section is on screen in the focused window, it replaces the notices
+  // while the section is on screen in the focused window, on the tab of the run, it replaces the notices
   {
     const h = harness();
     h.runner.start('x');
     const p = await h.pane(h.item1);
     const p2 = await h.pane(h.item2);
+    p.pane().tabAnnotate.click();                   // the tab that shows the paper's annotation
     h.see(true);
     await h.runner.annotate([h.item1]); await settle(300);
     facts.inView = { notices: h.log.notices.length, notifications: h.log.notifications.length,
-                     state: p.view().state, kind: p.view().stateKind, other: p2.view().state, otherKind: p2.view().stateKind };
+                     card: p.view('annotate').flat.at(-1), shown: p.view('annotate').state, other: p2.view().state, otherKind: p2.view().stateKind };
     h.focus(false);
     await h.runner.annotate([h.item2]); await settle(300);
     facts.unfocused = { notices: h.log.notices.length, notifications: h.log.notifications.slice() };
@@ -205,6 +209,7 @@ SCENARIOS = r"""
     const h = harness({ existing: [['zotero-scholium'], ['zotero-scholium'], ['mine']] });
     h.runner.start('x');
     const p = await h.pane(h.item1);
+    p.pane().tabAnnotate.click(); await settle(5);                           // the tab of Delete annotations
     h.see(true);
     const removed = await h.runner.removeAnnotations([h.item1]);
     facts.deleteInView = { removed, notices: h.log.notices.length, state: p.view().state, kind: p.view().stateKind };
@@ -236,7 +241,7 @@ SCENARIOS = r"""
     await settle(40);
     await h.runner.annotate([h.item1]);
     await settle(300);
-    facts.boundedLog = { running: !!h.runner.current, kept: h.runner.transcript.length, nodes: p.view().flat.length };
+    facts.boundedLog = { running: !!h.runner.current, kept: h.runner.transcript.length, nodes: p.view('annotate').flat.length };
     h.log.calls[0].proc.kill();
     await settle(100);
   }
@@ -249,7 +254,7 @@ SCENARIOS = r"""
     await settle(40);
     await h.runner.annotate([h.item1]);
     await settle(300);
-    facts.stdinFails = { kills: h.log.kills, running: !!h.runner.current, state: p.view().state, last: p.view().flat.filter(untimed).at(-1) };
+    facts.stdinFails = { kills: h.log.kills, running: !!h.runner.current, state: p.view('annotate').state, last: p.view('annotate').flat.filter(untimed).at(-1) };
   }
 
   // the plugin stops while the program is looked up: no process is started afterwards
@@ -327,9 +332,9 @@ SCENARIOS = r"""
       await settle(200);
       await h.runner.annotate([h.item1]);
       await settle(500);
-      runs.push({ kills: h.log.kills + h.log.codexKills, locked: !!h.log.lockedOnce, state: p.view().state, lines: lines(h) });
+      runs.push({ kills: h.log.kills + h.log.codexKills, locked: !!h.log.lockedOnce, outcome: p.view('annotate').flat.at(-1)[0], lines: lines(h) });
     }
-    facts['logLocked_' + agent] = { kills: runs[1].kills - runs[0].kills, locked: runs[1].locked, state: runs[1].state.split(' · ')[0],
+    facts['logLocked_' + agent] = { kills: runs[1].kills - runs[0].kills, locked: runs[1].locked, outcome: runs[1].outcome,
                                     same: JSON.stringify(runs[1].lines) === JSON.stringify(runs[0].lines), lines: runs[1].lines.length };
   }
 
@@ -340,7 +345,7 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await settle(40);
     const input = p.pane().input;
-    Object.defineProperty(input, 'scrollHeight', { get() { return Math.max(1, Math.ceil(String(this.value).length / 40)) * 24; } });
+    Object.defineProperty(input, 'scrollHeight', { get() { return Math.max(1, Math.ceil(String(this.value).length / 10)) * 24; } });
     h.runner.paintPanes();
     const empty = input.style.height;
     input.type('short');
@@ -358,6 +363,7 @@ SCENARIOS = r"""
     const look = () => { const v = p.view(); return { placeholder: v.placeholder, sendHidden: v.sendHidden, sendDisabled: v.sendDisabled,
                                                        sendRowHidden: p.pane().sendRow.hidden }; };
     const before = look();
+    p.pane().tabAnnotate.click();
     p.pane().input.value = '只标注方法部分';
     p.annotate();
     await settle(300);
@@ -375,9 +381,10 @@ SCENARIOS = r"""
     const lines = h.log.writes[logPath].trim().split('\n').map(l => JSON.parse(l));
     facts.followUp = { calls: h.log.calls.length, resume: args[args.indexOf('--resume') + 1], prompt: h.log.stdin[1], prevented,
                        cleared: p.pane().input.value, prompts: entries.filter(e => e[0] === 'scholium-entry prompt').map(e => e[1]),
-                       entries: entries.length, markers: lines.filter(l => l.type === 'scholium' && !['run', 'time'].includes(l.subtype)).map(l => l.text),
+                       entries: entries.length, markers: lines.filter(l => l.type === 'scholium' && !['run', 'time', 'counts'].includes(l.subtype)).map(l => l.text),
                        inits: lines.filter(l => l.type === 'system' && l.subtype === 'init').length, state: p.view().state,
-                       conversations: convs(h).length, times: entries.filter(e => e[0] === 'scholium-meta').length };
+                       conversations: convs(h).length, times: entries.filter(e => e[0] === 'scholium-meta').length,
+                       cards: entries.filter(e => e[0] === 'scholium-card').length, counts: lines.filter(l => l.subtype === 'counts').length };
   }
   {
     // the agent's answer in a continued conversation is Markdown: set as such, with a button that copies its source
@@ -389,11 +396,11 @@ SCENARIOS = r"""
     await settle(40);
     await h.runner.annotate([h.item1]);
     await settle(300);
-    await h.runner.send(h.att1, '第 5 页那条译文改短');
+    await h.runner.send(h.att1, '第 5 页那条译文改短', { kind: 'annotate' });
     await settle(300);
-    const last = pane => h.flat(pane.pane()).filter(c => c.className === 'scholium-entry text').at(-1);
+    const last = pane => h.flat(pane.pane().annot).filter(c => c.className === 'scholium-entry text').at(-1);
     const node = last(p);
-    const meta = p.pane().list.children.at(-1).children.at(-1);   // the line under the run's answer
+    const meta = p.pane().annot.list.children.at(-1).children.at(-1);   // the line under the run's answer
     const copy = meta.children[1];
     copy.click();
     const done = [copy.className, copy.title, h.live()];
@@ -418,16 +425,16 @@ SCENARIOS = r"""
     await h.runner.annotate([h.item1]);
     await settle(300);
     const notified = h.log.notifications.length;
-    await h.runner.send(h.att1, '用的什么模型？');
+    await h.runner.send(h.att1, '用的什么模型？', { kind: 'annotate' });
     await settle(100);
     await new Promise(r => setTimeout(r, 150));   // the draft is set a moment after its pieces
-    const last = () => h.flat(p.pane()).filter(c => c.className !== 'scholium-meta').at(-1);
+    const last = () => h.flat(p.pane().annot).filter(c => c.className !== 'scholium-meta').at(-1);
     const again = (await h.pane(h.item1)).pane();   // a pane rendered meanwhile shows it too, scrolled to it
-    const writing = { tree: tree(last()), draft: h.runner.draft && h.runner.draft.text, again: tree(h.flat(again).at(-1)),
-                      againAtEnd: again.list.scrollTop === again.list.scrollHeight && again.list.scrollTop > 0 };
+    const writing = { tree: tree(last()), draft: h.runner.draft && h.runner.draft.text, again: tree(h.flat(again.annot).at(-1)),
+                      againAtEnd: again.annot.list.scrollTop === again.annot.list.scrollHeight && again.annot.list.scrollTop > 0 };
     h.log.release();
     await settle(100);
-    const drafts = () => h.flat(p.pane()).filter(c => c.className.includes('draft')).length;
+    const drafts = () => h.flat(p.pane().annot).filter(c => c.className.includes('draft')).length;
     const whole = { drafts: drafts(), left: h.runner.draft, running: !!h.runner.job };   // the whole message, before the run ends
     h.log.release();
     await settle(300);
@@ -479,10 +486,10 @@ SCENARIOS = r"""
       await h.runner.annotate([h.item1]);
       await settle(400);
       const kinds = e => (e.unfinished ? 'unfinished' : e.kind);
-      return { shown: h.flat(p.pane()).slice(-3).map(c => c.className.replace('scholium-entry ', '')),
+      return { shown: h.flat(p.pane().annot).slice(-3).map(c => c.className.replace('scholium-entry ', '')),
                logged: convLines(h).filter(e => e.subtype === 'unfinished' || e.type === 'result')
                  .map(e => e.subtype === 'unfinished' ? 'unfinished' : 'result'),
-               read: (await h.runner.readLog('ATT1', await h.runner.currentConv('ATT1', agent))).entries.slice(-3).map(kinds) };
+               read: (await h.runner.readLog('ATT1', await h.runner.annotationConv('ATT1', agent))).entries.slice(-3).map(kinds) };
     };
     facts.failedInside = {
       claude: await order(harness({ exitCode: 1, script: [SCRIPT[0], piece('写到一半'),
@@ -560,7 +567,8 @@ SCENARIOS = r"""
     const p1 = await h.pane(h.item1), p2 = await h.pane(h.item2);
     await h.runner.annotate([h.item1]);
     await settle(300);
-    facts.limitOther = { paused: !!h.runner.paused, resume1: !p1.view().resumeHidden, resume2: !p2.view().resumeHidden, state2: p2.view().state };
+    facts.limitOther = { paused: !!h.runner.paused, resume1: !p1.view('annotate').resumeHidden, resume2: !p2.view('annotate').resumeHidden,
+                         state2: p2.view('annotate').state };
   }
 
   // the usage limit: the queue waits, and the interrupted paper continues its conversation after the reset
@@ -570,12 +578,13 @@ SCENARIOS = r"""
     const p1 = await h.pane(h.item1), p2 = await h.pane(h.item2);
     await h.runner.annotate([h.item1, h.item2]);
     await settle(300);
+    p1.pane().tabAnnotate.click(); p2.pane().tabAnnotate.click();
     facts.limit = { clock: h.runner.paused && h.runner.clock(h.runner.paused.until), calls: h.log.calls.length,
                     queue: h.runner.queue.map(j => [j.att.key, j.resume || null, j.say === undefined ? null : j.say]), waits: h.live(),
                     state1: p1.view().state, kind1: p1.view().stateKind, state2: p2.view().state, title1: p1.view().stateTitle, title2: p2.view().stateTitle, resumeShown: !p1.view().resumeHidden, stopShown: p1.view().round[0] === '■',
                     notices: h.log.notices.map(notice), notifications: h.log.notifications.slice(),
                     last: p1.view().flat.filter(untimed).at(-1),
-                    followUpWhileQueued: await h.runner.send(h.att1, 'x'), queued: h.runner.queue.length };
+                    followUpWhileQueued: await h.runner.send(h.att1, 'x', { kind: 'annotate' }), queued: h.runner.queue.length };
     h.fire();
     await settle(800);
     const lines = convLines(h);
@@ -585,6 +594,7 @@ SCENARIOS = r"""
                            entries: p1.view().flat.map(e => e[1]), markers: lines.filter(l => l.type === 'scholium' && l.subtype !== 'run').map(l => l.subtype),
                            runs: lines.filter(l => l.subtype === 'run').map(l => [l.agent, l.user]),
                            inits: lines.filter(l => l.type === 'system' && l.subtype === 'init').length, state1: p1.view().state,
+                           cards: p1.view().flat.filter(e => e[0].startsWith('scholium-card')),
                            notifications: h.log.notifications.map(n => n.title), paused: h.runner.paused, waits: h.live() };
   }
   {
@@ -593,6 +603,7 @@ SCENARIOS = r"""
     const p1 = await h.pane(h.item1), p2 = await h.pane(h.item2);
     await h.runner.annotate([h.item1, h.item2]);
     await settle(300);
+    p1.pane().tabAnnotate.click(); p2.pane().tabAnnotate.click();
     facts.retry = { clock: h.runner.paused && h.runner.clock(h.runner.paused.until), waits: h.live(), state1: p1.view().state };
     p2.pane().send.click();                       // the waiting paper leaves the queue
     facts.retry.queue = h.runner.queue.map(j => j.att.key);
@@ -600,7 +611,7 @@ SCENARIOS = r"""
     await settle(300);
     const args = h.log.calls[1].opts.arguments;
     facts.retry.after = { calls: h.log.calls.length, resume: args[args.indexOf('--resume') + 1], waits: h.live(), paused: h.runner.paused,
-                          state1: p1.view().state, state2: p2.view().state };
+                          state1: p1.view().state, cards1: p1.view().flat.filter(e => e[0].startsWith('scholium-card')), state2: p2.view().state };
   }
   {
     const h = harness({ scripts: [SCRIPT.slice(0, 3).concat(RATE_LIMITED)] });
@@ -608,6 +619,7 @@ SCENARIOS = r"""
     const p1 = await h.pane(h.item1);
     await h.runner.annotate([h.item1]);
     await settle(300);
+    p1.pane().tabAnnotate.click();
     p1.pane().send.click();                       // the interrupted paper leaves the queue, which ends the pause
     facts.pauseCancelled = { queue: h.runner.queue.length, paused: h.runner.paused, waits: h.live(), calls: h.log.calls.length };
   }
@@ -913,7 +925,7 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]); await settle(300);
     facts.failure = { notices: h.log.notices.map(notice), notifications: h.log.notifications,
-                      last: p.view().flat.filter(untimed).at(-1), state: p.view().state, kind: p.view().stateKind };
+                      last: p.view('annotate').flat.filter(untimed).at(-1), state: p.view('annotate').state };
   }
 
   // cancel while running, from the item pane
@@ -923,10 +935,11 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     const done = h.runner.annotate([h.item1]);
     await settle(80);
+    p.pane().tabAnnotate.click();
     facts.whileRunning = { view: p.view() };
     p.pane().send.click();
     await done; await settle(80);
-    facts.cancel = { kills: h.log.kills, current: h.runner.current, last: p.view().flat.filter(untimed).at(-1), view: p.view(), state: p.view().state,
+    facts.cancel = { kills: h.log.kills, current: h.runner.current, last: p.view().flat.filter(untimed).at(-1), view: p.view(),
                      notices: h.log.notices.map(notice), notifications: h.log.notifications.map(n => n.title) };
   }
 
@@ -938,6 +951,7 @@ SCENARIOS = r"""
     await h.runner.annotate([h.item1, h.item2, h.att1]);
     await h.runner.annotate([h.item2]);
     await settle(80);
+    p1.pane().tabAnnotate.click(); p2.pane().tabAnnotate.click();
     facts.queueWhileFirstRuns = { calls: h.log.calls.length, queued: h.runner.queue.length, alerts: h.log.alerts.length,
                                   pane1: p1.view(), pane2: p2.view() };
     h.log.calls[0].proc.kill();
@@ -951,6 +965,7 @@ SCENARIOS = r"""
     const p2 = await h.pane(h.item2);
     await h.runner.annotate([h.item1]);
     await settle(60);
+    p2.pane().tabAnnotate.click();
     facts.otherRunning = { state: p2.view().state, kind: p2.view().stateKind };
     h.log.calls[0].proc.kill();
     await settle(200);
@@ -993,7 +1008,7 @@ SCENARIOS = r"""
     h.runner.start('x');
     const p = await h.pane(h.item1);
     facts.deleteFails = { removed: await h.runner.removeAnnotations([h.item1]), notice: notice(h.log.notices.at(-1)),
-                          state: p.view().state, kind: p.view().stateKind };
+                          state: p.view('annotate').state, kind: p.view('annotate').stateKind };   // the tab of Delete annotations
   }
   {
     // a second PDF of the paper is free, but the paper's notes stay while its first PDF runs
@@ -1020,8 +1035,8 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]); await settle(80);
     facts.noClaude = { calls: h.log.calls.length, modelCalls: h.log.modelCalls.length, notices: h.log.notices.map(notice),
-                       notifications: h.log.notifications.map(n => n.title), last: p.view().flat.filter(untimed).at(-1), models: p.view().models,
-                       state: p.view().state };
+                       notifications: h.log.notifications.map(n => n.title), last: p.view('annotate').flat.filter(untimed).at(-1), models: p.view().models,
+                       state: p.view('annotate').state };
   }
   {
     const { runner, log, item1 } = harness({ prefs: { 'extensions.scholium-bridge.claudeModel': 'claude-sonnet-5-5',
@@ -1133,6 +1148,7 @@ SCENARIOS = r"""
     h.runner.growDraft = function (piece, block) { grown.push([piece, block]); return grow.call(this, piece, block); };
     await h.runner.annotate([h.item1]);
     await settle(500);
+    p.pane().tabAnnotate.click();                  // the annotation's tab
     facts.codexDraft = { grown, left: h.runner.draft };
     const call = h.log.codexCalls[before];
     const sent = h.log.codexProcs[before].sent;
@@ -1150,7 +1166,7 @@ SCENARIOS = r"""
       prompt: turn.input[0].text,
       answers: sent.filter(m => m.method === undefined),
       dirs: h.log.madeDirs.slice(),
-      entries: p.view().flat, state: p.view().state, stateTitle: p.view().stateTitle.split('\n').pop(),
+      entries: p.view().flat, state: p.view().state, stateTitle: latestNote(h).title,
       logged: lines().filter(l => l.subtype !== 'run').map(l => l.method || l.type), init: lines().find(l => l.type === 'system'), result: lines().find(l => l.type === 'result'),
       killed: h.log.codexProcs[before].killed, session: (await h.runner.readLog('ATT1', p.view().shownConv)).session,
       notices: h.log.notices.map(notice), sendShown: !p.view().sendHidden, claudeCalls: h.log.calls.length, ring: p.view().ring, ctxUsed: p.view().ctxUsed,
@@ -1166,12 +1182,13 @@ SCENARIOS = r"""
     const sent2 = h.log.codexProcs.at(-1).sent;
     facts.codexFollowUp = { claudeCalls: h.log.calls.length, methods: sent2.filter(m => typeof m.method === 'string').map(m => m.method),
                             resume: sent2.find(m => m.method === 'thread/resume').params, input: sent2.find(m => m.method === 'turn/start').params.input,
-                            effort: sent2.find(m => m.method === 'turn/start').params.effort, state: p.view().state,
+                            effort: sent2.find(m => m.method === 'turn/start').params.effort, state: noteOf(h),
                             disabled: sent2.find(m => m.method === 'turn/start').params.disabledPluginIds,
                             entries: p.view().flat.slice(-5), results: lines().filter(l => l.type === 'result').length,
                             markers: lines().filter(l => l.type === 'scholium' && l.subtype === 'prompt').map(l => l.text) };
     // Claude Code chosen: a new conversation of its own, which knows nothing of Codex's
     const codexLog = h.log.writes[logPath];
+    p.pane().tabChat.click();
     p.pane().agent.change('claude');
     await settle(100);
     const switched = { entries: p.view().flat, shownConv: p.view().shownConv, newChatDisabled: p.view().newChatDisabled, ring: p.view().ring,
@@ -1189,8 +1206,9 @@ SCENARIOS = r"""
     p.pane().historyButton.click();
     await settle(100);
     const rows = p.view().historyRows;
-    p.pane().popover.node.children[1].children[0].click();   // the row of the one conversation, under its day
-    await settle(200);
+    h.runner.closePopover(p.pane());
+    p.pane().tabAnnotate.click();
+    await settle(20);
     const opened = { shownConv: p.view().shownConv === logPath.split('/').pop().replace('.jsonl', ''), historyRows: p.view().historyRows,
                      entries: p.view().flat.length, placeholder: p.view().placeholder };
     p.pane().input.type('再短一点');
@@ -1212,6 +1230,7 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]);
     await settle(300);
+    p.pane().tabAnnotate.click();
     const during = p.view().state;
     p.pane().send.click();
     await settle(300);
@@ -1228,7 +1247,7 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]);
     await settle(300);
-    facts.codexCancel.begun = p.view().state;
+    facts.codexCancel.begun = p.view('annotate').state;
     h.runner.stop();
     facts.codexCancel.shutdown = h.log.codexProcs.at(-1).killed;
     await settle(100);
@@ -1245,7 +1264,7 @@ SCENARIOS = r"""
       const p = await h.pane(h.item1);
       await h.runner.annotate([h.item1]);
       await settle(300);
-      states[name] = { state: p.view().state, entries: p.view().flat.map(e => e[1]) };
+      states[name] = { state: p.view('annotate').state, entries: p.view('annotate').flat.map(e => e[1]) };
       h.runner.stop();
       await settle(100);
     }
@@ -1256,10 +1275,10 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]);
     await settle(300);
-    states.claude = { state: p.view().state };
+    states.claude = { state: p.view('annotate').state };
     h.log.release();
     await settle(200);
-    states.claudeBack = { state: p.view().state };
+    states.claudeBack = { state: p.view('annotate').state };
     h.runner.stop();
     await settle(100);
     facts.reconnecting = states;
@@ -1276,7 +1295,7 @@ SCENARIOS = r"""
       const turn = sent.find(m => m.method === 'turn/start'), thread = sent.find(m => m.method === 'thread/start');
       found[skillAt || 'none'] = { methods: sent.filter(m => typeof m.method === 'string').map(m => m.method).filter(m => m.startsWith('skills/')),
                                    input: turn ? turn.params.input.slice(1) : null, model: thread ? 'model' in thread.params : null,
-                                   outcome: (h.runner.notes.get('ATT1') || {}).text, log: convText(h) || undefined };
+                                   outcome: (latestNote(h) || {}).text, log: convText(h) || undefined };
     }
     facts.codexSkillFound = found;
   }
@@ -1291,13 +1310,13 @@ SCENARIOS = r"""
     facts.codexLimit = { clock: h.runner.paused && h.runner.clock(h.runner.paused.until), expected: h.runner.clock(CODEX_RESET * 1000 + 60000),
                          known: h.runner.paused && h.runner.paused.known,
                          queue: h.runner.queue.map(j => [j.att.key, j.agent, j.resume || null]), notifications: h.log.notifications.map(n => n.title),
-                         last: p1.view().flat.filter(untimed).at(-1), state: p1.view().state };
+                         last: p1.view('annotate').flat.filter(untimed).at(-1), state: p1.view('annotate').state };
     h.fire();
     await settle(900);
     const resumed = h.log.codexProcs.find(c => c.sent.some(m => m.method === 'thread/resume'));
     facts.codexLimit.after = { resume: resumed.sent.find(m => m.method === 'thread/resume').params.threadId,
                                prompt: resumed.sent.find(m => m.method === 'turn/start').params.input[0].text,
-                               turns: h.log.codexTurns, state: p1.view().state, paused: h.runner.paused };
+                               turns: h.log.codexTurns, state: p1.view('annotate').state, cards: p1.view('annotate').flat.filter(e => e[0].startsWith('scholium-card')), paused: h.runner.paused };
   }
 
   // Codex failing: a failed turn; a refused request; no Codex at all
@@ -1313,7 +1332,7 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]);
     await settle(400);
-    facts.codexFailed = { entries: p.view().flat.filter(untimed).slice(-2), state: p.view().state, kind: p.view().stateKind, paused: h.runner.paused,
+    facts.codexFailed = { entries: p.view('annotate').flat.filter(untimed).slice(-2), state: p.view('annotate').state, paused: h.runner.paused,
                           notices: h.log.notices.map(notice), turns: h.log.codexTurns, queue: h.runner.queue.length };
   }
   {
@@ -1323,7 +1342,7 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]);
     await settle(400);
-    facts.codexRefused = { last: p.view().flat.filter(untimed).at(-1), state: p.view().state, killed: h.log.codexProcs.at(-1).killed, turns: h.log.codexTurns };
+    facts.codexRefused = { last: p.view('annotate').flat.filter(untimed).at(-1), state: p.view('annotate').state, killed: h.log.codexProcs.at(-1).killed, turns: h.log.codexTurns };
   }
   {
     const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { versions: {} } });
@@ -1332,7 +1351,7 @@ SCENARIOS = r"""
     await settle(40);
     await h.runner.annotate([h.item1]);
     await settle(100);
-    facts.noCodex = { codexCalls: h.log.codexCalls.length, last: p.view().flat.filter(untimed).at(-1), state: p.view().state, models: p.view().models,
+    facts.noCodex = { codexCalls: h.log.codexCalls.length, last: p.view('annotate').flat.filter(untimed).at(-1), state: p.view('annotate').state, models: p.view().models,
                       labels: p.view().modelLabels };
   }
 
@@ -1351,6 +1370,7 @@ SCENARIOS = r"""
       const p = await h.pane(h.item1);
       await h.runner.annotate([h.item1], { extra: '只标注方法部分' });
       await settle(400);
+      p.pane().tabAnnotate.click();
       const v = p.view();
       const waiting = { state: v.state, kind: v.stateKind, stopShown: v.round[0] === '■', last: v.flat.filter(untimed).slice(-2), queue: h.runner.queue.map(j => [j.att.key, !!j.retried]),
                         job: h.runner.job, notices: h.log.notices.length, notifications: h.log.notifications.length, turns: h.log.codexTurns };
@@ -1358,7 +1378,7 @@ SCENARIOS = r"""
       await new Promise(r => setTimeout(r, 60));
       await settle(600);
       const lines = convLines(h);
-      retry[name] = { waiting, turns: h.log.codexTurns, state: p.view().state, queue: h.runner.queue.length,
+      retry[name] = { waiting, turns: h.log.codexTurns, state: p.view().state, cards: p.view().flat.filter(e => e[0].startsWith('scholium-card')), queue: h.runner.queue.length,
                       marks: lines.filter(l => l.type === 'scholium' && !['run', 'time'].includes(l.subtype)).map(l => l.subtype), inits: lines.filter(l => l.type === 'system').length,
                       runs: lines.filter(l => l.subtype === 'run').map(l => [l.agent, l.user]),
                       entries: p.view().flat.slice(0, 4), notifications: h.log.notifications.map(n => n.title) };
@@ -1370,10 +1390,11 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]);
     await settle(400);
+    p.pane().tabAnnotate.click();
     p.pane().send.click();
     await new Promise(r => setTimeout(r, 30));
     await settle(200);
-    retry.cancelled = { queue: h.runner.queue.length, turns: h.log.codexTurns, state: p.view().state, draining: h.runner.draining };
+    retry.cancelled = { queue: h.runner.queue.length, turns: h.log.codexTurns, last: p.view().flat.filter(untimed).at(-1), draining: h.runner.draining };
     // a refusal is not the connection: no second try
     const refused = [note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }),
                      turnDone({ status: 'failed', error: { message: 'unauthorized', codexErrorInfo: 'unauthorized' } })];
@@ -1391,11 +1412,11 @@ SCENARIOS = r"""
     const p3 = await h3.pane(h3.item1);
     await h3.runner.annotate([h3.item1]);
     await settle(300);
-    const claudeWaiting = { state: p3.view().state, calls: h3.log.calls.length };
+    const claudeWaiting = { state: p3.view('annotate').state, calls: h3.log.calls.length };
     h3.runner.queue[0].retryAt = 0;
     await new Promise(r => setTimeout(r, 60));
     await settle(500);
-    retry.claude = { waiting: claudeWaiting, calls: h3.log.calls.length, state: p3.view().state,
+    retry.claude = { waiting: claudeWaiting, calls: h3.log.calls.length, cards: p3.view('annotate').flat.filter(e => e[0].startsWith('scholium-card')),
                      resumed: h3.log.calls[1].opts.arguments.includes('--resume'), prompts: h3.log.stdin.length };
     // Claude Code had used a tool: no second try
     const h4 = harness({ scripts: [SCRIPT.slice(0, 4).concat([ev({ type: 'result', subtype: 'success', is_error: true, result: 'API Error: Connection error.' })])] });
@@ -1485,7 +1506,7 @@ SCENARIOS = r"""
       const c = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex });
       c.runner.start('x');
       await c.runner.annotate([c.item1]); await settle(400);
-      said[name] = [c.runner.transcript.filter(e => e.kind !== 'time').at(-1).text, (c.runner.notes.get('ATT1') || {}).text.slice(0, 2)];
+      said[name] = [c.runner.transcript.filter(e => e.kind !== 'time').at(-1).text, (latestNote(c) || {}).text.slice(0, 2)];
       c.runner.stop();
     }
     facts.codexSkillIssues = said;
@@ -1514,12 +1535,12 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]); await settle(200);
     const lines = convLines(h);
-    facts.noSkill = { kills: h.log.kills, last: p.view().flat.filter(untimed).at(-1), state: p.view().state, end: lines.at(-2) };
+    facts.noSkill = { kills: h.log.kills, last: p.view('annotate').flat.filter(untimed).at(-1), state: p.view('annotate').state, end: lines.at(-2) };
     const ok = harness({ script: [ev({ type: 'system', subtype: 'init', model: 'm', session_id: 'S1', skills: ['zotero-scholium:zotero-scholium'] }),
                                   LAST, RESULT] });
     ok.runner.start('x');
     await ok.runner.annotate([ok.item1]); await settle(200);
-    facts.pluginSkill = { kills: ok.log.kills, state: (ok.runner.notes.get('ATT1') || {}).text };
+    facts.pluginSkill = { kills: ok.log.kills, state: (latestNote(ok) || {}).text };
   }
   // an update while a paper runs: its log records the interruption, and the new copy continues the paper's
   // conversation, then the paper still waiting; a disabled plugin hands nothing over
@@ -1553,8 +1574,8 @@ SCENARIOS = r"""
                       staleDropped: stale.store.get('extensions.scholium-bridge.carryOver'), staleRuns: stale.log.calls.length };
     facts.update = { kills: h.log.kills, end: JSON.parse(h.log.writes[logPath].trim().split('\n').at(-1)), carried: JSON.parse(carried),
                      prompts: h2.log.stdin, resume: h2.log.calls[0].opts.arguments.includes('--resume'),
-                     cleared: h2.store.get('extensions.scholium-bridge.carryOver'), entries: p2.view().flat.map(e => e[1]),
-                     history: history.view().state, historyLast: history.view().flat.filter(untimed).at(-1), conversations: convs(h2).length,
+                     cleared: h2.store.get('extensions.scholium-bridge.carryOver'), entries: p2.view('annotate').flat.map(e => e[1]),
+                     history: history.view('annotate').state, historyLast: history.view('annotate').flat.filter(untimed).at(-1), conversations: convs(h2).length,
                      disabled: { carried: d.store.get('extensions.scholium-bridge.carryOver') ?? null, end: convLines(d).at(-1).outcome } };
   }
   // a cancelled run's end is in its log, and its history shows it
@@ -1564,11 +1585,13 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     const done = h.runner.annotate([h.item1]);
     await settle(80);
+    p.pane().tabAnnotate.click();
     p.pane().send.click();
     await done; await settle(80);
     const later = harness({ logs: ours(h) });
     later.runner.start('x');
-    facts.cancelLogged = { end: convLines(h).at(-2), time: convLines(h).at(-1).subtype, history: (await later.pane(later.item1)).view().state };
+    facts.cancelLogged = { end: convLines(h).at(-2), time: convLines(h).at(-1).subtype,
+                           history: (await later.pane(later.item1)).view('annotate').flat.filter(untimed).at(-1) };
   }
   // the service's limit ("not your usage limit") waits as long as its message says, and says what it is
   {
@@ -1583,9 +1606,9 @@ SCENARIOS = r"""
     await h.runner.annotate([h.item1]); await settle(300);
     const paused = h.runner.paused;
     facts.throttle = { throttled: paused && paused.throttled, known: paused && paused.known, wait: paused && paused.until - started,
-                       waits: h.live(), state: p.view().state, clock: paused && h.runner.clock(paused.until), notices: h.log.notices.at(-1).descriptions };
+                       waits: h.live(), state: p.view('annotate').state, clock: paused && h.runner.clock(paused.until), notices: h.log.notices.at(-1).descriptions };
     h.fire(); await settle(400);
-    facts.throttle.after = { prompt: h.log.stdin[1], entries: p.view().flat.map(e => e[1]), paused: h.runner.paused };
+    facts.throttle.after = { prompt: h.log.stdin[1], entries: p.view('annotate').flat.map(e => e[1]), paused: h.runner.paused };
     facts.resetFrom = ['约 24 分钟后重置', 'Please try again in 3 minutes.', 'try again in about 2 hours', '5 小时额度已用完', 'in 900 hours', '']
       .map(t => { const at = h.runner.resetFrom(t); return at ? Math.round((at - Date.now()) / 60000) : null; });
   }
@@ -1603,12 +1626,13 @@ SCENARIOS = r"""
                            asked: await h.runner.send(group, '这篇讲什么？') };
     facts.otherLibrary.askedMissing = [await h.runner.send(missing, '这篇讲什么？'), h.log.alerts.slice(facts.otherLibrary.alerts.length), h.log.calls.length];
   }
-  // Annotate goes on in the conversation shown, with the words in the box as extra instructions
+  // Annotate again opens a session of its own, with the words in the box as extra instructions
   {
     const h = harness();
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]); await settle(300);
+    p.pane().tabAnnotate.click();
     p.pane().input.type('只标方法部分');
     p.annotate(); await settle(300);
     const args = h.log.calls[1].opts.arguments;
@@ -1616,14 +1640,14 @@ SCENARIOS = r"""
                                      kept: p.pane().input.value, conversations: convs(h).length,
                                      prompts: p.view().flat.filter(e => e[0] === 'scholium-entry prompt').map(e => e[1]) };
   }
-  // a question about a paper without a conversation starts one that answers; Annotate continues it with the box's
-  // words as extra instructions, and once it has an annotation a redo starts afresh and leaves the box alone
+  // a question about a paper without a conversation starts one that answers; Annotate opens a session of its own with
+  // the words in the annotation tab's box as extra instructions, and leaves the question's conversation as it was
   {
     const reply = '用变分推断估计后验。';
     const ANSWER = [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'Q1' }),
                     tool('Skill', { skill: 'zotero-scholium' }), answer('Launching skill: zotero-scholium'), said(reply), 'HOLD',
                     ev({ type: 'result', subtype: 'success', is_error: false, result: reply, session_id: 'Q1' })];
-    const marks = () => convLines(h).filter(l => l.type === 'scholium' && !['run', 'time'].includes(l.subtype));
+    const marks = () => convLines(h).filter(l => l.type === 'scholium' && !['run', 'time', 'counts'].includes(l.subtype));
     const h = harness({ scripts: [ANSWER, SCRIPT.concat([LAST, RESULT]), SCRIPT.concat([LAST, RESULT])] });
     h.runner.start('x');
     const p = await h.pane(h.item1);
@@ -1639,6 +1663,8 @@ SCENARIOS = r"""
     const asked = { sent, during, after: Object.assign(look(), { session: await session() }), state: p.view().state, args: h.log.calls[0].opts.arguments,
                     prompt: h.log.stdin[0], lines: marks(), notices: h.log.notices.map(n => n.descriptions), entries: p.view().flat.map(e => e[1]) };
     const questionLog = ours(h);
+    const chatLog = h.log.writes[convs(h)[0]];
+    p.pane().tabAnnotate.click();
     p.pane().input.type('重点标方法部分');
     p.annotate();
     await settle(400);
@@ -1646,6 +1672,7 @@ SCENARIOS = r"""
     const annotated = { resume: args1.includes('--resume') ? args1[args1.indexOf('--resume') + 1] : null, prompt: h.log.stdin[1],
                         cleared: p.pane().input.value, after: Object.assign(look(), { session: await session() }), lines: marks(),
                         prompts: p.view().flat.filter(e => e[0] === 'scholium-entry prompt').map(e => e[1]),
+                        chat: [p.view('chat').flat.filter(e => e[0] === 'scholium-entry prompt').map(e => e[1]), h.log.writes[convs(h)[0]] === chatLog],
                         notices: h.log.notices.slice(asked.notices.length).map(n => n.descriptions) };
     const annotatedLog = ours(h);
     p.pane().input.type('第 5 页那条译文改短');
@@ -1685,7 +1712,7 @@ SCENARIOS = r"""
     const asking = p.view().placeholder;
     h.log.releaseDir(); await settle(300);
     await h.runner.annotate([h.item1]); await settle(50);
-    facts.askBox = { asking, annotating: p.view().placeholder, state: p.view().state, queued: h.runner.queue.map(j => [j.conv, !!j.annotate]) };
+    facts.askBox = { asking, annotating: p.view('annotate').placeholder, state: p.view('annotate').state, queued: h.runner.queue.map(j => [j.conv, !!j.annotate]) };
     h.log.releaseDir(); await settle(300);
   }
   // a follow-up in a question's conversation is not told of a configuration; an annotation there that ends before the
@@ -1721,6 +1748,7 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await settle(200);
     await h.runner.annotate([h.item1]); await settle(500);
+    p.pane().tabAnnotate.click();                  // words on the annotation tab go to its session
     p.pane().input.type('AdLN的作用是什么');
     p.pane().send.click();
     await settle(800);
@@ -1730,10 +1758,10 @@ SCENARIOS = r"""
     const turn = sent.find(m => m.method === 'turn/start');
     const injected = sent.find(m => m.method === 'thread/inject_items');
     facts[inject ? 'goneCodex' : 'goneCodexText'] = {
-      methods, marks: lines.filter(l => l.type === 'scholium' && !['run', 'time'].includes(l.subtype)).map(l => Object.assign({}, l, { text: l.text && l.text.slice(0, 40) })),
+      methods, marks: lines.filter(l => l.type === 'scholium' && !['run', 'time', 'counts'].includes(l.subtype)).map(l => Object.assign({}, l, { text: l.text && l.text.slice(0, 40) })),
       runs: lines.filter(l => l.subtype === 'run').map(l => l.user), items: injected && injected.params.items,
       prompt: turn && turn.params.input[0].text, skill: !!(turn && turn.params.input.some(i => i.type === 'skill')),
-      entries: p.view().flat.slice(-5).map(e => [e[0], e[1].slice(0, 60)]), state: p.view().state,
+      entries: p.view().flat.slice(-5).map(e => [e[0], e[1].slice(0, 60)]), state: noteOf(h),
       session: (await h.runner.readLog('ATT1', p.view().shownConv)).session, placeholder: p.view().placeholder, conversations: convs(h).length };
   }
   {
@@ -1745,19 +1773,20 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await settle(40);
     await h.runner.annotate([h.item1]); await settle(300);
-    await h.runner.send(h.att1, 'AdLN的作用是什么'); await settle(500);
+    await h.runner.send(h.att1, 'AdLN的作用是什么', { kind: 'annotate' }); await settle(500);
+    p.pane().tabAnnotate.click();
     facts.goneClaude = { resumes: h.log.calls.map(c => c.opts.arguments.includes('--resume')), prompt: h.log.stdin[2],
                          prompts: p.view().flat.filter(e => e[0] === 'scholium-entry prompt').map(e => e[1]),
                          metas: p.view().flat.filter(e => e[0] === 'scholium-meta').map(e => e[1]),
                          info: p.view().flat.filter(e => e[0] === 'scholium-entry info').map(e => e[1]),
-                         session: (await h.runner.readLog('ATT1', p.view().shownConv)).session, state: p.view().state,
+                         session: (await h.runner.readLog('ATT1', p.view().shownConv)).session, state: noteOf(h),
                          finals: p.view().flat.filter(e => e[0].includes('final')).map(e => e[1]), conversations: convs(h).length };
     const e = harness({ script: [ev({ type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 0, session_id: 'S9',
                                       errors: ['Credit balance is too low'] }), 'EXIT:1'] });
     e.runner.start('x');
     const ep = await e.pane(e.item1);
     await e.runner.annotate([e.item1]); await settle(300);
-    facts.goneClaude.errorsShown = { last: ep.view().flat.filter(untimed).at(-1), notice: e.log.notices.at(-1) && e.log.notices.at(-1).descriptions };
+    facts.goneClaude.errorsShown = { last: ep.view('annotate').flat.filter(untimed).at(-1), notice: e.log.notices.at(-1) && e.log.notices.at(-1).descriptions };
   }
   {
     const h = harness({ scripts: [SCRIPT.slice(0, 3).concat(LIMIT_HIT), CLAUDE_GONE] });
@@ -1771,6 +1800,7 @@ SCENARIOS = r"""
     later.runner.start('x');
     const lp = await later.pane(later.item1);
     await settle(100);
+    p.pane().tabAnnotate.click(); lp.pane().tabAnnotate.click();
     facts.goneStopped = { calls: h.log.calls.length, queued: h.runner.queue.length, gone: lines.find(l => l.subtype === 'gone'),
                           state: p.view().state, last: p.view().flat.filter(untimed).at(-1), session: (await h.runner.readLog('ATT1', p.view().shownConv)).session,
                           placeholder: p.view().placeholder,
@@ -1830,7 +1860,7 @@ SCENARIOS = r"""
                            items: items.map(i => [i.role, i.content[0].type, i.content[0].text.split('\n')[0].slice(0, 20)]),
                            cut: [h.runner.cut('ab\u{1d465}cd', 4), h.runner.cut('abc\u{1d465}d', 4), h.runner.cut('abc', 4)] };
   }
-  // Annotate again goes on in the conversation, in its thread
+  // Annotate again opens a session of its own, in a new thread
   {
     const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, CODEX_SCRIPT] } });
     h.runner.start('x');
@@ -1850,7 +1880,7 @@ SCENARIOS = r"""
     await h.pane(h.item1);
     await settle(40);
     await h.runner.annotate([h.item1]); await settle(300);
-    await h.runner.send(h.att1, 'AdLN的作用是什么'); await settle(150);
+    await h.runner.send(h.att1, 'AdLN的作用是什么', { kind: 'annotate' }); await settle(150);
     h.runner.stop(true);
     const carried = h.store.get('extensions.scholium-bridge.carryOver');
     const h2 = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried }, logs: ours(h) });
@@ -1878,21 +1908,21 @@ SCENARIOS = r"""
     await h.runner.send(h.att1, '第 3 页那条讲了什么？'); await settle(400);   // Claude Code, conversation B
     const fresh = h.log.stdin.at(-1).split('\n').find(l => /^这篇论文(已有|目前)/.test(l));
     h.store.set('extensions.scholium-bridge.agent', 'codex');
-    await h.runner.send(h.att1, '再短一点'); await settle(500);   // Codex, conversation A: nothing changed since
+    await h.runner.send(h.att1, '再短一点', { kind: 'annotate' }); await settle(500);   // Codex, conversation A: nothing changed since
     const unchanged = h.log.codexProcs.at(-1).sent.find(m => m.method === 'turn/start').params.input[0].text;
     const applied = JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']);
     // rewritten in another conversation before this one's last run: nothing to tell
     h.log.writes['/data/tmp/scholium/ATT1/applied.json'] = JSON.stringify(Object.assign({}, applied, { agent: 'claude', conv: 'claude-x', at: 1 }));
-    await h.runner.send(h.att1, '再短一点'); await settle(500);
+    await h.runner.send(h.att1, '再短一点', { kind: 'annotate' }); await settle(500);
     const older = h.log.codexProcs.at(-1).sent.find(m => m.method === 'turn/start').params.input[0].text;
     h.log.writes['/data/tmp/scholium/ATT1/applied.json'] = JSON.stringify(Object.assign({}, applied, { agent: 'claude', conv: 'claude-x',
                                                                                                          config: '/data/tmp/scholium/ATT1/b.json', at: Date.now() + 1000 }));
-    await h.runner.send(h.att1, '还是太长'); await settle(500);
+    await h.runner.send(h.att1, '还是太长', { kind: 'annotate' }); await settle(500);
     const rewritten = h.log.codexProcs.at(-1).sent.find(m => m.method === 'turn/start').params.input[0].text;
     h.att1.getAnnotations = () => [];
-    await h.runner.send(h.att1, '重新写'); await settle(500);
+    await h.runner.send(h.att1, '重新写', { kind: 'annotate' }); await settle(500);
     const gone = h.log.codexProcs.at(-1).sent.find(m => m.method === 'turn/start').params.input[0].text;
-    facts.appliedConfig = { fresh, applied: [applied.agent, applied.config, applied.conv === p.view().shownConv],
+    facts.appliedConfig = { fresh, applied: [applied.agent, applied.config, applied.conv === p.view('annotate').shownConv],
                             unchanged: unchanged.split('\n').filter(l => /上次之后|现在没有|改已经写入/.test(l)),
                             older: older.split('\n').filter(l => /上次之后|现在没有|改已经写入/.test(l)),
                             rewritten: rewritten.split('\n').filter(l => /上次之后|现在没有|改已经写入/.test(l)),
@@ -2002,10 +2032,10 @@ SCENARIOS = r"""
     p.pane().agent.change('claude');
     await settle(100);
     await h.runner.annotate([h.item1]); await settle(300);
-    facts.redoWithoutAgent = { kept: convText(h, 'ATT1', 0) === codexLog, conversations: convs(h).length, state: p.view().state,
-                               last: p.view().flat.filter(untimed).at(-1) };
+    facts.redoWithoutAgent = { kept: convText(h, 'ATT1', 0) === codexLog, conversations: convs(h).length, state: p.view('annotate').state,
+                               chatState: p.view('chat').state, last: p.view('annotate').flat.filter(untimed).at(-1) };
   }
-  // Annotate and a question for the same paper at once: one of them is queued
+  // Annotate and a question for the same paper at once: one runs, the other waits behind it
   {
     const h = harness({ gateFirst: true });
     h.runner.start('x');
@@ -2052,11 +2082,11 @@ SCENARIOS = r"""
     const sent = h.log.codexProcs.at(-1).sent;
     const turn = sent.find(m => m.method === 'turn/start');
     facts.askThenCodex = { claudeCalls: h.log.calls.length, threads: sent.map(m => m.method).filter(m => typeof m === 'string' && m.startsWith('thread/')),
-                           placeholder: p.view().placeholder, text: turn && turn.params.input[0].text.split('\n')[0], conversations: convs(h).length,
-                           entries: p.view().flat.map(e => e[1].slice(0, 30)) };
+                           placeholder: p.view('annotate').placeholder, text: turn && turn.params.input[0].text.split('\n')[0], conversations: convs(h).length,
+                           entries: p.view('annotate').flat.map(e => e[1].slice(0, 30)) };
   }
-  // the usage limit in a question and in the annotation that continued its conversation: each goes on there with the
-  // plain continuation; a question waiting in the queue is cancelled as a question
+  // the usage limit in a question and in an annotation: each goes on in its own session with the plain continuation; a
+  // question waiting in the queue is cancelled as a question
   {
     const reply = '用变分推断估计后验。';
     const init = ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'Q1' });
@@ -2072,13 +2102,14 @@ SCENARIOS = r"""
     const session = async () => (await h.runner.readLog('ATT1', p.view().shownConv)).session;
     const answered = { prompt: h.log.stdin[1], session: await session(), state: p.view().state };
     await h.runner.annotate([h.item1]); await settle(300);
-    const annotating = { stop: p.view().round, queued: h.runner.queue.map(j => [j.resume || null, !!j.annotate]) };
+    const annotating = { stop: p.view('annotate').round, queued: h.runner.queue.map(j => [j.resume || null, !!j.annotate]) };
     h.fire(); await settle(400);
     facts.askLimit = { paused, answered, annotating, annotatePrompt: h.log.stdin[2].split('\n')[0], continued: h.log.stdin[3],
-                       resumes: h.log.calls.map(c => c.opts.arguments.includes('--resume')), session: await session() };
+                       resumes: h.log.calls.map(c => c.opts.arguments.includes('--resume')), session: await session(),
+                       annotSession: (await h.runner.readLog('ATT1', p.view('annotate').shownConv)).session };
   }
-  // an update hands over a question not yet received with its words, and an annotation in a question's conversation
-  // as it stands: before the agent answered with its whole task, after that with the plain continuation
+  // an update hands over a question not yet received with its words, and an annotation after a question as it stands:
+  // before the agent answered with its whole task in a new session, after that with the plain continuation
   {
     const reply = '用变分推断估计后验。';
     const init = ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'Q1' });
@@ -2172,11 +2203,11 @@ SCENARIOS = r"""
                             deletedShown, removed: h.log.removed.map(r => r.split('/').pop() === first + '.jsonl'),
                             files: convs(h).length, titles: Object.values(index.titles), current: index.current.claude,
                             busy: null };
-    // while the paper runs, its conversations stay as they are
+    // while the paper's chat runs, its conversations stay as they are
     const g = harness({ gateFirst: true });
     g.runner.start('x');
     const gp = await g.pane(g.item1);
-    await g.runner.annotate([g.item1]); await settle(80);
+    await g.runner.send(g.item1, '一个问题'); await settle(80);
     facts.conversations.busy = { newChat: gp.view().newChatDisabled, history: gp.view().historyDisabled, agent: gp.view().agentDisabled };
     g.log.calls[0].proc.kill(); await settle(200);
   }
@@ -2186,7 +2217,7 @@ SCENARIOS = r"""
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
-    await h.runner.annotate([h.item1]); await settle(500);
+    await h.runner.send(h.item1, '这篇讲什么？'); await settle(500);
     p.pane().historyButton.click(); await settle(100);
     p.pane().popover.node.children[1].children[2].click(); await settle(100);
     h.fire(); await settle(200);
@@ -2224,22 +2255,22 @@ SCENARIOS = r"""
     const cp = await codex.pane(codex.item1);
     await settle(200);
     await codex.runner.annotate([codex.item1]); await settle(500);
-    const codexBare = [cp.view().ring, cp.view().ctxUsed];
-    await codex.runner.send(codex.att1, '再短一点'); await settle(500);
+    const codexBare = [cp.view('annotate').ring, cp.view('annotate').ctxUsed];
+    await codex.runner.send(codex.att1, '再短一点', { kind: 'annotate' }); await settle(500);
     facts.gauge = { running, runningLog, after, logged: lp.view().ring, near: { ring: p.view().ring, cls: p.view().ringClass },
                     none: await (async () => { const b = harness(); b.runner.start('x'); return (await b.pane(b.item1)).view().ring; })(),
-                    codex: [codexBare, cp.view().ring],
+                    codex: [codexBare, cp.view('annotate').ring],
                     en: (() => { const e = harness({ locale: 'en-US' }); return [e.runner.text('contextUsed', 23, 77), e.runner.text('contextTokens', '45k', '200k')]; })() };
   }
-  // when each run ended, under what it showed
+  // when each run ended, under what it showed (an annotation's card has its own time)
   {
     const h = harness();
     h.runner.start('x');
     const p = await h.pane(h.item1);
-    await h.runner.annotate([h.item1]); await settle(300);
+    await h.runner.send(h.item1, '这篇讲什么？'); await settle(300);
     const time = convLines(h).at(-1);
-    facts.runTime = { last: p.view().flat.at(-1), logged: [time.type, time.subtype, time.at > 0], shown: h.runner.clock(time.at), at: time.at,
-                      read: (await h.runner.readLog('ATT1', p.view().shownConv)).entries.at(-1) };
+    facts.runTime = { last: p.view('chat').flat.at(-1), logged: [time.type, time.subtype, time.at > 0], shown: h.runner.clock(time.at), at: time.at,
+                      read: (await h.runner.readLog('ATT1', p.view('chat').shownConv)).entries.at(-1) };
   }
   // the plugin stops before a run's line is written: nothing of it is logged, and the paper is handed over as queued
   {
@@ -2295,7 +2326,7 @@ SCENARIOS = r"""
     h.runner.draining = true;   // the queue is only looked at
     h.runner.start('x', true);
     await settle(100);
-    facts.legacyHandOver = h.runner.queue.map(j => [j.att.key, j.conv, !!j.logged, !!j.annotate, !!j.asking]);
+    facts.legacyHandOver = h.runner.queue.map(j => [j.att.key, j.conv, !!j.logged, !!j.annotate, !!j.asking, j.kind]);
     h.runner.queue = [];
     h.runner.draining = false;
   }
@@ -2344,7 +2375,7 @@ SCENARIOS = r"""
     const kept = JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']);
     await h.runner.annotate([h.item1]); await settle(400);
     const after = JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']);
-    facts.appliedKept = { kept: [kept.config, kept.agent], state: (h.runner.notes.get('ATT1') || {}).text, refused: after.config, at: after.at === kept.at };
+    facts.appliedKept = { kept: [kept.config, kept.agent], state: (latestNote(h) || {}).text, refused: after.config, at: after.at === kept.at };
     // Codex: a write whose command failed is not kept
     const failedApply = [note('turn/started', { threadId: 'T1', turn: { id: 'TURN', status: 'inProgress' } }),
                          shell('c5', 'python C:/skills/scholium.py --config c.json --apply'),
@@ -2411,7 +2442,7 @@ SCENARIOS = r"""
     const user = convLines(h).filter(l => l.type === 'user').at(-1);
     const parts = user.message.content[0].content;
     facts.slimLog = { copy: 'tool_use_result' in user, data: parts[1].source.data, media: parts[1].source.media_type, text: parts[0].text,
-                      plain: convText(h).includes(SCRIPT[3].trim()), shown: p.view().flat.filter(e => e[0].includes('result')).at(-1)[1] };
+                      plain: convText(h).includes(SCRIPT[3].trim()), shown: p.view('annotate').flat.filter(e => e[0].includes('result')).at(-1)[1] };
     // Codex: the turn's diff stays out
     const diff = note('turn/diff/updated', { threadId: 'T1', turnId: 'TURN', diff: 'diff --git a/x b/x\n+line' });
     const c = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT.slice(0, -1).concat([diff, diff, CODEX_SCRIPT.at(-1)])] } });
@@ -2448,6 +2479,7 @@ SCENARIOS = r"""
     await settle(40);
     await h.runner.annotate([h.item1]); await settle(300);
     const paused = [!!h.runner.paused, h.runner.queue.length];
+    p.pane().tabAnnotate.click();
     p.pane().send.click(); await settle(200);
     facts.cancelPaused = { paused, queue: h.runner.queue.length, pausedAfter: !!h.runner.paused, state: p.view().state,
                            ends: convLines(h).filter(l => l.subtype === 'end').map(l => l.outcome),
@@ -2470,7 +2502,7 @@ SCENARIOS = r"""
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
-    await h.runner.annotate([h.item1]); await settle(300);
+    await h.runner.send(h.item1, '这篇讲什么？'); await settle(300);
     const before = p.view().state;
     p.pane().newChat.click(); await settle(100);
     const fresh = p.view().state;
@@ -2533,10 +2565,11 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await settle(200);
     await h.runner.annotate([h.item1]); await settle(500);
+    p.pane().tabAnnotate.click();
     p.pane().input.type('再问一句');
     p.pane().send.click(); await settle(800);
     facts.codexExit = { gone: convLines(h).filter(l => l.subtype === 'gone').length, threads: h.log.threads,
-                        session: (await h.runner.readLog('ATT1', p.view().shownConv)).session, state: p.view().state.split(' · ')[0],
+                        session: (await h.runner.readLog('ATT1', p.view().shownConv)).session, state: noteOf(h).split(' · ')[0],
                         last: p.view().flat.filter(untimed).at(-1)[1] };
   }
   // the log of a conversation handed over without it is started again
@@ -2562,7 +2595,7 @@ SCENARIOS = r"""
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
-    await h.runner.annotate([h.item1]);
+    await h.runner.send(h.att1, '再改一处');
     for (let i = 0; i < 3000 && !h.log.release; i++) await tick();
     const first = p.pane().list.children[0];
     h.log.release(); await settle(300);
@@ -2583,6 +2616,7 @@ SCENARIOS = r"""
     const h = harness({ existing: [['zotero-scholium']], eraseFails: true });
     h.runner.start('x');
     const p = await h.pane(h.item1);
+    p.pane().tabAnnotate.click(); await settle(5);
     h.see(true);
     await h.runner.removeAnnotations([h.item1]);
     facts.deleteFailsInView = { notices: h.log.notices.length, state: p.view().state, kind: p.view().stateKind };
@@ -2609,7 +2643,7 @@ def facts(tmp_path_factory):
 CLAUDE = "/appdata/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 SUMMARY = "高亮 28 条（核心 12 条），页边批注 9 条，笔记《Deep latent》，无剩余警告。"
 BRIEF = "高亮 28 条（核心 12 条）\n页边批注 9 条\n无剩余警告"   # the summary in a notice
-ASK = "向这篇论文提问；或写附加要求，随「批注这篇」发送"   # the message box's placeholder before an annotation
+ASK = "向这篇论文提问"   # the chat's placeholder while its conversation is a question's
 HISTORY_HEAD = "下面是这段对话之前的内容。原来的会话已经接不上了，这是 Zotero 里保存的记录："   # a new session's conversation, as text
 HISTORY_END = "——以上是之前的对话，新消息如下——"
 STARTERS = ["scholium-starters", "可以这样开始这篇论文要解决什么问题？主要贡献有哪几点？方法的核心思路是什么？实验用了哪些数据和对比方法？"]
@@ -2648,7 +2682,18 @@ TRANSCRIPT = [   # a run with its steps opened; the model is under it, with the 
 ]
 ANNOTATE = ["scholium-entry prompt", "批注这篇"]   # the user's Annotate, as the transcript shows it
 ENDED = ["scholium-meta", "Opus 5.5 · HH:MM"]     # the model and when a run ended, under its answer
-RUN = [ANNOTATE] + TRANSCRIPT + [ENDED]
+
+
+def card(turns="26 轮 · 2,568k tokens", title="✓ 批注完成，没有剩余警告", nums=(0, 0, 0, 0, 0)):
+    """A finished annotation's card on the annotation tab: its title, the numbers counted in Zotero, its turns and
+    tokens and when it ended (through run_time); the harness's run leaves the paper without Scholium annotations."""
+    h, core, margin, notes, reading = nums
+    return ["scholium-card", f"{title}{h}高亮（核心\u00a0{core}）{margin}页边批注{notes}便签{reading}阅读笔记{turns} · HH:MM"]
+
+
+CARD = card()
+STEPS = ["scholium-steps", "加载技能提取句子通读论文撰写批注预演检查写入 Zotero"]   # an annotation's steps while it runs, none done
+RUN = [ANNOTATE] + TRANSCRIPT + [CARD]   # an annotation on its tab: the closing words among the steps, then its card
 
 
 def test_section_is_registered_and_removed_without_menus_or_toolbar_status(facts):
@@ -2728,7 +2773,9 @@ def test_section_is_styled_by_its_stylesheet(facts):
                 "scholium-markdown", "scholium-starters", "scholium-starters-title", "scholium-starter", "scholium-history-group", "scholium-history-row",
                 "scholium-history-open", "scholium-history-title", "scholium-history-time", "scholium-history-rename",
                 "scholium-history-empty", "scholium-round", "scholium-ring", "scholium-context-head", "scholium-context-bar", "scholium-context-legend",
-                "scholium-run", "scholium-fold-head", "scholium-fold-body", "scholium-meta"]:
+                "scholium-run", "scholium-fold-head", "scholium-fold-body", "scholium-meta", "scholium-annot-intro-title", "scholium-steps",
+                "scholium-step", "scholium-fold-more", "scholium-card", "scholium-card-title", "scholium-card-nums", "scholium-card-usage",
+                "scholium-confirm", "scholium-confirm-text"]:
         assert any(re.search(r"\." + re.escape(cls) + r"(?![\w-])", sel) for sel in rules), cls
     log = rules[".scholium-log"]
     assert "resize" not in log
@@ -2759,6 +2806,17 @@ def test_section_is_styled_by_its_stylesheet(facts):
     assert "background: transparent" in rules[".scholium-fold-head"] and "var(--fill-secondary)" in rules[".scholium-fold-head"]
     assert 'content: "◌ "' in rules[".scholium-fold-head.live::before"] and "var(--fill-quinary)" in rules[".scholium-fold-body"]
     assert "space-between" in rules[".scholium-meta"] and "var(--fill-tertiary)" in rules[".scholium-meta"]
+    # the annotation tab: the steps (done ticked in green, the current one in blue), the card (red when it failed, four
+    # numbers in a row), the question in place on a red tint, its Replace in red
+    assert 'content: "✓"' in rules[".scholium-step.done::before"] and "var(--accent-green)" in rules[".scholium-step.done::before"]
+    assert "var(--accent-blue)" in rules[".scholium-step.now"] and 'content: "◉"' in rules[".scholium-step.now::before"]
+    assert 'content: "○"' in rules[".scholium-step::before"] and "flex: 1" in rules[".scholium-step > span:first-child"]
+    assert "space-between" in rules[".scholium-step"] and "var(--fill-tertiary)" in rules[".scholium-step"], "a step's time at the right; a step to come in grey"
+    assert "border-color: var(--accent-red)" in rules[".scholium-card.failed"] and "border: var(--material-border-quarternary)" in rules[".scholium-card"]
+    assert "repeat(4, 1fr)" in rules[".scholium-card-nums"] and "font-size: 16px" in rules[".scholium-card-nums b"]
+    assert "var(--accent-red)" in rules[".scholium-confirm"] and "flex: 1" in rules[".scholium-confirm-text"]
+    assert "background: var(--accent-red)" in rules[".scholium-button.danger"]
+    assert "text-align: center" in rules[".scholium-annot-intro"] and "font-weight: 600" in rules[".scholium-annot-intro-title"]
     assert not any("scholium-entry.time" in sel or "draft .scholium-bullet" in sel for sel in rules), "no time line, no bullet on a message"
     assert "visibility: hidden" in rules[".scholium-history-row .scholium-button.icon"]
     assert "text-overflow: ellipsis" in rules[".scholium-history-title"] and "overflow: auto" in rules[".scholium-popover.history"]
@@ -2795,18 +2853,21 @@ def test_section_shows_the_transcript_like_claude_code(facts):
     a = facts["paneAfter"]
     assert run_time(a["flat"]) == RUN
     assert not any(kind.startswith("scholium-entry final") for kind, _ in a["flat"])
-    assert a["state"] == DONE_STATE and a["stateKind"] == "scholium-state ok" and a["stateTitle"] == DONE_STATE + "\n" + TOKEN_DETAIL
-    assert a["stateDisplay"] == "" and a["round"][0] != "■"
+    # the annotation tab's state line shows runs going on or waiting; the outcome is the run's card and its folded steps,
+    # not the chat's
+    assert a["state"] is None and a["stateKind"] == "scholium-state info"
+    assert re.fullmatch(r"已处理 \d+ 秒 ›", facts["annotOutcome"]["fold"]) and facts["annotOutcome"]["chatState"] is None
+    assert a["stateDisplay"] == "none" and a["round"][0] != "■"
     assert (a["annotateDisabled"], a["logDisabled"], a["shownKey"]) == (False, False, "ATT1")
     assert run_time(facts["paneRerendered"]["flat"]) == RUN
     o = facts["otherAfter"]
     assert o["flat"] == [STARTERS]
     assert o["state"] is None and o["stateKind"] == "scholium-state info", "nothing of another paper's run"
-    assert facts["logLines"] == 18, "the run's own line, the Annotate line, Claude Code's events, when it ended"
-    assert re.fullmatch(r"/data/tmp/scholium/ATT1/conversations/claude-\d{8}-\d{6}\.jsonl", facts["revealed"][0])
+    assert facts["logLines"] == 19, "the run's own line, the Annotate line, Claude Code's events, the numbers counted, when it ended"
+    assert re.fullmatch(r"/data/tmp/scholium/ATT1/conversations/annotate-claude-\d{8}-\d{6}\.jsonl", facts["revealed"][0])
     c = facts["firstConversation"]
-    assert c["files"] == ["/data/tmp/scholium/ATT1/conversations/claude-TIME.jsonl"]
-    assert c["index"] == {"current": {"claude": "claude-TIME"}, "titles": {"claude-TIME": "批注这篇"}}
+    assert c["files"] == ["/data/tmp/scholium/ATT1/conversations/annotate-claude-TIME.jsonl"]
+    assert c["index"] == {"current": {}, "titles": {"annotate-claude-TIME": "批注这篇"}, "annotation": {"claude": "annotate-claude-TIME"}}
     assert c["applied"]["config"] == "/data/c.json" and c["applied"]["agent"] == "claude" and c["applied"]["conv"] in facts["revealed"][0]
     h = facts["history"]
     assert h["history"] is True and h["shownKey"] == "ATT1" and h["logDisabled"] is False
@@ -2828,7 +2889,8 @@ def test_corner_notices_close_by_themselves(facts):
 def test_a_section_on_screen_replaces_the_notices(facts):
     v = facts["inView"]
     assert (v["notices"], v["notifications"]) == (0, 0)
-    assert v["state"] == DONE_STATE and v["kind"] == "scholium-state ok"
+    # the annotation tab's state line shows runs going on or waiting; the outcome is the run's card
+    assert run_time(v["card"]) == CARD and v["shown"] is None
     assert v["other"] is None and v["otherKind"] == "scholium-state info", "another paper's section shows nothing of this run"
     assert facts["unfocused"] == {"notices": 0, "notifications": [{"title": "批注完成：Paper ITEM2", "body": BRIEF}]}, \
         "in the background the system notification tells, not a corner notice"
@@ -2843,14 +2905,14 @@ def test_a_section_on_screen_replaces_the_notices(facts):
 
 def test_section_shows_running_and_finished_state(facts):
     q = facts["queueWhileFirstRuns"]
-    assert run_time(q["pane1"]["state"]) == "第 6/6 步 写入 Zotero · 已用 Ns", "the papers waiting are shown in their own sections"
+    assert run_time(q["pane1"]["state"]) == "第 6/6 步 · 已用 Ns", "the papers waiting are shown in their own sections"
     assert q["pane1"]["stateKind"] == "scholium-state running"
     assert q["pane1"]["round"] == ["■", "停止"], "the running paper has the stop button"
     assert q["pane2"]["state"] == "排队中，前面还有 1 篇" and q["pane2"]["annotateDisabled"] is True
     w = facts["whileRunning"]["view"]
-    assert run_time(w["state"]) == "第 1/6 步 加载技能 · 已用 Ns" and w["stateKind"] == "scholium-state running"
+    assert run_time(w["state"]) == "第 1/6 步 · 已用 Ns" and w["stateKind"] == "scholium-state running"
     assert (w["annotateDisabled"], w["removeDisabled"]) == (True, True) and w["round"] == ["■", "停止"]
-    assert w["flat"] == [ANNOTATE] + TRANSCRIPT[:2]
+    assert w["flat"] == [ANNOTATE, STEPS] + TRANSCRIPT[:2], "the six steps, the first one going on, above what it does now"
     assert facts["otherRunning"] == {"state": None, "kind": "scholium-state info"}, "another paper's run is not shown here"
     assert facts["finished"]["notifications"] == [], "Zotero is in front: the corner notice tells"
 
@@ -2880,14 +2942,14 @@ def test_existing_annotations_need_confirmation(facts):
 
 def test_failure_and_cancel_are_reported(facts):
     f = facts["failure"]
-    assert f["last"] == ["scholium-entry final error", "scholium.py: style_warnings remain重试"]
+    # the annotation tab: its card in red with the reason and Retry; its state line is for runs going on or waiting
+    assert f["last"] == ["scholium-card failed", "scholium.py: style_warnings remain重试"]
     assert f["notifications"] == [] and f["notices"][-1]["descriptions"] == ["失败 · scholium.py: style_warnings remain"]
-    assert run_time(f["state"]) == "失败 · Ns" and f["kind"] == "scholium-state error"
+    assert f["state"] is None
     c = facts["cancel"]
     assert c["kills"] == 1 and c["current"] is None
-    assert c["last"] == ["scholium-entry final error", "已取消重试"]
-    assert c["view"]["annotateDisabled"] is False and c["view"]["round"][0] != "■"
-    assert run_time(c["state"]) == "已取消 · Ns"
+    assert c["last"] == ["scholium-card failed", "已取消重试"]
+    assert c["view"]["annotateDisabled"] is False and c["view"]["round"][0] != "■" and c["view"]["state"] is None
     assert c["notifications"] == [] and c["notices"][-1]["descriptions"] == ["已取消"]
 
 
@@ -2897,8 +2959,8 @@ def test_papers_run_one_after_another_without_duplicates(facts):
     done = facts["queueDone"]
     assert done["calls"] == 2 and done["prompts"] == ["ATT1", "ATT2"]
     assert done["notifications"] == []
-    assert done["pane2"]["shownKey"] == "ATT2" and run_time(done["pane2"]["flat"][-2:]) == [TRANSCRIPT[-1], ENDED]
-    assert done["pane2"]["state"] == DONE_STATE
+    assert done["pane2"]["shownKey"] == "ATT2" and run_time(done["pane2"]["flat"][-2:]) == [TRANSCRIPT[-1], CARD]
+    assert done["pane2"]["state"] is None
     assert facts["raceWhileFirstStarts"] == {"calls": 1, "queued": 1}
     assert facts["raceDone"] == 2
 
@@ -2938,7 +3000,7 @@ def test_missing_pdf_missing_claude_and_preferences(facts):
     nc = facts["noClaude"]
     assert nc["calls"] == 0 and nc["notifications"] == []
     assert nc["last"][0] == "scholium-entry final error" and "Zotero 设置 → Scholium" in nc["last"][1]
-    assert nc["notices"][-1]["errors"] == 1 and nc["state"] == "失败"
+    assert nc["notices"][-1]["errors"] == 1 and nc["state"] is None
     args = facts["prefArgs"]
     assert args[args.index("--permission-mode") + 1] == "dontAsk"
     assert args[args.index("--model") + 1] == "claude-sonnet-5-5"
@@ -3140,7 +3202,7 @@ def test_a_cancelled_message_stays_marked_and_typed_words_stay_with_their_item(f
 def test_an_unfinished_message_comes_before_the_failure(facts):
     for agent in ("claude", "codex"):
         f = facts["failedInside"][agent]
-        assert f["shown"] == ["text", "final error", "scholium-meta"], agent
+        assert f["shown"] == ["prompt", "text", "scholium-card failed"], agent   # the message among the folded steps, then the card
         assert f["logged"] == ["unfinished", "result"], agent
         assert f["read"] == ["unfinished", "final", "time"], agent
 
@@ -3243,7 +3305,7 @@ def test_the_transcript_box_is_bounded_like_the_transcript(facts):
 
 def test_a_failed_prompt_write_stops_claude_code(facts):
     f = facts["stdinFails"]
-    assert f["kills"] == 1 and not f["running"] and f["state"].startswith("失败") and "EPIPE" in f["last"][1]
+    assert f["kills"] == 1 and not f["running"] and f["state"] is None and f["last"][0] == "scholium-card failed" and "EPIPE" in f["last"][1]
 
 
 def test_no_run_starts_after_the_plugin_stopped(facts):
@@ -3256,13 +3318,13 @@ def test_no_run_starts_after_the_plugin_stopped(facts):
 def test_a_log_that_refuses_a_write_a_moment_loses_nothing(facts):
     for agent in ("claude", "codex"):
         f = facts["logLocked_" + agent]
-        assert f["locked"] and f["kills"] == 0 and f["state"] == "完成", agent
+        assert f["locked"] and f["kills"] == 0 and f["outcome"] == "scholium-card", agent
         assert f["same"] and f["lines"] > 3, agent + ": every line, in order"
 
 
 
 def test_an_empty_message_box_fits_its_placeholder(facts):
-    assert facts["inputHeight"] == {"placeholder": "Ask about this paper, or write extra instructions to send with Annotate",
+    assert facts["inputHeight"] == {"placeholder": "Ask about this paper",
                                     "empty": "48px", "typed": "24px", "cleared": "48px", "value": ""}
 
 
@@ -3270,9 +3332,11 @@ def test_extra_instructions_and_follow_ups_continue_the_conversation(facts):
     e = facts["extra"]
     assert e["before"] == {"placeholder": ASK, "sendHidden": False, "sendDisabled": True, "sendRowHidden": False}
     assert "用户的附加要求：\n只标注方法部分\n\n结束时" in e["prompt"] and e["cleared"] == ""
-    assert e["firstLogLine"] == {"type": "scholium", "subtype": "prompt", "text": "批注这篇\n附加要求：只标注方法部分", "annotate": True}
+    assert e["firstLogLine"] == {"type": "scholium", "subtype": "prompt", "text": "批注这篇\n附加要求：只标注方法部分", "annotate": True,
+                                 "extra": "只标注方法部分"}
     assert e["firstEntry"] == ["scholium-entry prompt", "批注这篇\n附加要求：只标注方法部分"]
-    follow = "接着对话，例如：第 5 页那条译文改短一些"
+    # the section stays on the annotation tab, whose words go to the annotation's session
+    follow = "接着这次批注修改，例如：第 5 页那条译文改短"
     assert e["after"] == {"placeholder": follow, "sendHidden": False, "sendDisabled": True, "sendRowHidden": False}
     assert e["typed"] == {"placeholder": follow, "sendHidden": False, "sendDisabled": False, "sendRowHidden": False}
     f = facts["followUp"]
@@ -3281,9 +3345,10 @@ def test_extra_instructions_and_follow_ups_continue_the_conversation(facts):
                                   "只是提问就直接回答；要改批注时按技能的流程修改配置，再写入 Zotero。")
     assert f["prompt"].endswith("\n\n第 5 页那条译文改短\n\n" + CLOSING)
     assert f["prompts"] == ["批注这篇\n附加要求：只标注方法部分", "第 5 页那条译文改短"]
-    assert f["entries"] == 2 * (2 + len(TRANSCRIPT)), "each run: the user's words, the transcript, when it ended"
-    assert f["markers"] == f["prompts"] and f["inits"] == 2 and f["times"] == 2
-    assert f["state"] == DONE_STATE and f["conversations"] == 1
+    assert f["entries"] == 2 * (2 + len(TRANSCRIPT)), "each run: the user's words, the transcript, the annotation's card or when the follow-up ended"
+    assert f["markers"] == f["prompts"] and f["inits"] == 2 and f["cards"] == 1 and f["times"] == 1
+    assert f["counts"] == 1, "the numbers are the annotation's, not the follow-up's"
+    assert f["state"] is None and f["conversations"] == 1
 
 
 def test_a_paper_outside_the_queue_shows_nothing_of_a_pause(facts):
@@ -3306,16 +3371,17 @@ def test_usage_limit_pauses_the_queue_and_continues_after_the_reset(facts):
     r = facts["limitResumed"]
     assert r["calls"] == 3 and r["resume"] == "S1" and r["order"] == ["ATT1", "continue", "ATT2"]
     assert r["prompt"] == "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。"
-    assert "额度已恢复，接着中断的地方继续" in r["entries"] and r["markers"] == ["prompt", "continue", "time"] and r["inits"] == 2
+    assert "额度已恢复，接着中断的地方继续" in r["entries"] and r["markers"] == ["prompt", "continue", "counts", "time"] and r["inits"] == 2
     assert r["runs"] == [["claude", "批注这篇"], ["claude", None]], "the continuation is the same turn"
-    assert r["state1"] == DONE_STATE and r["paused"] is None and r["waits"] == []
+    assert run_time(r["cards"]) == [CARD], "the annotation's card, once it went on to its end"
+    assert r["state1"] is None and r["paused"] is None and r["waits"] == []
     assert r["notifications"] == []
     t = facts["retry"]
     assert t["waits"] == [600000] and t["state1"] == f"额度已用完，{t['clock']} 自动重试"
     assert t["queue"] == ["ATT1"]
     a = t["after"]
     assert a["calls"] == 2 and a["resume"] == "S1" and a["waits"] == [] and a["paused"] is None
-    assert a["state1"] == DONE_STATE and a["state2"] is None
+    assert run_time(a["cards1"]) == [CARD] and a["state1"] is None and a["state2"] is None
     assert facts["pauseCancelled"] == {"queue": 0, "paused": None, "waits": [], "calls": 1}
 
 
@@ -3336,6 +3402,7 @@ CODEX_TRANSCRIPT = [
     ["scholium-entry text", "Done.\n" + SUMMARY],
 ]
 CODEX_ENDED = ["scholium-meta", "GPT-6-Luna · HH:MM"]
+CODEX_CARD = card("3 轮 · 2,647k tokens")
 
 
 def test_codex_is_the_newest_copy_found(facts):
@@ -3394,12 +3461,13 @@ def test_codex_runs_the_skill_in_a_sandbox_through_its_app_server(facts):
 
 def test_codex_transcript_state_and_log_read_like_claude_codes(facts):
     r = facts["codexRun"]
-    assert run_time(r["entries"]) == [ANNOTATE] + CODEX_TRANSCRIPT + [CODEX_ENDED]
-    assert r["state"] == "完成 · 6m 17s · 3 轮 · 2,647k tokens" and r["ctxUsed"] == 1325778 and r["ring"] is None
+    assert run_time(r["entries"]) == [ANNOTATE] + CODEX_TRANSCRIPT + [CODEX_CARD]
+    assert r["state"] is None and r["ctxUsed"] == 1325778 and r["ring"] is None
+    # the token counts behind the total, which no place on the annotation tab shows
     assert r["stateTitle"] == "输入 190k · 缓存写入 0 · 缓存读取 2,410k · 输出 47k"
     # deltas and start-up chatter stay out of the log; the run starts and ends as Claude Code's does
     assert not any(m.endswith("Delta") or m.endswith("delta") or "startupStatus" in m for m in r["logged"])
-    assert r["logged"][:2] == ["scholium", "system"] and r["logged"][-2:] == ["result", "scholium"]
+    assert r["logged"][:2] == ["scholium", "system"] and r["logged"][-3:] == ["result", "scholium", "scholium"]   # the numbers counted, the end
     assert "item/commandExecution/requestApproval" in r["logged"] and r["userMessages"] == 0, "the user's message is the plugin's own line"
     assert r["init"] == {"type": "system", "subtype": "init", "agent": "codex", "model": "gpt-6-luna", "session_id": "T1"}
     assert r["result"] == {"type": "result", "agent": "codex", "subtype": "success", "is_error": False, "result": "Done.\n" + SUMMARY,
@@ -3407,7 +3475,8 @@ def test_codex_transcript_state_and_log_read_like_claude_codes(facts):
                            "usage": {"input_tokens": 190000, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 2410000,
                                      "output_tokens": 46778}}
     assert run_time(r["notices"][-1]["descriptions"]) == DONE_NOTICE
-    assert r["sendShown"] is True and re.fullmatch(r"/data/tmp/scholium/ATT1/conversations/codex-\d{8}-\d{6}\.jsonl", r["revealed"][0])
+    # the annotation tab shows its session: its send button is there; its log is the annotation session's
+    assert r["sendShown"] is True and re.fullmatch(r"/data/tmp/scholium/ATT1/conversations/annotate-codex-\d{8}-\d{6}\.jsonl", r["revealed"][0])
     latest = facts["latestLog"]
     assert latest["codex"] == {"first": CODEX_TRANSCRIPT[0], "count": len(CODEX_TRANSCRIPT) + 1,
                                "state": "上次：完成 · 6m 17s · 3 轮 · 2,647k tokens", "shownConv": "codex-run", "session": "T1",
@@ -3435,26 +3504,30 @@ def test_each_agent_has_its_own_conversations(facts):
     assert f["disabled"] == ["superpowers@m", "zotero@remote"]
     assert len(f["input"]) == 1 and f["input"][0]["text"].endswith("第 5 页那条译文改短\n\n" + CLOSING)
     assert f["effort"] == "high"
-    # only this run's calls and tokens: the thread's totals include the earlier turn
+    # only this run's calls and tokens: the thread's totals include the earlier turn (kept by the plugin; a follow-up on
+    # the annotation tab shows its model and time)
     assert f["state"] == "完成 · 1m 05s · 1 轮 · 403k tokens"
-    assert run_time(f["entries"]) == [["scholium-entry text", "Done.\n" + SUMMARY], CODEX_ENDED, ["scholium-entry prompt", "第 5 页那条译文改短"],
+    assert run_time(f["entries"]) == [["scholium-entry text", "Done.\n" + SUMMARY], CODEX_CARD, ["scholium-entry prompt", "第 5 页那条译文改短"],
                                       ["scholium-entry text", "改好了：第 5 页的译文已缩短。"], CODEX_ENDED]
     assert f["results"] == 2 and f["markers"] == ["批注这篇", "第 5 页那条译文改短"]
-    # Claude Code chosen: a new conversation of its own, given nothing of Codex's; Codex's log stays as it was
+    # Claude Code chosen: a new conversation of its own, given nothing of Codex's; Codex's log stays as it was. Codex's
+    # annotation session is no chat of Codex's
     c = facts["switchedToClaude"]
     s = c["switched"]
-    assert s["entries"] == [["scholium-entry info", "这篇论文在 Codex 里有对话，把智能体换成 Codex 就能接着聊。"], STARTERS]
+    assert s["entries"] == [STARTERS]
     assert (s["shownConv"], s["newChatDisabled"], s["ring"], s["placeholder"]) == (None, True, None, ASK)
-    assert s["index"]["claude"] is None and s["index"]["codex"].startswith("codex-"), "as llm-for-zotero's switch, a new conversation"
+    assert s["index"] == {"claude": None}, "as llm-for-zotero's switch, a new conversation"
     assert c["calls"] == 1 and c["resumed"] is False
     assert c["prompt"].startswith("使用 zotero-scholium 技能读下面这篇论文") and HISTORY_HEAD not in c["prompt"]
     assert "\n\n用户的问题：\n它和 FNO 比怎么样？\n\n" in c["prompt"]
-    assert c["conversations"] == ["codex", "claude"] and c["codexKept"] is True
-    # Codex chosen again: a new conversation too; History opens the earlier one, which goes on in its thread
+    assert c["conversations"] == ["annotate", "claude"] and c["codexKept"] is True
+    # Codex chosen again: a new conversation too, and no chat of Codex's in History; the annotation tab shows Codex's
+    # session, which goes on in its thread
     b = facts["switchedBack"]
-    assert b["again"] == {"entries": [STARTERS], "shownConv": None}
-    assert b["rows"][0] == ["scholium-history-group", "今天"] and re.fullmatch(r"批注这篇\d{2}:\d{2}✎✕", b["rows"][1][1])
-    assert b["opened"] == {"shownConv": True, "historyRows": None, "entries": 16, "placeholder": "接着对话，例如：第 5 页那条译文改短一些"}
+    assert b["again"] == {"entries": [["scholium-entry info", "这篇论文在 Claude Code 里有对话，把智能体换成 Claude Code 就能接着聊。"], STARTERS],
+                          "shownConv": None}
+    assert b["rows"] == [["scholium-history-empty", "没有别的对话。"]]
+    assert b["opened"] == {"shownConv": True, "historyRows": None, "entries": 16, "placeholder": "接着这次批注修改，例如：第 5 页那条译文改短"}
     assert b["methods"] == ["thread/resume"] and b["threadId"] == "T1" and b["skill"] is False, "Codex goes on in its own thread"
     assert b["text"].startswith("下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。") and b["text"].endswith("\n\n再短一点\n\n" + CLOSING)
     assert b["runs"] == [["codex", "批注这篇"], ["codex", "第 5 页那条译文改短"], ["codex", "再短一点"]] and b["conversations"] == 2
@@ -3462,11 +3535,11 @@ def test_each_agent_has_its_own_conversations(facts):
 
 def test_codex_steps_and_cancel(facts):
     c = facts["codexCancel"]
-    assert run_time(c["during"]) == "第 2/6 步 提取句子 · 已用 Ns"
+    assert run_time(c["during"]) == "第 2/6 步 · 已用 Ns"
     assert c["interrupt"] == {"threadId": "T1", "turnId": "U1"} and c["killed"] is True
-    assert c["last"] == ["scholium-entry final error", "已取消重试"] and run_time(c["state"]) == "已取消 · Ns"
+    assert c["last"] == ["scholium-card failed", "已取消重试"] and c["state"] is None
     assert c["results"] == 0 and c["waits"] == [] and c["current"] is None and c["shutdown"] is True
-    assert run_time(c["begun"]) == "第 1/6 步 加载技能 · 已用 Ns"
+    assert run_time(c["begun"]) == "第 1/6 步 · 已用 Ns"
     s = facts["codexSkillFound"]
     assert s["/data/tmp/scholium"]["methods"] == ["skills/list"]
     assert s["/data/tmp/scholium"]["input"] == [{"type": "skill", "name": "zotero-scholium", "path": "/home/u/.codex/skills/zotero-scholium/SKILL.md"}]
@@ -3479,8 +3552,8 @@ def test_codex_steps_and_cancel(facts):
 
 def test_a_lost_connection_shows_on_the_state_line_until_the_agent_answers_again(facts):
     r = facts["reconnecting"]
-    assert run_time(r["codex"]["state"]) == "第 1/6 步 加载技能 · 连接中断，正在重试（2/5） · 已用 Ns"
-    assert run_time(r["codexBack"]["state"]) == "第 1/6 步 加载技能 · 已用 Ns"
+    assert run_time(r["codex"]["state"]) == "第 1/6 步 · 连接中断，正在重试（2/5） · 已用 Ns"
+    assert run_time(r["codexBack"]["state"]) == "第 1/6 步 · 已用 Ns"
     assert not any("连接" in str(e) or "Reconnecting" in str(e) for e in r["codex"]["entries"]), "the transcript gets no line of its own"
     assert "连接中断，正在重试（1/10）" in r["claude"]["state"]
     assert "连接中断" not in r["claudeBack"]["state"]
@@ -3491,24 +3564,27 @@ def test_codex_usage_limit_waits_for_the_reset(facts):
     assert l["clock"] == l["expected"] and l["known"] is True
     assert l["queue"] == [["ATT1", "codex", "T1"], ["ATT2", "codex", None]]
     assert l["notifications"] == []
-    assert l["last"] == ["scholium-entry final error", "You've hit your usage limit. Try again at 9:00 PM."]
+    assert l["last"] == ["scholium-entry final error", "You've hit your usage limit. Try again at 9:00 PM."], "it goes on after the wait: no card"
     a = l["after"]
     assert a["resume"] == "T1" and a["prompt"] == "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。"
-    assert a["turns"] == 3 and a["paused"] is None and a["state"] == "完成 · 1m 05s · 1 轮 · 403k tokens"
+    # the continuation ends the annotation: its card, with the continuation's turns and tokens
+    assert run_time(a["cards"]) == [card("1 轮 · 403k tokens", title="✓ 批注完成")], "the end's card only"
+    assert a["turns"] == 3 and a["paused"] is None and a["state"] is None
 
 
 def test_codex_failures_are_reported(facts):
     f = facts["codexFailed"]
-    assert f["entries"] == [["scholium-entry result", "⎿ 412 sentences"], ["scholium-entry final error", "stream disconnected before completion重试"]]
-    assert f["state"].startswith("失败") and f["kind"] == "scholium-state error" and f["paused"] is None
+    assert f["entries"] == [["scholium-entry result", "⎿ 412 sentences"], ["scholium-card failed", "stream disconnected before completion重试"]]
+    assert f["state"] is None and f["paused"] is None
     assert f["turns"] == 1 and f["queue"] == 0   # a tool had run: no second try
     assert f["notices"][-1]["descriptions"] == ["失败 · stream disconnected before completion"]
     r = facts["codexRefused"]
-    assert r["last"] == ["scholium-entry final error", "model gpt-9 is not available重试"] and r["state"].startswith("失败")
+    assert r["last"] == ["scholium-card failed", "model gpt-9 is not available重试"] and r["state"] is None
     assert r["killed"] is True and r["turns"] == 0
     n = facts["noCodex"]
-    assert n["codexCalls"] == 0 and n["state"] == "失败"
-    assert n["last"] == ["scholium-entry final error", "找不到 Codex（codex.exe）。请在 Zotero 设置 → Scholium 里指定 Codex 程序。重试"]
+    # no program, so no session: the end of a run without its Annotate line, with no Retry
+    assert n["codexCalls"] == 0 and n["state"] is None
+    assert n["last"] == ["scholium-entry final error", "找不到 Codex（codex.exe）。请在 Zotero 设置 → Scholium 里指定 Codex 程序。"]
     assert n["models"] == [""] and n["labels"] == ["Codex 默认"]
 
 
@@ -3517,27 +3593,30 @@ def test_a_failed_connection_gets_one_more_try(facts):
     w = r["ok"]["waiting"]
     assert w["state"] == "等待第二次尝试" and w["kind"] == "scholium-state paused", "the transcript says why"
     assert w["last"] == [["scholium-entry final error", "workspace routing discovery timed out"],
-                         ["scholium-entry info", "连接失败，30 秒后自动重试一次"]]
+                         ["scholium-entry info", "连接失败，30 秒后自动重试一次"]], "no card: the second try comes by itself"
     assert w["stopShown"] is True and w["queue"] == [["ATT1", True]] and w["job"] is None
     assert w["notices"] == 1 and w["notifications"] == 0 and w["turns"] == 1   # only the start notice so far
     ok = r["ok"]
-    assert ok["turns"] == 2 and ok["queue"] == 0 and ok["state"] == "完成 · 6m 17s · 3 轮 · 2,647k tokens"
+    assert ok["turns"] == 2 and ok["queue"] == 0 and ok["state"] is None
+    assert run_time(ok["cards"]) == [CODEX_CARD], "the second try is the annotation's: its card, and no red card"
     # one log, the first try kept: two starts, the retry line between them
-    assert ok["marks"] == ["prompt", "retry"] and ok["inits"] == 2   # the extra instructions are logged once
+    assert ok["marks"] == ["prompt", "retry", "counts"] and ok["inits"] == 2   # the extra instructions are logged once
     assert ok["runs"] == [["codex", "批注这篇\n附加要求：只标注方法部分"], ["codex", None]], "the second try is the same turn"
     assert ok["entries"][:4] == [["scholium-entry prompt", "批注这篇\n附加要求：只标注方法部分"],
                                  ["scholium-entry final error", "workspace routing discovery timed out"],
                                  ["scholium-entry info", "连接失败，30 秒后自动重试一次"], ["scholium-entry text", "先提取句子。"]]
     assert ok["notifications"] == []
     again = r["again"]
-    assert again["turns"] == 2 and again["queue"] == 0 and again["state"].startswith("失败")
+    assert again["turns"] == 2 and again["queue"] == 0 and again["state"] is None
+    assert again["cards"] == [["scholium-card failed", "workspace routing discovery timed out重试"]], "the last try's card, with Retry"
     assert again["marks"] == ["prompt", "retry"] and again["notifications"] == []
     assert again["waiting"]["last"][0] == ["scholium-entry final error", "stream disconnected before completion"]
-    assert r["cancelled"] == {"queue": 0, "turns": 1, "state": "已取消", "draining": False}
+    assert r["cancelled"] == {"queue": 0, "turns": 1, "last": ["scholium-card failed", "已取消重试"], "draining": False}
     assert r["refused"] == {"turns": 1, "queue": 0}
     c = r["claude"]
     assert c["waiting"] == {"state": "等待第二次尝试", "calls": 1}
-    assert c["calls"] == 2 and c["state"] == DONE_STATE and c["resumed"] is False and c["prompts"] == 2
+    assert c["calls"] == 2 and run_time(c["cards"]) == [CARD]
+    assert c["resumed"] is False and c["prompts"] == 2
     assert r["claudeActed"] == {"calls": 1, "queue": 0}
     assert facts["transient"] == [True, True, True, True, True, False, False, False]
 
@@ -3567,8 +3646,8 @@ def test_a_follow_up_says_how_to_change_written_annotations(facts):
 
 def test_claude_code_without_the_skill_stops_at_once(facts):
     n = facts["noSkill"]
-    assert n["kills"] == 1 and n["state"].startswith("失败")
-    assert n["last"] == ["scholium-entry final error", "Claude Code 找不到 zotero-scholium 技能：请把它放进 ~/.claude/skills/（见 README）。重试"]
+    assert n["kills"] == 1 and n["state"] is None
+    assert n["last"] == ["scholium-card failed", "Claude Code 找不到 zotero-scholium 技能：请把它放进 ~/.claude/skills/（见 README）。重试"]
     assert n["end"]["subtype"] == "end" and n["end"]["outcome"] == "failed"
     assert facts["pluginSkill"]["kills"] == 0 and facts["pluginSkill"]["state"].startswith("完成"), "a plugin's skill counts"
 
@@ -3583,14 +3662,15 @@ def test_an_update_hands_the_running_paper_and_the_queue_to_the_new_copy(facts):
     assert "附件 key：ATT2" in u["prompts"][1] and len(u["prompts"]) == 2
     assert u["cleared"] == "", "handed over once"
     assert "运行被中断（插件更新或停用，或 Zotero 退出）" in u["entries"] and "插件已更新，接着中断的地方继续" in u["entries"]
-    assert run_time(u["history"]) == "上次：已中断 · Ns" and u["historyLast"] == ["scholium-entry final error", "运行被中断（插件更新或停用，或 Zotero 退出）重试"]
+    # the annotation tab of a section drawn later shows the session, its end last; its state line shows runs going on or waiting
+    assert u["history"] is None and u["historyLast"] == ["scholium-card failed", "运行被中断（插件更新或停用，或 Zotero 退出）重试"]
     assert u["disabled"] == {"carried": None, "end": "interrupted"}
 
 
 def test_a_cancelled_run_keeps_its_end_in_the_log(facts):
     c = facts["cancelLogged"]
     assert c["end"]["outcome"] == "cancelled" and c["end"]["text"] == "已取消"
-    assert run_time(c["history"]) == "上次：已取消 · Ns"
+    assert c["history"] == ["scholium-card failed", "已取消重试"]
 
 
 def test_the_services_limit_waits_as_long_as_it_says(facts):
@@ -3613,11 +3693,11 @@ def test_papers_outside_my_library_and_missing_files_are_not_run(facts):
     assert o["askedMissing"] == [False, ["这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）。"], 0]
 
 
-def test_annotate_goes_on_in_the_conversation_with_the_box_as_extra_instructions(facts):
+def test_annotate_again_opens_a_session_with_the_box_as_extra_instructions(facts):
     a = facts["annotateInConversation"]
-    assert a["calls"] == 2 and a["resume"] == "S1" and a["kept"] == "" and a["conversations"] == 1
+    assert a["calls"] == 2 and a["resume"] is None and a["kept"] == "" and a["conversations"] == 2
     assert a["prompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注：") and "用户的附加要求：\n只标方法部分\n\n结束时" in a["prompt"]
-    assert a["prompts"] == ["批注这篇", "批注这篇\n附加要求：只标方法部分"]
+    assert a["prompts"] == ["批注这篇\n附加要求：只标方法部分"], "the annotation tab shows the new session"
 
 
 def test_a_question_starts_a_conversation_that_answers_without_annotating(facts):
@@ -3649,28 +3729,30 @@ def test_a_question_starts_a_conversation_that_answers_without_annotating(facts)
     assert facts["ask"]["shown"] == {"placeholder": ASK, "session": "Q1"}, "a restart reads the question's conversation from the log"
 
 
-def test_annotate_continues_a_questions_conversation_with_the_box_as_extra_instructions(facts):
-    follow = "接着对话，例如：第 5 页那条译文改短一些"
+def test_annotate_after_a_question_opens_a_session_of_its_own(facts):
+    extra = "附加要求（可不填），例如：只批注第 3–5 页"   # the annotation tab's box until it shows a session
+    follow = "接着这次批注修改，例如：第 5 页那条译文改短"   # then words to that session
     n = facts["ask"]["annotated"]
-    assert n["resume"] == "Q1" and n["cleared"] == ""
+    assert n["resume"] is None and n["cleared"] == "", "a new annotation session is not given the chat"
     assert n["prompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注：")
     assert "\n- 画像：没有；按默认值标注，不要生成或修改画像\n" in n["prompt"] and "用户的附加要求：\n重点标方法部分\n\n结束时" in n["prompt"]
-    assert n["lines"][-1] == {"type": "scholium", "subtype": "prompt", "text": "批注这篇\n附加要求：重点标方法部分", "annotate": True}
-    assert n["prompts"] == ["这篇怎么估计后验？", "批注这篇\n附加要求：重点标方法部分"], "the question's transcript stays"
+    assert n["lines"] == [{"type": "scholium", "subtype": "prompt", "text": "批注这篇\n附加要求：重点标方法部分", "annotate": True, "extra": "重点标方法部分"}]
+    assert n["prompts"] == ["批注这篇\n附加要求：重点标方法部分"]
+    assert n["chat"] == [["这篇怎么估计后验？"], True], "the question's conversation stays as it was"
     assert n["notices"][0] == [STARTED]
-    assert n["after"] == {"placeholder": follow, "sendHidden": False, "stop": ["↑", "发送"], "session": "S1"}
+    assert n["after"] == {"placeholder": follow, "sendHidden": False, "stop": ["↑", "发送"], "session": "Q1"}
     r = facts["ask"]["redo"]
-    assert r["calls"] == 3 and r["resumed"] is True and r["kept"] == "" and r["conversations"] == 1, "Annotate again goes on in the conversation"
-    assert [line["text"] for line in r["lines"]] == ["这篇怎么估计后验？", "批注这篇\n附加要求：重点标方法部分", "批注这篇\n附加要求：第 5 页那条译文改短"]
-    assert facts["ask"]["restarted"] == {"resumed": True, "prompt": n["prompt"].split("\n")[0], "profile": "- 画像：/data/zotero-scholium/profile.md"}
-    assert facts["ask"]["later"] == {"placeholder": follow, "session": "S1"}, "the log keeps the annotation"
+    assert r["calls"] == 3 and r["resumed"] is False and r["kept"] == "" and r["conversations"] == 3, "Annotate again opens another session"
+    assert [line["text"] for line in r["lines"]] == ["批注这篇\n附加要求：第 5 页那条译文改短"]
+    assert facts["ask"]["restarted"] == {"resumed": False, "prompt": n["prompt"].split("\n")[0], "profile": "- 画像：/data/zotero-scholium/profile.md"}
+    assert facts["ask"]["later"] == {"placeholder": ASK, "session": "Q1"}, "the question's conversation stays a question's"
     assert facts["askOrder"] == ["ATT3", "ATT4", "ATT2"], "questions go before the papers still waiting, in their order"
-    assert run_time(facts["askBox"]) == {"asking": ASK, "annotating": follow, "state": "启动 Claude Code · 已用 Ns", "queued": []}, \
-        "an annotation that starts takes the box's next words as a follow-up"
+    assert run_time(facts["askBox"]) == {"asking": ASK, "annotating": extra, "state": "启动 Claude Code · 已用 Ns", "queued": []}, \
+        "an annotation that starts shows on its own tab"
     c = facts["askThenCodex"]
     assert c["claudeCalls"] == 1 and c["threads"] == ["thread/start"] and c["conversations"] == 2, "Codex starts a conversation of its own"
     assert c["text"] == "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论、页边批注、阅读笔记，按画像和默认值。"
-    assert c["entries"][0] == "批注这篇" and run_time(c["entries"][-1]) == "GPT-6-Astra · HH:MM" and "这篇怎么估计后验？" not in c["entries"]
+    assert c["entries"][0] == "批注这篇" and c["entries"][-1] == CODEX_CARD[1][:30] and "这篇怎么估计后验？" not in c["entries"]
     assert c["placeholder"] == follow
 
 
@@ -3682,10 +3764,10 @@ def test_a_questions_follow_ups_failures_and_races(facts):
     assert e["followUp"] == ("下面是用户在 Zotero 里针对这篇论文发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
                              "只是提问就直接回答；用户明确要求写批注或笔记时，才按技能的流程写入 Zotero。\n\n那它的损失函数呢？\n\n"
                              "写入了 Zotero 时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。"), "no configuration to rewrite whole"
-    assert e["resumes"] == [False, True, True, True], "after a failed annotation the conversation goes on in its session"
-    assert e["failed"] == {"session": "Q1", "question": False, "placeholder": "接着对话，例如：第 5 页那条译文改短一些"}
+    assert e["resumes"] == [False, True, False, False], "each annotation opens a session of its own"
+    assert e["failed"] == {"session": "Q1", "question": True, "placeholder": ASK}, "a failed annotation leaves the question's conversation as it was"
     race = facts["askRace"]
-    assert sorted(bool(x) for x in race["both"]) == [False, True] and race["queued"] == 0 and race["calls"] == 1, "one of them runs"
+    assert [bool(x) for x in race["both"]] == [True, True] and race["queued"] == 1 and race["calls"] == 1, "one runs, the other waits behind it"
     assert facts["handedTwice"] == {"calls": 0, "updated": True, "conv": "claude-run"}, "an earlier version's paper goes on in that version's log"
 
 
@@ -3705,7 +3787,7 @@ def test_a_session_the_agent_no_longer_has_is_rebuilt_from_the_conversation(fact
         assert run_time(c["entries"][-3:]) == [["scholium-entry prompt", "AdLN的作用是什么"], ["scholium-entry text", "改好了：第 5 页的译文已缩短。"],
                                                ["scholium-meta", "GPT-6-Astra · HH:MM"]], "nothing shows the session was rebuilt"
         assert c["state"].startswith("完成") and c["session"] == "T2" and c["conversations"] == 1, name
-        assert c["placeholder"] == "接着对话，例如：第 5 页那条译文改短一些", name
+        assert c["placeholder"] == "接着这次批注修改，例如：第 5 页那条译文改短", name
     assert facts["goneCodex"]["prompt"].startswith(question), "the turns are items of the new thread, not text"
     assert facts["goneCodexText"]["prompt"].startswith(HISTORY_HEAD + "\n\n" + turn + "\n\n" + HISTORY_END + "\n\n" + question), \
         "a Codex that does not take items gets them as text"
@@ -3714,16 +3796,19 @@ def test_a_session_the_agent_no_longer_has_is_rebuilt_from_the_conversation(fact
     assert k["prompt"].startswith(HISTORY_HEAD + "\n\n" + turn + "\n\n" + HISTORY_END + "\n\n" + question)
     assert "\n\n用户的新消息：\nAdLN的作用是什么\n\n" in k["prompt"]
     assert k["prompts"] == ["批注这篇", "AdLN的作用是什么"], "the words are not shown twice"
-    assert run_time(k["metas"]) == ["Opus 5.5 · HH:MM"] * 2 and k["info"] == [] and k["finals"] == [], "Claude Code's own error for the missing session is not shown"
+    # the follow-up's model and time (the annotation has its card)
+    assert run_time(k["metas"]) == ["Opus 5.5 · HH:MM"] and k["info"] == [] and k["finals"] == [], "Claude Code's own error for the missing session is not shown"
     assert k["session"] == "Q2" and k["state"].startswith("完成") and k["conversations"] == 1
-    assert k["errorsShown"] == {"last": ["scholium-entry final error", "Credit balance is too low重试"], "notice": ["失败 · Credit balance is too low"]}
+    assert k["errorsShown"] == {"last": ["scholium-card failed", "Credit balance is too low重试"], "notice": ["失败 · Credit balance is too low"]}
     s = facts["goneStopped"]
     stopped = "Claude Code 里原来的会话已经不存在了（例如已被 Claude Code 清理），刚才的任务没法接着做；再发一条消息，会开一个新会话，带着这段对话接着聊。"
     assert s["calls"] == 2 and s["queued"] == 0, "a continuation is not sent to a new session"
     assert s["gone"] == {"type": "scholium", "subtype": "gone", "agent": "claude", "resent": False}
-    assert run_time(s["state"]) == "失败 · Ns" and s["last"] == ["scholium-entry final error", stopped + "重试"]
-    assert s["session"] is None and s["placeholder"] == "接着对话，例如：第 5 页那条译文改短一些", "the conversation stays, without the session"
-    assert s["later"] == {"session": None, "placeholder": "接着对话，例如：第 5 页那条译文改短一些"}, "after a restart the log no longer names it"
+    # the annotation's continuation failed: its card, with Retry, which annotates anew
+    assert s["state"] is None and s["last"] == ["scholium-card failed", stopped + "重试"]
+    follow = "接着这次批注修改，例如：第 5 页那条译文改短"   # the annotation tab's box, which shows the session
+    assert s["session"] is None and s["placeholder"] == follow, "the session shown stays, without the agent's session"
+    assert s["later"] == {"session": None, "placeholder": follow}, "after a restart the log no longer names it"
 
 
 def test_conversations_of_earlier_versions_and_the_history_given(facts):
@@ -3746,7 +3831,7 @@ def test_conversations_of_earlier_versions_and_the_history_given(facts):
     assert h["cut"] == ["ab…", "abc…", "abc"], "never half of a character that takes two"
     assert h["boundary"] == [False, True], "excerpts from the eleventh exchange on"
     a = facts["annotateAgain"]
-    assert a == {"conversations": 1, "threads": ["thread/resume"], "runs": ["批注这篇", "批注这篇"],
+    assert a == {"conversations": 2, "threads": ["thread/start"], "runs": ["批注这篇"],
                  "text": "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论、页边批注、阅读笔记，按画像和默认值。"}
     f = facts["handedFollowUp"]
     assert f["handed"] == ["S1", "AdLN的作用是什么", True, True] and f["resumed"] is True
@@ -3785,8 +3870,8 @@ def test_new_and_resumed_sessions_know_the_annotations_and_turns(facts):
     assert i["runs"] == [["claude", "这篇讲什么？"], ["claude", None]] and i["prompts"] == 1, "the same turn, its words logged once"
     assert i["second"].startswith("使用 zotero-scholium 技能读下面这篇论文")
     w = facts["redoWithoutAgent"]
-    assert w == {"kept": True, "conversations": 1, "state": "失败",
-                 "last": ["scholium-entry final error", "找不到 Claude Code（claude.exe）。请在 Zotero 设置 → Scholium 里指定 Claude Code 程序。重试"]}
+    assert w == {"kept": True, "conversations": 1, "state": None, "chatState": None,
+                 "last": ["scholium-entry final error", "找不到 Claude Code（claude.exe）。请在 Zotero 设置 → Scholium 里指定 Claude Code 程序。"]}
 
 
 def test_new_chat_and_history(facts):
@@ -3831,8 +3916,8 @@ def test_conversations_of_a_paper_with_two_pdfs_and_hand_overs(facts):
     assert t["annotated"] == "ATT1", "Annotate goes to the PDF whose conversation is shown, as Send does"
     assert facts["livePanes"] == {"shownConv": "claude-x", "shownPath": "/data/tmp/scholium/ATT1/conversations/claude-x.jsonl",
                                   "moved": "还没发的话", "left": False}
-    assert facts["legacyHandOver"] == [["ATT1", "codex-run", True, False, True], ["ATT2", None, False, True, False]], \
-        "an earlier version's paused question has its turn in that version's log; its annotation is one"
+    assert facts["legacyHandOver"] == [["ATT1", "codex-run", True, False, True, "chat"], ["ATT2", None, False, True, False, "annotate"]], \
+        "an earlier version's paused question has its turn in that version's log; its annotation not begun starts a session of its own"
 
 
 def test_a_switch_of_the_agent_shows_each_papers_conversation(facts):
@@ -3883,14 +3968,14 @@ def test_a_question_and_its_annotation_go_on_after_a_limit_and_an_update(facts):
     assert lim["annotating"] == {"stop": ["■", "停止"], "queued": [["S1", False]]}
     assert lim["annotatePrompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注")
     assert lim["continued"] == "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。", "the task is not sent twice"
-    assert lim["resumes"] == [False, True, True, True] and lim["session"] == "S1"
+    assert lim["resumes"] == [False, True, False, True] and lim["session"] == "Q1" and lim["annotSession"] == "S1"
     u = facts["askUpdate"]
     assert u["question"] == {"handed": [True, False, "这篇怎么估计后验？", None, False],
                              "prompt": "使用 zotero-scholium 技能读下面这篇论文（status 给出题录，extract 给出正文），回答用户在 Zotero 里提的问题。",
                              "resume": False}
-    assert u["annotateSent"] == {"handed": [False, True, "", "Q1", False],
+    assert u["annotateSent"] == {"handed": [False, True, "", None, False],
                                  "prompt": "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论、页边批注、阅读笔记，按画像和默认值。",
-                                 "resume": True}
+                                 "resume": False}
     assert u["annotateAnswered"] == {"handed": [False, False, "", "Q1", True], "prompt": "插件更新打断了上面的任务。请从中断的地方继续完成，规则不变。",
                                      "resume": True}
 def test_a_failed_deletion_in_view_is_told_once(facts):
@@ -3945,13 +4030,13 @@ def test_words_go_back_when_the_agent_is_not_found(facts):
 def test_cancel_ends_a_paused_paper_in_its_log_and_section(facts):
     c = facts["cancelPaused"]
     assert c["paused"] == [True, 1] and c["queue"] == 0 and c["pausedAfter"] is False
-    assert c["state"] == "已取消" and c["ends"] == ["cancelled"] and c["last"] == "已取消" and c["timed"] == "time"
+    assert c["state"] is None and c["ends"] == ["cancelled"] and c["last"] == "已取消重试" and c["timed"] == "time"
 
 
 def test_a_second_try_paused_by_the_limit_continues_as_any_run(facts):
     p = facts["pauseAfterRetry"]
     assert p["waiting"] == [False, 0] and p["calls"] == 3
-    assert p["marks"] == ["run", "prompt", "retry", "run", "run", "continue", "time"]
+    assert p["marks"] == ["run", "prompt", "retry", "run", "run", "continue", "counts", "time"], "the annotation's end, counted"
 
 
 def test_the_state_line_is_the_conversation_shown(facts):

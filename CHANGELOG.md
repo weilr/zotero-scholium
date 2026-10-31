@@ -12,14 +12,18 @@
   Code and Codex programs (preferences `sendShortcut`, `followUpMode`, `contextRing`, `claudePath`, `codexPath`).
 - A context ring beside the send button: the share of the context window the conversation's session took up in
   its latest request, with a layer of input, cache and output.
+- Annotation sessions: each **Annotate** starts a session of its own (`annotate-<agent>-<time>.jsonl`, the
+  index's `annotation`), shown on the Annotations tab with the six steps and their times, then a card with the
+  highlights (core), margin notes, sticky notes and reading notes counted in Zotero, the warnings left, the turns
+  and the tokens. Words typed there continue the session; **Annotate again** asks in place; a failed annotation
+  offers **Retry**.
 - An empty conversation offers four starter questions; a failed question offers **Retry**; Esc twice stops a
   run.
 - Scholium section: as in llm-for-zotero, each agent has its own conversations of a paper. **New chat** starts
   one, **History** lists them by day to open, rename or delete (with **Undo**; a deleted Codex conversation's thread
-  is archived), and switching the agent starts a new one. Messages and **Annotate** go on in the conversation shown,
-  the box's words with **Annotate** as extra instructions. Each conversation has its log in
-  `<out dir>/conversations/`; `claude-run.jsonl` and `codex-run.jsonl` of earlier versions are each agent's first
-  conversation.
+  is archived), and switching the agent starts a new one. Messages go on in the conversation shown. Each
+  conversation has its log in `<out dir>/conversations/`; `claude-run.jsonl` and `codex-run.jsonl` of earlier
+  versions are each agent's first conversation.
 - Scholium section: a new session is told which configuration, agent and time wrote the paper's annotations, and a
   session that goes on is told when another conversation rewrote them since, or that they are gone. The section
   shows when each run ended.
@@ -31,6 +35,7 @@
 - Scholium section: the section fills the side pane's height. The state is one line beside the settings chip.
   While a run goes on, one line names what the agent does; once the answer is there, the steps fold into "Worked
   for 24s ›". The history is a layer of the PDF's conversations by day. ■ stops a run.
+- Scholium section: annotating no longer continues the chat; the Chat tab is for questions.
 - Scholium section: the conversations and the history are those of one PDF, the item's best PDF in the library
   and the open PDF in the reader.
 - Token counts are written in k with thousands separators (`2,568k tokens`), in Chinese too.
@@ -42,16 +47,16 @@
 - Scholium section: a conversation's log leaves out the image data in a Claude Code tool's result, Claude Code's own
   copy of the result and Codex's turn diff. A line the log file does not take at once is written with the next ones,
   and the run goes on.
-- Scholium section: the state line gives the outcome of the conversation shown. ■ on a paper that waits for its
-  second try or for a limit to reset ends it as cancelled in its log. A paper moved to the trash while it waits is
-  left out. The words of a message whose agent is not found go back to the box. A title being typed in **History**
-  stays when the list is drawn again. For a paper in a group library the message box is hidden and **Agent**,
-  **New chat** and **History** are off.
+- Scholium section: the state line gives the outcome of the conversation shown, on the Annotations tab that of
+  **Delete annotations**. ■ on a paper that waits for its second try or for a limit to reset ends it as cancelled in
+  its log. A paper moved to the trash while it waits is left out. The words of a message whose agent is not found go
+  back to the box. A title being typed in **History** stays when the list is drawn again. For a paper in a group
+  library the message box is hidden and **Agent**, **New chat** and **History** are off.
 - Scholium section: a Codex thread counts as gone only when Codex refuses to resume it. A relative configuration path
   of a command run in a Windows folder is kept as a Windows path. The model list is asked for without the user's MCP
   servers and hooks. `mailto:` links are not followed. A conversation index that cannot be read is not written over,
-  and the index is written through a temporary file. English texts say "1 turn"; Codex's end and Claude Code's
-  failure kinds are named in the user's language.
+  and the index is written through a temporary file. English texts say "1 turn" and "1 sticky note"; Codex's end
+  and Claude Code's failure kinds are named in the user's language.
 - A margin note without room (no gap tall enough, taller than the page allows, or a margin narrower than a box)
   takes the other margin of a one-column page when its `side` is `auto`, and without room there either is written as
   a sticky note with its whole text beside the first line of its paragraph, listed under `as_notes`; a two-column
