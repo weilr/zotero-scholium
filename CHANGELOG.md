@@ -11,7 +11,9 @@
   Ctrl + Enter), the follow-up behavior (Queue or Steer), whether the context window usage shows, and the Claude
   Code and Codex programs (preferences `sendShortcut`, `followUpMode`, `contextRing`, `claudePath`, `codexPath`).
 - A context ring beside the send button: the share of the context window the conversation's session took up in
-  its latest request, with a layer of input, cache and output.
+  its latest request, with a layer of input, cache and output and **Compact this conversation's context**;
+  `/compact` in the box does the same. Compactions, also the agents' own, show in the transcript with the sizes
+  before and after. A compaction under way when the plugin is updated is handed over and runs again.
 - Annotation sessions: each **Annotate** starts a session of its own (`annotate-<agent>-<time>.jsonl`, the
   index's `annotation`), shown on the Annotations tab with the six steps and their times, then a card with the
   highlights (core), margin notes, sticky notes and reading notes counted in Zotero, the warnings left, the turns

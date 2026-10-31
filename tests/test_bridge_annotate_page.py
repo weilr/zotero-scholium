@@ -523,12 +523,13 @@ SCENARIOS = r"""
     pane.annotGo.click();
     for (let i = 0; i < 3000 && !h.log.release; i++) await tick();
     await settle(20);
+    pane.state.title = 'stale'; await new Promise(r => setTimeout(r, 40));   // the line's ticks keep its tooltip
     const run = () => pane.annot.list.children.at(-1);
     const steps = run().children.find(c => c.className === 'scholium-steps');
     const during = { steps: steps.children.map(s => [s.className, s.children[0].textContent]), go: pane.annotGo.hidden,
                      round: pane.send.textContent, sendShown: !pane.send.hidden,
                      live: run().children.find(c => c.className === 'scholium-fold').children[0].textContent,
-                     reached: h.runner.job.steps.map(s => s.step), state: p.view().state };
+                     reached: h.runner.job.steps.map(s => s.step), state: p.view().state, stateTitle: p.view().stateTitle };
     // a step done shows how long it took, up to the start of the next one
     h.runner.job.steps = [['skill', 0], ['extract', 5000], ['reading', 65000], ['writing', 3725000], ['dryRun', 3730000], ['applying', 3790000]]
       .map(([step, at]) => ({ step, at }));
@@ -981,6 +982,7 @@ def test_the_annotation_tab(facts):
     assert d["sendShown"] is True, "■ stops the annotation"
     assert d["reached"] == ["skill", "extract", "reading", "writing", "dryRun", "applying"]
     assert re.fullmatch(r"第 6/6 步 · 已用 \d+s", d["state"]), "the step's name is in the list of steps, not on the state line"
+    assert d["stateTitle"] == d["state"], "a running state cut short is whole in its tooltip"
     assert d["times"] == ["5 秒", "1 分 0 秒", "1 小时 1 分", "5 秒", "1 分 0 秒", ""]
     f = a["after"]
     assert f["parts"] == ["scholium-entry prompt", "scholium-fold", "scholium-card"], "the closing words go into the folded steps"

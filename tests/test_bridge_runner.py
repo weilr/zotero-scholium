@@ -3498,7 +3498,7 @@ def test_each_agent_has_its_own_conversations(facts):
     f = facts["codexFollowUp"]
     assert f["claudeCalls"] == 0
     assert f["methods"] == ["initialize", "initialized", "config/read", "plugin/installed", "thread/resume", "turn/start"]
-    assert f["resume"] == {"threadId": "T1", "cwd": "/data/tmp/scholium", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
+    assert f["resume"] == {"threadId": "T1", "excludeTurns": True, "cwd": "/data/tmp/scholium", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
                            "sandbox": "workspace-write", "serviceName": "scholium-bridge", "model": "gpt-6-luna",
                            "config": {"mcp_servers": {"s": {"enabled": False}}}}
     assert f["disabled"] == ["superpowers@m", "zotero@remote"]

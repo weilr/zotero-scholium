@@ -1307,7 +1307,7 @@ def test_the_context_ring(facts):
     r = facts["ring"]
     assert r["half"]["shown"] and r["half"]["cls"] == "scholium-ring" and r["half"]["share"] == "55%"
     assert r["half"]["title"] == "上下文窗口：\n55% 已用（剩余 45%）\n550k / 1,000k tokens"
-    assert r["parts"] == {"names": ["scholium-context-head", "scholium-context-bar", "scholium-context-legend"], "head": "上下文窗口550k / 1,000k（55%）",
+    assert r["parts"] == {"names": ["scholium-context-head", "scholium-context-bar", "scholium-context-legend", "scholium-context-compact"], "head": "上下文窗口550k / 1,000k（55%）",
                           "segs": [["seg input", "6.00%"], ["seg cache", "44.00%"], ["seg output", "5.00%"]], "legend": ["输入60k", "缓存440k", "输出50k"]}
     # each label and number is a box of its own row
     assert r["boxes"] == {"head": [["span", "上下文窗口"], ["span", "550k / 1,000k（55%）"]],
@@ -1316,7 +1316,7 @@ def test_the_context_ring(facts):
     assert r["edge"] == "scholium-ring warn", "orange from 80 %"
     assert r["over"] == "100%"
     assert r["full"] == "scholium-ring warn"
-    assert "上下文窗口" in r["layer"] and "850k / 1,000k（85%）" in r["layer"] and r["noBar"] == 1, "the bar needs the parts"
+    assert "上下文窗口" in r["layer"] and "850k / 1,000k（85%）" in r["layer"] and r["noBar"] == 2, "the bar needs the parts"
     assert r["off"] is True and r["k"] == ["999", "550k", "1,000k", "2,567k", "2,568k"]
     assert r["claude"] == {"used": 45102, "window": 0, "parts": {"input": 2, "cache": 45000, "output": 100}}
     assert r["codex"] == {"used": 1050, "window": 9000, "parts": {"input": 400, "cache": 600, "output": 50}}
@@ -1441,7 +1441,7 @@ def test_the_words_of_a_runs_line(facts):
     assert w["durations"] == ["0 秒", "59 秒", "6 分 17 秒", "1 小时 2 分"]
     assert w["worked"] == ["已处理", "已处理 6 分 17 秒", "已处理"]
     assert w["labels"] == ["Opus 5.5", "Haiku 4.5", "GPT-6-Luna", "gpt-x"]
-    assert w["runLines"] == [[{"kind": "run", "at": 5}], [{"kind": "run", "at": 0}]]
+    assert w["runLines"] == [[{"kind": "run", "at": 5, "compact": False}], [{"kind": "run", "at": 0, "compact": False}]]
     assert w["english"] == ["Thinking", "Reading b.txt", "Writing c.json", "Running ls", "Loading the skill", "Searching q", "Calling Grep",
                             "Worked for 6m 17s", "Worked", "59s", "6m 17s", "1h 2m"]
 

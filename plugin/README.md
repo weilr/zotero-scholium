@@ -174,7 +174,11 @@ history and the annotation sessions are those of that PDF.
   not found go back to the box.
 - Context ring: beside the round button, a ring whose arc is the share of the model's context window that the
   conversation's session took up in its latest request (orange from 80%); its tooltip gives the share used and
-  left and the tokens in k. A click opens a layer with the numbers and a bar of input, cache and output.
+  left and the tokens in k. A click opens a layer with the numbers, a bar of input, cache and output, and
+  **Compact this conversation's context**; `/compact` in the box, optionally followed by what to keep, does the
+  same. Claude Code is sent `/compact` in its session (`claude -p --resume`); Codex compacts its thread with
+  `thread/compact/start`. A compaction shows in the transcript as a dashed line, "Compacting context…" and then
+  "Context compacted · 850k → 120k"; one the agent made by itself reads "Context compacted automatically".
 - **Personal profile ↗** opens the annotation profile `<data dir>/zotero-scholium/profile.md`, which
   every run follows, in an editor over the Zotero window: the Markdown text as it is on the left, and
   on the right a preview that formats it as it is typed and follows its scrolling; colour codes such
@@ -222,9 +226,10 @@ the section ends the wait at once.
 When the plugin is updated while a paper runs, the run ends and its log records the interruption; the
 new version continues that paper's conversation, then runs the papers still waiting, and a pause for a
 limit or a wait for a second try goes on; a paper whose agent had not yet received its prompt is handed
-over as it was queued, the user's words with it. Disabling the plugin or quitting Zotero ends a run the same way,
-without handing the papers over: the paper's history shows the run as interrupted; **Retry** on a run that ended
-before its answer runs it again, and a new message continues the conversation.
+over as it was queued, the user's words with it; a compaction under way is handed over as a compaction, with what
+to keep, and runs again. Disabling the plugin or quitting Zotero ends a run the same way, without handing the papers
+over: the paper's history shows the run as interrupted; **Retry** on a run that ended before its answer runs it
+again, and a new message continues the conversation.
 
 Papers that already carry the tool's annotations are annotated again only after a confirmation (on the
 Annotations tab, in place above the box); the new run replaces those annotations.

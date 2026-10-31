@@ -123,6 +123,7 @@ const CODEX_MODELS = [
 ];
 // the notifications of a Codex turn; TURN stands for the id that turn/start gave
 const note = (method, params) => ev({ method, params });
+const codexNote = note;   // harness() has a note of its own
 const coItem = (phase, item) => note('item/' + phase, { item, threadId: 'T1', turnId: 'TURN' });
 const PWSH = '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command ';
 const shell = (id, command, done) => coItem(done ? 'completed' : 'started', Object.assign(
@@ -386,6 +387,19 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
           const id = 'U' + log.codexTurns;
           answer({ turn: { id, status: 'inProgress', items: [] } });
           return this.emit((co.scripts[log.codexTurns - 1] || CODEX_SCRIPT).map(l => l.split('"TURN"').join(JSON.stringify(id))));
+        }
+        // answers at once; the compaction then runs as a turn of its own, whose id the answer does not carry
+        case 'thread/compact/start': {
+          answer({});
+          const c = { threadId: p.threadId, turnId: 'C1' };
+          return this.emit(co.compactScript || [
+            codexNote('thread/status/changed', { threadId: p.threadId, status: { type: 'active', activeFlags: [] } }),
+            codexNote('turn/started', { threadId: p.threadId, turn: { id: 'C1', status: 'inProgress', items: [] } }),
+            codexNote('item/started', Object.assign({ item: { type: 'contextCompaction', id: 'cc1' } }, c)),
+            codexNote('thread/tokenUsage/updated', Object.assign({ tokenUsage: { last: tok(119000, 100000, 1000), total: tok(9000000, 8000000, 90000), modelContextWindow: 1000000 } }, c)),
+            codexNote('item/completed', Object.assign({ item: { type: 'contextCompaction', id: 'cc1' } }, c)),
+            codexNote('thread/status/changed', { threadId: p.threadId, status: { type: 'idle' } }),
+            turnDone({ id: 'C1', status: 'completed' })]);
         }
         case 'turn/interrupt':
           answer({});

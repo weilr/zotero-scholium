@@ -647,6 +647,7 @@ var ScholiumRunner = {
       stepCount: (i, n) => zh ? `第 ${i}/${n} 步` : `step ${i}/${n}`,
       running: (step, time) => zh ? `${step} · 已用 ${time}` : `${step} · ${time} so far`,
       reconnecting: (n, max) => zh ? `连接中断，正在重试${n && max ? `（${n}/${max}）` : ""}` : `connection lost, retrying${n && max ? ` (${n}/${max})` : ""}`,
+      compactedTitle: title => zh ? `上下文已压缩：${title}` : `Context compacted: ${title}`,
       finished: title => zh ? `批注完成：${title}` : `Finished: ${title}`,
       answered: title => zh ? `已回答：${title}` : `Answered: ${title}`,
       failedLine: title => zh ? `批注失败：${title}` : `Failed: ${title}`,
@@ -708,11 +709,20 @@ var ScholiumRunner = {
       convDeleted: title => zh ? `已删除「${title}」` : `Deleted “${title}”`,
       undo: zh ? "撤销" : "Undo",
       retry: zh ? "重试" : "Retry",
+      compactingLine: zh ? "◌ 正在压缩上下文……" : "◌ Compacting context…",
+      compactedLine: zh ? "上下文已压缩" : "Context compacted",
+      compactedAuto: zh ? "上下文已自动压缩" : "Context compacted automatically",
+      compactStopped: zh ? "压缩已中断" : "Compaction stopped",
+      compactingState: d => zh ? `正在压缩 · ${d}` : `Compacting · ${d}`,
+      compactedNotice: zh ? "上下文已压缩" : "Context compacted",
+      compacting: zh ? "正在压缩" : "Compacting",
       contextLabel: zh ? "上下文窗口：" : "Context window:",
       contextUsed: (u, r) => zh ? `${u}% 已用（剩余 ${r}%）` : `${u}% used (${r}% left)`,
       contextTokens: (u, w) => zh ? `${u} / ${w} tokens` : `${u} / ${w} tokens used`,
       contextTitle2: zh ? "上下文窗口" : "Context window",
       contextShare: (u, w, s) => zh ? `${u} / ${w}（${s}%）` : `${u} / ${w} (${s}%)`,
+      compactButton: zh ? "压缩此对话的上下文" : "Compact this conversation's context",
+      compactNote: zh ? "早先的内容换成摘要，对话接着进行" : "Earlier content becomes a summary; the conversation goes on",
       partInput: zh ? "输入" : "Input",
       partCache: zh ? "缓存" : "Cache",
       partOutput: zh ? "输出" : "Output",
@@ -922,6 +932,7 @@ var ScholiumRunner = {
 
   // the message, after the conversation so far for a new session of it that is not given it otherwise
   prompt(job, own, history = true) {
+    if (job.compact) return "/compact" + (job.say ? " " + job.say : "");
     const message = this.taskPrompt(job, own);
     const before = history ? this.historyText(job.history || []) : "";
     return before ? before + "\n\n" + message : message;
@@ -1231,6 +1242,7 @@ var ScholiumRunner = {
 
   // the running paper's state line: its step and the time so far
   runningState() {
+    if (this.job.source && this.job.source.compact) return this.text("compactingState", this.duration(Date.now() - this.job.started));
     const retry = this.job.retry;
     const step = this.stepText(this.job.step) + (retry ? " · " + this.text("reconnecting", retry.attempt, retry.max) : "");
     return this.text("running", step, this.duration(Date.now() - this.job.started));
@@ -1295,8 +1307,24 @@ var ScholiumRunner = {
         if (c && c.type === "tool_result") out.push({ kind: "result", text: this.resultSummary(c.content), error: !!c.is_error });
       }
     }
-    // a run that goes on with the turn before (a second try, a continuation) has no words of its own
-    if (event.type === "scholium" && event.subtype === "run") out.push(Object.assign({ kind: "run", at: event.at || 0 }, event.user === null ? { continues: true } : {}));
+    // a compaction: the agent's status, the boundary it leaves, and the plugin's own lines
+    if (event.type === "system" && event.subtype === "status" && event.status === "compacting") out.push({ kind: "compacting" });
+    if (event.type === "system" && event.subtype === "status" && event.compact_result && event.compact_result !== "success") {
+      out.push({ kind: "compactFailed", text: String(event.compact_error || event.compact_result) });
+    }
+    if (event.type === "system" && event.subtype === "compact_boundary") {
+      const m = event.compact_metadata || {};
+      out.push({ kind: "compacted", trigger: m.trigger === "auto" ? "auto" : "manual", pre: Number(m.pre_tokens) || 0, post: Number(m.post_tokens) || 0 });
+    }
+    if (event.type === "scholium" && event.subtype === "compact") out.push({ kind: "compacting", text: String(event.text || "") });
+    if (event.type === "scholium" && event.subtype === "compacted") {
+      out.push({ kind: "compacted", trigger: "manual", pre: Number(event.pre) || 0, post: Number(event.post) || 0 });
+    }
+    // a run that goes on with the turn before (a second try, a continuation) has no words of its own; a compaction is a
+    // run of its own
+    if (event.type === "scholium" && event.subtype === "run") {
+      out.push(Object.assign({ kind: "run", at: event.at || 0, compact: !!event.compact }, event.user === null && !event.compact ? { continues: true } : {}));
+    }
     // an annotation's line carries its extra instructions
     if (event.type === "scholium" && event.subtype === "prompt") {
       out.push(Object.assign({ kind: "prompt", text: String(event.text || "") }, event.annotate ? { annotate: true, extra: String(event.extra || "") } : {}));
@@ -1355,6 +1383,7 @@ var ScholiumRunner = {
   codexEntries(msg) {
     const item = msg.params && msg.params.item;
     if (!item || typeof item !== "object") return [];
+    if (msg.method === "item/completed" && item.type === "contextCompaction") return [{ kind: "compacted", trigger: "auto", pre: 0, post: 0 }];
     if (msg.method === "item/started") {
       return item.type === "commandExecution"
         ? [{ kind: "tool", name: "Shell", text: `Shell(${this.toolSummary({ command: this.shellCommand(item.command) })})` }] : [];
@@ -1523,7 +1552,7 @@ var ScholiumRunner = {
                        this.text("contextTokens", this.kTokens(used), this.kTokens(win))].join("\n");
   },
 
-  // the context layer: the numbers, and a bar of input, cache and output; the compaction joins it in Task 5.3
+  // the context layer: the numbers, a bar of input, cache and output, and the compaction of the conversation
   openContextLayer(pane) {
     if (this.closePopover(pane, "context")) return;
     const view = this.viewOf(pane, pane.tab);
@@ -1548,6 +1577,19 @@ var ScholiumRunner = {
         }
         node.append(bar, legend);
       }
+      const box = row("scholium-context-compact");
+      const go = doc.createElement("button");
+      go.className = "scholium-button small";
+      go.textContent = this.text("compactButton");
+      go.disabled = !view.shownKey || this.busy(view.shownKey) || !view.shownConv || !(c && c.used > 0);
+      go.addEventListener("click", () => {
+        this.closePopover(pane, "context");
+        this.compactFromPane(pane).catch(e => this.log("compact failed: " + e));
+      });
+      const note = doc.createElement("div");
+      note.textContent = this.text("compactNote");
+      box.append(go, note);
+      node.append(box);
     });
   },
 
@@ -2560,6 +2602,12 @@ var ScholiumRunner = {
 
   // the words in a pane's box go to the paper it shows, in the conversation the chosen agent's messages about it go to
   sendFromPane(pane, invert = false) {
+    // /compact compacts the conversation shown, on whichever tab; it is no wish for an annotation
+    const compact = /^\/compact(?:\s+([\s\S]*))?$/.exec(String(pane.input.value || "").trim());
+    if (compact && pane.item) {
+      this.compactFromPane(pane, (compact[1] || "").trim()).then(ok => { if (ok) this.clearInput(pane); }).catch(e => this.log("compact failed: " + e));
+      return;
+    }
     // the annotation tab without a session: the words go with a new annotation
     if (pane.tab === "annotate" && !pane.annot.shownConv && !pane.busy) { this.annotateFromPane(pane); return; }
     const say = String(pane.input.value || "").trim();
@@ -2569,6 +2617,15 @@ var ScholiumRunner = {
     this.send(att || pane.item, say, { kind: pane.tab })
       .then(sent => { if (sent) this.clearInput(pane); })
       .catch(e => this.log("message failed: " + e));
+  },
+
+  // the conversation a tab shows, compacted by its agent: Claude Code's /compact in its session; false when it has no
+  // session yet or its paper is busy
+  async compactFromPane(pane, focus = "") {
+    const view = this.viewOf(pane, pane.tab);
+    if (!pane.item || !view.shownKey || !view.shownConv || this.busy(view.shownKey)) return false;
+    const att = Zotero.Items.getByLibraryAndKey(pane.item.libraryID, view.shownKey);
+    return !!att && this.send(att, focus, { compact: true, kind: pane.tab, conv: view.shownConv });
   },
 
   // the annotation tab's button: the tab's paper annotated anew, with the words in the box as extra wishes; over its
@@ -2798,6 +2855,7 @@ var ScholiumRunner = {
     // a log of an earlier version starts with an annotation unless the user's words come first; a run's session,
     // and its turn, count once the message reached the agent
     let session = null, pending = null, result = null, question = false, opened = false, reached = false, context = null, lastAt = 0;
+    let compacting = false;   // the run is a compaction: its result is no turn's
     for (const line of text.split("\n")) {
       if (!line.trim()) continue;
       let event;
@@ -2805,10 +2863,11 @@ var ScholiumRunner = {
       // the start of a run, with the user's words when it starts a turn
       if (event.type === "scholium" && event.subtype === "run") {
         opened = typeof event.user === "string";
+        compacting = !!event.compact;
         if (opened) turns.push({ user: event.user, reply: "", ended: "", reached: false });
         reached = false;
         pending = null;
-        if (event.at > 0) lastAt = event.at;
+        if (event.at > 0 && !event.compact) lastAt = event.at;   // since the session's last run that did its work
         this.addEntries(entries, this.entries(event));
         continue;
       }
@@ -2835,14 +2894,14 @@ var ScholiumRunner = {
       // the agent no longer has the session: a new one goes on with the conversation
       if (event.type === "scholium" && event.subtype === "gone") session = null;
       context = this.contextAfter(event, context);
-      if (event.type === "system" && event.subtype === "init") result = null;
-      if (event.type === "result") {
+      if (event.type === "system" && event.subtype === "init" && !compacting) result = null;
+      if (event.type === "result" && !compacting) {
         result = event;
         const errors = Array.isArray(event.errors) ? event.errors.join("; ") : "";
         if (turns.length && event.is_error) turns[turns.length - 1].ended = String(event.result || errors || this.failureText(event.subtype)).trim();
         else if (turns.length) Object.assign(turns[turns.length - 1], { reply: String(event.result || "").trim(), done: true });
       }
-      if (event.type === "scholium" && event.subtype === "end") {
+      if (event.type === "scholium" && event.subtype === "end" && !compacting) {
         result = { type: "result", subtype: event.outcome, is_error: true, result: event.text, duration_ms: event.duration_ms };
         if (turns.length) turns[turns.length - 1].ended = String(event.text || event.outcome || "");
       }
@@ -2866,6 +2925,15 @@ var ScholiumRunner = {
       const n = k => Number(u[k]) || 0;
       c.used = n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens") + n("output_tokens");
       c.parts = { input: n("input_tokens"), cache: n("cache_creation_input_tokens") + n("cache_read_input_tokens"), output: n("output_tokens") };
+    } else if (event.type === "system" && event.subtype === "compact_boundary" && event.compact_metadata) {
+      // the size the compaction left
+      const post = Number(event.compact_metadata.post_tokens) || 0;
+      if (!post) return context;
+      c.used = post;
+      c.parts = null;
+    } else if (event.type === "scholium" && event.subtype === "compacted" && Number(event.post) > 0) {
+      c.used = Number(event.post);
+      c.parts = null;
     } else if (event.type === "scholium" && event.subtype === "gone") {
       c.used = 0;   // the new session reports its own
     } else if (event.type === "result" && event.modelUsage && typeof event.modelUsage === "object") {
@@ -3384,12 +3452,14 @@ var ScholiumRunner = {
     const runs = [];
     let run = null, bare = false;   // bare: the run has nothing yet but its start line
     const open = (at, continues = false) => {
-      if (continues && run) run.continued = true;
-      run = { start: at, end: 0, prompt: null, turn: continues && run ? run.turn : null, lead: [], steps: [], answer: [], other: [], model: "" };
+      // a compaction is no turn: the run that goes on goes on with the last turn's run
+      const before = continues ? runs.filter(r => !r.compact).pop() : null;
+      if (before) before.continued = true;
+      run = { start: at, end: 0, prompt: null, turn: before ? before.turn : null, lead: [], steps: [], answer: [], other: [], model: "" };
       runs.push(run);
     };
     for (const e of entries) {
-      if (e.kind === "run") { open(e.at, !!e.continues); bare = true; continue; }
+      if (e.kind === "run") { open(e.at, !!e.continues); run.compact = !!e.compact; bare = true; continue; }
       if (!run || (e.kind === "prompt" && !bare)) open(0);
       bare = false;
       run.last = e;
@@ -3398,6 +3468,7 @@ var ScholiumRunner = {
       else if (e.kind === "text") run.answer.push(e);
       else if (e.kind === "info" && e.model) run.model = e.text;
       else if (e.kind === "time") run.end = e.at;
+      else if (e.kind === "compacting" || e.kind === "compacted" || e.kind === "compactFailed") run.other.push(e);
       else (run.steps.length || run.answer.length ? run.other : run.lead).push(e);
     }
     return runs;
@@ -3406,6 +3477,7 @@ var ScholiumRunner = {
   // one run: the user's words; the lines before its steps; a line for its steps (what it does now while it runs, else how
   // long it worked; a click opens the steps); the answer; its other lines; then the model and the time with a copy button
   renderRun(view, run, index, live) {
+    if (run.compact) return this.compactNode(view, run, live);
     if (view.kind === "annotate" && run.turn && run.turn.annotate) return this.renderAnnotationRun(view, run, index, live);
     const doc = view.doc;
     const node = doc.createElement("div");
@@ -3424,10 +3496,38 @@ var ScholiumRunner = {
     for (const e of run.lead) node.append(line(e));
     if (run.steps.length || live) node.append(this.foldNode(view, run, index, live));
     for (const e of run.answer) node.append(this.entryNode(doc, e));
-    for (const e of run.other) node.append(line(e));
+    for (const e of run.other) {
+      // the agent's own compaction in this run: a line with the sizes; its start has none
+      if (e.kind === "compacted") {
+        const n = doc.createElement("div");
+        n.className = "scholium-compact";
+        n.textContent = this.text("compactedAuto") + this.compactSizes(e);
+        node.append(n);
+        continue;
+      }
+      if (e.kind === "compacting") continue;
+      node.append(line(e));
+    }
     if (!live && run.answer.length) node.append(this.metaNode(doc, run));
     return node;
   },
+
+  // a compaction: one line, while it runs and then how it ended
+  compactNode(view, run, live) {
+    const doc = view.doc;
+    const node = doc.createElement("div");
+    node.className = "scholium-compact" + (live ? " live" : "");
+    const lines = run.lead.concat(run.other);
+    const done = lines.filter(e => e.kind === "compacted").pop();
+    node.textContent = live ? this.text("compactingLine")
+      : done ? this.text("compactedLine") + this.compactSizes(done)
+      : this.text("compactStopped");
+    const failure = lines.find(e => (e.kind === "final" && e.error) || e.kind === "compactFailed");
+    if (!live && !done && failure) node.title = failure.text || "";
+    return node;
+  },
+
+  compactSizes(e) { return e.pre > 0 && e.post > 0 ? ` · ${this.kTokens(e.pre)} → ${this.kTokens(e.post)}` : ""; },
 
   // an annotation in the annotation tab: the wishes; while it runs the steps and what it does now (the raw steps on a
   // click); then its steps folded with the closing words among them, and a card of the numbers or of the failure. The
@@ -3918,7 +4018,7 @@ var ScholiumRunner = {
   // session), its session there when the agent still holds one, and whether its message is the first one; a new
   // conversation (conv null) starts when the job runs
   async place(job) {
-    if (job.retry && job.conv) {
+    if ((job.retry || job.compact) && job.conv) {
       const log = await this.readLog(job.att.key, job.conv);
       job.resume = (log && log.session) || null;
       job.question = false;
@@ -3955,7 +4055,7 @@ var ScholiumRunner = {
   // a new one, which answers without annotating, or the next one; false when that is not possible now. opts: retry (the
   // same words again in conv, already logged), kind, quote
   async send(item, say, opts = {}) {
-    if (!item || !say) return false;
+    if (!item || (!say && !opts.compact)) return false;
     const job = await this.resolve(item);
     if (!job) {
       Services.prompt.alert(Zotero.getMainWindow(), this.text("headline"), this.text(this.pdfAttachments([item]).length ? "noFile" : "noPdf"));
@@ -3965,13 +4065,16 @@ var ScholiumRunner = {
     // the paper's run of the other tab leaves it free
     if (job.att.libraryID !== Zotero.Libraries.userLibraryID || this.busy(job.att.key, kind)) return false;
     // words to the annotation tab without a session go with a new annotation, as its extra wishes
-    if (kind === "annotate" && !opts.retry && !(await this.annotationConv(job.att.key, this.agent()))) {
+    if (kind === "annotate" && !opts.retry && !opts.compact && !(await this.annotationConv(job.att.key, this.agent()))) {
       return (await this.annotate([job.att], { extra: say })) > 0;
     }
     Object.assign(job, { agent: opts.retry && opts.agent ? opts.agent : this.agent(), say, own: job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length,
-                         kind, retry: !!opts.retry, quote: opts.quote || null });
+                         kind, retry: !!opts.retry, compact: !!opts.compact, quote: opts.quote || null });
     if (opts.retry) Object.assign(job, { conv: opts.conv, logged: true });
+    // a compaction is the shown conversation's, by its own agent
+    if (opts.compact) Object.assign(job, { conv: opts.conv, agent: this.convAgent(opts.conv) });
     await this.place(job);
+    if (job.compact && !job.resume) return false;
     if (this.busy(job.att.key, kind)) return false;
     this.enqueue([job], this.conversationAt());
     return true;
@@ -3980,13 +4083,14 @@ var ScholiumRunner = {
   // the words of a message that did not reach the agent's log go back to the box they were typed in, unless something
   // else was typed there since
   giveBack(job) {
-    if (!job.say || this.started(job) || job.fresh || job.logged) return;
+    const words = job.compact ? "/compact" + (job.say ? " " + job.say : "") : job.say;
+    if (!words || this.started(job) || job.fresh || job.logged) return;
     const att = job.att;
     const keys = [att.parentItemKey, att.key].filter(Boolean).map(item => `${att.libraryID}/${item}/${job.kind || "chat"}/${job.agent}/${job.conv || ""}`);
-    for (const k of keys) if (!this.unsent.get(k)) this.unsent.set(k, job.say);
+    for (const k of keys) if (!this.unsent.get(k)) this.unsent.set(k, words);
     for (const pane of this.panes.values()) {
       if (!keys.includes(this.unsentKey(pane)) || String(pane.input.value || "").trim()) continue;
-      pane.input.value = job.say;
+      pane.input.value = words;
       this.fitInput(pane);
     }
   },
@@ -4038,7 +4142,7 @@ var ScholiumRunner = {
   // whether a queued paper's conversation has its run already: one waiting for its second try, for a limit to reset,
   // or handed over by an update
   started(job) {
-    return !!(job.retried || job.interrupted || (job.resume && !job.say && !job.annotate));
+    return !!(job.retried || job.interrupted || (job.resume && !job.say && !job.annotate && !job.compact));
   },
 
   // a paper whose run waited ends as cancelled, in its log and its sections
@@ -4164,7 +4268,7 @@ var ScholiumRunner = {
   // record the end of one paper: its section keeps the outcome in short, the transcript has the rest
   finish(job, ok, summary, outcome, detail, answered = false) {
     if (this.job && this.job.key === job.att.key) this.job = null;
-    const title = this.text(answered ? "answered" : ok ? "finished" : this.asking(job) ? "failedAsk" : "failedLine", job.title);
+    const title = this.text(ok && job.compact ? "compactedTitle" : answered ? "answered" : ok ? "finished" : this.asking(job) ? "failedAsk" : "failedLine", job.title);
     // a chat's outcome is its state line's; an annotation's is its card, and a deletion's note before it goes
     if ((job.kind || "chat") === "chat") {
       this.notes.set(`${job.att.key}/chat`, { text: outcome || this.text(ok ? "done" : "failed"), error: !ok, at: Date.now(),
@@ -4199,7 +4303,8 @@ var ScholiumRunner = {
       for (const pane of this.panes.values()) {
         if (!pane.keys.includes(job.key)) continue;
         try {
-          pane.state.textContent = this.runningState();
+          // the line belongs to the tab of the run's kind; the other tab's outcome stays
+          if (pane.tab === (job.source.kind || "chat")) pane.state.textContent = pane.state.title = this.runningState();
           this.paintRing(pane);
         } catch (e) {}
       }
@@ -4226,14 +4331,15 @@ var ScholiumRunner = {
     if (this.job !== running) return;   // the plugin stopped meanwhile
     // the run is one of the transcript's from its start; its line goes into the log once the log is there. One that goes
     // on with the turn before is an annotation's when that turn is: its state line counts the steps its list names
-    this.transcript = (log ? log.entries : []).concat(this.entries({ type: "scholium", subtype: "run", at: started, user: again || continuation ? null : "" }));
+    this.transcript = (log ? log.entries : []).concat(this.entries({ type: "scholium", subtype: "run", at: started, compact: !!job.compact,
+                                                                                     user: job.compact || again || continuation ? null : "" }));
     const runs = this.runsOf(this.transcript), turn = runs[runs.length - 1].turn;
     running.annotation = !!job.annotate || !!(turn && turn.annotate);
     this.transcriptKey = key;
     this.transcriptPath = log ? log.path : null;
     running.context = log ? log.context : null;
     this.startPanes(key, this.transcriptKind);
-    this.notice(job, this.text(job.annotate || (!job.say && !job.resume) ? "typical" : job.question ? "askNotice" : "continuedNotice"));
+    this.notice(job, this.text(job.compact ? "compacting" : job.annotate || (!job.say && !job.resume) ? "typical" : job.question ? "askNotice" : "continuedNotice"));
     this.refresh();
     this.tick(running).catch(() => {});
     const program = agent === "codex" ? await this.findCodex() : await this.findClaude();
@@ -4259,15 +4365,16 @@ var ScholiumRunner = {
     running.log = logPath;
     // the run's agent, and the user's words when it starts a turn; once this line is on its way an update hands the
     // paper over as logged, so that the new copy does not log the turn again
-    const user = again || continuation ? null
+    const user = job.compact || again || continuation ? null
       : job.say || this.text("annotateThis") + (job.extra ? "\n" + this.text("extraLabel") + job.extra : "");
     running.logged = true;
-    await IOUtils.writeUTF8(logPath, JSON.stringify({ type: "scholium", subtype: "run", agent, user, at: started }) + "\n", { mode: "appendOrCreate" });
+    await IOUtils.writeUTF8(logPath, JSON.stringify(Object.assign({ type: "scholium", subtype: "run", agent, user, at: started }, job.compact ? { compact: true } : {})) + "\n", { mode: "appendOrCreate" });
     if (!job.resume || job.annotate) job.profile = (await this.exists(this.profilePath())) ? this.profilePath() : null;
     // the user's words, an annotation, or an automatic continuation, go into the log as the plugin's own lines; a second
     // try has them already. A question's line marks its conversation as one.
     const prompted = text => ({ type: "scholium", subtype: "prompt", text });
     const mark = job.retried || job.fresh || job.logged ? null
+      : job.compact ? { type: "scholium", subtype: "compact", text: job.say || "" }
       : job.annotate ? Object.assign(prompted(this.text("annotateThis") + (job.extra ? "\n" + this.text("extraLabel") + job.extra : "")),
                                      { annotate: true, extra: job.extra || "" })
       : job.question ? Object.assign(prompted(job.say), { question: true })
@@ -4306,8 +4413,9 @@ var ScholiumRunner = {
       this.notice(job, message, true);
     } else if (exitCode === 0 && result && !result.is_error) {
       ok = true;
-      message = summary;
-      this.notice(job, [`${this.text("done")} · ${this.duration(Date.now() - started)}`, answered ? summary : this.brief(summary)].filter(Boolean).join("\n"));
+      message = job.compact ? (ctx.compacted ? this.compactSizes(ctx.compacted).replace(/^ · /, "") : "") : summary;
+      this.notice(job, job.compact ? this.text("compactedNotice")
+        : [`${this.text("done")} · ${this.duration(Date.now() - started)}`, answered ? summary : this.brief(summary)].filter(Boolean).join("\n"));
       // an annotation's end, also of its second try or of its continuation after a pause: the numbers counted in Zotero
       if (running.annotation) {
         const tokens = this.tokenCounts(result).reduce((n, [, c]) => n + c, 0);
@@ -4490,6 +4598,10 @@ var ScholiumRunner = {
           }
           if (event.type === "assistant") this.dropDraft();   // the whole message replaces its draft
           if (event.type === "assistant" || event.type === "result") ctx.running.delivered = true;   // the agent has the prompt
+          // a compaction answers with its status and boundary
+          if (job.compact && event.type === "system" && (event.subtype === "compact_boundary" || (event.subtype === "status" && event.status === "compacting"))) {
+            ctx.running.delivered = true;
+          }
           if (event.type === "result") {
             const unfinished = this.unfinished();
             if (unfinished) {
@@ -4514,6 +4626,7 @@ var ScholiumRunner = {
             try { proc.kill(); } catch (e) {}
           }
           if (event.type === "result") ctx.result = event;
+          if (event.type === "system" && event.subtype === "compact_boundary") ctx.compacted = this.entries(event)[0];
           if (event.type === "assistant" && ((event.message && event.message.content) || []).some(c => c && c.type === "tool_use")) ctx.acted = true;
           if (event.type === "rate_limit_event" && event.rate_limit_info) {
             const info = event.rate_limit_info;
@@ -4822,7 +4935,8 @@ var ScholiumRunner = {
       let opened = null;
       if (job.resume) {
         // a thread that Codex refuses to resume is one it no longer has: a new one goes on with the conversation
-        try { opened = await rpc.request("thread/resume", Object.assign({ threadId: job.resume }, settings)); }
+        // the turns stay with the server: a long conversation is not sent back whole
+        try { opened = await rpc.request("thread/resume", Object.assign({ threadId: job.resume, excludeTurns: true }, settings)); }
         catch (e) { ctx.gone = !!(e && e.refused); throw e; }
       } else opened = await rpc.request("thread/start", settings);
       const thread = opened && opened.thread && opened.thread.id;
@@ -4841,21 +4955,32 @@ var ScholiumRunner = {
           asText = false;
         } catch (e) { this.log("history not injected: " + e); }
       }
-      const input = [{ type: "text", text: this.prompt(job, job.own, asText), text_elements: [] }];
-      if (skill) input.push({ type: "skill", name: skill.name, path: skill.path });
-      const params = { threadId: thread, input, sandboxPolicy: { type: "workspaceWrite", writableRoots: roots, networkAccess: true,
-                                                                 excludeTmpdirEnvVar: false, excludeSlashTmp: false } };
-      if (model) params.model = model;
-      if (quiet.plugins.length) params.disabledPluginIds = quiet.plugins;
-      const effort = this.effort("codex");
-      if (effort) params.effort = effort;
-      if (!ctx.current.cancelled) {
-        const begun = await rpc.request("turn/start", params);
-        state.turn = (begun && begun.turn && begun.turn.id) || null;
-        ctx.running.delivered = true;   // the turn has the prompt
-        if (skill) this.advance(ctx, "skill");
-        if (ctx.current.cancelled) stop();
-        await over;
+      // a compaction is a request of its own: it runs as a turn, whose end ends the run
+      if (job.compact) {
+        state.before = (ctx.running.context && ctx.running.context.used) || 0;
+        if (!ctx.current.cancelled) {
+          await rpc.request("thread/compact/start", { threadId: thread });
+          ctx.running.delivered = true;
+          if (ctx.current.cancelled) stop();
+          await over;
+        }
+      } else {
+        const input = [{ type: "text", text: this.prompt(job, job.own, asText), text_elements: [] }];
+        if (skill) input.push({ type: "skill", name: skill.name, path: skill.path });
+        const params = { threadId: thread, input, sandboxPolicy: { type: "workspaceWrite", writableRoots: roots, networkAccess: true,
+                                                                   excludeTmpdirEnvVar: false, excludeSlashTmp: false } };
+        if (model) params.model = model;
+        if (quiet.plugins.length) params.disabledPluginIds = quiet.plugins;
+        const effort = this.effort("codex");
+        if (effort) params.effort = effort;
+        if (!ctx.current.cancelled) {
+          const begun = await rpc.request("turn/start", params);
+          state.turn = (begun && begun.turn && begun.turn.id) || null;
+          ctx.running.delivered = true;   // the turn has the prompt
+          if (skill) this.advance(ctx, "skill");
+          if (ctx.current.cancelled) stop();
+          await over;
+        }
       }
     } catch (e) {
       failure = String((e && e.message) || e);
@@ -4885,6 +5010,14 @@ var ScholiumRunner = {
     await this.appendLog(ctx, (unfinished ? [JSON.stringify(unfinished)] : []).concat(JSON.stringify(ctx.result)));
     if (unfinished) this.appendEntries(this.entries(unfinished));
     this.appendEntries(this.entries(ctx.result));
+    // the sizes before and after the compaction, as the plugin's own line
+    if (job.compact && !failed) {
+      const after = ctx.running.context && ctx.running.context.used;
+      const mark = { type: "scholium", subtype: "compacted", pre: state.before || 0, post: after && after !== state.before ? after : 0 };
+      await this.appendLog(ctx, [JSON.stringify(mark)]);
+      ctx.compacted = this.entries(mark)[0];
+      this.appendEntries([ctx.compacted]);
+    }
     ctx.exitCode = 0;
   },
 
@@ -5023,14 +5156,16 @@ var ScholiumRunner = {
     const plain = j => ({ key: j.att.key, libraryID: j.att.libraryID, agent: j.agent, extra: j.extra || "", say: j.say || "",
                           resume: j.resume || null, asked: !!j.asked, question: !!j.question, annotate: !!j.annotate, own: j.own || 0,
                           interrupted: !!j.interrupted, updated: !!j.updated, fresh: !!j.fresh, conv: j.conv || null, asking: !!j.asking,
-                          logged: !!j.logged, throttled: !!j.throttled, retried: !!j.retried, retryAt: j.retryAt || 0, kind: j.kind || "chat" });
+                          logged: !!j.logged, throttled: !!j.throttled, retried: !!j.retried, retryAt: j.retryAt || 0, kind: j.kind || "chat",
+                          compact: !!j.compact });
     const jobs = [];
     if (running && running.source) {
       const j = running.source;
       // once the agent has answered to the prompt the conversation holds it, and the paper continues there; before that the
-      // paper is handed over as it was queued, the user's words with it
-      jobs.push(running.session && running.delivered
-        ? Object.assign(plain(j), { resume: running.session, say: "", extra: "", asked: !!(j.say || j.asked), annotate: false,
+      // paper is handed over as it was queued, the user's words with it. A compaction is handed over as one, with its
+      // focus: the new copy compacts again
+      jobs.push(running.session && running.delivered && !j.compact
+        ? Object.assign(plain(j), { resume: running.session, say: "", extra: "", asked: !!(j.say || j.asked), annotate: false, compact: false,
                                     question: false, fresh: false, logged: false, throttled: false, retried: false, retryAt: 0,
                                     updated: true })
         : Object.assign(plain(j), { logged: !!(j.logged || running.logged) }));
@@ -5060,7 +5195,7 @@ var ScholiumRunner = {
                            question: !!s.question, annotate: !!s.annotate, own: Number(s.own) || 0, updated: !!s.updated, fresh: !!s.fresh,
                            conv: typeof s.conv === "string" && s.conv ? s.conv : null, asking: !!(s.asking || s.question),
                            logged: !!s.logged, interrupted: !!s.interrupted, throttled: !!s.throttled, retried: !!s.retried,
-                           retryAt: Number(s.retryAt) || 0, kind });
+                           retryAt: Number(s.retryAt) || 0, kind, compact: !!s.compact });
       // a copy before the paper's conversations hands over its one conversation per agent, which became that agent's
       // first: a paper interrupted there has its turn in that log; an annotation not begun starts a session of its own
       if (!("conv" in s)) {

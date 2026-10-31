@@ -706,6 +706,9 @@
   font-weight: 600;
 }
 
+.scholium-context-compact { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+.scholium-context-compact > div { font-size: 10.5px; color: var(--fill-secondary); }
+
 .scholium-context-bar {
   display: flex;
   height: 6px;
@@ -1048,3 +1051,7 @@
 .scholium-entry.final .retry {
   margin-inline-start: auto;
 }
+
+.scholium-compact { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--fill-secondary); margin: 6px 0; }
+.scholium-compact::before, .scholium-compact::after { content: ""; flex: 1; border-top: 1px dashed var(--fill-quarternary); }
+.scholium-compact.live { color: var(--accent-blue); }
