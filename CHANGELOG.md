@@ -26,6 +26,10 @@
   highlights (core), margin notes, sticky notes and reading notes counted in Zotero, the warnings left, the turns
   and the tokens. Words typed there continue the session; **Annotate again** asks in place; a failed annotation
   offers **Retry**.
+- **Ask Scholium** in the reader's selection popup puts the passage and its page label above the box of the Chat
+  tab, and the next message quotes it to the agent with its page in the PDF and, where it differs, the label.
+- Sentence citations: answers cite the paper's sentences as `[#n]`, shown as chips with the page and, on hover,
+  the sentence; **Locate ↗** opens the PDF at the page and finds the sentence.
 - An empty conversation offers four starter questions; a failed question offers **Retry**; Esc twice on the same
   run stops it.
 - Scholium section: as in llm-for-zotero, each agent has its own conversations of a paper. **New chat** starts

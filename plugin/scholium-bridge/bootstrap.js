@@ -490,6 +490,7 @@ var ScholiumRunner = {
   removedQueued: new Map(), // qid -> { job, next, timer }: a queued message deleted a moment ago, until it can no longer be brought back;
                             // next: the qid of the row of its queue that followed it
   qseq: 0,                  // the number of the latest queued message
+  pendingQuotes: new Map(), // attachment key -> { text, page }: a passage asked about before the section was drawn
   current: null,            // { key, proc, cancelled }
   draining: false,
   job: null,                // { title, key, libraryID, started, step } of the running paper
@@ -528,6 +529,8 @@ var ScholiumRunner = {
   DRAFT_MS: 80,             // the draft is set again at most this often
   MAX_ENTRIES: 3000,
   paneID: null,
+  citations: new Map(),     // attachment key -> { at, size, map } the paper's numbered sentences, as sentences.json has them
+  cites: null,              // { key, map } the sentences of the paper whose transcript is being drawn
   panes: new Map(),         // item pane section body -> { doc, keys, list, state, buttons, the conversation shown, seen }
   AGENTS: ["claude", "codex"],
   models: {},               // agent -> [{ value, label, title, efforts }] as the agent reports them; none until it answered
@@ -697,6 +700,8 @@ var ScholiumRunner = {
                                : `The session in ${agent === "codex" ? "Codex no longer exists (for example, it was deleted in the Codex app)" : "Claude Code no longer exists (for example, Claude Code cleaned it up)"}, so the task cannot go on; a new message starts a new session that is given this conversation.`,
       tabChat: zh ? "对话" : "Chat",
       tabAnnotate: zh ? "批注" : "Annotations",
+      askScholium: zh ? "问 Scholium" : "Ask Scholium",
+      quoteRemove: zh ? "不引用这段" : "Remove the quote",
       annotEmptyTitle: zh ? "还没有批注这篇" : "Not annotated yet",
       annotEmptyBody: zh ? "会做重点句高亮（附译文）、页边批注和一篇阅读笔记，按你的个人配置来，通常 10–20 分钟。每次批注都是新会话。"
                          : "Highlights key sentences with translations, adds margin notes and a reading note, following your profile; usually 10–20 minutes. Each annotation is a new session.",
@@ -734,6 +739,8 @@ var ScholiumRunner = {
       deleteConv: zh ? "删除这段对话" : "Delete this conversation",
       convDeleted: title => zh ? `已删除「${title}」` : `Deleted “${title}”`,
       undo: zh ? "撤销" : "Undo",
+      citePage: p => zh ? `第 ${p} 页` : `Page ${p}`,
+      locate: zh ? "定位 ↗" : "Locate ↗",
       retry: zh ? "重试" : "Retry",
       compactingLine: zh ? "◌ 正在压缩上下文……" : "◌ Compacting context…",
       compactedLine: zh ? "上下文已压缩" : "Context compacted",
@@ -820,12 +827,12 @@ var ScholiumRunner = {
   },
 
   // words into the answer under way, as Codex's Steer: given to the agent without stopping it, and logged as the user's
-  async steerFromPane(pane, say) {
+  async steerFromPane(pane, say, quote = null) {
     if (!this.steerable(pane)) return false;
     const running = this.job;
-    try { await this.current.steer(say); }
+    try { await this.current.steer(this.said({ say, quote })); }
     catch (e) { this.log("steer refused: " + e); return false; }
-    const mark = { type: "scholium", subtype: "steer", text: say };
+    const mark = Object.assign({ type: "scholium", subtype: "steer", text: say }, quote ? { quote } : {});
     try { if (running.log) await IOUtils.writeUTF8(running.log, JSON.stringify(mark) + "\n", { mode: "append" }); }
     catch (e) { this.log("steer not logged: " + e); }
     if (this.job === running) this.appendEntries(this.entries(mark));
@@ -1083,9 +1090,10 @@ var ScholiumRunner = {
       "",
       "这是从 Zotero 里发来的无人值守任务：不要向用户提问，不要启动子代理。只回答，不写批注和笔记；用户在问题里明确要求时，才按技能的流程写入 Zotero。",
       ...this.annotationLines(job, own),
+      `引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt（已有就直接读 sentences.txt）。`,
       "",
       later ? "用户的新消息：" : "用户的问题：",
-      job.say,
+      this.said(job),
       "",
       "写入了 Zotero 时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。",
     ] : [
@@ -1100,12 +1108,48 @@ var ScholiumRunner = {
       "This is an unattended task sent from Zotero: do not ask the user anything and do not start sub-agents. Only answer; write no annotations "
         + "and no note unless the question asks for them, and then write to Zotero as the skill describes.",
       ...this.annotationLines(job, own),
+      `When you quote a sentence of the paper, put its sentence number after it as [#123] (several: [#12][#15]); the numbers come from extract --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt (read sentences.txt when it is there).`,
       "",
       later ? "The user's new message:" : "The user's question:",
-      job.say,
+      this.said(job),
       "",
       "When you wrote to Zotero, end with one line only: what changed, remaining warnings. Leave that line out when only answering.",
     ]).join("\n");
+  },
+
+  // the user's words, after the passage they quote: its page in the PDF, with the page's label where it differs
+  said(job) {
+    const q = job.quote;
+    if (!q || !q.text) return job.say;
+    const lines = String(q.text).split("\n").map(l => "> " + l).join("\n");
+    const zh = this.zh();
+    const page = !q.page ? "" : zh ? `第 ${q.page} 页${q.label ? `（页码 ${q.label}）` : ""}` : `page ${q.page}${q.label ? ` (page label ${q.label})` : ""}`;
+    const lead = zh ? (page ? `用户引用了${page}的这段原文：` : "用户引用了这段原文：")
+                    : (page ? `The user quotes this passage from ${page}:` : "The user quotes this passage:");
+    return lead + "\n" + lines + "\n\n" + job.say;
+  },
+
+  // a quoted passage as it is kept: its text, its page in the PDF (as sentences.txt and the citation chips count) and,
+  // where it differs, the page's label; null without text
+  quoteOf(q) {
+    if (!q || !q.text) return null;
+    const page = String(q.page || ""), label = String(q.label || "");
+    return Object.assign({ text: String(q.text), page }, label && label !== page ? { label } : {});
+  },
+
+  // the page of a reader's selection: its number in the PDF, else its label
+  pageOf(a) {
+    const i = a.position ? a.position.pageIndex : -1;
+    return typeof i === "number" && i >= 0 ? String(i + 1) : String(a.pageLabel || "");
+  },
+
+  // a quoted passage as the section shows it, with the page's label; the page only when the reader gave one
+  quoteLabel(q) {
+    return (q.page ? `p.${q.label || q.page} · ` : "") + q.text;
+  },
+
+  quoteTag(q) {
+    return (q.page ? `[p.${q.page}] ` : "") + `"${q.text}"\n`;
   },
 
   // the next message of the paper's conversation: the user's words, or a continuation after the usage limit, a
@@ -1128,7 +1172,7 @@ var ScholiumRunner = {
           + "只是提问就直接回答；用户明确要求写批注或笔记时，才按技能的流程写入 Zotero。",
         ...changed,
         "",
-        job.say,
+        this.said(job),
         "",
         "写入了 Zotero 时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。",
       ] : [
@@ -1136,7 +1180,7 @@ var ScholiumRunner = {
           + "Answer a question directly; write annotations or a note only when the user asks for them, and then write to Zotero as the skill describes.",
         ...changed,
         "",
-        job.say,
+        this.said(job),
         "",
         "When you wrote to Zotero, end with one line only: what changed, remaining warnings. Leave that line out when only answering.",
       ]).join("\n");
@@ -1148,7 +1192,7 @@ var ScholiumRunner = {
                      + "（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置，否则下次整份重写时会把它们删掉。"] : []),
       ...changed,
       "",
-      job.say,
+      this.said(job),
       "",
       "改了批注时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。",
     ] : [
@@ -1159,7 +1203,7 @@ var ScholiumRunner = {
                      + "write a separate configuration with just new entries, which the next whole rewrite would delete."] : []),
       ...changed,
       "",
-      job.say,
+      this.said(job),
       "",
       "When annotations changed, end with one line only: what changed, remaining warnings. Leave that line out when only answering.",
     ]).join("\n");
@@ -1377,9 +1421,13 @@ var ScholiumRunner = {
       out.push(Object.assign({ kind: "run", at: event.at || 0, compact: !!event.compact }, event.user === null && !event.compact ? { continues: true } : {}));
     }
     // an annotation's line carries its extra instructions
-    if (event.type === "scholium" && event.subtype === "steer") out.push({ kind: "prompt", text: String(event.text || ""), steer: true });
+    if (event.type === "scholium" && event.subtype === "steer") {
+      out.push(Object.assign({ kind: "prompt", text: String(event.text || ""), steer: true },
+                             event.quote && event.quote.text ? { quote: this.quoteOf(event.quote) } : {}));
+    }
     if (event.type === "scholium" && event.subtype === "prompt") {
-      out.push(Object.assign({ kind: "prompt", text: String(event.text || "") }, event.annotate ? { annotate: true, extra: String(event.extra || "") } : {}));
+      out.push(Object.assign({ kind: "prompt", text: String(event.text || "") }, event.annotate ? { annotate: true, extra: String(event.extra || "") } : {},
+                             event.quote && event.quote.text ? { quote: this.quoteOf(event.quote) } : {}));
     }
     if (event.type === "scholium" && event.subtype === "unfinished" && String(event.text || "").trim()) {
       out.push({ kind: "text", text: String(event.text).trim(), unfinished: true });
@@ -1487,6 +1535,66 @@ var ScholiumRunner = {
       onAsyncRender: ({ body }) => this.loadHistory(body),
       onDestroy: ({ body }) => { this.dropPane(body); },
     }) || null;
+  },
+
+  // Ask Scholium under the colours of the reader's selection popup
+  selectionButton({ reader, doc, params, append }) {
+    const a = params && params.annotation;
+    if (!a || !String(a.text || "").trim()) return;
+    const b = doc.createElement("button");
+    b.className = "toolbar-button wide-button scholium-ask";
+    b.textContent = this.text("askScholium");
+    b.addEventListener("click", () => { this.askAboutSelection(reader, a).catch(e => this.log("ask failed: " + e)); });
+    append(b);
+  },
+
+  // the passage goes above the chat's box of the paper's section, in the window of the reader
+  async askAboutSelection(reader, a) {
+    const att = Zotero.Items.get(reader.itemID);
+    if (!att) return;
+    const quote = this.quoteOf({ text: String(a.text).replace(/\s+/g, " ").trim(), page: this.pageOf(a), label: a.pageLabel });
+    const pane = this.paneFor(reader._window, att.key, reader.tabID || null);
+    if (!pane) { this.pendingQuotes.set(att.key, quote); await this.revealSection(reader._window, null, reader.tabID || null); return; }
+    pane.quote = quote;
+    this.setTab(pane, "chat");
+    await this.revealSection(reader._window, pane);
+    try { pane.input.focus(); } catch (e) {}
+  },
+
+  // the section of a paper in a window: a reader's is the one of its side pane (the library's stays drawn behind the
+  // reader's tab); else the one on screen when there are several
+  paneFor(win, key, tabID = null) {
+    let found = null;
+    for (const pane of this.panes.values()) {
+      if (!pane.keys.includes(key) || (win && pane.doc.defaultView !== win)) continue;
+      if (tabID) {
+        let details = null;
+        try { details = pane.body.closest("item-details"); } catch (e) {}
+        if (details && details.tabID === tabID) return pane;
+        continue;
+      }
+      found = pane;
+      try { if (pane.body.checkVisibility && pane.body.checkVisibility()) return pane; } catch (e) {}
+    }
+    return found;
+  },
+
+  // the section in view in the reader's side pane: the context pane opened, the section opened, the item pane scrolled to
+  // it; each step may be missing. A section not drawn yet is found in the side pane of the reader's tab (Zotero draws it
+  // once it is scrolled to)
+  async revealSection(win, pane = null, tabID = null) {
+    try { if (win && win.ZoteroContextPane && win.ZoteroContextPane.collapsed) win.ZoteroContextPane.collapsed = false; } catch (e) {}
+    let section = null, details = null;
+    try {
+      if (pane && pane.body) { section = pane.body.closest("collapsible-section"); details = pane.body.closest("item-details"); }
+      else if (tabID && win) {
+        details = win.document.getElementById(tabID + "-context");
+        const own = details && [...details.querySelectorAll("item-pane-custom-section")].find(c => c.dataset.pane === this.paneID);
+        section = own && own.querySelector("collapsible-section");
+      }
+    } catch (e) {}
+    try { if (section) section.open = true; } catch (e) {}
+    try { if (details && typeof details.scrollToPane === "function") await details.scrollToPane(this.paneID); } catch (e) {}
   },
 
   dropPane(body) {
@@ -2090,6 +2198,9 @@ var ScholiumRunner = {
     pane.pane = pane;               // a view's section: the chat view is the section itself
     pane.foldOpen = new Map();
     pane.tab = old ? old.tab : "chat";
+    const pending = keys.map(k => this.pendingQuotes.get(k)).find(Boolean);
+    if (pending) { pane.quote = pending; for (const k of keys) this.pendingQuotes.delete(k); pane.tab = "chat"; }
+    else pane.quote = old && old.item === item ? old.quote || null : null;   // a quote is of the item it was chosen for
     // below the transcript, a message box as in a chat: a question or extra instructions for a new run, or a
     // follow-up; it grows with the text
     const talk = pane.composer = div("scholium-composer");
@@ -2115,6 +2226,8 @@ var ScholiumRunner = {
     // a question in place of a dialog, above the words
     pane.confirmRow = div("scholium-confirm");
     this.show(pane.confirmRow, false);
+    // the passage of the reader's selection that goes with the next message
+    pane.quoteBox = div("scholium-quote");
     pane.sendRow = div("scholium-send-row");
     pane.hint = doc.createElement("span");
     pane.hint.className = "scholium-hint";
@@ -2131,7 +2244,7 @@ var ScholiumRunner = {
     // the annotation tab's button: Annotate, or Annotate again once the tab shows a session
     pane.annotGo = this.paneButton(doc, this.text("annotateThis"), () => { this.annotateFromPane(pane); }, "primary small");
     pane.sendRow.append(pane.hint, pane.ring, pane.send, pane.annotGo);
-    talk.append(pane.queueBox, pane.confirmRow, pane.input, pane.sendRow);
+    talk.append(pane.queueBox, pane.confirmRow, pane.quoteBox, pane.input, pane.sendRow);
     box.append(head, line, pane.chatView, pane.annotView, talk);
     body.append(box);
     this.fitPane(pane);
@@ -2564,6 +2677,7 @@ var ScholiumRunner = {
       "\\*([^*\\s][^*\\n]*?)\\*",                      // 8 italics
       "\\[([^\\]\\n]+)\\]\\(([^)\\s]+)\\)",            // 9, 10 link
       "((?:https?|zotero)://[^\\s<>\"'`()（）\\[\\]{}，。；：！？、]+)",   // 11 a bare address
+      "\\[#(\\d{1,6})\\]",                             // 12 a sentence of the paper
     ].join("|"), "g");
     let at = 0;
     let m;
@@ -2582,6 +2696,11 @@ var ScholiumRunner = {
         continue;
       }
       at = re.lastIndex;
+      if (m[12] !== undefined) {
+        const found = this.cites && this.cites.map.get(Number(m[12]));
+        parent.append(found ? this.citeNode(doc, this.cites.key, Number(m[12]), found) : doc.createTextNode(m[0]));
+        continue;
+      }
       if (m[2] !== undefined || m[3] !== undefined || m[4] !== undefined || m[5] !== undefined) {
         const display = m[2] !== undefined || m[3] !== undefined;
         const math = this.mathNode(doc, (m[2] ?? m[3] ?? m[4] ?? m[5]).trim(), display);
@@ -2626,6 +2745,123 @@ var ScholiumRunner = {
       }
     }
     if (at < text.length) parent.append(doc.createTextNode(text.slice(at)));
+  },
+
+  // the paper's numbered sentences, for the citations in answers: read again when the file changed
+  async loadCitations(key) {
+    if (!key) return;
+    const path = PathUtils.join(this.outDir(key), "sentences.json");
+    let stat = null;
+    try { stat = await IOUtils.stat(path); } catch (e) { this.citations.delete(key); return; }
+    const had = this.citations.get(key);
+    if (had && had.at === stat.lastModified && had.size === stat.size) return;
+    let raw;
+    try { raw = await IOUtils.readUTF8(path); } catch (e) { this.log("sentences not read: " + e); return; }   // tried again at the next draw
+    const map = new Map();
+    try {
+      const data = JSON.parse(raw);
+      for (const x of (data && data.sentences) || []) {
+        if (x && Number.isInteger(x.id) && x.page > 0) map.set(x.id, { page: x.page, text: String(x.text || ""), rects: Array.isArray(x.rects) ? x.rects : null });
+      }
+    } catch (e) { map.clear(); this.log("sentences not parsed: " + e); }
+    this.citations.set(key, { at: stat.lastModified, size: stat.size, map });
+  },
+
+  withCites(key, fn) {
+    const before = this.cites;
+    const c = key && this.citations.get(key);
+    this.cites = c ? { key, map: c.map } : null;
+    try { return fn(); } finally { this.cites = before; }
+  },
+
+  // a cited sentence as a chip with its page
+  citeNode(doc, key, id, s) {
+    const chip = doc.createElement("span");
+    chip.className = "scholium-cite";
+    chip.setAttribute("data-id", String(id));
+    chip.textContent = `p.${s.page}`;
+    chip.addEventListener("mouseenter", () => this.openCiteCard(chip, key, s));
+    chip.addEventListener("mouseleave", () => { const pane = this.paneOf(chip); if (pane) this.citeAway(pane); });
+    chip.addEventListener("click", () => { this.locate(key, s).catch(e => this.log("locate failed: " + e)); });
+    return chip;
+  },
+
+  // a cited sentence on hover: its page, Locate at the top right, the sentence. It closes when the pointer is on neither
+  // the chip nor the card
+  openCiteCard(chip, key, s) {
+    const pane = this.paneOf(chip);
+    if (!pane || (pane.popover && pane.popover.name !== "cite")) return;
+    pane.citeHover = 1;
+    const node = this.openPopover(pane, "cite", chip, card => {
+      const doc = pane.doc;
+      const head = doc.createElement("div");
+      head.className = "scholium-cite-head";
+      const page = doc.createElement("span");
+      page.textContent = this.text("citePage", s.page);
+      const go = this.paneButton(doc, this.text("locate"), () => { this.closePopover(pane, "cite"); this.locate(key, s).catch(e => this.log("locate failed: " + e)); }, "quiet small");
+      head.append(page, go);
+      const text = doc.createElement("div");
+      text.className = "scholium-cite-text";
+      text.textContent = s.text;
+      card.append(head, text);
+    });
+    node.addEventListener("mouseenter", () => { pane.citeHover++; });
+    node.addEventListener("mouseleave", () => this.citeAway(pane));
+  },
+
+  citeAway(pane) {
+    if (!pane.popover || pane.popover.name !== "cite") return;
+    pane.citeHover--;
+    setTimeout(() => { if (pane.citeHover <= 0) this.closePopover(pane, "cite"); }, 300);
+  },
+
+  // the section that shows a node (a card lives in the window's root, so its pane is found from its chip)
+  paneOf(node) {
+    for (const pane of this.panes.values()) if (pane.body && pane.body.contains(node)) return pane;
+    return null;
+  },
+
+  // what the reader's find looks for: a sentence's first words, up to 60 characters; text without spaces, its first 20
+  findQuery(text) {
+    const flat = String(text || "").replace(/(\p{L})-\s+(\p{L})/gu, "$1$2").split(/\s+/).filter(Boolean);
+    if (flat.length < 3) return flat.join(" ").slice(0, 20);
+    let query = flat.slice(0, 8).join(" ");
+    if (query.length > 60) {
+      const cut = query.slice(0, 60), at = cut.lastIndexOf(" ");
+      query = at > 0 && query[60] !== " " ? cut.slice(0, at) : cut;
+    }
+    return query.replace(/\s*\S*-$/, "");
+  },
+
+  // a cited sentence in the paper's reader: its page, then the reader's find on the sentence's first words once its view
+  // can find
+  async locate(key, s) {
+    if (!s || !s.page) return;
+    const pane = [...this.panes.values()].find(p => p.keys.includes(key) && p.item);
+    const att = pane && Zotero.Items.getByLibraryAndKey(pane.item.libraryID, key);
+    if (!att) return;
+    try {
+      const reader = await Zotero.Reader.open(att.id, { pageIndex: s.page - 1 });
+      if (reader && reader._initPromise) await reader._initPromise;
+      const ir = reader && reader._internalReader;
+      const query = this.findQuery(s.text);
+      if (!query || !ir || typeof ir.toggleFindPopup !== "function" || typeof ir._handleFindStateChange !== "function"
+          || !ir._state || !ir._state.primaryViewFindState) return;
+      if (!(await this.findReady(ir))) return;
+      const clone = o => Components.utils.cloneInto(o, reader._iframeWindow);
+      ir.toggleFindPopup(clone({ primary: true, open: true }));
+      const prev = JSON.parse(JSON.stringify(ir._state.primaryViewFindState));
+      ir._handleFindStateChange(true, clone(Object.assign(prev, { popupOpen: true, active: true, query, highlightAll: false })));
+    } catch (e) { this.log("sentence not found in the reader: " + e); }
+  },
+
+  // whether the reader's view has its find: a reader opened just now makes its view after it starts. Five seconds at most
+  async findReady(ir) {
+    for (let i = 0; i < 50; i++) {
+      if (ir._primaryView && ir._primaryView._findController) return true;
+      await Zotero.Promise.delay(100);
+    }
+    return false;
   },
 
   LINK_SCHEMES: /^(?:https?|zotero):/i,
@@ -2679,8 +2915,13 @@ var ScholiumRunner = {
     const say = String(pane.input.value || "").trim();
     if (!say || !pane.item) return;
     if (pane.busy && this.followUpFor(pane, invert) === "steer" && this.steerable(pane)) {
-      this.steerFromPane(pane, say)
-        .then(ok => ok ? this.clearInput(pane) : this.queueFromPane(pane, say))
+      const quote = pane.tab === "chat" ? pane.quote : null;
+      this.steerFromPane(pane, say, quote)
+        .then(ok => {
+          if (!ok) return this.queueFromPane(pane, say);
+          this.clearInput(pane);
+          if (quote && pane.quote === quote) { pane.quote = null; this.paintQuote(pane); }
+        })
         .catch(e => this.log("steer failed: " + e));
       return;
     }
@@ -2702,8 +2943,9 @@ var ScholiumRunner = {
   queueFromPane(pane, say, { before = null } = {}) {
     const view = this.viewOf(pane, pane.tab);
     const att = view.shownKey && Zotero.Items.getByLibraryAndKey(pane.item.libraryID, view.shownKey);   // the paper of the tab's conversation
-    return this.send(att || pane.item, say, { kind: pane.tab, conv: view.shownConv, before })
-      .then(sent => { if (sent) this.clearInput(pane); });
+    const quote = pane.tab === "chat" ? pane.quote : null;
+    return this.send(att || pane.item, say, { kind: pane.tab, conv: view.shownConv, before, quote })
+      .then(sent => { if (sent) { this.clearInput(pane); if (quote && pane.quote === quote) { pane.quote = null; this.paintQuote(pane); } } });
   },
 
   // the conversation a tab shows, compacted by its agent: Claude Code's /compact in its session; false when it has no
@@ -3064,7 +3306,8 @@ var ScholiumRunner = {
       }
       // words steered into the turn are the user's, and part of the turn's words
       if (event.type === "scholium" && event.subtype === "steer") {
-        if (turns.length) turns[turns.length - 1].user += "\n\n" + String(event.text || "");
+        const q = event.quote && event.quote.text ? event.quote : null;
+        if (turns.length) turns[turns.length - 1].user += "\n\n" + (q ? this.quoteTag(q) : "") + String(event.text || "");
         this.addEntries(entries, this.entries(event));
         continue;
       }
@@ -3074,6 +3317,7 @@ var ScholiumRunner = {
           turns.push({ user: String(event.text || ""), reply: "", ended: "", reached: false });
           reached = false;
         }
+        if (event.quote && event.quote.text && turns.length) turns[turns.length - 1].quote = this.quoteOf(event.quote);
         opened = false;
       } else if (event.type !== "scholium") {
         opened = false;
@@ -3165,7 +3409,7 @@ var ScholiumRunner = {
     const zh = this.zh();
     const answer = t => t.reply || (t.done ? (zh ? "（没有文字回答）" : "(no text)")
       : zh ? `（没有完成${t.ended ? "：" + this.cut(t.ended, 300) : ""}）` : `(not finished${t.ended ? ": " + this.cut(t.ended, 300) : ""})`);
-    let whole = turns.map((t, i) => ({ n: i + 1, user: String(t.user || ""), answer: answer(t) }));
+    let whole = turns.map((t, i) => ({ n: i + 1, user: (t.quote ? this.quoteTag(t.quote) : "") + String(t.user || ""), answer: answer(t) }));
     let summary = "";
     if (whole.length > this.HISTORY_FROM) {
       const early = whole.slice(0, -this.HISTORY_WHOLE);
@@ -3236,6 +3480,7 @@ var ScholiumRunner = {
       for (const key of pane.keys) if ((await this.conversations(key, a)).length) { other = a; break; }
     }
     const log = shown ? await this.readLog(shown.key, shown.id) : null;
+    if (shown) await this.loadCitations(shown.key);
     if (this.panes.get(pane.body) !== pane || pane.showing !== seq) return;   // rendered or shown anew meanwhile
     if (liveHere()) { this.showLive(pane, this.job.key, "chat"); await this.showAnnotation(pane); return; }   // a run started meanwhile
     const before = this.unsentKey(pane);
@@ -3277,6 +3522,7 @@ var ScholiumRunner = {
     const id = key ? await this.annotationConv(key, agent) : null;
     const log = id ? await this.readLog(key, id) : null;
     const intro = log && log.entries.length ? null : await this.annotIntroNode(pane, key);
+    if (id) await this.loadCitations(key);
     if (view.showing !== seq) return;   // shown anew meanwhile
     // the paper's annotation runs, or started meanwhile
     if (this.job && key === this.job.key && this.job.source.kind === "annotate") { this.showLive(pane, key, "annotate"); return; }
@@ -3351,6 +3597,14 @@ var ScholiumRunner = {
       this.renderTranscript(view, ours ? this.transcript : [], true);
       if (ours && this.draft) this.paintDraft();
     } catch (e) {}
+    // the sentences the answers cite, read now: drawn again with their chips
+    const had = this.citations.get(key);
+    this.loadCitations(key).then(() => {
+      if (this.citations.get(key) === had || !view.live || view.shownKey !== key) return;
+      view.draft = null;   // the redraw detaches the draft's node
+      this.renderTranscript(view, this.transcriptKey === key ? this.transcript : [], true);
+      if (this.draft) this.paintDraft();
+    }).catch(e => this.log("citations failed: " + e));
     this.swapUnsent(pane, before);
     if (view !== pane) this.paintPane(pane);
   },
@@ -3607,6 +3861,12 @@ var ScholiumRunner = {
       node.append(content);
       return node;
     }
+    if (entry.kind === "prompt" && entry.quote) {
+      const q = doc.createElement("div");
+      q.className = "scholium-prompt-quote";
+      q.textContent = this.quoteLabel(entry.quote);
+      node.append(q);
+    }
     const content = doc.createElement("span");
     content.className = "scholium-content";
     if (entry.kind === "tool" && entry.name && entry.text.startsWith(entry.name)) {
@@ -3679,6 +3939,10 @@ var ScholiumRunner = {
   // one run: the user's words; the lines before its steps; a line for its steps (what it does now while it runs, else how
   // long it worked; a click opens the steps); the answer; its other lines; then the model and the time with a copy button
   renderRun(view, run, index, live) {
+    return this.withCites(view.shownKey, () => this.drawRun(view, run, index, live));
+  },
+
+  drawRun(view, run, index, live) {
     if (run.compact) return this.compactNode(view, run, live);
     if (view.kind === "annotate" && run.turn && run.turn.annotate) return this.renderAnnotationRun(view, run, index, live);
     const doc = view.doc;
@@ -4140,8 +4404,22 @@ var ScholiumRunner = {
       this.paintRing(pane);
       this.paintHint(pane);
       this.paintQueue(pane);
+      this.paintQuote(pane);
       this.fitInput(pane);
     } catch (e) {}
+  },
+
+  // the passage that goes with the next message, above the box of the chat tab
+  paintQuote(pane) {
+    const q = pane.tab === "chat" ? pane.quote : null;
+    this.show(pane.quoteBox, !!q);
+    if (!q) return;
+    const text = pane.doc.createElement("span");
+    text.className = "scholium-quote-text";
+    text.textContent = this.quoteLabel(q);
+    const drop = this.paneButton(pane.doc, "✕", () => { pane.quote = null; this.paintQuote(pane); }, "quiet icon small");
+    drop.title = this.text("quoteRemove");
+    pane.quoteBox.replaceChildren(text, drop);
   },
 
   paintPanes() {
@@ -4252,7 +4530,7 @@ var ScholiumRunner = {
     const agent = this.convAgent(view.shownConv);   // the conversation's own agent, whichever is chosen now
     // the retried conversation is the one the chat's messages go to; the annotation tab's is its latest session already
     if (view.kind === "chat") await this.chooseConv(key, agent, view.shownConv);
-    await this.send(att, turn.user, { retry: true, conv: view.shownConv, kind: view.kind, agent });
+    await this.send(att, turn.user, { retry: true, conv: view.shownConv, kind: view.kind, agent, quote: turn.quote || null });
   },
 
   // the user's words to the paper, in the conversation the chosen agent's messages about it go to: the first message of
@@ -4309,6 +4587,7 @@ var ScholiumRunner = {
     for (const pane of this.panes.values()) {
       if (!keys.includes(this.unsentKey(pane)) || String(pane.input.value || "").trim()) continue;
       pane.input.value = words;
+      if (job.quote && !pane.quote && !job.compact) { pane.quote = job.quote; this.paintQuote(pane); }
       this.fitInput(pane);
     }
   },
@@ -4471,7 +4750,7 @@ var ScholiumRunner = {
     const i = this.queuedAt(qid);
     if (i < 0) return;
     const job = this.queue[i];
-    if (!(await this.steerFromPane(pane, job.say))) return;
+    if (!(await this.steerFromPane(pane, job.say, job.quote))) return;
     const k = this.queuedAt(qid);
     if (k >= 0) this.queue.splice(k, 1);
     this.refresh();
@@ -4774,12 +5053,13 @@ var ScholiumRunner = {
     // the user's words, an annotation, or an automatic continuation, go into the log as the plugin's own lines; a second
     // try has them already. A question's line marks its conversation as one.
     const prompted = text => ({ type: "scholium", subtype: "prompt", text });
+    const quoted = job.quote ? { quote: job.quote } : {};
     const mark = job.retried || job.fresh || job.logged ? null
       : job.compact ? { type: "scholium", subtype: "compact", text: job.say || "" }
       : job.annotate ? Object.assign(prompted(this.text("annotateThis") + (job.extra ? "\n" + this.text("extraLabel") + job.extra : "")),
                                      { annotate: true, extra: job.extra || "" })
-      : job.question ? Object.assign(prompted(job.say), { question: true })
-      : job.say ? prompted(job.say)
+      : job.question ? Object.assign(prompted(job.say), { question: true }, quoted)
+      : job.say ? Object.assign(prompted(job.say), quoted)
       : job.resume ? { type: "scholium", subtype: "continue", reason: job.updated ? "update" : job.throttled ? "throttle" : undefined } : null;
     if (mark) {
       await IOUtils.writeUTF8(logPath, JSON.stringify(mark) + "\n", { mode: "append" });
@@ -5548,6 +5828,10 @@ var ScholiumRunner = {
   start(pluginID, update = false) {
     this.pluginID = pluginID;
     this.registerPane(pluginID);
+    try {
+      this.selectionHandler = event => this.selectionButton(event);
+      Zotero.Reader.registerEventListener("renderTextSelectionPopup", this.selectionHandler, pluginID);
+    } catch (e) { this.log("selection popup not registered: " + e); }
     // the Scholium page of Zotero's settings; Zotero removes it when the plugin stops
     if (Zotero.PreferencePanes && this.rootURI) {
       Zotero.PreferencePanes.register({ pluginID, src: this.rootURI + "settings.xhtml", label: "Scholium",
@@ -5573,7 +5857,7 @@ var ScholiumRunner = {
                           resume: j.resume || null, asked: !!j.asked, question: !!j.question, annotate: !!j.annotate, own: j.own || 0,
                           interrupted: !!j.interrupted, updated: !!j.updated, fresh: !!j.fresh, conv: j.conv || null, asking: !!j.asking,
                           logged: !!j.logged, throttled: !!j.throttled, retried: !!j.retried, retryAt: j.retryAt || 0, kind: j.kind || "chat",
-                          compact: !!j.compact, qid: j.qid || null, failed: !!j.failed });
+                          compact: !!j.compact, qid: j.qid || null, failed: !!j.failed, quote: j.quote || null });
     const jobs = [];
     if (running && running.source) {
       const j = running.source;
@@ -5612,7 +5896,8 @@ var ScholiumRunner = {
                            question: !!s.question, annotate: !!s.annotate, own: Number(s.own) || 0, updated: !!s.updated, fresh: !!s.fresh,
                            conv: typeof s.conv === "string" && s.conv ? s.conv : null, asking: !!(s.asking || s.question),
                            logged: !!s.logged, interrupted: !!s.interrupted, throttled: !!s.throttled, retried: !!s.retried,
-                           retryAt: Number(s.retryAt) || 0, kind, compact: !!s.compact, qid, failed: !!(qid && s.failed) });
+                           retryAt: Number(s.retryAt) || 0, kind, compact: !!s.compact, qid, failed: !!(qid && s.failed),
+                           quote: this.quoteOf(s.quote) });
       if (qid) this.qseq = Math.max(this.qseq, Number(qid) || 0);
       // a copy before the paper's conversations hands over its one conversation per agent, which became that agent's
       // first: a paper interrupted there has its turn in that log; an annotation not begun starts a session of its own
@@ -5672,6 +5957,9 @@ var ScholiumRunner = {
     for (const win of this.windows()) this.removeFromWindow(win);
     try { if (this.paneID) Zotero.ItemPaneManager.unregisterSection(this.paneID); } catch (e) {}
     this.paneID = null;
+    try { Zotero.Reader.unregisterEventListener("renderTextSelectionPopup", this.selectionHandler); } catch (e) {}
+    this.selectionHandler = null;
+    this.pendingQuotes.clear();
     this.prefPaneID = null;
     for (const body of [...this.panes.keys()]) this.dropPane(body);
     this.notes.clear();

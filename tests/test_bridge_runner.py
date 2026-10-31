@@ -34,7 +34,7 @@ SCENARIOS = r"""
     runner.start('scholium-bridge@zotero-scholium');
     const sec = log.sections[0];
     facts.section = { paneID: sec.paneID, header: sec.header, sidenav: sec.sidenav, ftl: log.ftl.slice(), styles: h.styles() };
-    facts.contextMenus = { menus: log.menus.length, readerListeners: log.listeners.length };
+    facts.contextMenus = { menus: log.menus.length, readerListeners: log.listeners.map(l => l.type) };
 
     const before = await h.pane(item1);
     const forNote = await h.pane(note);
@@ -2706,7 +2706,7 @@ def test_section_is_registered_and_removed_without_menus_or_toolbar_status(facts
         "ftl": ["scholium-bridge.ftl"],
         "styles": [["link", "scholium-bridge-style", "stylesheet", "chrome://scholium-bridge/content/scholium.css"]],
     }
-    assert facts["contextMenus"] == {"menus": 0, "readerListeners": 0}
+    assert facts["contextMenus"] == {"menus": 0, "readerListeners": ["renderTextSelectionPopup"]}
     assert facts["stopped"] == {"sections": ["scholium-pane"], "ftl": "removed", "panes": 0, "toolbarItems": 0, "observers": 0,
                                 "styles": 0}
 
@@ -3717,6 +3717,7 @@ def test_a_question_starts_a_conversation_that_answers_without_annotating(facts)
         "",
         "这是从 Zotero 里发来的无人值守任务：不要向用户提问，不要启动子代理。只回答，不写批注和笔记；用户在问题里明确要求时，才按技能的流程写入 Zotero。",
         "这篇论文目前没有本工具的批注。",
+        "引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --sentences /data/tmp/scholium/ATT1/sentences.json --out /data/tmp/scholium/ATT1/sentences.txt（已有就直接读 sentences.txt）。",
         "",
         "用户的问题：",
         "这篇怎么估计后验？",
