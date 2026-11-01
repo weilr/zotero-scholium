@@ -51,8 +51,8 @@
 ### Changed
 
 - Scholium section: the section fills the side pane's height. The state is one line beside the settings chip.
-  While a run goes on, one line names what the agent does; once the answer is there, the steps fold into "Worked
-  for 24s ›". The history is a layer of the PDF's conversations by day. ■ stops a run.
+  While a run goes on, one line says "Working"; once the answer is there, the steps fold into "Worked for 24s ›".
+  The history is a layer of the PDF's conversations by day. ■ stops a run.
 - Scholium section: annotating no longer continues the chat; the Chat tab is for questions.
 - Scholium section: the conversations and the history are those of one PDF, the item's best PDF in the library
   and the open PDF in the reader.

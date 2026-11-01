@@ -978,7 +978,7 @@ def test_the_annotation_tab(facts):
     d = a["during"]
     assert [s[1] for s in d["steps"]] == ["加载技能", "提取句子", "通读论文", "撰写批注", "预演检查", "写入 Zotero"]
     assert [s[0] for s in d["steps"]] == ["scholium-step done"] * 5 + ["scholium-step now"]
-    assert d["go"] is True and d["round"] == "■" and d["live"].startswith("正在运行 python") and d["live"].endswith("详情 ›")
+    assert d["go"] is True and d["round"] == "■" and d["live"] == "正在处理 详情 ›"
     assert d["sendShown"] is True, "■ stops the annotation"
     assert d["reached"] == ["skill", "extract", "reading", "writing", "dryRun", "applying"]
     assert re.fullmatch(r"第 6/6 步 · 已用 \d+s", d["state"]), "the step's name is in the list of steps, not on the state line"

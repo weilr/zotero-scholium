@@ -119,7 +119,7 @@ history and the annotation sessions are those of that PDF.
 
   The choices apply to the runs started afterwards, are saved for each agent, and are shared by all panes.
 - Beside the chip, one line of state for the tab shown: the step of six and the elapsed time while an
-  annotation runs (for a question, the step's name), the attempt while the agent's connection is tried again,
+  annotation runs (for a question, "Working"), the attempt while the agent's connection is tried again,
   the place in the queue, a pause for the usage limit with **Continue now**, or, on the Chat tab, the latest
   outcome of the conversation shown with its time, turns and tokens (the tooltip splits the tokens into input,
   cache and output); on the Annotations tab the outcome of **Delete annotations** (a finished annotation's is its
@@ -139,14 +139,13 @@ history and the annotation sessions are those of that PDF.
 - On hover, ✎ and 🗑 show beside each. ✎ and ＋ edit a label and a prompt in the row.
 - A deleted one comes back with **Undo** for six seconds. Dragging one moves it.
 - There are four built-in ones until the list is changed (preference `savedPrompts`).
-- The user's words are a bubble on the right. While a run goes on, one blue line names what the agent does at
-  the moment ("Reading sentences.txt", "Running python scholium.py extract …", a path by its last part), and the answer appears as it is
-  written; once the answer is there, the steps fold into "Worked for 24s ›", which opens them as Claude Code
-  shows them: each tool call with its command or file, and the first lines of each result (errors in red). A fold
-  opened or closed by hand stays so. Under an answer, a line gives the model and the time it ended, with a copy
-  button. A failed question ends with its error and ↻ (**Retry**), which sends the same words again. Web addresses
-  and `zotero://` links in a message open on a click or with Enter, in the browser or in Zotero; links to files
-  are shown, not followed.
+- The user's words are a bubble on the right. While a run goes on, one blue line says "Working" (「正在处理」), and the
+  answer appears as it is written; once the answer is there, the steps fold into "Worked for 24s ›" (「已处理 24 秒 ›」),
+  which opens them as Claude Code shows them: each tool call with its command or file, and the first lines of each
+  result (errors in red). A fold opened or closed by hand stays so. Under an answer, a line gives the model and the
+  time it ended, with a copy button. A failed question ends with its error and ↻ (**Retry**), which sends the same
+  words again. Web addresses and `zotero://` links in a message open on a click or with Enter, in the browser or in
+  Zotero; links to files are shown, not followed.
 - On hover, ✎ shows under a question of the Chat tab, except while the paper runs or waits. It turns the question
   into a box in place, with its words and its quote; ✓ or the send shortcut asks again, ✕ or Esc cancels.
 - The question and everything after it are replaced. **Undo** under the new question brings them back for six
@@ -174,7 +173,7 @@ history and the annotation sessions are those of that PDF.
   index's `annotation`. **Annotate** in the context menu of several papers starts a session for each.
 - While it runs, the tab shows **Annotate** with the extra instructions, the six steps (loading the skill,
   extracting sentences, reading the paper, writing the annotations, checking (dry run), writing to Zotero), each
-  done step with its time, and under them what the agent does at the moment, with **Details ›** for the steps.
+  done step with its time, and under them "Working" with **Details ›** for the steps.
 - When it ends, the steps fold and a card gives the outcome: the warnings left, from the agent's closing line;
   the numbers counted on the paper in Zotero (highlights with the core ones, those of the configuration's core
   colour; margin notes; sticky notes; reading notes); the turns, the tokens and the time. A failed annotation

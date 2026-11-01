@@ -591,14 +591,8 @@ var ScholiumRunner = {
       copyMessage: zh ? "复制这条回复（Markdown）" : "Copy this message (Markdown)",
       copiedMessage: zh ? "已复制" : "Copied",
       worked: d => zh ? `已处理 ${d}` : `Worked for ${d}`,
+      working: zh ? "正在处理" : "Working",
       workedPlain: zh ? "已处理" : "Worked",
-      liveThinking: zh ? "正在思考" : "Thinking",
-      liveRead: f => zh ? `正在读取 ${f}` : `Reading ${f}`,
-      liveWrite: f => zh ? `正在写 ${f}` : `Writing ${f}`,
-      liveRun: c => zh ? `正在运行 ${c}` : `Running ${c}`,
-      liveSkill: zh ? "正在加载技能" : "Loading the skill",
-      liveSearch: q => zh ? `正在搜索 ${q}` : `Searching ${q}`,
-      liveTool: n => zh ? `正在调用 ${n}` : `Calling ${n}`,
       profileOpen: zh ? "个人配置 ↗" : "Personal profile ↗",
       profileTitle: zh ? "个人配置" : "Personal profile",
       profileAbout: zh ? "每次批注都遵循这份个人配置。重新统计文库只改写开头的统计，Interpretation 和 User's rules 两节保持不变。"
@@ -1369,10 +1363,10 @@ var ScholiumRunner = {
 
   stepText(step) {
     const i = this.STEPS.indexOf(step);
-    // a question goes through some of the steps only: their names without the count; an annotation's list of steps names
-    // them, so its line has the count only
+    // a question's line says it works, without a step; an annotation's list of steps names them, so its line has the
+    // count only
     if (i >= 0) {
-      return this.job && this.job.asking ? this.text(step) : this.job && this.job.annotation ? this.text("stepCount", i + 1, this.STEPS.length)
+      return this.job && this.job.asking ? this.text("working") : this.job && this.job.annotation ? this.text("stepCount", i + 1, this.STEPS.length)
         : this.text("stepOf", i + 1, this.STEPS.length, this.text(step));
     }
     return step && step !== "starting" ? this.text(step) : this.text("starting", this.agentName(this.job && this.job.agent));
@@ -4378,14 +4372,13 @@ var ScholiumRunner = {
     node.className = "scholium-fold";
     const head = doc.createElement("button");
     head.className = "scholium-fold-head" + (live ? " live" : "");
-    const tools = run.steps.filter(e => e.kind === "tool");
     if (live && view.kind === "annotate") {
       const more = doc.createElement("span");
       more.className = "scholium-fold-more";
       more.textContent = " " + this.text("details") + (open ? " ⌄" : " ›");
-      head.append(doc.createTextNode(this.liveText(tools[tools.length - 1])), more);
+      head.append(doc.createTextNode(this.text("working")), more);
     } else {
-      head.textContent = (live ? this.liveText(tools[tools.length - 1]) : this.workedText(run)) + (open ? " ⌄" : live ? "" : " ›");
+      head.textContent = (live ? this.text("working") : this.workedText(run)) + (open ? " ⌄" : live ? "" : " ›");
     }
     head.addEventListener("click", () => { view.foldOpen.set(key, !open); this.refreshRun(view, index); });
     node.append(head);
@@ -4396,29 +4389,6 @@ var ScholiumRunner = {
       node.append(body);
     }
     return node;
-  },
-
-  // what the agent is doing, from its latest step: 正在读取 sentences.txt
-  liveText(step) {
-    if (!step) return this.text("liveThinking");
-    const name = String(step.name);
-    const arg = String(step.text).slice(name.length).replace(/^\(/, "").replace(/\)$/, "");
-    const file = arg.split(/[\\/]/).pop();
-    if (/^read$/i.test(name)) return this.text("liveRead", file);
-    if (/^(write|edit|multiedit|notebookedit)$/i.test(name)) return this.text("liveWrite", file);
-    if (/^(bash|powershell|shell)$/i.test(name)) return this.text("liveRun", this.cut(this.shortCommand(arg), 80));
-    if (/^skill$/i.test(name)) return this.text("liveSkill");
-    if (/^web(search|fetch)$/i.test(name)) return this.text("liveSearch", this.cut(arg, 60));
-    return this.text("liveTool", name);
-  },
-
-  // a command as the live line names it: an absolute path by its last part (python scholium.py extract …)
-  shortCommand(cmd) {
-    const last = p => p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
-    return String(cmd)
-      .replace(/"((?:[A-Za-z]:|~)[\\/][^"]*|\/[^"\s][^"]*)"/g, (m, p) => last(p))
-      .replace(/(^|[\s=(,])((?:[A-Za-z]:|~)[\\/][^\s"';|),]*)/g, (m, pre, p) => pre + last(p))
-      .replace(/(^|[\s=(,])(\/(?:[^\s"';|/),]+\/)+[^\s"';|),]*)/g, (m, pre, p) => pre + last(p));
   },
 
   workedText(run) {

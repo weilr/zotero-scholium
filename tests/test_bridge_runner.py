@@ -3750,8 +3750,8 @@ def test_a_question_starts_a_conversation_that_answers_without_annotating(facts)
         "",
         "写入了 Zotero 时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。",
     ])
-    assert run_time(a["during"]) == {"placeholder": ASK, "sendHidden": False, "stop": ["■", "停止"], "state": "加载技能 · 已用 Ns", "cleared": ""}, \
-        "the steps a question reaches, without their count"
+    assert run_time(a["during"]) == {"placeholder": ASK, "sendHidden": False, "stop": ["■", "停止"], "state": "正在处理 · 已用 Ns", "cleared": ""}, \
+        "a question's state line says it works, not its step"
     assert a["lines"] == [{"type": "scholium", "subtype": "prompt", "text": "这篇怎么估计后验？", "question": True}]
     assert run_time(a["notices"]) == [["已在后台开始回答。过程见条目侧栏的 Scholium 区块。"], ["完成 · Ns", "用变分推断估计后验。"]]
     assert a["entries"][0] == "这篇怎么估计后验？编辑" and a["entries"][-2:] == ["用变分推断估计后验。", a["entries"][-1]], "the question with its ✎"

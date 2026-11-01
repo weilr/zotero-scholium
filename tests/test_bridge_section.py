@@ -763,30 +763,21 @@ SCENARIOS = r"""
   }
   // the words of a run's line, in both languages
   {
-    const r = harness().runner;
+    const hr = harness(), r = hr.runner;
     const step = (name, text) => ({ kind: 'tool', name, text });
+    const foldView = hh => ({ doc: hh.paneDoc, foldOpen: new Map(), kind: 'chat' });
     r.models.codex = [{ value: '', label: 'Codex 默认' }, { value: 'gpt-6-luna', label: 'GPT-6-Luna' }];
     facts.words = {
-      live: [r.liveText(undefined), r.liveText(step('Read', 'Read(D:\\x\\sentences.txt)')), r.liveText(step('Edit', 'Edit(D:/x/config.json)')),
-             r.liveText(step('Write', 'Write(/data/c.json)')), r.liveText(step('Bash', 'Bash(' + 'x'.repeat(100) + ')')),
-             r.liveText(step('Shell', 'Shell(Get-Content a)')), r.liveText(step('Skill', 'Skill(zotero-scholium)')),
-             r.liveText(step('WebSearch', 'WebSearch(diffusion)')), r.liveText(step('WebFetch', 'WebFetch(https://x.org/a)')),
-             r.liveText(step('node.repl', 'node.repl(x)')), r.liveText(step('WebSearch', 'WebSearch(' + 'q'.repeat(100) + ')'))],
-      // a command's absolute paths by their last part
-      commands: [r.liveText(step('Bash', 'Bash(python C:\\Users\\me\\.claude\\skills\\zotero-scholium\\scripts\\scholium.py extract --pdf "D:\\Zotero data\\storage\\K\\a b.pdf")')),
-                 r.liveText(step('PowerShell', 'PowerShell($o="C:\\T\\scholium\\UFIPQRR7"; python ~/.claude/skills/z/scripts/scholium.py --config "$o\\config.json")')),
-                 r.liveText(step('Bash', 'Bash(cd /home/me/Zotero/tmp/scholium/K && python /opt/s/scholium.py status K)')),
-                 r.liveText(step('Bash', 'Bash(ls -la tmp/x; echo done)'))],
+      live: [step('Read', 'Read(D:/x/sentences.txt)'), step('Bash', 'Bash(python scholium.py extract)'), undefined]
+        .map(st => r.foldNode(foldView(hr), { start: 1, end: 0, steps: st ? [st] : [] }, 0, true).children[0].textContent),
       durations: [0, 59400, 377000, 3725000].map(ms => r.durationWords(ms)),
       worked: [r.workedText({ start: 0, end: 5 }), r.workedText({ start: 1000, end: 378000 }), r.workedText({ start: 5000, end: 0 })],
       labels: [r.modelLabel('Claude Code · claude-opus-5-5'), r.modelLabel('claude-haiku-4-5-20251001'), r.modelLabel('Codex · gpt-6-luna'),
                r.modelLabel('Codex · gpt-x')],
       runLines: [r.entries({ type: 'scholium', subtype: 'run', agent: 'claude', at: 5 }), r.entries({ type: 'scholium', subtype: 'run', agent: 'claude' })],
     };
-    const e = harness({ locale: 'en-US' }).runner;
-    facts.words.english = [e.liveText(undefined), e.liveText(step('Read', 'Read(a/b.txt)')), e.liveText(step('Write', 'Write(c.json)')),
-                           e.liveText(step('PowerShell', 'PowerShell(ls)')), e.liveText(step('Skill', 'Skill(x)')),
-                           e.liveText(step('WebSearch', 'WebSearch(q)')), e.liveText(step('Grep', 'Grep(q)')),
+    const he = harness({ locale: 'en-US' }), e = he.runner;
+    facts.words.english = [e.foldNode(foldView(he), { start: 1, end: 0, steps: [step('Read', 'Read(a/b.txt)')] }, 0, true).children[0].textContent,
                            e.workedText({ start: 1000, end: 378000 }), e.workedText({ start: 0, end: 0 }),
                            ...[59400, 377000, 3725000].map(ms => e.durationWords(ms))];
   }
@@ -1418,7 +1409,7 @@ def test_the_section_fills_the_side_pane(facts):
 
 def test_the_transcript_by_runs(facts):
     r = facts["runs"]
-    assert r["liveLine"] == "正在运行 python scholium.py --config c.json --apply"
+    assert r["liveLine"] == "正在处理"
     assert r["parts"] == ["scholium-entry prompt editable", "scholium-fold", "scholium-entry text", "scholium-meta"]
     assert re.fullmatch(r"已处理 \d+ 秒 ›", r["closed"][0]) and r["closed"][1] == 1, "the steps are folded"
     assert r["opened"][0] == "scholium-entry text" and "scholium-entry tool" in r["opened"] and "scholium-entry result" in r["opened"]
@@ -1429,8 +1420,8 @@ def test_the_transcript_by_runs(facts):
 
 def test_opened_steps_stay_open_and_a_reader_scrolled_up_stays(facts):
     f = facts["foldKept"]
-    assert f["drawnHead"] == "正在运行 python scholium.py extract --pdf x.pdf --sentences s.json", "a section drawn meanwhile shows it live"
-    assert f["during"] == ["正在运行 python scholium.py extract --pdf x.pdf --sentences s.json ⌄", 5, "scholium-fold-head live"]
+    assert f["drawnHead"] == "正在处理", "a section drawn meanwhile shows it live"
+    assert f["during"] == ["正在处理 ⌄", 5, "scholium-fold-head live"]
     assert re.fullmatch(r"已处理 \d+ 秒 ⌄", f["after"][0]) and f["after"][1:] == [11, "scholium-fold-head"], "the reader's choice wins"
     assert f["runs"] == 1, "the run is drawn again in its place"
     assert f["scrollTop"] == 0
@@ -1470,7 +1461,7 @@ def test_the_message_being_written_is_last_in_its_run(facts):
     assert f["parts"] == [["scholium-fold", "scholium-entry text", "scholium-meta"],
                           ["scholium-entry prompt editable", "scholium-fold", "scholium-entry text", "scholium-entry text draft"]], \
         "the earlier run is finished; the running one has its line and no line under it yet"
-    assert f["thinking"] == "正在思考" and f["earlier"] == "已处理 ⌄"
+    assert f["thinking"] == "正在处理" and f["earlier"] == "已处理 ⌄"
     assert f["first"] == [2, True] and f["line"] == [2, True] and f["run"] == [3, True]
     assert f["clicked"] == [2, True], "opening the running run's steps keeps the message being written"
 
@@ -1492,7 +1483,7 @@ def test_a_run_that_ends_without_its_conversation_shown_again_is_drawn_finished(
     assert e["noProgram"] == [["scholium-fold", "scholium-entry text", "scholium-meta"], ["scholium-entry final error"]], \
         "the run before keeps its line; the failure is a run of its own"
     assert e["starting"] == [[["scholium-fold", "scholium-entry text", "scholium-meta"], ["scholium-fold"]],
-                             ["scholium-fold-head live", "正在思考"]], "the run before is finished from the start"
+                             ["scholium-fold-head live", "正在处理"]], "the run before is finished from the start"
 
 
 def test_the_runs_drawn_follow_the_transcript_when_its_first_run_goes(facts):
@@ -1503,19 +1494,12 @@ def test_the_runs_drawn_follow_the_transcript_when_its_first_run_goes(facts):
 
 def test_the_words_of_a_runs_line(facts):
     w = facts["words"]
-    assert w["commands"] == ['正在运行 python scholium.py extract --pdf a b.pdf',
-                             r'正在运行 $o=UFIPQRR7; python scholium.py --config "$o\config.json"',
-                             '正在运行 cd K && python scholium.py status K',
-                             '正在运行 ls -la tmp/x; echo done'], "a command's absolute paths by their last part"
-    assert w["live"] == ["正在思考", "正在读取 sentences.txt", "正在写 config.json", "正在写 c.json", "正在运行 " + "x" * 79 + "…",
-                         "正在运行 Get-Content a", "正在加载技能", "正在搜索 diffusion", "正在搜索 https://x.org/a", "正在调用 node.repl",
-                         "正在搜索 " + "q" * 59 + "…"]
+    assert w["live"] == ["正在处理"] * 3, "a live line says it works, whatever the last step is"
     assert w["durations"] == ["0 秒", "59 秒", "6 分 17 秒", "1 小时 2 分"]
     assert w["worked"] == ["已处理", "已处理 6 分 17 秒", "已处理"]
     assert w["labels"] == ["Opus 5.5", "Haiku 4.5", "GPT-6-Luna", "gpt-x"]
     assert w["runLines"] == [[{"kind": "run", "at": 5, "compact": False}], [{"kind": "run", "at": 0, "compact": False}]]
-    assert w["english"] == ["Thinking", "Reading b.txt", "Writing c.json", "Running ls", "Loading the skill", "Searching q", "Calling Grep",
-                            "Worked for 6m 17s", "Worked", "59s", "6m 17s", "1h 2m"]
+    assert w["english"] == ["Working", "Worked for 6m 17s", "Worked", "59s", "6m 17s", "1h 2m"]
 
 
 def test_history_is_a_layer_of_this_pdfs_conversations(facts):
