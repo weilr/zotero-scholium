@@ -147,6 +147,17 @@ history and the annotation sessions are those of that PDF.
   button. A failed question ends with its error and ↻ (**Retry**), which sends the same words again. Web addresses
   and `zotero://` links in a message open on a click or with Enter, in the browser or in Zotero; links to files
   are shown, not followed.
+- On hover, ✎ shows under a question of the Chat tab, except while the paper runs or waits. It turns the question
+  into a box in place, with its words and its quote; ✓ or the send shortcut asks again, ✕ or Esc cancels.
+- The question and everything after it are replaced. **Undo** under the new question brings them back for six
+  seconds, until another message of the conversation starts, with the conversation's title, and stops the new
+  answer without a notice; an edited question that waits for another paper's run leaves the queue.
+- Claude Code resumes the session at the answer before the question, as a new session (`--resume-session-at`,
+  `--fork-session`). Codex forks the thread through the turn before (`thread/fork`); **Undo** archives the fork.
+- Where there is nothing to go back to (a compaction since) or the agent refuses it (an older Claude Code), a new
+  session is given the conversation before the question. An edited first question starts a new session, and the
+  conversation's title follows it unless it was renamed.
+- Words steered into a turn go with it. Annotation sessions cannot be edited.
 - Sentence citations: a question asks the agent to cite the paper's sentences by their number in
   `sentences.txt`, as `[#123]`. The section reads `sentences.json` in the paper's output directory and shows a
   cited sentence as a chip with its page (`p.4`); on hover, a card gives the page, **Locate ↗** and the sentence.
@@ -277,6 +288,7 @@ Annotations tab, in place above the box); the new run replaces those annotations
 | `extensions.scholium-bridge.sendShortcut` | `cmdAlways` | `enter`, `cmdIfMultiline` or `cmdAlways`; set on the settings page |
 | `extensions.scholium-bridge.followUpMode` | `queue` | `queue` or `steer`; set on the settings page |
 | `extensions.scholium-bridge.contextRing` | `true` | whether the context ring shows; set on the settings page |
+| `extensions.scholium-bridge.savedPrompts` | empty (the four built-in prompts) | the saved prompts as a JSON array of `{label, prompt}`; set in the Scholium section |
 
 ## Deleting the tool's annotations
 

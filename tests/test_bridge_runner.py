@@ -1675,7 +1675,7 @@ SCENARIOS = r"""
     const annotated = { resume: args1.includes('--resume') ? args1[args1.indexOf('--resume') + 1] : null, prompt: h.log.stdin[1],
                         cleared: p.pane().input.value, after: Object.assign(look(), { session: await session() }), lines: marks(),
                         prompts: p.view().flat.filter(e => e[0] === 'scholium-entry prompt').map(e => e[1]),
-                        chat: [p.view('chat').flat.filter(e => e[0] === 'scholium-entry prompt').map(e => e[1]), h.log.writes[convs(h)[0]] === chatLog],
+                        chat: [p.view('chat').flat.filter(e => /^scholium-entry prompt( editable)?$/.test(e[0])).map(e => e[1]), h.log.writes[convs(h)[0]] === chatLog],
                         notices: h.log.notices.slice(asked.notices.length).map(n => n.descriptions) };
     const annotatedLog = ours(h);
     p.pane().input.type('第 5 页那条译文改短');
@@ -3493,7 +3493,7 @@ def test_an_unchanged_log_is_parsed_once(facts):
     c = facts["logCache"]
     assert c["first"] == c["again"] and c["unchanged"] == 0
     assert c["after"] == c["first"] + 1 and c["reparsed"] == 7
-    assert facts["quietTurn"] == [{"user": "只写入", "reply": "", "ended": "", "reached": True, "done": True}], \
+    assert facts["quietTurn"] == [{"user": "只写入", "reply": "", "ended": "", "reached": True, "start": 0, "point": None, "done": True}], \
         "a run that ended well without a word is not an unfinished one"
 
 
@@ -3728,7 +3728,7 @@ def test_a_question_starts_a_conversation_that_answers_without_annotating(facts)
         "the steps a question reaches, without their count"
     assert a["lines"] == [{"type": "scholium", "subtype": "prompt", "text": "这篇怎么估计后验？", "question": True}]
     assert run_time(a["notices"]) == [["已在后台开始回答。过程见条目侧栏的 Scholium 区块。"], ["完成 · Ns", "用变分推断估计后验。"]]
-    assert a["entries"][0] == "这篇怎么估计后验？" and a["entries"][-2:] == ["用变分推断估计后验。", a["entries"][-1]]
+    assert a["entries"][0] == "这篇怎么估计后验？编辑" and a["entries"][-2:] == ["用变分推断估计后验。", a["entries"][-1]], "the question with its ✎"
     assert a["after"]["placeholder"] == ASK and a["after"]["session"] == "Q1"
     assert facts["ask"]["shown"] == {"placeholder": ASK, "session": "Q1"}, "a restart reads the question's conversation from the log"
 
@@ -3742,7 +3742,7 @@ def test_annotate_after_a_question_opens_a_session_of_its_own(facts):
     assert "\n- 画像：没有；按默认值标注，不要生成或修改画像\n" in n["prompt"] and "用户的附加要求：\n重点标方法部分\n\n结束时" in n["prompt"]
     assert n["lines"] == [{"type": "scholium", "subtype": "prompt", "text": "批注这篇\n附加要求：重点标方法部分", "annotate": True, "extra": "重点标方法部分"}]
     assert n["prompts"] == ["批注这篇\n附加要求：重点标方法部分"]
-    assert n["chat"] == [["这篇怎么估计后验？"], True], "the question's conversation stays as it was"
+    assert n["chat"] == [["这篇怎么估计后验？编辑"], True], "the question's conversation stays as it was (the question with its ✎)"
     assert n["notices"][0] == [STARTED]
     assert n["after"] == {"placeholder": follow, "sendHidden": False, "stop": ["↑", "发送"], "session": "Q1"}
     r = facts["ask"]["redo"]
@@ -3892,7 +3892,7 @@ def test_new_chat_and_history(facts):
     assert [k[:5] for k in c["kept"]] == ["第二个问题", c["kept"][1][:5], "很早的问题"] and c["kept"][1].startswith("估计方法"), "Esc keeps the old title"
     o = c["opened"]
     assert o["shownConv"] is True and o["input"] == "写给第一段对话的话" and o["historyOpen"] is False, "the words typed to it come back with it"
-    assert run_time(o["entries"]) == ["第一个问题", "回答 1", "Opus 5.5 · HH:MM"]
+    assert run_time(o["entries"]) == ["第一个问题编辑", "回答 1", "Opus 5.5 · HH:MM"], "the question with its ✎"
     assert c["resumedFirst"] == "Q1", "an earlier conversation goes on in its session"
     assert c["afterFire"] == 0, "a conversation gone for good leaves the layer's rows"
     assert c["followPrompt"] == ("下面是用户在 Zotero 里针对这篇论文发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"

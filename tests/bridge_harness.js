@@ -391,6 +391,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
         case 'thread/inject_items': return answer({});
         case 'thread/archive': return answer({});
         case 'thread/resume': return answer({ thread: { id: p.threadId }, model: p.model || 'gpt-6-astra' });
+        case 'thread/fork': return answer({ thread: { id: co.forkId || 'F1' }, model: p.model || 'gpt-6-astra' });
         case 'turn/start': {
           log.codexTurns += 1;
           const id = 'U' + log.codexTurns;
@@ -613,10 +614,12 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
         if (!(p in log.writes)) throw Object.assign(Error('missing'), { name: 'NotFoundError' });
         return log.writes[p];
       },
-      // as IOUtils: "append" needs the file, "appendOrCreate" makes it; a log locked a moment refuses one write
+      // as IOUtils: "append" needs the file, "appendOrCreate" makes it; a log locked a moment refuses one write (failLogWrites:
+      // the words it holds, or a test of the path, the text and the options)
       writeUTF8: async (p, t, o) => {
         if (writeFails && p === PROFILE_PATH) throw Error('NotAllowedError');
-        if (failLogWrites && /\/conversations\/[\w-]+\.jsonl$/.test(p) && String(t).includes(failLogWrites) && !log.lockedOnce) {
+        const refused = typeof failLogWrites === 'function' ? failLogWrites(p, String(t), o) : String(t).includes(failLogWrites);
+        if (failLogWrites && /\/conversations\/[\w-]+\.jsonl$/.test(p) && refused && !log.lockedOnce) {
           log.lockedOnce = true;
           throw Error('NotWritableError');
         }

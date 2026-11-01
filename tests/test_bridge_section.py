@@ -1419,7 +1419,7 @@ def test_the_section_fills_the_side_pane(facts):
 def test_the_transcript_by_runs(facts):
     r = facts["runs"]
     assert r["liveLine"] == "正在运行 python scholium.py --config c.json --apply"
-    assert r["parts"] == ["scholium-entry prompt", "scholium-fold", "scholium-entry text", "scholium-meta"]
+    assert r["parts"] == ["scholium-entry prompt editable", "scholium-fold", "scholium-entry text", "scholium-meta"]
     assert re.fullmatch(r"已处理 \d+ 秒 ›", r["closed"][0]) and r["closed"][1] == 1, "the steps are folded"
     assert r["opened"][0] == "scholium-entry text" and "scholium-entry tool" in r["opened"] and "scholium-entry result" in r["opened"]
     assert r["reclosed"] == 1
@@ -1459,8 +1459,8 @@ def test_logs_are_read_as_runs(facts):
     assert f["scrollTop"] == 1000, "at the latest"
     assert f["legacy"] == [
         [["scholium-entry final error", "出错了"]],
-        [["scholium-entry prompt", "第二个问题"], ["scholium-entry text", "回答 2"], ["scholium-entry text", "补充"], ["scholium-meta", "Opus 5.5"]],
-        [["scholium-entry prompt", "第三个问题"], ["scholium-entry text", "回答 3"], ["scholium-meta", ""]],
+        [["scholium-entry prompt editable", "第二个问题"], ["scholium-entry text", "回答 2"], ["scholium-entry text", "补充"], ["scholium-meta", "Opus 5.5"]],
+        [["scholium-entry prompt editable", "第三个问题"], ["scholium-entry text", "回答 3"], ["scholium-meta", ""]],
     ], "an earlier version's log: a run at each of the user's words"
     assert f["copied"] == ["回答 2\n\n补充"], "the whole answer"
 
@@ -1468,7 +1468,7 @@ def test_logs_are_read_as_runs(facts):
 def test_the_message_being_written_is_last_in_its_run(facts):
     f = facts["draftPlace"]
     assert f["parts"] == [["scholium-fold", "scholium-entry text", "scholium-meta"],
-                          ["scholium-entry prompt", "scholium-fold", "scholium-entry text", "scholium-entry text draft"]], \
+                          ["scholium-entry prompt editable", "scholium-fold", "scholium-entry text", "scholium-entry text draft"]], \
         "the earlier run is finished; the running one has its line and no line under it yet"
     assert f["thinking"] == "正在思考" and f["earlier"] == "已处理 ⌄"
     assert f["first"] == [2, True] and f["line"] == [2, True] and f["run"] == [3, True]
@@ -1477,10 +1477,10 @@ def test_the_message_being_written_is_last_in_its_run(facts):
 
 def test_a_runs_lines_before_its_steps_come_above_them(facts):
     assert facts["leadLines"] == [
-        ["scholium-entry prompt", "scholium-fold", "scholium-entry final error: 中途失败"],
+        ["scholium-entry prompt editable", "scholium-fold", "scholium-entry final error: 中途失败"],
         ["scholium-entry info: 额度已恢复，接着中断的地方继续", "scholium-fold", "scholium-entry text", "scholium-meta"],
-        ["scholium-entry prompt", "scholium-entry final error: 出错了", "scholium-entry info: 连接失败，30 秒后自动重试一次"],
-        ["scholium-entry prompt", "scholium-entry text", "scholium-entry final error: 后来失败", "scholium-meta"],
+        ["scholium-entry prompt editable", "scholium-entry final error: 出错了", "scholium-entry info: 连接失败，30 秒后自动重试一次"],
+        ["scholium-entry prompt editable", "scholium-entry text", "scholium-entry final error: 后来失败", "scholium-meta"],
     ]
 
 

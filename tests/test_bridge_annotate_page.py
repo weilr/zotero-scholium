@@ -916,7 +916,7 @@ def test_the_words_typed_stay_with_their_tab(facts):
 def test_the_annotations_extra_instructions_are_logged(facts):
     f = facts["annotExtra"]
     assert f["line"] == ["批注这篇\n附加要求：只标方法部分", True, "只标方法部分"]
-    assert f["entry"] == {"kind": "prompt", "text": "批注这篇\n附加要求：只标方法部分", "annotate": True, "extra": "只标方法部分"}
+    assert f["entry"] == {"kind": "prompt", "text": "批注这篇\n附加要求：只标方法部分", "annotate": True, "extra": "只标方法部分", "turn": 0}
     assert f["plain"] == [{"kind": "prompt", "text": "一个问题"}]
 
 

@@ -479,7 +479,7 @@ var ScholiumToggle = {
  * An update of the plugin hands the papers still to do over to the new copy, and the running paper
  * continues its conversation there. Only papers in My Library are annotated. Every event but the
  * pieces of a message being written and the user's message as Codex repeats it, and the plugin's own lines (the start
- * of each run, the user's words or Annotate, a continuation, a session the agent no longer has, the end of a run
+ * of each run, the user's words or Annotate, an edit's rewind marker, a continuation, a session the agent no longer has, the end of a run
  * without a result of its own, when a run ended), is logged to the conversation's log,
  * <data dir>/tmp/scholium/<attachment key>/conversations/<agent>-<time>.jsonl.
  */
@@ -490,6 +490,7 @@ var ScholiumRunner = {
   savedRemoved: null,       // { item, at, timer }: the saved prompt deleted a moment ago, until Undo can no longer bring it back
   removedQueued: new Map(), // qid -> { job, next, timer }: a queued message deleted a moment ago, until it can no longer be brought back;
                             // next: the qid of the row of its queue that followed it
+  replaced: new Map(),      // "key/conv" -> the conversation before an edited question, until Undo can no longer bring it back
   qseq: 0,                  // the number of the latest queued message
   pendingQuotes: new Map(), // attachment key -> { text, page }: a passage asked about before the section was drawn
   current: null,            // { key, proc, cancelled }
@@ -754,6 +755,10 @@ var ScholiumRunner = {
       citePage: p => zh ? `第 ${p} 页` : `Page ${p}`,
       locate: zh ? "定位 ↗" : "Locate ↗",
       retry: zh ? "重试" : "Retry",
+      editPrompt: zh ? "编辑" : "Edit",
+      editSend: zh ? "发送" : "Send",
+      editCancel: zh ? "取消" : "Cancel",
+      replaced: zh ? "已替换" : "Replaced",
       compactingLine: zh ? "◌ 正在压缩上下文……" : "◌ Compacting context…",
       compactedLine: zh ? "上下文已压缩" : "Context compacted",
       compactedAuto: zh ? "上下文已自动压缩" : "Context compacted automatically",
@@ -1163,6 +1168,14 @@ var ScholiumRunner = {
     return Object.assign({ text: String(q.text), page }, label && label !== page ? { label } : {});
   },
 
+  // the point an edited question takes the session back to, as it is kept: Claude Code's message or Codex's turn; null
+  // when it is neither
+  pointOf(p) {
+    if (p && typeof p.uuid === "string" && p.uuid) return { uuid: p.uuid };
+    if (p && typeof p.turnId === "string" && p.turnId) return { turnId: p.turnId };
+    return null;
+  },
+
   // the page of a reader's selection: its number in the PDF, else its label
   pageOf(a) {
     const i = a.position ? a.position.pageIndex : -1;
@@ -1251,7 +1264,11 @@ var ScholiumRunner = {
     if (model) args.push("--model", model);
     const effort = this.effort("claude");
     if (effort) args.push("--effort", effort);
-    if (job && job.resume) args.push("--resume", job.resume);
+    if (job && job.resume) {
+      args.push("--resume", job.resume);
+      // an edited question: the session as it was at that point, as a new session (the old one stays as it was)
+      if (job.rewind && job.rewind.uuid) args.push("--resume-session-at", job.rewind.uuid, "--fork-session");
+    }
     return args;
   },
 
@@ -3345,7 +3362,7 @@ var ScholiumRunner = {
     }
     return { entries: log.entries.slice(), session: log.session, turns: log.turns.map(t => Object.assign({}, t)), result: log.result,
              question: log.question, context: log.context && Object.assign({}, log.context), lastAt: log.lastAt, path, id,
-             agent: this.convAgent(id) };
+             rewind: log.rewind, agent: this.convAgent(id) };
   },
 
   // what readLog gives of a log, read once; null when it cannot be read
@@ -3357,7 +3374,12 @@ var ScholiumRunner = {
     // and its turn, count once the message reached the agent
     let session = null, pending = null, result = null, question = false, opened = false, reached = false, context = null, lastAt = 0;
     let compacting = false;   // the run is a compaction: its result is no turn's
+    // where each turn starts in the text, and the point an edited question takes the session back to: Claude Code's
+    // last message, Codex's last turn; rewind: the point a run went back to, until the session moves on
+    let at = 0, point = null, rewind = null, bare = null;   // bare: where a run line without the user's words starts
     for (const line of text.split("\n")) {
+      const start = at;
+      at += line.length + 1;
       if (!line.trim()) continue;
       let event;
       try { event = JSON.parse(line); } catch (e) { continue; }
@@ -3365,7 +3387,9 @@ var ScholiumRunner = {
       if (event.type === "scholium" && event.subtype === "run") {
         opened = typeof event.user === "string";
         compacting = !!event.compact;
-        if (opened) turns.push({ user: event.user, reply: "", ended: "", reached: false });
+        bare = !opened && !event.compact ? start : null;
+        if (opened) turns.push({ user: event.user, reply: "", ended: "", reached: false, start, point });
+        if (event.rewind) rewind = { point: event.rewind, from: session };
         reached = false;
         pending = null;
         if (event.at > 0 && !event.compact) lastAt = event.at;   // since the session's last run that did its work
@@ -3382,14 +3406,17 @@ var ScholiumRunner = {
       if (event.type === "scholium" && event.subtype === "prompt") {
         question = event.question ? true : event.annotate ? false : question;
         if (!opened) {
-          turns.push({ user: String(event.text || ""), reply: "", ended: "", reached: false });
+          turns.push({ user: String(event.text || ""), reply: "", ended: "", reached: false, start: bare === null ? start : bare, point });
           reached = false;
         }
+        bare = null;
+        if (turns.length) Object.assign(turns[turns.length - 1], { prompted: true, annotate: !!event.annotate });
         if (event.quote && event.quote.text && turns.length) turns[turns.length - 1].quote = this.quoteOf(event.quote);
         opened = false;
       } else if (event.type !== "scholium") {
         opened = false;
-        if (!turns.length) turns.push({ user: this.text("annotateThis"), reply: "", ended: "", reached: false });
+        bare = null;
+        if (!turns.length) turns.push({ user: this.text("annotateThis"), reply: "", ended: "", reached: false, start, point: null });
       }
       if (typeof event.session_id === "string" && event.session_id) {
         pending = event.session_id;
@@ -3401,7 +3428,28 @@ var ScholiumRunner = {
         if (turns.length) turns[turns.length - 1].reached = true;
       }
       // the agent no longer has the session: a new one goes on with the conversation
-      if (event.type === "scholium" && event.subtype === "gone") session = null;
+      if (event.type === "scholium" && event.subtype === "gone") {
+        session = null; rewind = null;
+        // a new session took over the run's words: the refused run's error is not drawn
+        if (event.resent === true) {
+          this.dropRefused(entries);
+          if (turns.length) turns[turns.length - 1].ended = "";
+          result = null;
+        }
+      }
+      // the cut of an edited question: the next run goes back to the point before it; without one, a new session goes on
+      // with the conversation
+      if (event.type === "scholium" && event.subtype === "rewind") {
+        const back = this.pointOf(event.point);
+        if (back) rewind = { point: back, from: session };
+        else { session = null; rewind = null; }
+      }
+      if (event.type === "assistant" && typeof event.uuid === "string" && !compacting) point = { uuid: event.uuid };
+      if (event.type === "system" && event.subtype === "compact_boundary") point = null;   // Claude Code keeps no messages before it
+      if (event.method === "turn/completed" && event.params && event.params.turn && event.params.turn.id && !compacting) {
+        point = { turnId: String(event.params.turn.id) };
+      }
+      if (rewind && session && session !== rewind.from) rewind = null;   // the run reached the agent: a session of its own
       context = this.contextAfter(event, context);
       if (event.type === "system" && event.subtype === "init" && !compacting) result = null;
       if (event.type === "result" && !compacting) {
@@ -3414,9 +3462,19 @@ var ScholiumRunner = {
         result = { type: "result", subtype: event.outcome, is_error: true, result: event.text, duration_ms: event.duration_ms };
         if (turns.length) turns[turns.length - 1].ended = String(event.text || event.outcome || "");
       }
-      this.addEntries(entries, this.entries(event));
+      const made = this.entries(event);
+      // a turn's own words know their turn
+      if (event.type === "scholium" && event.subtype === "prompt") for (const e of made) if (e.kind === "prompt" && !e.steer) e.turn = turns.length - 1;
+      this.addEntries(entries, made);
     }
-    return { entries: entries.slice(-this.MAX_ENTRIES), session, turns, result, question, context, lastAt };
+    return { entries: entries.slice(-this.MAX_ENTRIES), session, turns, result, question, context, lastAt, rewind: rewind ? rewind.point : null };
+  },
+
+  // the error lines of the latest run, which a new session took over: they leave the entries
+  dropRefused(entries) {
+    let from = entries.length;
+    while (from > 0 && entries[from - 1].kind !== "run") from--;
+    for (let i = entries.length - 1; i >= from; i--) if (entries[i].kind === "final" && entries[i].error && !entries[i].cancelled) entries.splice(i, 1);
   },
 
   // whether an event of a run shows that its message reached the agent: its answer or tools, a result, Codex's turn
@@ -3443,7 +3501,7 @@ var ScholiumRunner = {
     } else if (event.type === "scholium" && event.subtype === "compacted" && Number(event.post) > 0) {
       c.used = Number(event.post);
       c.parts = null;
-    } else if (event.type === "scholium" && event.subtype === "gone") {
+    } else if (event.type === "scholium" && (event.subtype === "gone" || (event.subtype === "rewind" && !this.pointOf(event.point)))) {
       c.used = 0;   // the new session reports its own
     } else if (event.type === "result" && event.modelUsage && typeof event.modelUsage === "object") {
       // the run's model's window, the largest of those it used
@@ -4161,7 +4219,17 @@ var ScholiumRunner = {
     const doc = view.doc;
     const node = doc.createElement("div");
     node.className = "scholium-run";
-    if (run.prompt) node.append(this.entryNode(doc, run.prompt));
+    if (run.prompt) {
+      const said = this.entryNode(doc, run.prompt);
+      // the user's own words can be edited and asked again
+      if (this.promptEditable(view, run)) {
+        said.className += " editable";
+        said.append(this.iconButton(doc, "edit", this.text("editPrompt"), () => this.startEdit(view, run, said), "quiet edit-prompt"));
+      }
+      node.append(said);
+    }
+    // the question that replaced the ones after it a moment ago: Undo under it
+    if (this.replaced.size && this.undoAt(view) === index) node.append(this.undoNode(view));
     // the last run of a view that failed without an answer carries a retry on its failure line; on the annotation tab, a
     // run of words to the session. A queued message that failed has its Retry on its row
     const failedLast = !live && index === (view.runCount || 0) - 1 && !run.answer.length && !!view.pane && (view.kind === "chat" || !!run.turn)
@@ -4393,6 +4461,8 @@ var ScholiumRunner = {
     view.entries = entries;
     view.runCount = runs.length;   // before the runs are drawn: the last one carries the retry
     view.list.replaceChildren(...runs.map((r, i) => this.renderRun(view, r, i, live && i === runs.length - 1)));
+    // an edited question that waits for its run: Undo after the conversation
+    if (this.replaced.size && this.undoAt(view) === runs.length) view.list.append(this.undoNode(view));
     view.runCount = runs.length;
     view.head = this.headOf(runs);
     view.list.scrollTop = view.list.scrollHeight;
@@ -4588,6 +4658,9 @@ var ScholiumRunner = {
       const busy = !!running || queuedAt >= 0;
       // any run of the paper, of either tab
       const any = pane.keys.some(k => this.busy(k));
+      // no ✎ on the questions while a run of the paper goes or waits
+      pane.chatView.className = "scholium-view chat" + (any ? " busy" : "");
+      if (pane.editing) pane.editing.fit();   // ✓ of a question being edited, off while the paper runs
       // the views of the tabs and the dot on the tab whose run goes on out of sight
       this.show(pane.chatView, tab === "chat");
       this.show(pane.annotView, tab === "annotate");
@@ -4726,6 +4799,7 @@ var ScholiumRunner = {
     if ((job.retry || job.compact || job.qid) && job.conv) {
       const log = await this.readLog(job.att.key, job.conv);
       job.resume = (log && log.session) || null;
+      job.rewind = job.resume ? (log && log.rewind) || null : null;
       job.question = false;
       if (!job.annotate) job.asking = !!(log && log.question);
       return;
@@ -4736,6 +4810,8 @@ var ScholiumRunner = {
     const log = conv ? await this.readLog(job.att.key, conv) : null;
     job.conv = conv;
     job.resume = (log && log.session) || null;
+    // an edited question goes back to its point; a message after an edit whose run never reached the agent, to that one's
+    job.rewind = job.resume ? job.rewind || (log && log.rewind) || null : null;
     // words to an annotation session are not a question
     job.question = job.kind !== "annotate" && !!job.say && !(log && log.turns.length);
     job.asking = job.question || !!(log && log.question);
@@ -4756,11 +4832,210 @@ var ScholiumRunner = {
     await this.send(att, turn.user, { retry: true, conv: view.shownConv, kind: view.kind, agent, quote: turn.quote || null });
   },
 
+  // whether the user's words of a run can be edited and asked again: the chat's own question or follow-up of a
+  // conversation in the log, not words steered into a turn nor an annotation's
+  promptEditable(view, run) {
+    const p = run.prompt;
+    return view.kind === "chat" && !!view.pane && !!view.shownKey && !!view.shownConv && !!p && !p.steer && !p.annotate
+      && run.turn === p && typeof p.turn === "number";
+  },
+
+  // the turn of a log that a run's words started; null when the log no longer has it as it was. Its words are the run's,
+  // or the run's followed by words steered into it
+  turnOf(log, prompt) {
+    const turn = log && typeof prompt.turn === "number" ? log.turns[prompt.turn] : null;
+    const user = turn ? String(turn.user) : "", text = String(prompt.text);
+    return turn && turn.prompted && !turn.annotate && (user === text || user.startsWith(text + "\n\n")) ? turn : null;
+  },
+
+  // where a chat view shows Undo of its conversation's edited question: the index of the question's run; until that is
+  // drawn, the run going on (the question starting) or, past the runs, the end of the list (the question waits); -1: none
+  undoAt(view) {
+    const r = view.kind === "chat" ? this.replaced.get(`${view.shownKey}/${view.shownConv}`) : null;
+    if (!r) return -1;
+    const runs = this.runsOf(view.entries || []);
+    const own = runs.findIndex(x => !!x.prompt && !x.prompt.steer && x.prompt.turn === r.turn);
+    return own >= 0 ? own : this.showsRun(view) ? runs.length - 1 : runs.length;
+  },
+
+  undoNode(view) {
+    const id = `${view.shownKey}/${view.shownConv}`;
+    return this.undoStrip(view.doc, this.text("replaced"), () => { this.undoReplace(id).catch(e => this.log("undo failed: " + e)); });
+  },
+
+  // the user's words in place as a box, with their quote: ✓ or the send shortcut asks again, ✕ or Esc leaves them
+  startEdit(view, run, said) {
+    if (view.pane && this.busy(view.shownKey)) return;
+    if (view.editing) this.stopEdit(view);
+    const doc = view.doc, prompt = run.prompt;
+    let quote = prompt.quote || null;
+    const box = doc.createElement("div");
+    box.className = "scholium-entry prompt scholium-edit";
+    if (quote) {
+      const q = doc.createElement("div");
+      q.className = "scholium-prompt-quote";
+      const t = doc.createElement("span");
+      t.textContent = this.quoteLabel(quote);
+      q.append(t, this.iconButton(doc, "close", this.text("quoteRemove"), () => { quote = null; q.remove(); }));
+      box.append(q);
+    }
+    const input = doc.createElement("textarea");
+    input.className = "scholium-edit-input";
+    input.setAttribute("rows", "2");
+    input.setAttribute("no-native", "true");
+    input.value = prompt.text;
+    // while the paper runs, the box and its words stay until it is free
+    const busy = () => !!view.pane && this.busy(view.shownKey);
+    const submit = () => {
+      const say = String(input.value || "").trim();
+      if (!say || busy()) { fit(); return; }
+      this.stopEdit(view);
+      this.editTurn(view, prompt, say, quote).catch(e => this.log("edit failed: " + e));
+    };
+    const tools = doc.createElement("div");
+    tools.className = "scholium-edit-tools";
+    const send = this.iconButton(doc, "check", this.text("editSend"), submit);
+    tools.append(this.iconButton(doc, "close", this.text("editCancel"), () => this.stopEdit(view)), send);
+    const fit = () => { send.disabled = !String(input.value || "").trim() || busy(); };
+    input.addEventListener("input", fit);
+    input.addEventListener("keydown", e => {
+      if (e.isComposing) return;   // the keys of an input method's word are its own
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); this.stopEdit(view); return; }
+      if (this.sendKey(e, input.value)) { e.preventDefault(); submit(); }
+    });
+    box.append(input, tools);
+    fit();
+    said.replaceWith(box);
+    view.editing = { box, said, fit };   // paintPane fits it again when the paper starts or stops running
+    try { input.focus(); } catch (e) {}
+  },
+
+  stopEdit(view) {
+    const e = view.editing;
+    view.editing = null;
+    if (e) { try { e.box.replaceWith(e.said); } catch (err) {} }
+  },
+
+  // an earlier question of the chat asked again with new words: the turns from it on leave the log, and the agent goes on
+  // from the conversation before it (Claude Code: that point of the session as a new session; Codex: a fork of the
+  // thread through the turn before); Undo brings the old log back for a few seconds
+  async editTurn(view, prompt, say, quote = null) {
+    const pane = view.pane, key = view.shownKey, conv = view.shownConv;
+    say = String(say || "").trim();
+    if (!pane || !key || !conv || !say || this.busy(key)) return false;
+    const log = await this.readLog(key, conv);
+    const turn = this.turnOf(log, prompt);
+    if (!turn) return false;
+    const path = this.convPath(key, conv), id = `${key}/${conv}`;
+    let old;
+    try { old = await IOUtils.readUTF8(path); } catch (e) { this.log("conversation not read: " + e); return false; }
+    if (this.replaced.has(id)) this.endReplaced(id);   // the edit before: its old text goes now
+    const agent = this.convAgent(conv);
+    const index = await this.index(key);
+    const r = { key, conv, path, text: old, agent, session: log.session, note: this.notes.get(`${key}/chat`) || null,
+                title: index.titles[conv], retitled: false, timer: null, turn: prompt.turn };
+    // the first question names the conversation, unless it was renamed
+    if (turn === log.turns[0] && index.titles[conv] === this.cut(String(prompt.text).split("\n")[0], 64)) {
+      index.titles[conv] = this.cut(say.split("\n")[0], 64);
+      r.retitled = true;
+      await this.saveIndex(key);
+    }
+    // the cut keeps the point before the question, which the next run goes back to even when it is sent anew; without a
+    // point, a new session is given the conversation. The first question leaves an empty log
+    const marker = turn === log.turns[0] ? "" : JSON.stringify({ type: "scholium", subtype: "rewind", point: turn.point || null }) + "\n";
+    // an edit before left its own marker at the end of the kept text: it goes, so that one marker is left
+    const kept = old.slice(0, turn.start).split("\n").reverse();
+    while (kept.length > 1 && this.isRewindMarker(kept[1])) kept.splice(1, 1);
+    try { await IOUtils.writeUTF8(path, kept.reverse().join("\n") + marker); }
+    catch (e) {
+      this.log("conversation not cut: " + e);
+      if (r.retitled) { index.titles[conv] = r.title; await this.saveIndex(key); }
+      return false;
+    }
+    r.timer = setTimeout(() => this.endReplaced(id), this.UNDO_MS);
+    this.replaced.set(id, r);
+    await this.chooseConv(key, agent, conv);
+    const att = Zotero.Items.getByLibraryAndKey(pane.item.libraryID, key);
+    let sent = false;
+    try { sent = await this.send(att || pane.item, say, { kind: "chat", conv, agent, quote, rewind: turn.point || null, edited: true }); }
+    catch (e) { this.log("edit not sent: " + e); }
+    if (!sent) { await this.undoReplace(id); return false; }
+    // an edit that waits behind another paper's run: the sections show the conversation cut, with Undo
+    if (!(this.job && this.job.key === key)) for (const p of [...this.panes.values()]) if (p.keys.includes(key)) await this.showConversation(p);
+    return true;
+  },
+
+  // whether a line of a log is the marker of an edited question's cut
+  isRewindMarker(line) {
+    try { const e = JSON.parse(line); return !!e && e.type === "scholium" && e.subtype === "rewind"; } catch (e) { return false; }
+  },
+
+  // Undo of an edited question: its run stops (or leaves the queue before it started) without a word, the messages queued
+  // behind it are held, and the log, the title and the state line come back as they were; Codex archives the fork
+  async undoReplace(id) {
+    const r = this.replaced.get(id);
+    if (!r) return;
+    clearTimeout(r.timer);
+    this.replaced.delete(id);
+    const mine = j => j.att.key === r.key && (j.kind || "chat") === "chat" && (j.conv || null) === r.conv;
+    for (const j of this.queue) if (j.qid && mine(j)) this.heldQueues.add(this.queueKey(j));
+    this.queue = this.queue.filter(j => j.qid || !mine(j));
+    const running = () => !!this.job && this.job.key === r.key && mine(this.job.source);
+    if (running()) {
+      this.job.source.undone = true;
+      this.cancel();
+      for (let i = 0; i < 400 && running(); i++) await Zotero.Promise.delay(25);
+    }
+    const now = await this.readLog(r.key, r.conv);
+    if (r.agent === "codex" && now && now.session && now.session !== r.session) this.queueArchive(now.session);
+    try { await IOUtils.writeUTF8(r.path, r.text); }
+    catch (e) { this.log("conversation not restored: " + e); return; }
+    if (r.retitled) {
+      const index = await this.index(r.key);
+      if (r.title === undefined) delete index.titles[r.conv];
+      else index.titles[r.conv] = r.title;
+      await this.saveIndex(r.key);
+    }
+    if (r.note) this.notes.set(`${r.key}/chat`, r.note);
+    else this.notes.delete(`${r.key}/chat`);
+    if (this.transcriptPath === r.path) {
+      const back = await this.readLog(r.key, r.conv);
+      this.transcript = back ? back.entries : [];
+    }
+    this.refresh();
+    for (const pane of [...this.panes.values()]) {
+      if (!pane.keys.includes(r.key)) continue;
+      pane.live = false;   // the run it showed as it went left the conversation: all of it is drawn anew
+      await this.showConversation(pane);
+    }
+  },
+
+  // the old conversation of an edit can no longer come back: its Undo goes
+  endReplaced(id) {
+    const r = this.replaced.get(id);
+    if (!r) return;
+    clearTimeout(r.timer);
+    this.replaced.delete(id);
+    this.dropUndo(r.key, r.conv);
+  },
+
+  // the Undo of an edit leaves the chat views of its conversation: under a run or after them; the rest stays as it is, a
+  // box being edited too. A view's strip is the conversation's it shows: another one is drawn anew
+  dropUndo(key, conv) {
+    for (const pane of [...this.panes.values()]) {
+      if (pane.shownKey !== key || pane.shownConv !== conv) continue;
+      for (const n of [...pane.list.children]) {
+        if (n.className === "scholium-undo") n.remove();
+        else for (const c of [...(n.children || [])]) if (c.className === "scholium-undo") c.remove();
+      }
+    }
+  },
+
   // the user's words to the paper, in the conversation the chosen agent's messages about it go to: the first message of
   // a new one, which answers without annotating, or the next one; while the paper's run of the tab goes on or waits, a
   // message queued behind it; false when that is not possible now. opts: retry (the same words again in conv, already
   // logged), compact, kind, conv (the conversation a queued message belongs to), before (a held queued message the words go
-  // ahead of), quote
+  // ahead of), quote, agent, rewind (the point an edited question goes back to), edited
   async send(item, say, opts = {}) {
     if (!item || (!say && !opts.compact)) return false;
     const job = await this.resolve(item);
@@ -4770,11 +5045,12 @@ var ScholiumRunner = {
     }
     const kind = opts.kind === "annotate" ? "annotate" : "chat";
     if (job.att.libraryID !== Zotero.Libraries.userLibraryID) return false;
-    // the paper's run of the other tab leaves it free; a compaction or a retry is no message to queue
+    // the paper's run of the other tab leaves it free; a compaction, a retry or an edited question is no message to queue
     const busy = this.busy(job.att.key, kind);
-    if (busy && (opts.compact || opts.retry)) return false;
-    Object.assign(job, { agent: opts.retry && opts.agent ? opts.agent : this.agent(), say, own: job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length,
-                         kind, retry: !!opts.retry, compact: !!opts.compact, quote: opts.quote || null });
+    if (busy && (opts.compact || opts.retry || opts.edited)) return false;
+    Object.assign(job, { agent: (opts.retry || opts.edited) && opts.agent ? opts.agent : this.agent(), say, own: job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length,
+                         kind, retry: !!opts.retry, compact: !!opts.compact, quote: opts.quote || null, rewind: opts.rewind || null,
+                         edited: !!opts.edited });
     // the paper is busy: the words wait in the queue of the conversation, as Codex queues a follow-up
     if (busy) {
       Object.assign(job, { qid: String(++this.qseq), conv: opts.conv || null });
@@ -5085,10 +5361,12 @@ var ScholiumRunner = {
     if (this.job && this.job.key === job.att.key) this.job = null;
     // a question stays one when its conversation continues; an annotation that continued a question's conversation
     // has its prompt there. A run after the wait may have its second try again. A queued message that was sent is no row.
+    // An edited question's new session goes on as it is; until there is one, the run goes back to the point again
     this.queue.unshift(Object.assign({}, job, { retried: false, retryAt: 0, qid: null },
                                      session ? { resume: session, say: "", extra: "", asked: !!(job.say || job.asked),
                                                  annotate: false, question: false, fresh: false, logged: false,
-                                                 throttled: !!throttled, updated: false } : { interrupted: true, logged: true }));
+                                                 throttled: !!throttled, updated: false, rewind: session === job.resume ? job.rewind || null : null }
+                                             : { interrupted: true, logged: true }));
     this.settleRun();   // the paper waits: no retry
     const wait = until ? Math.max(until - Date.now(), 0) + 60000 : this.RETRY_MS;
     if (this.paused) clearTimeout(this.paused.timer);
@@ -5152,7 +5430,7 @@ var ScholiumRunner = {
       this.notes.set(`${job.att.key}/chat`, { text: outcome || this.text(ok ? "done" : "failed"), error: !ok, at: Date.now(),
                                               title: detail || "", conv: job.conv || null });
     } else this.notes.delete(`${job.att.key}/annotate`);
-    if (!this.focused()) this.notify(title, ok && !answered ? this.brief(summary) : summary || "");
+    if (!this.focused() && !job.undone) this.notify(title, ok && !answered ? this.brief(summary) : summary || "");
     this.refresh();
     // the sections of the paper take what its log now says of the conversation; without a log, they draw the run ended
     if (job.logPath) {
@@ -5197,9 +5475,9 @@ var ScholiumRunner = {
     if (job.qid) {
       this.queue.splice(this.backAt(job, this.nextRow(job, 0)), 0, job);
       this.heldQueues.add(this.queueKey(job));
-    } else this.giveBack(job);
+    } else if (!job.undone) this.giveBack(job);
     this.appendEntries([{ kind: "final", text: message, error: true, cancelled: true }]);
-    this.notice(job, message, true);
+    if (!job.undone) this.notice(job, message, true);
     this.finish(job, false, message, this.outcome(null, true, running.started));
     return { ok: false, delivered: false, cancelled: true };
   },
@@ -5231,6 +5509,8 @@ var ScholiumRunner = {
     this.transcriptKey = key;
     this.transcriptPath = log ? log.path : null;
     running.context = log ? log.context : null;
+    // another run of a conversation whose question was edited a moment ago: the edit can no longer be undone
+    if (!job.edited && job.conv) this.endReplaced(`${key}/${job.conv}`);
     this.startPanes(key, this.transcriptKind);
     this.notice(job, this.text(job.compact ? "compacting" : job.annotate || (!job.say && !job.resume) ? "typical" : job.question ? "askNotice" : "continuedNotice"));
     this.refresh();
@@ -5271,7 +5551,8 @@ var ScholiumRunner = {
     const user = job.compact || again || continuation ? null
       : job.say || this.text("annotateThis") + (job.extra ? "\n" + this.text("extraLabel") + job.extra : "");
     running.logged = true;
-    await IOUtils.writeUTF8(logPath, JSON.stringify(Object.assign({ type: "scholium", subtype: "run", agent, user, at: started }, job.compact ? { compact: true } : {})) + "\n", { mode: "appendOrCreate" });
+    await IOUtils.writeUTF8(logPath, JSON.stringify(Object.assign({ type: "scholium", subtype: "run", agent, user, at: started },
+      job.compact ? { compact: true } : {}, job.rewind && job.resume ? { rewind: job.rewind } : {})) + "\n", { mode: "appendOrCreate" });
     if (!job.resume || job.annotate) job.profile = (await this.exists(this.profilePath())) ? this.profilePath() : null;
     // the user's words, an annotation, or an automatic continuation, go into the log as the plugin's own lines; a second
     // try has them already. A question's line marks its conversation as one.
@@ -5286,7 +5567,10 @@ var ScholiumRunner = {
       : job.resume ? { type: "scholium", subtype: "continue", reason: job.updated ? "update" : job.throttled ? "throttle" : undefined } : null;
     if (mark) {
       await IOUtils.writeUTF8(logPath, JSON.stringify(mark) + "\n", { mode: "append" });
-      this.appendEntries(this.entries(mark));
+      const made = this.entries(mark);
+      // the turn's words know their turn, as the log's do once it is read
+      for (const e of made) if (e.kind === "prompt" && !e.steer) e.turn = log ? log.turns.length : 0;
+      this.appendEntries(made);
     }
     // what the agent's run leaves: its result (as Claude Code's result event), a usage limit, the
     // conversation, the exit code and the end of stderr
@@ -5316,7 +5600,7 @@ var ScholiumRunner = {
     if (current.cancelled) {
       message = this.text("cancelled");
       this.appendEntries(this.entries(await this.logEnd(logPath, "cancelled", message, started)));
-      this.notice(job, message, true);
+      if (!job.undone) this.notice(job, message, true);   // Undo of an edit stops it without a word
     } else if (exitCode === 0 && result && !result.is_error) {
       ok = true;
       message = job.compact ? (ctx.compacted ? this.compactSizes(ctx.compacted).replace(/^ · /, "") : "") : summary;
@@ -5341,12 +5625,14 @@ var ScholiumRunner = {
       message = (ctx.failure || summary || errors || ctx.stderr.trim().split("\n").pop() || this.text("exitCode", exitCode)).slice(0, 300);
       // the agent no longer has the session (deleted in Codex's app, cleaned up by Claude Code): a new one goes on with
       // the conversation, given its turns; a continuation has nothing to go on with, and its end says why
-      if (job.resume && (ctx.gone || this.gone(message))) {
+      if (job.resume && (ctx.gone || this.gone(message) || (job.rewind && this.rewindRefused(message)))) {
         const again = this.fresh(job);
         const mark = { type: "scholium", subtype: "gone", agent, resent: !!again };
         await IOUtils.writeUTF8(logPath, JSON.stringify(mark) + "\n", { mode: "append" });
         if (again) {
           if (this.job === running) this.job = null;
+          this.dropRefused(this.transcript);
+          this.settleRun();
           return { exitCode, result, fresh: again };
         }
         message = this.text("goneStopped", agent);
@@ -5413,11 +5699,17 @@ var ScholiumRunner = {
     return /no rollout found for thread|No conversation found with session ID/i.test(String(message || ""));
   },
 
+  // whether Claude Code could not take the session back to an edited question's point: it no longer has that message
+  // (compacted since), or it does not know the options
+  rewindRefused(message) {
+    return /No message found with message\.uuid|unknown option '--(?:resume-session-at|fork-session)'/i.test(String(message || ""));
+  },
+
   // the job for a new session of the agent when the one it was to continue is gone: the user's words or the annotation,
   // with the whole conversation; null for a continuation after a limit or an update
   fresh(job) {
     if (!job.say && !job.annotate) return null;
-    return Object.assign({}, job, { resume: null, asked: false, updated: false, throttled: false, retried: false, retryAt: 0,
+    return Object.assign({}, job, { resume: null, rewind: null, asked: false, updated: false, throttled: false, retried: false, retryAt: 0,
                                     interrupted: false, fresh: true, qid: null });
   },
 
@@ -5846,9 +6138,14 @@ var ScholiumRunner = {
       if (!job.resume && !skill) throw new Error(this.text("noSkill", "codex"));
       let opened = null;
       if (job.resume) {
-        // a thread that Codex refuses to resume is one it no longer has: a new one goes on with the conversation
+        // a thread that Codex refuses to resume is one it no longer has: a new one goes on with the conversation; an
+        // edited question forks the thread through the turn before it, and a refused fork does the same
         // the turns stay with the server: a long conversation is not sent back whole
-        try { opened = await rpc.request("thread/resume", Object.assign({ threadId: job.resume, excludeTurns: true }, settings)); }
+        const fork = job.rewind && job.rewind.turnId;
+        try {
+          opened = fork ? await rpc.request("thread/fork", Object.assign({ threadId: job.resume, lastTurnId: fork, excludeTurns: true }, settings))
+                        : await rpc.request("thread/resume", Object.assign({ threadId: job.resume, excludeTurns: true }, settings));
+        }
         catch (e) { ctx.gone = !!(e && e.refused); throw e; }
       } else opened = await rpc.request("thread/start", settings);
       const thread = opened && opened.thread && opened.thread.id;
@@ -6083,17 +6380,18 @@ var ScholiumRunner = {
                           resume: j.resume || null, asked: !!j.asked, question: !!j.question, annotate: !!j.annotate, own: j.own || 0,
                           interrupted: !!j.interrupted, updated: !!j.updated, fresh: !!j.fresh, conv: j.conv || null, asking: !!j.asking,
                           logged: !!j.logged, throttled: !!j.throttled, retried: !!j.retried, retryAt: j.retryAt || 0, kind: j.kind || "chat",
-                          compact: !!j.compact, qid: j.qid || null, failed: !!j.failed, quote: j.quote || null });
+                          compact: !!j.compact, qid: j.qid || null, failed: !!j.failed, quote: j.quote || null, rewind: j.rewind || null });
     const jobs = [];
     if (running && running.source) {
       const j = running.source;
       // once the agent has answered to the prompt the conversation holds it, and the paper continues there (a queued
       // message that was sent, too: no row); before that the paper is handed over as it was queued, the user's words with
-      // it. A compaction is handed over as one, with its focus: the new copy compacts again
+      // it. A compaction is handed over as one, with its focus: the new copy compacts again. An edited question goes back
+      // to its point until the agent made a new session of it
       jobs.push(running.session && running.delivered && !j.compact
         ? Object.assign(plain(j), { resume: running.session, say: "", extra: "", asked: !!(j.say || j.asked), annotate: false, compact: false,
                                     question: false, fresh: false, logged: false, throttled: false, retried: false, retryAt: 0,
-                                    updated: true, qid: null })
+                                    updated: true, qid: null, rewind: running.session === j.resume ? j.rewind || null : null })
         : Object.assign(plain(j), { logged: !!(j.logged || running.logged) }));
     }
     for (const j of this.queue) jobs.push(plain(j));
@@ -6123,7 +6421,7 @@ var ScholiumRunner = {
                            conv: typeof s.conv === "string" && s.conv ? s.conv : null, asking: !!(s.asking || s.question),
                            logged: !!s.logged, interrupted: !!s.interrupted, throttled: !!s.throttled, retried: !!s.retried,
                            retryAt: Number(s.retryAt) || 0, kind, compact: !!s.compact, qid, failed: !!(qid && s.failed),
-                           quote: this.quoteOf(s.quote) });
+                           quote: this.quoteOf(s.quote), rewind: this.pointOf(s.rewind) });
       if (qid) this.qseq = Math.max(this.qseq, Number(qid) || 0);
       // a copy before the paper's conversations hands over its one conversation per agent, which became that agent's
       // first: a paper interrupted there has its turn in that log; an annotation not begun starts a session of its own
@@ -6171,6 +6469,8 @@ var ScholiumRunner = {
     this.queue = [];
     for (const r of this.removedQueued.values()) clearTimeout(r.timer);
     this.removedQueued.clear();
+    for (const r of this.replaced.values()) clearTimeout(r.timer);
+    this.replaced.clear();
     if (this.savedRemoved) clearTimeout(this.savedRemoved.timer);
     this.savedRemoved = null;
     this.heldQueues.clear();

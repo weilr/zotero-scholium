@@ -4,8 +4,13 @@
 
 ### Added
 
-- Saved prompts above the Chat tab's box (preference `savedPrompts`), sent with a click and edited, deleted (with **Undo**) and reordered in the row; they replace the starter questions of an empty conversation.
-- Scholium section: two tabs, **Chat** and **Annotations**. A settings chip (agent · model · effort) opens a
+- Saved prompts above the Chat tab's box (preference `savedPrompts`), sent with a click and edited,
+  deleted (with **Undo**) and reordered in the row.
+- Editing an earlier question of the Chat tab (✎ on hover) asks it again from the conversation before it,
+  replacing what followed, with **Undo** for six seconds (Claude Code `--resume-session-at` with `--fork-session`;
+  Codex `thread/fork`; a new session given the conversation where that is refused or there is no point to go back
+  to).
+- Scholium section: two tabs, **Chat** and **Annotations**. A settings chip (model and effort) opens a
   layer with the three choices; ⋯ holds **Show log**, **Personal profile ↗**, **Settings…** and, on the
   Annotations tab, **Delete annotations**.
 - A Scholium page in Zotero's settings: the send shortcut (Enter, Ctrl + Enter for multiline prompts, or always
@@ -31,8 +36,7 @@
   tab, and the next message quotes it to the agent with its page in the PDF and, where it differs, the label.
 - Sentence citations: answers cite the paper's sentences as `[#n]`, shown as chips with the page and, on hover,
   the sentence; **Locate ↗** opens the PDF at the page and finds the sentence.
-- An empty conversation offers four starter questions; a failed question offers **Retry**; Esc twice on the same
-  run stops it.
+- A failed question offers **Retry**; Esc twice on the same run stops it.
 - Scholium section: as in llm-for-zotero, each agent has its own conversations of a paper. **New chat** starts
   one, **History** lists them by day to open, rename or delete (with **Undo**; a deleted Codex conversation's thread
   is archived), and switching the agent starts a new one. Messages go on in the conversation shown. Each
@@ -89,7 +93,6 @@
 - When removing the earlier annotations or notes fails after the new ones are written, the report gives
   `applied: "partial"` with `result.removeError`.
 - An item that is not in My Library is reported as not found there; group libraries are not supported.
-- The settings chip shows the model and the effort without the agent.
 - Retry, Steer, Delete, Send and Resume, and a stopped run's mark, are icons with their words as tooltips; the send
   and stop button is larger.
 - The Annotations tab's introduction is one line.

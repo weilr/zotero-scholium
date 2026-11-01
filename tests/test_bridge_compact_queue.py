@@ -440,7 +440,7 @@ SCENARIOS = r"""
                turnDone({ id: 'U1', status: 'completed' })]);
     await settle(400);
     const log = await h.runner.readLog('ATT1', pane.shownConv);
-    const prompts = run => run.children.filter(c => c.className === 'scholium-entry prompt').map(c => c.textContent);
+    const prompts = run => run.children.filter(c => /^scholium-entry prompt( editable)?$/.test(c.className)).map(c => c.textContent);
     facts.steerCodex = {
       steerFn: [steerBefore, typeof cur.steer], tip, queued, queuedWords, steers: h.log.steers.map(s => [s.threadId, s.expectedTurnId, s.input]), input: pane.input.value, during,
       runs: pane.list.children.map(r => [prompts(r), r.children.some(c => c.className === 'scholium-meta')]),
@@ -531,7 +531,7 @@ SCENARIOS = r"""
     proc.emit([note('item/completed', { threadId: 'T1', turnId: 'U1', item: { type: 'agentMessage', id: 'm1', text: '批注好了' } }),
                turnDone({ id: 'U1', status: 'completed' })]);
     await settle(500);
-    const prompts = run => run.children.filter(c => c.className === 'scholium-entry prompt').map(c => c.textContent);
+    const prompts = run => run.children.filter(c => /^scholium-entry prompt( editable)?$/.test(c.className)).map(c => c.textContent);
     facts.steerAnnotation = { during, runs: pane.annot.list.children.map(r => prompts(r)), cards: cards(), runCount: pane.annot.list.children.length,
                               retries: pane.annot.list.children.flatMap(r => r.children).filter(c => c.className.includes('retry')).length };
   }
@@ -1503,7 +1503,7 @@ def test_codex_compaction(facts):
 
 def test_compaction_on_its_own(facts):
     assert facts["compactAuto"] == ["上下文已自动压缩 · 990k → 150k"]
-    assert facts["compactAutoParts"] == ["scholium-entry prompt", "scholium-fold", "scholium-entry text", "scholium-compact", "scholium-meta"], \
+    assert facts["compactAutoParts"] == ["scholium-entry prompt editable", "scholium-fold", "scholium-entry text", "scholium-compact", "scholium-meta"], \
         "the start of the compaction has no line"
     assert facts["compactAutoEarly"] == ["上下文已自动压缩 · 990k → 150k"]
     assert facts["compactedLine"] == 90

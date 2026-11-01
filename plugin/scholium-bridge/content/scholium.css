@@ -559,6 +559,7 @@
 
 /* the user's words, under the passage they quote */
 .scholium-entry.prompt {
+  position: relative;
   flex-direction: column;
   box-sizing: border-box;
   width: fit-content;
@@ -1121,3 +1122,17 @@
   border-radius: 4px; padding: 2px 6px; background: var(--material-background); color: var(--fill-primary); }
 .scholium-saved-prompt { resize: vertical; min-height: 36px; }
 .scholium-saved-tools { display: flex; justify-content: flex-end; gap: 2px; }
+
+/* ✎ under a question of the user's, on hover; none while the paper runs */
+.scholium-entry.prompt .edit-prompt { position: absolute; top: calc(100% + 2px); inset-inline-end: 0; opacity: 0; }
+/* room for it: 2px and its 22px under the bubble, less the run's gap of 6px */
+.scholium-entry.prompt.editable { margin-bottom: 20px; }
+.scholium-run:hover .edit-prompt,
+.scholium-entry.prompt .edit-prompt:focus-visible { opacity: 1; }
+.scholium-view.busy .edit-prompt { display: none; }
+.scholium-edit { display: flex; flex-direction: column; gap: 4px; }
+/* the box is a bubble too: wider than the bubble's fit-content */
+.scholium-entry.prompt.scholium-edit { width: 88%; }
+.scholium-edit-input { box-sizing: border-box; font: inherit; resize: vertical; min-height: 40px; border: var(--material-border-quarternary);
+  border-radius: 6px; padding: 4px 6px; background: var(--material-background); color: var(--fill-primary); }
+.scholium-edit-tools { display: flex; justify-content: flex-end; gap: 2px; }
