@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from bridge_harness import NODE, run_scenarios
+from bridge_harness import NODE, PLUGIN, css_rules, run_scenarios
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
 
@@ -508,7 +508,7 @@ SCENARIOS = r"""
     pane.input.type('追问'); const tip = pane.send.title; pane.send.click(); await settle(50);
     // its queued row: Steer greyed, with the reason
     const queued = pane.queueBox.children.find(c => c.className.startsWith('scholium-queued'));
-    const steer = queued ? [queued.children[2].textContent, !!queued.children[2].disabled, queued.children[2].title] : null;
+    const steer = queued ? [labelOf(queued.children[2]), !!queued.children[2].disabled, queued.children[2].title] : null;
     facts.steerClaude = { can: h.runner.canSteer('claude'), steerable: h.runner.steerable(pane), follow: h.runner.followUpFor(pane), tip,
                           steers: h.log.steers.length, writes: h.log.stdin.length, steer };
     for (const j of h.runner.queue.filter(j => j.qid)) h.runner.removeQueued(pane, j.qid);
@@ -590,7 +590,7 @@ SCENARIOS = r"""
                      await h.runner.send(h.item1, '问题一', { retry: true, conv: pane.shownConv, kind: 'chat', agent: 'claude' }), h.runner.queue.length];
     pane.input.type('追问二'); pane.send.click(); await settle(20);
     pane.input.type('追问三'); pane.send.click(); await settle(20);
-    const first = { rows: rows(), input: pane.input.value, buttons: row('追问二').children.slice(2).map(b => b.textContent) };
+    const first = { rows: rows(), input: pane.input.value, buttons: row('追问二').children.slice(2).map(labelOf) };
     const qids = h.runner.queue.map(j => j.qid);
     row('追问三').children[0].fire('dragstart'); const over = row('追问二').fire('dragover'); const drop = row('追问二').fire('drop'); await settle(10);
     const dragged = rows();
@@ -631,7 +631,7 @@ SCENARIOS = r"""
     for (let i = 0; i < 3000 && !(h.runner.current && h.log.stdin.length >= 1); i++) await tick();
     pane.input.type('追问二'); pane.send.click(); await settle(20);
     pane.send.click(); await settle(300);                                      // ■
-    const held = { line: pane.queueBox.children[0].textContent, row: pane.queueBox.children[1].children[2].textContent,
+    const held = { line: pane.queueBox.children[0].textContent, row: labelOf(pane.queueBox.children[1].children[2]),
                    calls: h.log.calls.length, round: pane.send.textContent };
     // the paper is idle meanwhile
     const idle = { state: p.view().state, busy: h.runner.busy('ATT1', 'chat'), any: h.runner.busy('ATT1'), newChat: pane.newChat.disabled };
@@ -660,7 +660,7 @@ SCENARIOS = r"""
     h.runner.findClaude = async () => null;
     h.log.release(); await settle(600);
     const row = pane.queueBox.children.find(c => c.className.startsWith('scholium-queued'));
-    const failed = { cls: row.className, text: row.children[1].textContent, tip: row.children[1].title, button: row.children[2].textContent,
+    const failed = { cls: row.className, text: row.children[1].textContent, tip: row.children[1].title, button: labelOf(row.children[2]), warn: row.children[1].children.length ? row.children[1].children[0].className : null,
                      waiting: h.runner.queue.filter(j => j.qid).map(j => j.say), input: pane.input.value,
                      // its Retry is on its row only
                      retries: pane.list.children.flatMap(r => r.children.flatMap(c => [c, ...c.children])).filter(c => c.className.includes('retry')).length };
@@ -700,7 +700,7 @@ SCENARIOS = r"""
     pane.input.type('追问二'); pane.send.click(); await settle(20);
     const row = () => qrows(pane)[0];
     const b = row().children[2];
-    const steer = [b.textContent, !!b.disabled, b.title];
+    const steer = [labelOf(b), !!b.disabled, b.title];
     row().children[4].click(); await settle(5);
     const menu = pane.popover.node.children.map(c => [c.textContent, !!c.disabled]);
     pane.popover.node.children[1].click(); await settle(5);                    // 关闭排队
@@ -1433,6 +1433,20 @@ SCENARIOS = r"""
     facts.compactNotNow = { bare, busy };
     h.runner.cancel(); await settle(100);
   }
+  // a stopped answer ends with ⊘, its word on hover
+  {
+    const h = harness({ gateFirst: true });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    const pane = p.pane();
+    pane.input.type('问'); pane.send.click(); await settle(200);
+    pane.send.click(); await settle(300);                       // ■
+    const line = pane.list.children.at(-1).children.find(c => /final/.test(c.className));
+    facts.stoppedLine = { cls: line.className, title: line.title, glyph: line.children.map(c => c.className),
+                          retry: line.children.filter(c => c.tagName === 'button').map(labelOf) };
+  }
+
   process.stdout.write(JSON.stringify(facts));
 })().catch(error => { console.error(error); process.exit(1); });
 """
@@ -1619,7 +1633,7 @@ def test_the_settings_page_says_that_claude_code_does_not_steer():
 def test_the_queue(facts):
     q = facts["queue"]
     assert q["refused"] == [False, False, 0], "a compaction or a retry while the paper runs is refused, not queued"
-    assert q["first"] == {"rows": ["追问二", "追问三"], "input": "", "buttons": ["引导", "✕", "⋯"]}
+    assert q["first"] == {"rows": ["追问二", "追问三"], "input": "", "buttons": ["引导", "删除", "⋯"]}
     assert q["qids"] == ["1", "2"]
     assert q["dragged"] == ["追问三", "追问二"] and q["prevented"] is True and q["over"] is True
     assert q["removed"]["rows"] == ["追问三"] and q["removed"]["undo"] == "已删除撤销"
@@ -1634,7 +1648,7 @@ def test_the_queue(facts):
 
 def test_a_stop_holds_the_queue(facts):
     h = facts["held"]
-    assert h["held"]["line"] == "由于你中断了当前响应，队列已暂停继续"
+    assert h["held"]["line"] == "由于你中断了当前响应，队列已暂停"
     assert h["held"]["row"] == "发送" and h["held"]["calls"] == 1 and h["held"]["round"] == "↑"
     assert h["ask"] == ["发送消息？你即将发送一条消息。要清除之前已排队的 1 条消息吗？", "清空队列", "发送消息"]
     # Send message sends the new message and resumes the queue after it (Codex: resumeInterruptedSteers)
@@ -1650,7 +1664,7 @@ def test_a_held_queue_leaves_the_paper_idle(facts):
 
 def test_a_queued_message_that_failed(facts):
     f = facts["queueFailed"]["failed"]
-    assert f["cls"] == "scholium-queued failed" and f["text"] == "⚠ 追问二"
+    assert f["cls"] == "scholium-queued failed" and f["text"] == "追问二" and f["warn"] == "scholium-glyph warn"
     assert f["tip"] == "这条排队中的消息未能发送 · 重试、编辑或删除该消息以继续发送排队的消息"
     assert f["button"] == "重试" and f["waiting"] == ["追问二", "追问三"] and f["input"] == ""
     assert f["retries"] == 0, "no Retry in the transcript, which would retry the turn before"
@@ -1744,7 +1758,7 @@ def test_a_message_the_agent_had_is_no_row(facts):
 def test_a_queued_run_that_broke_waits_failed(facts):
     t = facts["queueThrown"]
     # its Retry is on its row only: one in the transcript would retry the turn before
-    assert t["failed"] == ["scholium-queued failed", "⚠ 追问二", 0] and t["input"] == "" and t["sent"] is True
+    assert t["failed"] == ["scholium-queued failed", "追问二", 0] and t["input"] == "" and t["sent"] is True
 
 
 def test_a_queued_message_failed_after_its_log(facts):
@@ -1887,3 +1901,25 @@ def test_a_compact_the_paper_cannot_take_stays_in_the_box(facts):
     c = facts["compactNotNow"]
     assert c["bare"] == {"tip": "现在不能压缩", "box": "/compact", "calls": 0}
     assert c["busy"] == {"tip": "现在不能压缩", "box": "/compact 侧重", "queue": 0, "calls": 1}
+
+
+def test_a_stopped_answer_ends_with_an_icon(facts):
+    s = facts["stoppedLine"]
+    assert s["cls"] == "scholium-entry final error cancelled" and s["title"] == "已取消"
+    assert s["glyph"][0] == "scholium-glyph cancelled"
+    assert s["retry"] in ([], ["重试"])
+
+
+def test_icons_follow_the_text_colour():
+    rules = css_rules()
+    glyph = rules[".scholium-glyph"]
+    assert "-moz-context-properties: stroke" in glyph and "stroke: currentColor" in glyph
+    for icon in ("retry", "steer", "trash", "play", "edit", "add", "close", "check"):
+        assert f'url("{icon}16.svg")' in rules[f".glyph.{icon} .scholium-glyph"], icon
+    assert 'url("cancelled16.svg")' in rules[".scholium-glyph.cancelled"] and 'url("warn16.svg")' in rules[".scholium-glyph.warn"]
+    for name in ("retry", "cancelled", "steer", "trash", "play", "warn", "edit", "add", "close", "send", "stop", "check"):
+        svg = (PLUGIN / "content" / f"{name}16.svg").read_text(encoding="utf8")
+        assert 'viewBox="0 0 16 16"' in svg and "context-stroke" in svg, name
+    round_ = rules[".scholium-round"]
+    assert "width: 28px" in round_ and "height: 28px" in round_ and "font-size: 0" in round_ and 'url("send16.svg")' in round_
+    assert 'url("stop16.svg")' in rules[".scholium-round.stop"]

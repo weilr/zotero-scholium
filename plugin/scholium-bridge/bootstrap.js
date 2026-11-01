@@ -704,8 +704,8 @@ var ScholiumRunner = {
       askScholium: zh ? "问 Scholium" : "Ask Scholium",
       quoteRemove: zh ? "不引用这段" : "Remove the quote",
       annotEmptyTitle: zh ? "还没有批注这篇" : "Not annotated yet",
-      annotEmptyBody: zh ? "会做重点句高亮（附译文）、页边批注和一篇阅读笔记，按你的个人配置来，通常 10–20 分钟。每次批注都是新会话。"
-                         : "Highlights key sentences with translations, adds margin notes and a reading note, following your profile; usually 10–20 minutes. Each annotation is a new session.",
+      annotEmptyBody: zh ? "高亮重点句并附译文，加页边批注和阅读笔记。"
+                         : "Highlights key sentences with translations, adds margin notes and a reading note.",
       annotExtraHint: zh ? "附加要求（可不填），例如：只批注第 3–5 页" : "Extra instructions (optional), e.g. only pages 3–5",
       annotFollowUpHint: zh ? "接着这次批注修改，例如：第 5 页那条译文改短" : "Continue this annotation, e.g. shorten the translation on page 5",
       redoInline: n => zh ? `重新批注会替换这篇的 ${n} 条 Scholium 批注（你自己的不动）。` : `Annotating again replaces this paper's ${n} Scholium annotations (yours stay).`,
@@ -1452,7 +1452,8 @@ var ScholiumRunner = {
     }
     // the end of a run without a result of its own: cancelled, failed before a result, interrupted
     if (event.type === "scholium" && event.subtype === "end") {
-      out.push({ kind: "final", text: String(event.text || "").trim() || this.text(event.outcome || "failed"), error: true });
+      out.push(Object.assign({ kind: "final", text: String(event.text || "").trim() || this.text(event.outcome || "failed"), error: true },
+                             event.outcome === "cancelled" ? { cancelled: true } : {}));
     }
     if (event.type === "scholium" && event.subtype === "retry") out.push({ kind: "info", text: this.text("retrying") });
     // the numbers an annotation's card shows, as counted when it ended
@@ -1790,18 +1791,28 @@ var ScholiumRunner = {
     return [this.agentName(agent), model ? model.label : this.modelPref(agent), this.effort(agent)].filter(Boolean).join(" · ");
   },
 
-  // the chip: the agent and the model, cut with an ellipsis where the line is narrow, then the effort and ▾, which stay
+  // the chip: the model, cut with an ellipsis where the line is narrow, then the effort in small grey and ▾, which stay;
+  // the agent is in its tooltip and its layer
   paintChip(pane) {
-    const label = this.chipLabel(), effort = this.effort(this.agent());
-    const tail = effort && label.endsWith(" · " + effort) ? " · " + effort : "";
-    const name = pane.doc.createElement("span");
+    const doc = pane.doc, agent = this.agent();
+    const model = this.modelChoices(agent).find(m => m.value === this.modelPref(agent));
+    const name = doc.createElement("span");
     name.className = "scholium-chip-name";
-    name.textContent = label.slice(0, label.length - tail.length);
-    const rest = pane.doc.createElement("span");
-    rest.className = "scholium-chip-tail";
-    rest.textContent = tail + " ▾";
-    pane.chip.replaceChildren(name, rest);
-    pane.chip.title = label;
+    // an empty model is the agent's default
+    name.textContent = (model && model.label) || this.modelPref(agent)
+      || this.text(agent === "codex" ? "paneCodexDefault" : "paneClaudeDefault");
+    const tail = doc.createElement("span");
+    tail.className = "scholium-chip-tail";
+    const effort = this.effort(agent);
+    if (effort) {
+      const e = doc.createElement("span");
+      e.className = "scholium-chip-effort";
+      e.textContent = effort;
+      tail.append(e);
+    }
+    tail.append(doc.createTextNode("▾"));
+    pane.chip.replaceChildren(name, tail);
+    pane.chip.title = this.chipLabel();
   },
 
   paneField(doc, text, control) {
@@ -2022,6 +2033,18 @@ var ScholiumRunner = {
     button.className = ("scholium-button " + look).trim();
     button.textContent = label;
     button.addEventListener("click", onClick);
+    return button;
+  },
+
+  // a button that is an icon (content/<icon>16.svg, in the button's text colour); its words are its tooltip and
+  // its accessible name
+  iconButton(doc, icon, label, onClick, look = "quiet") {
+    const button = this.paneButton(doc, "", onClick, `${look} glyph ${icon}`);
+    const glyph = doc.createElement("span");
+    glyph.className = "scholium-glyph";
+    button.append(glyph);
+    button.title = label;
+    button.setAttribute("aria-label", label);
     return button;
   },
 
@@ -3078,7 +3101,7 @@ var ScholiumRunner = {
       line.className = "scholium-queue-held";
       const t = doc.createElement("span");
       t.textContent = this.text("queueHeld");
-      line.append(t, this.paneButton(doc, this.text("queueGoOn"), () => this.releaseQueue(jobs[0]), "quiet small"));
+      line.append(t, this.iconButton(doc, "play", this.text("queueGoOn"), () => this.releaseQueue(jobs[0])));
       nodes.push(line);
     }
     const sending = this.job && mine(this.job.source) && !this.job.delivered ? this.job.source : null;
@@ -3115,8 +3138,14 @@ var ScholiumRunner = {
     }
     const text = doc.createElement("span");
     text.className = "scholium-queued-text";
-    text.textContent = (job.failed ? "⚠ " : "") + job.say;
-    if (job.failed) text.title = this.text("queuedFailedTip");
+    if (job.failed) {
+      const warn = doc.createElement("span");
+      warn.className = "scholium-glyph warn";
+      warn.setAttribute("role", "img");
+      warn.setAttribute("aria-label", this.text("queuedFailedTip"));
+      text.append(warn, doc.createTextNode(job.say));
+      text.title = this.text("queuedFailedTip");
+    } else text.textContent = job.say;
     text.addEventListener("click", () => { pane.openQid = pane.openQid === job.qid ? null : job.qid; this.paintQueue(pane); });
     row.append(handle, text);
     if (sending) {
@@ -3127,16 +3156,15 @@ var ScholiumRunner = {
       return row;
     }
     let first;
-    if (job.failed) first = this.paneButton(doc, this.text("retry"), () => this.retryQueued(job.qid), "quiet small");
-    else if (held) first = this.paneButton(doc, this.text("queuedSend"), () => this.sendQueuedNow(job.qid), "quiet small");
+    if (job.failed) first = this.iconButton(doc, "retry", this.text("retry"), () => this.retryQueued(job.qid));
+    else if (held) first = this.iconButton(doc, "play", this.text("queuedSend"), () => this.sendQueuedNow(job.qid));
     else {
-      first = this.paneButton(doc, this.text("steerButton"), () => { this.steerQueued(pane, job.qid).catch(e => this.log("steer failed: " + e)); }, "quiet small");
+      first = this.iconButton(doc, "steer", this.text("steerButton"), () => { this.steerQueued(pane, job.qid).catch(e => this.log("steer failed: " + e)); });
       const can = this.steerable(pane, job);
       first.disabled = !can;
       first.title = can ? this.text("steerRowTip") : !this.canSteer(job.agent) ? this.text("noSteer", this.agentName(job.agent)) : this.text("steerNotNow");
     }
-    const remove = this.paneButton(doc, "✕", () => this.removeQueued(pane, job.qid), "quiet icon");
-    remove.title = this.text("queuedRemove");
+    const remove = this.iconButton(doc, "trash", this.text("queuedRemove"), () => this.removeQueued(pane, job.qid));
     const more = this.paneButton(doc, "⋯", () => this.queuedMenu(pane, job, more), "quiet icon");
     row.append(first, remove, more);
     return row;
@@ -3863,6 +3891,17 @@ var ScholiumRunner = {
       span.textContent = bullet;
       node.append(span);
     }
+    // a stopped run: ⊘, its word on hover
+    if (entry.kind === "final" && entry.cancelled) {
+      node.className += " cancelled";
+      node.title = entry.text;
+      const icon = doc.createElement("span");
+      icon.className = "scholium-glyph cancelled";
+      icon.setAttribute("role", "img");
+      icon.setAttribute("aria-label", entry.text);
+      node.append(icon);
+      return node;
+    }
     if (entry.kind === "text") {
       // the agent writes Markdown: set as the profile's preview sets it
       const content = doc.createElement("div");
@@ -3977,7 +4016,7 @@ var ScholiumRunner = {
     let retryable = failedLast ? [...run.lead, ...run.other].filter(e => e.kind === "final" && e.error).pop() : null;
     const line = e => {
       const n = this.entryNode(doc, e);
-      if (e === retryable) n.append(this.paneButton(doc, this.text("retry"), () => { this.retryFromView(view).catch(err => this.log("retry failed: " + err)); }, "quiet small retry"));
+      if (e === retryable) n.append(this.iconButton(doc, "retry", this.text("retry"), () => { this.retryFromView(view).catch(err => this.log("retry failed: " + err)); }));
       return n;
     };
     for (const e of run.lead) node.append(line(e));
@@ -4102,7 +4141,7 @@ var ScholiumRunner = {
     node.append(text);
     const extra = (run.turn && run.turn.extra) || "";
     if (view.pane && index === (view.runCount || 0) - 1 && !this.busy(view.shownKey, "annotate")) {
-      node.append(this.paneButton(doc, this.text("retry"), () => { this.annotateFromPane(view.pane, { extra }); }, "small"));
+      node.append(this.iconButton(doc, "retry", this.text("retry"), () => { this.annotateFromPane(view.pane, { extra }); }));
     }
     return node;
   },
@@ -5004,7 +5043,7 @@ var ScholiumRunner = {
       this.queue.splice(this.backAt(job, this.nextRow(job, 0)), 0, job);
       this.heldQueues.add(this.queueKey(job));
     } else this.giveBack(job);
-    this.appendEntries([{ kind: "final", text: message, error: true }]);
+    this.appendEntries([{ kind: "final", text: message, error: true, cancelled: true }]);
     this.notice(job, message, true);
     this.finish(job, false, message, this.outcome(null, true, running.started));
     return { ok: false, delivered: false, cancelled: true };

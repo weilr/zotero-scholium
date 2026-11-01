@@ -505,9 +505,9 @@ SCENARIOS = r"""
   }
 
   // a button with this text inside a node
-  const findButton = (node, text) => (node.tagName === 'button' && node.textContent === text ? node
+  const findButton = (node, text) => (node.tagName === 'button' && labelOf(node) === text ? node
     : (node.children || []).map(c => findButton(c, text)).find(Boolean) || null);
-  const buttonsIn = (node, text) => (node.tagName === 'button' && node.textContent === text ? 1 : 0)
+  const buttonsIn = (node, text) => (node.tagName === 'button' && labelOf(node) === text ? 1 : 0)
     + (node.children || []).reduce((n, c) => n + buttonsIn(c, text), 0);
   // the annotation tab: an introduction; while it runs, the six steps and what it does now; then the steps folded and a
   // card of the numbers counted in Zotero; Annotate again asks in place
@@ -578,7 +578,7 @@ SCENARIOS = r"""
     const pane = p.pane();
     pane.tabAnnotate.click(); pane.input.type('只批注第 3 页'); pane.annotGo.click(); await settle(600);
     const card = pane.annot.list.children.at(-1).children.find(c => c.className.startsWith('scholium-card'));
-    const failedCard = { cls: card.className, text: card.children[0].textContent, retry: card.children.at(-1).textContent,
+    const failedCard = { cls: card.className, text: card.children[0].textContent, retry: labelOf(card.children.at(-1)),
                          parts: pane.annot.list.children.at(-1).children.map(c => c.className), state: p.view().state };
     card.children.at(-1).click(); await settle(600);
     facts.annotFailed = { failedCard, retried: h.log.stdin[1].includes('只批注第 3 页'), sessions: Object.keys(h.log.writes).filter(k => /annotate-claude-/.test(k)).length };
@@ -972,7 +972,7 @@ def test_an_update_hands_over_the_kind(facts):
 
 def test_the_annotation_tab(facts):
     a = facts["annotPage"]
-    assert "重点句高亮" in a["intro"]["text"] and "每次批注都是新会话" in a["intro"]["text"]
+    assert "高亮重点句并附译文" in a["intro"]["text"] and "阅读笔记" in a["intro"]["text"]
     assert a["intro"]["go"] == "批注这篇" and a["intro"]["sendShown"] is False
     assert a["intro"]["placeholder"] == "附加要求（可不填），例如：只批注第 3–5 页" and a["intro"]["confirmHidden"] is True
     d = a["during"]

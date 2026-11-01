@@ -104,8 +104,8 @@ history and the annotation sessions are those of that PDF.
 
 - Two tabs: **Chat** for questions about the paper, **Annotations** for annotating it. A dot on a tab marks a
   run of that tab going on or waiting while the other tab is shown.
-- Under the tabs, a settings chip names the agent, the model and the effort (`Claude Code · Opus 5.5 · medium ▾`)
-  and opens a layer with the three choices; a click outside the layer or Esc closes it:
+- Under the tabs, the settings chip names the model and, smaller and grey, the effort (`Opus 5.5 medium ▾`); its tooltip
+  and its layer name the agent. It opens a layer with the three choices; a click outside the layer or Esc closes it:
   - **Agent**: Claude Code or Codex. As in llm-for-zotero, a switch starts a new conversation of the paper
     shown; other papers show the conversation that agent goes on with.
   - **Model**: the models the chosen agent reports, asked once per Zotero session without calling a model:
@@ -141,7 +141,7 @@ history and the annotation sessions are those of that PDF.
   written; once the answer is there, the steps fold into "Worked for 24s ›", which opens them as Claude Code
   shows them: each tool call with its command or file, and the first lines of each result (errors in red). A fold
   opened or closed by hand stays so. Under an answer, a line gives the model and the time it ended, with a copy
-  button. A failed question ends with its error and **Retry**, which sends the same words again. Web addresses
+  button. A failed question ends with its error and ↻ (**Retry**), which sends the same words again. Web addresses
   and `zotero://` links in a message open on a click or with Enter, in the browser or in Zotero; links to files
   are shown, not followed.
 - Sentence citations: a question asks the agent to cite the paper's sentences by their number in
@@ -164,7 +164,7 @@ history and the annotation sessions are those of that PDF.
 - When it ends, the steps fold and a card gives the outcome: the warnings left, from the agent's closing line;
   the numbers counted on the paper in Zotero (highlights with the core ones, those of the configuration's core
   colour; margin notes; sticky notes; reading notes); the turns, the tokens and the time. A failed annotation
-  shows its error with **Retry**, which annotates again with the same extra instructions.
+  shows its error with ↻ (**Retry**), which annotates again with the same extra instructions.
 - Words typed afterwards continue that annotation session, for example to change some annotations.
   **Annotate again** asks in place, above the box, how many Scholium annotations it replaces (the user's own
   stay); **Replace** starts a new session.
@@ -173,7 +173,7 @@ history and the annotation sessions are those of that PDF.
 
 - The box at the bottom of each tab takes the user's words. The round button sends them (↑, grey while the box is
   empty); while a run of the tab goes on and the box is empty, it is ■, which stops the run (and takes a waiting
-  paper out of the queue); a run stopped while it starts ends before its agent's process, and words its
+  paper out of the queue); a stopped run ends with ⊘ (**cancelled** on hover); a run stopped while it starts ends before its agent's process, and words its
   conversation does not have yet go back to the box (a queued message to its queue). Esc while a run goes on asks
   once ("Press Esc again to stop") and stops on a second press within three seconds on the same run; with a layer
   open, Esc closes the layer first. The line under the box names the send shortcut. Words typed and not sent are
@@ -183,12 +183,12 @@ history and the annotation sessions are those of that PDF.
   else Ctrl+Shift+Enter. A steered message joins the answer under way without stopping it (Codex's
   `turn/steer`); Claude Code does not support steering, and its follow-ups always queue.
 - Queued messages are listed at the top of the box, one line each, at most three tenths of the pane high: ⠿ drags
-  one to another place, a click on its text shows it whole, **Steer** sends it into the answer under way, ✕
-  deletes it (**Undo** for five seconds), and ⋯ offers **Edit message** (back to the box) and **Turn off
+  one to another place, a click on its text shows it whole, ↪ (**Steer**) sends it into the answer under way, 🗑
+  (**Delete**) deletes it (**Undo** for five seconds), and ⋯ offers **Edit message** (back to the box) and **Turn off
   queueing** (the setting becomes Steer). When an answer ends, the first queued message is sent, marked
-  "Sending". After a stop the queue is held: "Queue paused because you interrupted" with **Resume**, and each row
-  offers **Send**; a new message sent meanwhile asks whether to **Clear queue** or **Send message** first. A queued
-  message that could not be sent is marked ⚠ with **Retry**, and the queue waits until it is retried, edited or
+  "Sending". After a stop the queue is held: "Queue paused because you interrupted" with ▶ (**Resume**), and each row
+  offers ▶ (**Send**); a new message sent meanwhile asks whether to **Clear queue** or **Send message** first. A queued
+  message that could not be sent is marked ⚠ with ↻ (**Retry**), and the queue waits until it is retried, edited or
   deleted. During a compaction, and while a stopped answer ends, follow-ups queue. A follow-up joins the queue
   after the messages and runs waiting for its own conversation. The queue is kept in memory for each conversation
   and is handed over with the running paper when the plugin is updated.
@@ -255,7 +255,7 @@ new version continues that paper's conversation, then runs the papers still wait
 limit or a wait for a second try goes on; a paper whose agent had not yet received its prompt is handed
 over as it was queued, the user's words with it; a compaction under way is handed over as a compaction, with what
 to keep, and runs again. Disabling the plugin or quitting Zotero ends a run the same way, without handing the papers
-over: the paper's history shows the run as interrupted; **Retry** on a run that ended before its answer runs it
+over: the paper's history shows the run as interrupted; ↻ (**Retry**) on a run that ended before its answer runs it
 again, and a new message continues the conversation.
 
 Papers that already carry the tool's annotations are annotated again only after a confirmation (on the

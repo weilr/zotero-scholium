@@ -19,6 +19,15 @@ const key = (el, opts) => {
   return e;
 };
 const settle = async (n = 20) => { for (let i = 0; i < n; i++) await tick(); };
+// a button's words: its text, or for an icon button its aria-label
+const labelOf = n => (n && (n.textContent || (n.getAttribute && n.getAttribute('aria-label')))) || '';
+// a node's text with its icons as their words: an icon button or an img-role element counts as its aria-label
+const textOf = n => {
+  if (!n) return '';
+  const label = n.getAttribute && n.getAttribute('aria-label');
+  if (label && (n.tagName === 'button' || n.getAttribute('role') === 'img')) return n.textContent || label;
+  return n.children && n.children.length ? n.children.map(textOf).join('') : (n.textContent || '');
+};
 
 const CLAUDE = '/appdata/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe';
 const ev = (obj) => JSON.stringify(obj) + '\n';
@@ -668,7 +677,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                  state: p.state.hidden ? null : p.state.textContent, stateKind: p.state.className,
                  annotateDisabled: p.annotGo.disabled, removeDisabled: annotMenu.length ? annotMenu[2].disabled : null,
                  logDisabled: logItem ? logItem.disabled : null, shownKey: v.shownKey, history: v.history,
-                 entries: v.list.children.map(c => [c.className, c.textContent]), flat: flatNodes(runner, v).map(n => [n.className, n.textContent]),
+                 entries: v.list.children.map(c => [c.className, textOf(c)]), flat: flatNodes(runner, v).map(n => [n.className, textOf(n)]),
                  stateTitle: p.state.title,
                  resumeHidden: p.resume.hidden, stateDisplay: p.state.style.display,
                  sendHidden: p.send.hidden, sendDisabled: p.send.disabled, placeholder: p.input.placeholder,

@@ -89,6 +89,16 @@ SCENARIOS = r"""
     // a section drawn once the models are known (no list asked for again) has the same parts
     const second = await h.pane(h.item2); await settle(20);
     facts.chip.secondParts = second.pane().chip.children.map(c => c.className);
+    // a model without an effort shows only the model and the arrow
+    h.store.set('extensions.scholium-bridge.claudeModel', 'haiku');
+    h.runner.paintChip(pane);
+    facts.chip.noEffort = pane.chip.children.map(c => [c.className, c.textContent]);
+    // codex with no model saved: the name is the default's label, the tooltip still names the agent
+    h.store.set('extensions.scholium-bridge.agent', 'codex');
+    h.store.set('extensions.scholium-bridge.codexModel', '');
+    h.runner.models.codex = [{ value: 'gpt-x', label: 'GPT X', title: '', efforts: ['low'] }];
+    h.runner.paintChip(pane);
+    facts.chip.codexDefault = { name: pane.chip.children[0].textContent, tip: pane.chip.title };
   }
   // the layer is fixed in the window's document: placed from the anchor's viewport rect, closed by a scroll, a resize, a
   // re-render and the section's destruction, leaving no node and no listener behind
@@ -848,7 +858,7 @@ SCENARIOS = r"""
     const run = pane.list.children.at(-1);
     const errorNode = run.children.find(c => c.className.includes('final'));
     const retry = errorNode && errorNode.children.find(c => c.className.includes('retry'));
-    const label = retry && retry.textContent;
+    const label = labelOf(retry);
     const inLead = errorNode && run.children.indexOf(errorNode) < (run.children.findIndex(c => c.className === 'scholium-fold') + 1 || 99);
     retry.click(); await settle(400);
     const lines = convLines(h);
@@ -1032,6 +1042,16 @@ SCENARIOS = r"""
     facts.found.none = [await none.zotero.ScholiumBridge.found('claude'), await none.zotero.ScholiumBridge.found('codex')];
     none.runner.stop();
   }
+  // the annotation tab's introduction: its title and one line
+  for (const locale of ['zh-CN', 'en-US']) {
+    const h = harness({ locale });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    const pane = p.pane();
+    pane.tabAnnotate.click(); await settle(20);
+    (facts.intro = facts.intro || {})[locale] = pane.annot.list.children[0].children.map(c => c.textContent);
+  }
   process.stdout.write(JSON.stringify(facts));
 })().catch(error => { console.error(error); process.exit(1); });
 """
@@ -1109,7 +1129,7 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {
 def test_the_readme_says_how_an_interrupted_run_goes_on():
     text = " ".join((PLUGIN.parent / "README.md").read_text(encoding="utf8").split())
     assert "**Send** continues it" not in text
-    assert ("shows the run as interrupted; **Retry** on a run that ended before its answer runs it again, and a new message "
+    assert ("shows the run as interrupted; ↻ (**Retry**) on a run that ended before its answer runs it again, and a new message "
             "continues the conversation.") in text
 
 
@@ -1193,23 +1213,36 @@ def test_the_release_workflow_zips_every_top_level_entry_of_the_plugin():
     assert set(os.listdir(PLUGIN)) <= zipped, set(os.listdir(PLUGIN)) - zipped
 
 
+def test_the_annotation_tab_introduction_is_one_line(facts):
+    assert facts["intro"]["zh-CN"] == ["还没有批注这篇", "高亮重点句并附译文，加页边批注和阅读笔记。"]
+    assert facts["intro"]["en-US"][1] == "Highlights key sentences with translations, adds margin notes and a reading note."
+
+
+def test_the_chip_shows_the_default_label_when_no_model_is_saved(facts):
+    d = facts["chip"]["codexDefault"]
+    assert d["name"] and d["name"].startswith("Codex")
+    assert d["tip"].startswith("Codex")
+
+
 def test_the_settings_chip_and_its_layer(facts):
     c = facts["chip"]
-    assert c["chip"] == "Claude Code · Opus 5.5 · medium ▾"
+    assert c["chip"] == "Opus 5.5medium▾"
     assert c["open"] == {"name": "settings", "selects": True, "note": True}
     assert c["afterDropdown"] == "settings", "a choice in a select's dropdown keeps the layer"
     assert c["afterOutside"] is None and c["afterEsc"] is None
     assert c["menu"] == ["打开日志", "个人配置 ↗", "", "设置…"] and c["oneAtATime"] == "settings"
-    assert c["after"].startswith("Claude Code · Fable") and c["afterParts"] == ["scholium-chip-name", "scholium-chip-tail"]
+    assert c["after"].startswith("Fable") and c["afterParts"] == ["scholium-chip-name", "scholium-chip-tail"]
     assert c["secondParts"] == ["scholium-chip-name", "scholium-chip-tail"]
-    # the agent and the model are cut first; the effort stays
-    assert c["parts"] == [["scholium-chip-name", "Claude Code · Opus 5.5"], ["scholium-chip-tail", " · medium ▾"]]
+    # the model is cut first; the effort, small and grey, and ▾ stay
+    assert c["parts"] == [["scholium-chip-name", "Opus 5.5"], ["scholium-chip-tail", "medium▾"]]
+    assert c["noEffort"] == [["scholium-chip-name", "Haiku 4.5"], ["scholium-chip-tail", "▾"]]
     assert c["tip"] == "Claude Code · Opus 5.5 · medium"
     assert c["done"] == ["完成 · 21s · 4 轮 · 62k tokens", "完成 · 21s · 4 轮 · 62k tokens\n输入 3 · 输出 640"]
     assert c["none"] == [True, ""]
     rules = css_rules()
-    assert "display: flex" in rules[".scholium-chip"] and "flex: none" in rules[".scholium-chip-tail"]
-    assert "white-space: pre" in rules[".scholium-chip-tail"], "the space before · stays at the start of its box"
+    assert "display: flex" in rules[".scholium-chip"] and "align-items: center" in rules[".scholium-chip"]
+    assert "flex: none" in rules[".scholium-chip-tail"]
+    assert "color: var(--fill-secondary)" in rules[".scholium-chip-effort"]
     name = rules[".scholium-chip-name"]
     assert "min-width: 0" in name and "overflow: hidden" in name and "text-overflow: ellipsis" in name
 

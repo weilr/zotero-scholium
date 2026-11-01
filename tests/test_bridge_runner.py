@@ -470,7 +470,7 @@ SCENARIOS = r"""
     const list = h.flat(q.pane());
     const logged = convLines(h).filter(e => e.subtype === 'unfinished');
     const fromLog = (await h.runner.readLog('ATT1', await h.runner.currentConv('ATT1', 'claude'))).entries.filter(e => e.unfinished);
-    facts.unfinished = { restored, during, last: [tree(list.at(-3)), [list.at(-2).className, list.at(-2).textContent]],
+    facts.unfinished = { restored, during, last: [tree(list.at(-3)), [list.at(-2).className, textOf(list.at(-2))]],
                          logged: logged.map(e => e.text), fromLog: fromLog.map(e => e.text), removeDisabledAfter: q.view().removeDisabled,
                          durations: [8000, 59400, 59600, 376500, 3725000].map(ms => h.runner.duration(ms)) };
   }
@@ -3195,7 +3195,7 @@ def test_a_cancelled_message_stays_marked_and_typed_words_stay_with_their_item(f
     assert u["last"][0] == ["div.scholium-entry text",
                             ["div.scholium-content scholium-markdown", ["p", "写到一半的 ", ["strong", "回答"]],
                              ["div.scholium-unfinished", "（这条回复没有写完）"]]]
-    assert u["last"][1] == ["scholium-entry final error", "已取消"]
+    assert u["last"][1] == ["scholium-entry final error cancelled", "已取消"]
     assert u["logged"] == u["fromLog"] == ["写到一半的 **回答**"]
     assert u["removeDisabledAfter"] is False
     assert u["durations"] == ["8s", "59s", "1m 00s", "6m 17s", "1h 02m 05s"]

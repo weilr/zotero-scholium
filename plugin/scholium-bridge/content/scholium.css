@@ -111,15 +111,18 @@
   gap: 6px;
 }
 
-/* the agent and the model are cut first; the effort and ▾ stay */
+/* the model is cut first; the effort, small and grey, and ▾ stay */
 .scholium-chip {
   display: flex;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
   border: var(--material-border-quarternary);
   border-radius: 12px;
   background: var(--material-background);
   padding: 1px 9px;
   font-size: 11px;
+  line-height: 16px;
   white-space: nowrap;
   overflow: hidden;
   max-width: 70%;
@@ -133,7 +136,14 @@
 
 .scholium-chip-tail {
   flex: none;
-  white-space: pre;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.scholium-chip-effort {
+  font-size: 10px;
+  color: var(--fill-secondary);
 }
 
 .scholium-icon {
@@ -665,21 +675,19 @@
   color: var(--fill-secondary);
 }
 
-/* the round button: ↑ sends, ■ stops */
+/* the round button: ↑ sends, ■ stops; the glyph is its text, drawn as an icon */
 .scholium-round {
   appearance: none;
   flex: none;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 0;
   border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  color: var(--accent-white, #fff);
-  background: var(--accent-blue);
+  font-size: 0;
+  background: var(--accent-blue) url("send16.svg") center / 16px no-repeat;
+  -moz-context-properties: stroke;
+  stroke: var(--accent-white, #fff);
 }
 
 .scholium-round:disabled {
@@ -687,9 +695,8 @@
 }
 
 .scholium-round.stop {
-  background: var(--fill-primary);
-  color: var(--material-background);
-  font-size: 9px;
+  background: var(--fill-primary) url("stop16.svg") center / 12px no-repeat;
+  stroke: var(--material-background);
 }
 
 /* the context the conversation's session takes up; orange near the model's limit */
@@ -1084,3 +1091,39 @@
 .scholium-popover.cite { width: 240px; }
 .scholium-cite-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--fill-secondary); }
 .scholium-cite-text { font-size: 11.5px; margin-top: 4px; }
+
+/* a button that is an icon, drawn in the button's text colour; its words are its tooltip */
+.scholium-button.glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+}
+
+.scholium-queued .scholium-button.glyph { width: 20px; height: 20px; }
+
+.scholium-glyph {
+  display: inline-block;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+  background: center / 14px no-repeat;
+  -moz-context-properties: stroke;
+  stroke: currentColor;
+}
+
+.glyph.retry .scholium-glyph { background-image: url("retry16.svg"); }
+.glyph.steer .scholium-glyph { background-image: url("steer16.svg"); }
+.glyph.trash .scholium-glyph { background-image: url("trash16.svg"); }
+.glyph.play .scholium-glyph { background-image: url("play16.svg"); }
+.glyph.edit .scholium-glyph { background-image: url("edit16.svg"); }
+.glyph.add .scholium-glyph { background-image: url("add16.svg"); }
+.glyph.close .scholium-glyph { background-image: url("close16.svg"); }
+.glyph.check .scholium-glyph { background-image: url("check16.svg"); }
+.scholium-glyph.cancelled { background-image: url("cancelled16.svg"); }
+.scholium-glyph.warn { background-image: url("warn16.svg"); margin-inline-end: 4px; color: var(--accent-red); }
+
+.scholium-entry.final.error.cancelled { display: flex; align-items: center; gap: 6px; color: var(--fill-secondary); }

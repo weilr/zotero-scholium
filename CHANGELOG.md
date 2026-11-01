@@ -88,6 +88,10 @@
 - When removing the earlier annotations or notes fails after the new ones are written, the report gives
   `applied: "partial"` with `result.removeError`.
 - An item that is not in My Library is reported as not found there; group libraries are not supported.
+- The settings chip shows the model and the effort without the agent.
+- Retry, Steer, Delete, Send and Resume, and a stopped run's mark, are icons with their words as tooltips; the send
+  and stop button is larger.
+- The Annotations tab's introduction is one line.
 
 ### Fixed
 
