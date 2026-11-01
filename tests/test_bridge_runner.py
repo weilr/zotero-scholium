@@ -508,6 +508,7 @@ SCENARIOS = r"""
     h.runner.transcriptKey = 'ATT1';
     p.pane().shownKey = 'ATT1';
     p.pane().live = true;
+    p.pane().list.append(p.pane().doc.createElement('div'));   // the run the draft joins
     h.runner.growDraft('第一段', 0);
     h.runner.paintDraft();
     const node = p.pane().draft.node;
@@ -2648,7 +2649,6 @@ BRIEF = "高亮 28 条（核心 12 条）\n页边批注 9 条\n无剩余警告" 
 ASK = "向这篇论文提问"   # the chat's placeholder while its conversation is a question's
 HISTORY_HEAD = "下面是这段对话之前的内容。原来的会话已经接不上了，这是 Zotero 里保存的记录："   # a new session's conversation, as text
 HISTORY_END = "——以上是之前的对话，新消息如下——"
-STARTERS = ["scholium-starters", "可以这样开始这篇论文要解决什么问题？主要贡献有哪几点？方法的核心思路是什么？实验用了哪些数据和对比方法？"]
 CLOSING = "改了批注时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。"   # the end of a follow-up's prompt
 DONE_NOTICE = ["完成 · Ns"] + BRIEF.split("\n")   # a harness run's own time, read through run_time
 DONE_STATE = "完成 · 6m 17s · 26 轮 · 2,568k tokens"
@@ -2753,7 +2753,7 @@ def test_section_offers_model_effort_and_actions(facts):
     v = b["view"]
     assert (v["annotateDisabled"], v["removeDisabled"], v["logDisabled"]) == (False, False, True)
     assert v["round"][0] != "■", "nothing runs: no stop button"
-    assert v["flat"] == [STARTERS] and v["state"] is None
+    assert v["flat"] == [] and v["state"] is None
     assert v["stateDisplay"] == "none"   # hidden by display: the attribute alone is not enough in Zotero
     assert facts["settings"] == {"model": "fable", "effort": "high", "otherModel": "fable", "otherEffort": "high"}
     args = facts["call"]["args"]
@@ -2762,7 +2762,7 @@ def test_section_offers_model_effort_and_actions(facts):
 
 def test_section_is_styled_by_its_stylesheet(facts):
     look = facts["look"]
-    assert look["parts"] == ["scholium-tabs", "scholium-line", "scholium-view chat", "scholium-view annotate", "scholium-composer"]
+    assert look["parts"] == ["scholium-tabs", "scholium-line", "scholium-view chat", "scholium-view annotate", "scholium-saved", "scholium-composer"]
     assert look["buttons"] == ["scholium-button primary small", "scholium-button quiet small", "scholium-round send"]
     assert look["tabs"] == ["scholium-tab on", "scholium-tab"]
     assert look["selects"] == ["scholium-select"] * 3 and look["input"] == "scholium-input"
@@ -2772,7 +2772,7 @@ def test_section_is_styled_by_its_stylesheet(facts):
     for cls in ["scholium-pane", "scholium-tabs", "scholium-tab", "scholium-tab-dot", "scholium-line", "scholium-view", "scholium-annot-intro", "scholium-chip", "scholium-icon", "scholium-popover", "scholium-menu-item", "scholium-menu-sep", "scholium-note", "scholium-field", "scholium-select", "scholium-spacer",
                 "scholium-button", "scholium-state", "scholium-log", "scholium-entry", "scholium-bullet",
                 "scholium-content", "scholium-composer", "scholium-input", "scholium-send-row", "scholium-hint", "scholium-copy",
-                "scholium-markdown", "scholium-starters", "scholium-starters-title", "scholium-starter", "scholium-history-group", "scholium-history-row",
+                "scholium-markdown", "scholium-saved", "scholium-saved-item", "scholium-saved-go", "scholium-undo", "scholium-history-group", "scholium-history-row",
                 "scholium-history-open", "scholium-history-title", "scholium-history-time", "scholium-history-rename",
                 "scholium-history-empty", "scholium-round", "scholium-ring", "scholium-context-head", "scholium-context-bar", "scholium-context-legend",
                 "scholium-run", "scholium-fold-head", "scholium-fold-body", "scholium-meta", "scholium-annot-intro-title", "scholium-steps",
@@ -2863,7 +2863,7 @@ def test_section_shows_the_transcript_like_claude_code(facts):
     assert (a["annotateDisabled"], a["logDisabled"], a["shownKey"]) == (False, False, "ATT1")
     assert run_time(facts["paneRerendered"]["flat"]) == RUN
     o = facts["otherAfter"]
-    assert o["flat"] == [STARTERS]
+    assert o["flat"] == []
     assert o["state"] is None and o["stateKind"] == "scholium-state info", "nothing of another paper's run"
     assert facts["logLines"] == 19, "the run's own line, the Annotate line, Claude Code's events, the numbers counted, when it ended"
     assert re.fullmatch(r"/data/tmp/scholium/ATT1/conversations/annotate-claude-\d{8}-\d{6}\.jsonl", facts["revealed"][0])
@@ -3517,7 +3517,7 @@ def test_each_agent_has_its_own_conversations(facts):
     # annotation session is no chat of Codex's
     c = facts["switchedToClaude"]
     s = c["switched"]
-    assert s["entries"] == [STARTERS]
+    assert s["entries"] == []
     assert (s["shownConv"], s["newChatDisabled"], s["ring"], s["placeholder"]) == (None, True, None, ASK)
     assert s["index"] == {"claude": None}, "as llm-for-zotero's switch, a new conversation"
     assert c["calls"] == 1 and c["resumed"] is False
@@ -3527,7 +3527,7 @@ def test_each_agent_has_its_own_conversations(facts):
     # Codex chosen again: a new conversation too, and no chat of Codex's in History; the annotation tab shows Codex's
     # session, which goes on in its thread
     b = facts["switchedBack"]
-    assert b["again"] == {"entries": [["scholium-entry info", "这篇论文在 Claude Code 里有对话，把智能体换成 Claude Code 就能接着聊。"], STARTERS],
+    assert b["again"] == {"entries": [["scholium-entry info", "这篇论文在 Claude Code 里有对话，把智能体换成 Claude Code 就能接着聊。"]],
                           "shownConv": None}
     assert b["rows"] == [["scholium-history-empty", "没有别的对话。"]]
     assert b["opened"] == {"shownConv": True, "historyRows": None, "entries": 16, "placeholder": "接着这次批注修改，例如：第 5 页那条译文改短"}
@@ -3818,7 +3818,7 @@ def test_a_session_the_agent_no_longer_has_is_rebuilt_from_the_conversation(fact
 def test_conversations_of_earlier_versions_and_the_history_given(facts):
     assert facts["codexQuestion"] == {"session": "T1", "question": True, "placeholder": ASK, "title": "这篇讲什么？"}
     g = facts["legacyGoesOn"]
-    assert g["claude"] == {"placeholder": ASK, "entries": [["scholium-entry info", "这篇论文在 Codex 里有对话，把智能体换成 Codex 就能接着聊。"], STARTERS],
+    assert g["claude"] == {"placeholder": ASK, "entries": [["scholium-entry info", "这篇论文在 Codex 里有对话，把智能体换成 Codex 就能接着聊。"]],
                            "resumed": False, "conversations": 1,
                            "prompt": "使用 zotero-scholium 技能读下面这篇论文（status 给出题录，extract 给出正文），回答用户在 Zotero 里提的问题。"}, \
         "Claude Code starts its own conversation, given nothing of Codex's"
@@ -3880,7 +3880,7 @@ def test_new_and_resumed_sessions_know_the_annotations_and_turns(facts):
 
 def test_new_chat_and_history(facts):
     c = facts["conversations"]
-    new = [STARTERS]
+    new = []
     assert c["first"] is True and c["before"] == {"newChatDisabled": False, "historyDisabled": False}
     assert c["fresh"] == {"entries": new, "shownConv": None, "newChatDisabled": True, "input": "", "placeholder": ASK, "current": None}
     assert c["second"] is True and c["resumedSecond"] is False, "the next message starts a conversation of its own"

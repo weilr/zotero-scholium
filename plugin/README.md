@@ -134,8 +134,11 @@ history and the annotation sessions are those of that PDF.
   conversations of the PDF by day (today, yesterday, the previous 7 and 30 days, older), titled by their first
   message, the one shown highlighted: a click opens one, ✎ renames it (Enter keeps the new title, Esc the old
   one), ✕ deletes it (**Undo** brings it back for six seconds; a deleted Codex conversation's thread is archived
-  at the next Codex run). While the paper runs or waits, **＋**, the history and **Agent** are off. An empty
-  conversation offers four questions, each sent with a click.
+  at the next Codex run). While the paper runs or waits, **＋**, the history and **Agent** are off.
+- Saved prompts sit above the Chat tab's box. A click sends one: queued or steered while the agent answers, with the quoted passage.
+- On hover, ✎ and 🗑 show beside each. ✎ and ＋ edit a label and a prompt in the row.
+- A deleted one comes back with **Undo** for six seconds. Dragging one moves it.
+- There are four built-in ones until the list is changed (preference `savedPrompts`).
 - The user's words are a bubble on the right. While a run goes on, one blue line names what the agent does at
   the moment ("Reading sentences.txt", "Running python scholium.py extract …", a path by its last part), and the answer appears as it is
   written; once the answer is there, the steps fold into "Worked for 24s ›", which opens them as Claude Code

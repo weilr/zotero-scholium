@@ -1,5 +1,5 @@
 """The Scholium section's layout: the settings page, the tabs, the settings layer, the message box and its round
-button, the context ring, the transcript by runs, the history layer, the starters and the retry."""
+button, the context ring, the transcript by runs, the history layer, the saved prompts and the retry."""
 import json
 import os
 import re
@@ -800,8 +800,8 @@ SCENARIOS = r"""
     await settle(40);
     const pane = p.pane();
     const keys = pane.keys.slice();
-    const starters = pane.list.children[0] && pane.list.children[0].children.map(c => c.textContent);
-    pane.list.children[0].children[1].click(); await settle(300);       // the first question
+    const starters = pane.saved.children.filter(c => c.className === 'scholium-saved-item').map(c => c.children[0].textContent);
+    pane.saved.children[0].children[0].click(); await settle(300);       // the first question
     const asked = h.log.stdin[0].includes('这篇论文要解决什么问题？');
     pane.newChat.click(); await settle(50);
     pane.input.type('第二个问题'); pane.send.click(); await settle(300);
@@ -820,7 +820,8 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await settle(40);
     const pane = p.pane();
-    const english = [pane.list.children[0].children.map(c => c.textContent), pane.list.children[0].children[1].className];
+    const savedItems = pane.saved.children.filter(c => c.className === 'scholium-saved-item');
+    const english = [savedItems.map(c => c.children[0].textContent), savedItems.map(c => c.children[0].title)];
     let placed = 0;
     const place = h.runner.placePopover;
     h.runner.placePopover = function (...a) { placed++; return place.apply(this, a); };
@@ -839,7 +840,7 @@ SCENARIOS = r"""
     g.runner.start('x');
     const q = await g.pane(g.item1);
     await settle(40);
-    facts.historyLayer = { english, opened, toggled, other, busy, group: q.pane().list.children.map(c => c.textContent) };
+    facts.historyLayer = { english, opened, toggled, other, busy, group: q.pane().list.children.map(c => c.textContent), groupSaved: q.pane().saved.hidden };
   }
   // a failed question carries a Retry that runs the same words again in the same conversation, without a second prompt line;
   // the failure line is in the run's lead (it failed before any step) or among its other lines (after a step)
@@ -1273,10 +1274,9 @@ def test_the_section_never_widens_the_item_pane():
 def test_the_empty_states_and_the_card_labels_sit_as_drawn():
     rules = css_rules()
     log = rules[".scholium-log"]
-    assert "display: flex" in log and "flex-direction: column" in log, "the auto margins of the starters and the introduction need a column"
-    assert "margin: auto 0" in rules[".scholium-annot-intro"] and "margin: auto 0 4px" in rules[".scholium-starters"]
+    assert "display: flex" in log and "flex-direction: column" in log, "the auto margins of the introduction need a column"
+    assert "margin: auto 0" in rules[".scholium-annot-intro"]
     assert "word-break: keep-all" in rules[".scholium-card-nums span"]
-    assert "height: auto" in rules[".scholium-starter"], "a question on two lines gets a button as tall as two"
 
 
 def test_the_menu_items_close_the_layer_and_act(facts):
@@ -1401,7 +1401,7 @@ def test_the_section_stays_at_the_top_of_the_pane_when_a_section_above_it_grows(
 def test_a_section_drawn_while_collapsed_shows_its_conversation_once_opened(facts):
     o = facts["openLoads"]
     assert o["before"] == 0 and o["closed"] == 0, "drawn collapsed: nothing shown, nothing on closing"
-    assert "scholium-starters" in o["after"], "opened: the conversation (here the starters)"
+    assert o["after"] == [], "opened: the conversation (here an empty chat, without starters)"
     assert o["again"] == 1, "shown once"
     assert o["rendered"] == 1 and o["destroyed"] == 0, "the listener goes with its pane"
 
@@ -1521,7 +1521,7 @@ def test_the_words_of_a_runs_line(facts):
 def test_history_is_a_layer_of_this_pdfs_conversations(facts):
     h = facts["history"]
     assert h["keys"] == ["ATT1"], "the best PDF only, though the paper has two"
-    assert h["starters"] == ["可以这样开始", "这篇论文要解决什么问题？", "主要贡献有哪几点？", "方法的核心思路是什么？", "实验用了哪些数据和对比方法？"]
+    assert h["starters"] == ["问题", "贡献", "方法", "实验"]
     assert h["asked"] is True
     assert h["rows"] == ["第二个问题", "这篇论文要解决什么问题？"]
     assert h["after"] == [None, True] and h["shown"] == "回答 1"
@@ -1529,13 +1529,14 @@ def test_history_is_a_layer_of_this_pdfs_conversations(facts):
 
 def test_the_history_layer_toggles_is_placed_for_its_rows_and_goes_when_the_paper_runs(facts):
     f = facts["historyLayer"]
-    assert f["english"] == [["Try asking", "What problem does this paper address?", "What are its main contributions?",
-                             "What is the core idea of the method?", "Which data and baselines do the experiments use?"], "scholium-starter"]
+    assert f["english"] == [["Problem", "Contributions", "Method", "Experiments"],
+                            ["What problem does this paper address?", "What are its main contributions?",
+                             "What is the core idea of the method?", "Which data and baselines do the experiments use?"]]
     assert f["opened"] == ["history", True, ["scholium-history-empty"]]
     assert f["toggled"] is None, "the button closes its own layer"
     assert f["other"] == ["menu", True], "rows drawn late do not land in another layer"
     assert f["busy"] is None, "no layer while the paper runs"
-    assert f["group"] == ["这篇还没有运行记录。"], "a group library's paper has no starters"
+    assert f["group"] == ["这篇还没有运行记录。"] and f["groupSaved"] is True, "a group library's paper has no saved prompts"
 
 
 @pytest.mark.parametrize("name", ["retry", "retryAfterStep"])

@@ -4,6 +4,7 @@
 
 ### Added
 
+- Saved prompts above the Chat tab's box (preference `savedPrompts`), sent with a click and edited, deleted (with **Undo**) and reordered in the row; they replace the starter questions of an empty conversation.
 - Scholium section: two tabs, **Chat** and **Annotations**. A settings chip (agent · model · effort) opens a
   layer with the three choices; ⋯ holds **Show log**, **Personal profile ↗**, **Settings…** and, on the
   Annotations tab, **Delete annotations**.

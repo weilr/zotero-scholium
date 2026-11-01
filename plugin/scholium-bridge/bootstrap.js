@@ -487,6 +487,7 @@ var ScholiumRunner = {
   pluginID: null,
   queue: [],                // attachments waiting, in order
   heldQueues: new Set(),    // "<attachment key>/<kind>/<conversation>" (queueKey): a conversation's queued messages, held after a stop until Resume
+  savedRemoved: null,       // { item, at, timer }: the saved prompt deleted a moment ago, until Undo can no longer bring it back
   removedQueued: new Map(), // qid -> { job, next, timer }: a queued message deleted a moment ago, until it can no longer be brought back;
                             // next: the qid of the row of its queue that followed it
   qseq: 0,                  // the number of the latest queued message
@@ -724,11 +725,21 @@ var ScholiumRunner = {
       newChat: zh ? "新对话" : "New chat",
       historyButton: zh ? "历史" : "History",
       historyEmpty: zh ? "没有别的对话。" : "No other conversations.",
-      startersTitle: zh ? "可以这样开始" : "Try asking",
       starter1: zh ? "这篇论文要解决什么问题？" : "What problem does this paper address?",
       starter2: zh ? "主要贡献有哪几点？" : "What are its main contributions?",
       starter3: zh ? "方法的核心思路是什么？" : "What is the core idea of the method?",
       starter4: zh ? "实验用了哪些数据和对比方法？" : "Which data and baselines do the experiments use?",
+      starterLabel1: zh ? "问题" : "Problem",
+      starterLabel2: zh ? "贡献" : "Contributions",
+      starterLabel3: zh ? "方法" : "Method",
+      starterLabel4: zh ? "实验" : "Experiments",
+      savedAdd: zh ? "添加常用语句" : "Add prompt",
+      savedLabel: zh ? "名称" : "Label",
+      savedPrompt: zh ? "提示词" : "Prompt",
+      savedSave: zh ? "保存" : "Save",
+      savedCancel: zh ? "取消" : "Cancel",
+      savedEdit: zh ? "编辑" : "Edit",
+      savedDelete: zh ? "删除" : "Delete",
       otherAgentHas: name => zh ? `这篇论文在 ${name} 里有对话，把智能体换成 ${name} 就能接着聊。`
                                 : `This paper has a conversation in ${name}; choose ${name} as the agent to go on with it.`,
       groupToday: zh ? "今天" : "Today",
@@ -2246,6 +2257,8 @@ var ScholiumRunner = {
     else pane.quote = old && old.item === item ? old.quote || null : null;   // a quote is of the item it was chosen for
     // below the transcript, a message box as in a chat: a question or extra instructions for a new run, or a
     // follow-up; it grows with the text
+    // the saved prompts above the chat's box (paintSaved)
+    pane.saved = div("scholium-saved");
     const talk = pane.composer = div("scholium-composer");
     pane.input = doc.createElement("textarea");
     pane.input.className = "scholium-input";
@@ -2288,7 +2301,7 @@ var ScholiumRunner = {
     pane.annotGo = this.paneButton(doc, this.text("annotateThis"), () => { this.annotateFromPane(pane); }, "primary small");
     pane.sendRow.append(pane.hint, pane.ring, pane.send, pane.annotGo);
     talk.append(pane.queueBox, pane.confirmRow, pane.quoteBox, pane.input, pane.sendRow);
-    box.append(head, line, pane.chatView, pane.annotView, talk);
+    box.append(head, line, pane.chatView, pane.annotView, pane.saved, talk);
     body.append(box);
     this.fitPane(pane);
     this.watchFit(pane);
@@ -2945,24 +2958,26 @@ var ScholiumRunner = {
     catch (e) { this.log("link failed: " + e); }
   },
 
-  // the words in a pane's box go to the paper it shows, in the conversation the chosen agent's messages about it go to
-  sendFromPane(pane, invert = false) {
+  // the words in a pane's box, or a saved prompt's (text), go to the paper it shows, in the conversation the chosen
+  // agent's messages about it go to; a saved prompt leaves the box as it is
+  sendFromPane(pane, invert = false, text = null) {
+    const typed = text === null;
     // /compact compacts the conversation shown, on whichever tab; it is no wish for an annotation
-    const compact = /^\/compact(?:\s+([\s\S]*))?$/.exec(String(pane.input.value || "").trim());
+    const compact = typed ? /^\/compact(?:\s+([\s\S]*))?$/.exec(String(pane.input.value || "").trim()) : null;
     if (compact && pane.item) {
       this.compactFromPane(pane, (compact[1] || "").trim()).then(ok => { if (ok) this.clearInput(pane); }).catch(e => this.log("compact failed: " + e));
       return;
     }
     // the annotation tab without a session: the words go with a new annotation
-    if (pane.tab === "annotate" && !pane.annot.shownConv && !pane.busy) { this.annotateFromPane(pane); return; }
-    const say = String(pane.input.value || "").trim();
+    if (typed && pane.tab === "annotate" && !pane.annot.shownConv && !pane.busy) { this.annotateFromPane(pane); return; }
+    const say = String(typed ? pane.input.value || "" : text).trim();
     if (!say || !pane.item) return;
     if (pane.busy && this.followUpFor(pane, invert) === "steer" && this.steerable(pane)) {
       const quote = pane.tab === "chat" ? pane.quote : null;
       this.steerFromPane(pane, say, quote)
         .then(ok => {
-          if (!ok) return this.queueFromPane(pane, say);
-          this.clearInput(pane);
+          if (!ok) return this.queueFromPane(pane, say, { typed });
+          if (typed) this.clearInput(pane);
           if (quote && pane.quote === quote) { pane.quote = null; this.paintQuote(pane); }
         })
         .catch(e => this.log("steer failed: " + e));
@@ -2973,22 +2988,27 @@ var ScholiumRunner = {
     const waiting = this.queue.filter(j => this.shownQueued(pane, j));
     if (waiting.length && this.heldQueues.has(this.queueKey(waiting[0])) && !pane.busy) {
       this.askInPlace(pane, this.text("clearQueueAsk", waiting.length), [
-        [this.text("clearQueue"), "quiet small", () => { this.dropQueued(waiting); this.queueFromPane(pane, say).catch(e => this.log("message failed: " + e)); }],
+        [this.text("clearQueue"), "quiet small", () => { this.dropQueued(waiting); this.queueFromPane(pane, say, { typed }).catch(e => this.log("message failed: " + e)); }],
         [this.text("sendMessage"), "small", () => {
-          this.queueFromPane(pane, say, { before: waiting[0] }).then(() => this.releaseQueue(waiting[0])).catch(e => this.log("message failed: " + e));
+          this.queueFromPane(pane, say, { before: waiting[0], typed }).then(() => this.releaseQueue(waiting[0])).catch(e => this.log("message failed: " + e));
         }]]);
       return;
     }
-    this.queueFromPane(pane, say).catch(e => this.log("message failed: " + e));
+    this.queueFromPane(pane, say, { typed }).catch(e => this.log("message failed: " + e));
   },
 
-  // the words to the paper's conversation of the tab: sent, or queued behind the run under way (send)
-  queueFromPane(pane, say, { before = null } = {}) {
+  // the words to the paper's conversation of the tab: sent, or queued behind the run under way (send); typed words
+  // leave the box once they went
+  queueFromPane(pane, say, { before = null, typed = true } = {}) {
     const view = this.viewOf(pane, pane.tab);
     const att = view.shownKey && Zotero.Items.getByLibraryAndKey(pane.item.libraryID, view.shownKey);   // the paper of the tab's conversation
     const quote = pane.tab === "chat" ? pane.quote : null;
     return this.send(att || pane.item, say, { kind: pane.tab, conv: view.shownConv, before, quote })
-      .then(sent => { if (sent) { this.clearInput(pane); if (quote && pane.quote === quote) { pane.quote = null; this.paintQuote(pane); } } });
+      .then(sent => {
+        if (!sent) return;
+        if (typed) this.clearInput(pane);
+        if (quote && pane.quote === quote) { pane.quote = null; this.paintQuote(pane); }
+      });
   },
 
   // the conversation a tab shows, compacted by its agent: Claude Code's /compact in its session; false when it has no
@@ -3545,7 +3565,7 @@ var ScholiumRunner = {
                                       title: this.tokenDetail(log.result) } : null;
     const entries = memory ? this.transcript : log ? log.entries : [];
     // the run shown as it went is drawn again as finished; anything else anew, at the latest, so that what follows is followed;
-    // a chat without entries offers questions, under the note of the other agent's conversation
+    // a chat without entries shows the note of the other agent's conversation
     if (kept) this.refreshRun(pane, pane.runCount - 1);
     else if (entries.length) this.renderTranscript(pane, entries, false);
     else if (pane.item && pane.item.libraryID !== Zotero.Libraries.userLibraryID) {
@@ -3553,7 +3573,6 @@ var ScholiumRunner = {
     } else {
       this.renderTranscript(pane, [], false);
       if (other) pane.list.append(this.entryNode(pane.doc, { kind: "info", text: this.text("otherAgentHas", this.agentName(other)) }));
-      pane.list.append(this.startersNode(pane));
     }
     this.swapUnsent(pane, before);
     this.paintPane(pane);
@@ -3612,22 +3631,157 @@ var ScholiumRunner = {
     return node;
   },
 
-  // the questions an empty chat offers: one sends at once
-  startersNode(pane) {
-    const doc = pane.doc, node = doc.createElement("div");
-    node.className = "scholium-starters";
-    const title = doc.createElement("div");
-    title.className = "scholium-starters-title";
-    title.textContent = this.text("startersTitle");
-    node.append(title);
-    for (const k of ["starter1", "starter2", "starter3", "starter4"]) {
-      const b = doc.createElement("button");
-      b.className = "scholium-starter";
-      b.textContent = this.text(k);
-      b.addEventListener("click", () => { pane.input.value = this.text(k); this.sendFromPane(pane); });
-      node.append(b);
-    }
+  // the saved prompts of the row above the chat's box: [{ label, prompt }]; the four built-in ones until the list is
+  // changed, then the list as it was saved
+  savedPrompts() {
+    try {
+      const list = JSON.parse(this.getPref("savedPrompts") || "null");
+      if (Array.isArray(list)) {
+        return list.filter(p => p && typeof p.prompt === "string" && p.prompt.trim())
+          .map(p => ({ label: String(p.label || "").trim() || this.promptLabel(p.prompt), prompt: p.prompt.trim() }));
+      }
+    } catch (e) { this.log("saved prompts not read: " + e); }
+    return [1, 2, 3, 4].map(n => ({ label: this.text("starterLabel" + n), prompt: this.text("starter" + n) }));
+  },
+
+  saveSavedPrompts(list) {
+    try { Zotero.Prefs.set(this.pref + "savedPrompts", JSON.stringify(list.map(p => ({ label: p.label, prompt: p.prompt }))), true); }
+    catch (e) { this.log("saved prompts not saved: " + e); }
+    this.refresh();
+  },
+
+  // a prompt's label when none was given: its first twelve characters
+  promptLabel(prompt) { return Array.from(String(prompt).trim().split("\n")[0]).slice(0, 12).join(""); },
+
+  // the row of saved prompts, on the chat tab while its box is there: one button each (✎ and 🗑 on hover), ＋ at the end,
+  // and the one deleted a moment ago with Undo; drawn again only when that changes, and not while a prompt is edited there
+  paintSaved(pane) {
+    const shown = pane.tab === "chat" && !pane.composer.hidden;
+    this.show(pane.saved, shown);
+    if (!shown || pane.savedEdit) return;
+    const list = this.savedPrompts();
+    const sig = JSON.stringify([list, !!this.savedRemoved]);
+    if (pane.savedSig === sig) return;
+    pane.savedSig = sig;
+    const doc = pane.doc;
+    const nodes = list.map((p, at) => this.savedItem(pane, p, at));
+    nodes.push(this.iconButton(doc, "add", this.text("savedAdd"), () => this.editSaved(pane, -1)));
+    if (this.savedRemoved) nodes.push(this.undoStrip(doc, this.text("queuedRemoved"), () => this.undoRemoveSaved()));
+    pane.saved.replaceChildren(...nodes);
+  },
+
+  // a saved prompt: its label sends its words; ✎ and 🗑 beside it; dragged onto another, it takes that one's place
+  savedItem(pane, p, at) {
+    const doc = pane.doc, node = doc.createElement("span");
+    node.className = "scholium-saved-item";
+    node.setAttribute("draggable", "true");
+    const go = doc.createElement("button");
+    go.className = "scholium-saved-go";
+    go.textContent = p.label;
+    go.title = p.prompt;
+    go.addEventListener("click", () => this.sendFromPane(pane, false, p.prompt));
+    node.append(go,
+                this.iconButton(doc, "edit", this.text("savedEdit"), () => this.editSaved(pane, at)),
+                this.iconButton(doc, "trash", this.text("savedDelete"), () => this.removeSaved(at)));
+    node.addEventListener("dragstart", e => { pane.dragSaved = at; try { e.dataTransfer.setData("text/plain", String(at)); } catch (err) {} });
+    node.addEventListener("dragend", () => { pane.dragSaved = null; });
+    node.addEventListener("dragover", e => { if (typeof pane.dragSaved === "number") e.preventDefault(); });
+    node.addEventListener("drop", e => {
+      e.preventDefault();
+      const from = pane.dragSaved;
+      pane.dragSaved = null;
+      if (typeof from === "number") this.moveSaved(from, at);
+    });
     return node;
+  },
+
+  // a line that says what was just done, with Undo
+  undoStrip(doc, text, onUndo) {
+    const strip = doc.createElement("div");
+    strip.className = "scholium-undo";
+    const t = doc.createElement("span");
+    t.textContent = text;
+    strip.append(t, this.paneButton(doc, this.text("undo"), onUndo, "quiet small"));
+    return strip;
+  },
+
+  // the row as a small editor of one saved prompt (at -1: a new one at the end): its label and its words; ✓ or
+  // Ctrl/⌘+Enter keeps it, ✕ or Esc leaves the row as it was
+  editSaved(pane, at) {
+    const doc = pane.doc, was = at >= 0 ? this.savedPrompts()[at] || null : null;
+    const editor = doc.createElement("div");
+    editor.className = "scholium-saved-editor";
+    const label = doc.createElement("input");
+    label.className = "scholium-saved-label";
+    label.setAttribute("no-native", "true");
+    label.placeholder = this.text("savedLabel");
+    label.value = was ? was.label : "";
+    const words = doc.createElement("textarea");
+    words.className = "scholium-saved-prompt";
+    words.setAttribute("rows", "2");
+    words.setAttribute("no-native", "true");
+    words.placeholder = this.text("savedPrompt");
+    words.value = was ? was.prompt : "";
+    const close = () => { pane.savedEdit = null; pane.savedSig = null; this.paintSaved(pane); };
+    const keep = () => {
+      const prompt = String(words.value || "").trim();
+      if (!prompt) return;
+      const item = { label: String(label.value || "").trim() || this.promptLabel(prompt), prompt };
+      const list = this.savedPrompts();
+      if (at >= 0 && at < list.length) list[at] = item;
+      else list.push(item);
+      pane.savedEdit = null;
+      pane.savedSig = null;
+      this.saveSavedPrompts(list);
+    };
+    const no = this.iconButton(doc, "close", this.text("savedCancel"), close);
+    const ok = this.iconButton(doc, "check", this.text("savedSave"), keep);
+    const fit = () => { ok.disabled = !String(words.value || "").trim(); };
+    words.addEventListener("input", fit);
+    for (const field of [label, words]) {
+      field.addEventListener("keydown", e => {
+        if (e.isComposing) return;   // the ime's keys
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
+        else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); keep(); }
+      });
+    }
+    const tools = doc.createElement("div");
+    tools.className = "scholium-saved-tools";
+    tools.append(no, ok);
+    editor.append(label, words, tools);
+    fit();
+    pane.savedEdit = { at, editor };
+    pane.saved.replaceChildren(editor);
+    try { (was ? words : label).focus(); } catch (e) {}
+  },
+
+  // a saved prompt goes at once; Undo brings it back to its place for a few seconds
+  removeSaved(at) {
+    const list = this.savedPrompts();
+    if (!list[at]) return;
+    const [item] = list.splice(at, 1);
+    if (this.savedRemoved) clearTimeout(this.savedRemoved.timer);
+    this.savedRemoved = { item, at, timer: setTimeout(() => { this.savedRemoved = null; this.refresh(); }, this.UNDO_MS) };
+    this.saveSavedPrompts(list);
+  },
+
+  undoRemoveSaved() {
+    const r = this.savedRemoved;
+    if (!r) return;
+    clearTimeout(r.timer);
+    this.savedRemoved = null;
+    const list = this.savedPrompts();
+    list.splice(Math.min(r.at, list.length), 0, r.item);
+    this.saveSavedPrompts(list);
+  },
+
+  // a saved prompt dragged onto another takes its place
+  moveSaved(from, to) {
+    const list = this.savedPrompts();
+    if (from === to || !list[from] || !list[to]) return;
+    const [item] = list.splice(from, 1);
+    list.splice(to, 0, item);
+    this.saveSavedPrompts(list);
   },
 
   // the running paper's transcript, as it goes on
@@ -4456,6 +4610,7 @@ var ScholiumRunner = {
       // version's annotation), and while such a run goes or waits
       pane.busy = this.busyKind(pane, tab);
       this.show(pane.composer, !foreign);
+      this.paintSaved(pane);
       // the annotation tab: extra wishes and Annotate until it shows a session; then words to the session, with Annotate
       // again beside the send button; while its run goes or waits, ■
       if (tab === "annotate") {
@@ -6016,6 +6171,8 @@ var ScholiumRunner = {
     this.queue = [];
     for (const r of this.removedQueued.values()) clearTimeout(r.timer);
     this.removedQueued.clear();
+    if (this.savedRemoved) clearTimeout(this.savedRemoved.timer);
+    this.savedRemoved = null;
     this.heldQueues.clear();
     this.qseq = 0;
     this.cancel();

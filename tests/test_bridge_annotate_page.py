@@ -245,7 +245,7 @@ SCENARIOS = r"""
     const codex = pane.input.value;
     pane.agent.change('claude'); await settle(60);
     facts.unsentByTab = { onAnnot, backChat, backAnnot, codex, claude: pane.input.value };
-    // words put in the box without typing (a starter, a quote) stay with their tab as well
+    // words put in the box without typing (a quote) stay with their tab as well
     pane.input.value = '放进去的话';
     pane.tabChat.click(); await settle(5);
     pane.tabAnnotate.click(); await settle(5);
