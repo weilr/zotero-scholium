@@ -148,6 +148,116 @@ def test_extract_main_writes_numbered_listing_and_json(tmp_path, capsys):
     assert json.load(open(js, encoding="utf8"))["sentences"][0]["id"] == 1, "the JSON covers the whole document"
 
 
+def _extracted(tmp_path, fp):
+    js = tmp_path / "sentences.json"
+    cli.extract_main(["--pdf", str(fp), "--sentences", str(js), "--out", str(tmp_path / "sentences.txt")])
+    return [i for i in json.loads(js.read_text(encoding="utf8"))["sentences"] if "id" in i], js
+
+
+def _highlighted(tmp_path, fp, js, sents):
+    """The positions the highlights of these sentence ids get."""
+    cfg = dict(cli.DEFAULTS, pdf=str(fp), item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+               sentences=str(js), highlights=[{"id": s["id"], "comment": "x"} for s in sents])
+    out, missed = cli.build(cfg)
+    assert not missed
+    return [a["position"] for a in out]
+
+
+def test_each_sentence_gets_its_position_in_zotero_space(tmp_path):
+    fp = tmp_path / "paper.pdf"; _three_page_pdf(str(fp))
+    sents, _ = _extracted(tmp_path, fp)
+    assert sents and all(s.get("rects") for s in sents)
+    doc = pymupdf.open(str(fp))
+    for s in sents:
+        page = doc[s["page"] - 1]
+        for r in s["rects"]:
+            assert len(r) == 4 and all(isinstance(v, (int, float)) for v in r)
+            assert 0 <= r[0] < r[2] <= page.rect.width and 0 <= r[1] < r[3] <= page.rect.height
+    first = next(s for s in sents if s["text"].startswith("Foundation models"))
+    word = doc[0].search_for("Foundation")[0]
+    assert abs(first["rects"][0][3] - (792 - word.y0)) < 1.5, "y counts up from the bottom of the page"
+    assert "rects" not in (tmp_path / "sentences.txt").read_text(encoding="utf8")
+
+
+def test_a_sentence_position_is_that_of_its_highlight(tmp_path):
+    fp = tmp_path / "paper.pdf"; _three_page_pdf(str(fp))
+    sents, js = _extracted(tmp_path, fp)
+    assert _highlighted(tmp_path, fp, js, sents) == [{"pageIndex": s["page"] - 1, "rects": s["rects"]} for s in sents]
+
+
+def test_a_repeated_sentence_takes_its_own_occurrence(tmp_path):
+    fp = tmp_path / "paper.pdf"; _three_page_pdf(str(fp))
+    sents, _ = _extracted(tmp_path, fp)
+    a, b = [s for s in sents if s["text"] == "The encodings are pooled with a sum."]
+    assert b["rects"][0][3] < a["rects"][0][1], "the second one lies lower on the page"
+    pi = cli.PageIndex(pymupdf.open(str(fp))[1])
+    assert b["rects"] == [[round(r.x0, 2), round(pi.H - r.y1, 2), round(r.x1, 2), round(pi.H - r.y0, 2)]
+                          for r in pi.line_rects(pi.match(b["text"], 2))]
+    # three such sentences on a page that has the text twice: none of them gets a position
+    bare = [{k: v for k, v in s.items() if k != "rects"} for s in (a, b, dict(b, id=99))]
+    got = cli.sentence_rects(str(fp), bare)
+    assert [s.get("rects") for s in got] == [None, None, None]
+
+
+def test_a_sentence_whose_text_stands_elsewhere_on_the_page_gets_no_position(tmp_path):
+    """A text the page has more often than the extraction has sentences with it is ambiguous, as for an id highlight."""
+    fp = tmp_path / "substr.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_textbox(pymupdf.Rect(72, 72, 540, 400), "In all of the experiments reported here we use Adam. The kernel is "
+                        "invariant to rotations of the input. We use Adam. The bound holds because the kernel is invariant to "
+                        "rotations of the input and the sum is finite.", fontsize=11, fontname="helv")
+    doc.save(str(fp)); doc.close()
+    sents, js = _extracted(tmp_path, fp)
+    assert len(sents) == 4
+    assert [("rects" in s) for s in sents] == [True, True, False, True], "not the end of the first sentence"
+    cfg = dict(cli.DEFAULTS, pdf=str(fp), item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+               sentences=str(js), highlights=[{"id": s["id"], "comment": "x"} for s in sents])
+    out, missed = cli.build(cfg)
+    assert [m["id"] for m in missed] == [s["id"] for s in sents if "rects" not in s]
+    assert all("ambiguous" in m["reason"] for m in missed)
+    assert [a["position"]["rects"] for a in out] == [s["rects"] for s in sents if "rects" in s]
+
+
+def test_a_sentence_not_found_as_extracted_takes_the_closest_passage_or_none(tmp_path):
+    fp = tmp_path / "paper.pdf"; _three_page_pdf(str(fp))
+    first = next(i for i in cli.extract_sentences(str(fp)) if i.get("text", "").startswith("Foundation models"))
+    assert "rects" not in first
+    exact = cli.sentence_rects(str(fp), [dict(first)])[0]["rects"]
+    typo = dict(first, text=first["text"].replace("models", "modelz"))
+    far = dict(first, id=first["id"] + 1, text="Completely unrelated words that appear nowhere in this paper at all.")
+    got = cli.sentence_rects(str(fp), [typo, far])
+    assert got[0]["rects"] == exact and "rects" not in got[1]
+
+
+def test_sentence_positions_are_in_pdf_user_space_on_a_cropped_page(tmp_path):
+    fp = tmp_path / "cropped.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_textbox(pymupdf.Rect(110, 120, 500, 300), "Foundation models have transformed language processing. "
+                        "Patch jittering makes the encoder robust to small shifts.", fontsize=10, fontname="helv")
+    page.set_cropbox(pymupdf.Rect(50, 60, 562, 742))
+    doc.save(str(fp)); doc.close()
+    sents, js = _extracted(tmp_path, fp)
+    page = pymupdf.open(str(fp))[0]
+    word = page.search_for("Patch jittering")[0] * ~page.transformation_matrix
+    r = next(s for s in sents if s["text"].startswith("Patch"))["rects"][0]
+    assert abs(r[0] - word.x0) < 1.5 and abs(r[1] - word.y0) < 1.5 and abs(r[3] - word.y1) < 1.5
+    assert _highlighted(tmp_path, fp, js, sents) == [{"pageIndex": 0, "rects": s["rects"]} for s in sents]
+
+
+def test_sentences_on_a_rotated_page_get_no_position(tmp_path):
+    doc = pymupdf.open()
+    for i in range(2):
+        page = doc.new_page(width=612, height=792)
+        page.insert_textbox(pymupdf.Rect(72, 72, 540, 700), f"Page {i + 1} says that the method improves the result. "
+                            "It also runs fast on every benchmark.", fontsize=10, fontname="helv")
+    doc[1].set_rotation(90)
+    fp = tmp_path / "rotated.pdf"; doc.save(str(fp)); doc.close()
+    sents, _ = _extracted(tmp_path, fp)
+    assert [(s["page"], "rects" in s) for s in sents] == [(1, True), (1, True), (2, False), (2, False)]
+
+
 def test_measure_context_reports_skill_tokens(tmp_path):
     r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "measure_context.py"), "--json"],
                        capture_output=True, text=True, encoding="utf8", cwd=ROOT)

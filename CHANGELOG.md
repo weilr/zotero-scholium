@@ -35,7 +35,8 @@
 - **Ask Scholium** in the reader's selection popup puts the passage and its page label above the box of the Chat
   tab, and the next message quotes it to the agent with its page in the PDF and, where it differs, the label.
 - Sentence citations: answers cite the paper's sentences as `[#n]`, shown as chips with the page and, on hover,
-  the sentence; **Locate ↗** opens the PDF at the page and finds the sentence.
+  the sentence; **Locate ↗** opens the PDF, goes to the sentence and highlights it briefly; a sentence without a
+  position in `sentences.json` opens its page.
 - A failed question offers **Retry**; Esc twice on the same run stops it.
 - Scholium section: as in llm-for-zotero, each agent has its own conversations of a paper. **New chat** starts
   one, **History** lists them by day to open, rename or delete (with **Undo**; a deleted Codex conversation's thread
@@ -47,6 +48,7 @@
   shows when each run ended.
 - The plugin's apply returns `removeError` when the earlier notes cannot be moved to the trash after the new items
   are written.
+- `sentences.json` gives each sentence's position (`rects`).
 
 ### Changed
 

@@ -160,8 +160,9 @@ history and the annotation sessions are those of that PDF.
 - Sentence citations: a question asks the agent to cite the paper's sentences by their number in
   `sentences.txt`, as `[#123]`. The section reads `sentences.json` in the paper's output directory and shows a
   cited sentence as a chip with its page (`p.4`); on hover, a card gives the page, **Locate ↗** and the sentence.
-  The chip or **Locate ↗** opens the PDF in the reader (or switches to it) at that page and runs the reader's find
-  on the sentence's first words. A number that `sentences.json` does not have stays as written.
+  The chip or **Locate ↗** opens the PDF in the reader (or switches to it), goes to the sentence and highlights it
+  briefly; a sentence without a position in `sentences.json` opens its page. A number that `sentences.json` does
+  not have stays as written.
 
 **Annotations tab**
 

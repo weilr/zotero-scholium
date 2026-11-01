@@ -2828,10 +2828,17 @@ var ScholiumRunner = {
     try {
       const data = JSON.parse(raw);
       for (const x of (data && data.sentences) || []) {
-        if (x && Number.isInteger(x.id) && x.page > 0) map.set(x.id, { page: x.page, text: String(x.text || ""), rects: Array.isArray(x.rects) ? x.rects : null });
+        if (x && Number.isInteger(x.id) && x.page > 0) map.set(x.id, { page: x.page, text: String(x.text || ""), rects: this.positionRects(x.rects) });
       }
     } catch (e) { map.clear(); this.log("sentences not parsed: " + e); }
     this.citations.set(key, { at: stat.lastModified, size: stat.size, map });
+  },
+
+  // a sentence's position in sentences.json: its rectangles of four finite numbers, or null when it has none
+  positionRects(rects) {
+    const kept = Array.isArray(rects)
+      ? rects.filter(r => Array.isArray(r) && r.length === 4 && r.every(v => typeof v === "number" && Number.isFinite(v))) : [];
+    return kept.length ? kept : null;
   },
 
   withCites(key, fn) {
@@ -2888,47 +2895,17 @@ var ScholiumRunner = {
     return null;
   },
 
-  // what the reader's find looks for: a sentence's first words, up to 60 characters; text without spaces, its first 20
-  findQuery(text) {
-    const flat = String(text || "").replace(/(\p{L})-\s+(\p{L})/gu, "$1$2").split(/\s+/).filter(Boolean);
-    if (flat.length < 3) return flat.join(" ").slice(0, 20);
-    let query = flat.slice(0, 8).join(" ");
-    if (query.length > 60) {
-      const cut = query.slice(0, 60), at = cut.lastIndexOf(" ");
-      query = at > 0 && query[60] !== " " ? cut.slice(0, at) : cut;
-    }
-    return query.replace(/\s*\S*-$/, "");
-  },
-
-  // a cited sentence in the paper's reader: its page, then the reader's find on the sentence's first words once its view
-  // can find
+  // a cited sentence in the paper's reader: the reader opens (or is switched to) at the sentence's position, which it
+  // centres and highlights for a moment; a tab there but not loaded is selected with it. A sentence without a position
+  // opens its page
   async locate(key, s) {
     if (!s || !s.page) return;
     const pane = [...this.panes.values()].find(p => p.keys.includes(key) && p.item);
     const att = pane && Zotero.Items.getByLibraryAndKey(pane.item.libraryID, key);
     if (!att) return;
-    try {
-      const reader = await Zotero.Reader.open(att.id, { pageIndex: s.page - 1 });
-      if (reader && reader._initPromise) await reader._initPromise;
-      const ir = reader && reader._internalReader;
-      const query = this.findQuery(s.text);
-      if (!query || !ir || typeof ir.toggleFindPopup !== "function" || typeof ir._handleFindStateChange !== "function"
-          || !ir._state || !ir._state.primaryViewFindState) return;
-      if (!(await this.findReady(ir))) return;
-      const clone = o => Components.utils.cloneInto(o, reader._iframeWindow);
-      ir.toggleFindPopup(clone({ primary: true, open: true }));
-      const prev = JSON.parse(JSON.stringify(ir._state.primaryViewFindState));
-      ir._handleFindStateChange(true, clone(Object.assign(prev, { popupOpen: true, active: true, query, highlightAll: false })));
-    } catch (e) { this.log("sentence not found in the reader: " + e); }
-  },
-
-  // whether the reader's view has its find: a reader opened just now makes its view after it starts. Five seconds at most
-  async findReady(ir) {
-    for (let i = 0; i < 50; i++) {
-      if (ir._primaryView && ir._primaryView._findController) return true;
-      await Zotero.Promise.delay(100);
-    }
-    return false;
+    const pageIndex = s.page - 1;
+    try { await Zotero.Reader.open(att.id, s.rects ? { position: { pageIndex, rects: s.rects } } : { pageIndex }); }
+    catch (e) { this.log("sentence not shown in the reader: " + e); }
   },
 
   LINK_SCHEMES: /^(?:https?|zotero):/i,

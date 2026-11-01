@@ -217,6 +217,10 @@ class PageIndex:
             lines[k] = lines[k] | r if k in lines else r
         return [lines[k] for k in sorted(lines)]
 
+    def position_rects(self, ws):
+        """Rectangles (PDF space, y upward) of the lines the words lie on, as a Zotero position has them."""
+        return [[round(r.x0, 2), round(self.H - r.y1, 2), round(r.x1, 2), round(self.H - r.y0, 2)] for r in self.line_rects(ws)]
+
     def blocks(self):
         if self._blocks is None:
             self._blocks = text_lines(self.page)
@@ -812,7 +816,7 @@ def build(cfg, obstacles=None):
                     ws, snapped = best_ws, round(best_r, 2)
             if not ws:
                 missed.append(entry); continue
-        rects = [[round(r.x0, 2), round(pi.H - r.y1, 2), round(r.x1, 2), round(pi.H - r.y0, 2)] for r in pi.line_rects(ws)]
+        rects = pi.position_rects(ws)
         top = int(round(pi.H - rects[0][3]))
         # colour precedence: explicit "color", then named "level" (resolved through cfg["levels"]), then legacy core/other
         color = h.get("color") or cfg.get("levels", {}).get(h.get("level", ""), None) or \
@@ -1446,6 +1450,43 @@ def extract_sentences(pdf_path, pages=None, keep_references=False):
     return items
 
 
+SENTENCE_SIMILARITY = 0.9   # the least similarity of a passage taken for a sentence not found as extracted
+
+
+def sentence_rects(pdf_path, items):
+    """Give each sentence its position as Zotero stores it, "rects" in PDF user space, found as its highlight would be:
+    when the page has a sentence's text as often as the extracted sentences of the page have it, the n-th of them is its
+    n-th occurrence; when the page has it more or fewer times, it is ambiguous and gets none. A sentence whose text the
+    page does not have takes the closest passage when it is alike enough. Sentences on a rotated page get none."""
+    doc = pymupdf.open(pdf_path)
+    try:
+        counts = collections.Counter((it["page"], norm_str(it["text"])) for it in items if "id" in it)
+        seen, pages = collections.Counter(), {}
+        for it in items:
+            if "id" not in it:
+                continue
+            key = (it["page"], norm_str(it["text"]))
+            seen[key] += 1
+            if it.get("rotated"):
+                continue
+            p = it["page"] - 1
+            if p not in pages:
+                pages[p] = (PageIndex(doc[p]), user_space_shift(doc[p]))
+            pi, (dx, dy) = pages[p]
+            n = pi.count(it["text"])
+            ws = pi.match(it["text"], seen[key]) if n == counts[key] else None
+            if not n:
+                ws, ratio = pi.closest(it["text"])
+                if ratio < SENTENCE_SIMILARITY:
+                    ws = None
+            if ws:
+                rects = pi.position_rects(ws)
+                it["rects"] = [shift_rect(r, dx, dy) for r in rects] if dx or dy else rects
+    finally:
+        doc.close()
+    return items
+
+
 def render_sentences(items):
     """The listing an agent reads: page markers, `## heading` lines, `id | sentence` lines, blank lines between paragraphs."""
     out, page, para = [], None, None
@@ -1510,7 +1551,7 @@ def extract_main(argv):
     ap.add_argument("--out", help="write to this file instead of standard output")
     ap.add_argument("--pages", help="page or page range, e.g. 3 or 1-8 (default: all pages)")
     ap.add_argument("--keep-references", action="store_true", help="keep the bibliography")
-    ap.add_argument("--sentences", metavar="JSON", help="write numbered sentences to this JSON file and print the numbered listing instead of plain text")
+    ap.add_argument("--sentences", metavar="JSON", help="write numbered sentences with their positions to this JSON file and print the numbered listing instead of plain text")
     args = ap.parse_args(argv)
     if pymupdf is None:
         sys.exit(PYMUPDF_MISSING)
@@ -1527,7 +1568,8 @@ def extract_main(argv):
                "so stop and tell the user")
     if args.sentences:
         pdf_hash = _sha256(pdf)
-        items = extract_sentences(pdf, keep_references=args.keep_references)   # ids count over the whole document
+        # ids count over the whole document
+        items = sentence_rects(pdf, extract_sentences(pdf, keep_references=args.keep_references))
         n = sum(1 for it in items if "id" in it)
         if _sha256(pdf) != pdf_hash:
             sys.exit("extract: PDF changed during extraction; run again")

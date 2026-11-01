@@ -354,7 +354,8 @@ SCENARIOS = r"""
   // and the sentence; an id it does not have stays text
   {
     const SPATH = '/data/tmp/scholium/ATT1/sentences.json';
-    const sentences = JSON.stringify({ pdf: 'x.pdf', sentences: [{ id: 12, page: 4, para: 3, text: 'We propose a kernel that is invariant to rotations.' }] });
+    const sentences = JSON.stringify({ pdf: 'x.pdf', sentences: [{ id: 12, page: 4, para: 3, text: 'We propose a kernel that is invariant to rotations.',
+                                                                  rects: [[72, 600, 300, 612]] }] });
     const reply = [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S1' }),
                    said('核在旋转下不变 [#12]，见附录 [#999]。'),
                    ev({ type: 'result', subtype: 'success', is_error: false, result: '…', session_id: 'S1' })];
@@ -385,7 +386,8 @@ SCENARIOS = r"""
     const viaLocate = [!pane.popover, h.log.readerOpened.length];
     chip.click(); await settle(50);
     facts.cites = { text: answer.textContent, chip: chip.textContent, id: chip.attrs && chip.attrs['data-id'], head, sentence, stays, closed,
-                    opened, viaLocate, viaChip: [h.log.readerOpened.length, h.log.readerOpened.at(-1).itemID === h.att1.id], prompt: h.log.stdin[0] };
+                    opened, viaLocate, viaChip: [h.log.readerOpened.length, h.log.readerOpened.at(-1).itemID === h.att1.id], prompt: h.log.stdin[0],
+                    opens: h.log.readerOpened.map(o => o.location), navigated: h.log.navigated };
     // the file as it was and unchanged is not read again by drawing anew; a changed file is read again
     const reads = () => h.log.reads.filter(r => r === SPATH).length;
     const r0 = reads();
@@ -550,25 +552,45 @@ SCENARIOS = r"""
     const answer = pane.list.children.at(-1).children.find(c => c.className.startsWith('scholium-entry text'));
     facts.citeNone = answer.textContent;
   }
-  // locate: the page jump, then the reader's find with the sentence's first words; without a find only the page jump
+  // locate: the reader opens at the sentence's position (a tab there but not loaded is selected with it); a sentence
+  // without a position opens its page
   {
-    const long = 'We  propose a\n kernel that is invariant to rotations and   scale changes.';
-    const run = async (kind, text, arg) => {
+    const RECTS = [[72.5, 600.1, 300, 612.4], [72.5, 588, 210.25, 600]];
+    const run = async (kind, arg) => {
       const h = harness({});
       h.runner.start('x');
       await h.pane(h.item1); await settle(40);
       if (kind) h.log.readerKind = kind;
+      const logged = [];
+      h.zotero.debug = m => logged.push(m);
       let error = null;
-      try { await h.runner.locate('ATT1', arg === undefined ? { id: 1, page: 4, text } : arg); } catch (e) { error = String(e); }
+      try { await h.runner.locate('ATT1', arg === undefined ? { id: 1, page: 4, text: 'A.', rects: RECTS } : arg); } catch (e) { error = String(e); }
       await settle(20);
-      return { opened: h.log.readerOpened.map(o => o.location.pageIndex), finds: h.log.finds, cloned: h.log.cloned, error };
+      return { opened: h.log.readerOpened.map(o => o.location), navigated: h.log.navigated, finds: h.log.finds, error, logged };
     };
-    facts.locate = { normal: await run(null, 'We propose a kernel.'), late: await run('late', 'We propose a kernel.'), never: await run('never', 'We propose a kernel.'), plain: await run('plain', 'A.'), throws: await run('throws', 'A.'), nostate: await run('nostate', 'A.'), long: await run(null, long),
-                     hyphen: await run(null, 'Rotation invariance is the key property of gener- alises'), empty: await run(null, '  '),
-                     cjk: await run(null, '我们提出了一种在旋转下保持不变的核方法并证明了它的收敛性质。'),
-                     words: await run(null, 'aaaaaaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff gggggggg hhhhhhhh iiiiiiii jjjjjjjj kkkkkkkk llllllll'),
-                     rejoin: await run(null, 'Rotation invariance gener- alises to many kernels'), trailing: await run(null, 'Rotation invariance is the key property of gener-'),
-                     rejects: await run('rejects', 'A.'), nulls: await run(null, '', null), nopage: await run(null, '', { id: 1, text: 'A.' }) };
+    facts.locate = { normal: await run(null), old: await run(null, { id: 1, page: 4, text: 'A.', rects: null }), unloaded: await run('unloaded'),
+                     rejects: await run('rejects'), nulls: await run(null, null), nopage: await run(null, { id: 1, text: 'A.', rects: RECTS }) };
+  }
+  // the positions in sentences.json: only arrays of four finite numbers are kept; a sentence left without any opens the
+  // page only
+  {
+    const SPATH = '/data/tmp/scholium/ATT1/sentences.json';
+    const sentences = JSON.stringify({ sentences: [
+      { id: 1, page: 4, text: 'A.', rects: [[1, 2, 3, 4], [5.5, 6, 7, 8.25]] },
+      { id: 2, page: 4, text: 'B.', rects: [[1, 2, 3], [1, 2, 3, 4, 5], 'x', null, [1, 2, 'x', 4], [1, 2, null, 4], [1, 2, 'INF', 4], { 0: 1, 1: 2, 2: 3, 3: 4 }] },
+      { id: 3, page: 4, text: 'C.', rects: [[1, 2, 3, 4], [1, 2, 3]] },
+      { id: 4, page: 4, text: 'D.', rects: 'x' },
+      { id: 5, page: 4, text: 'E.', rects: [] },
+      { id: 6, page: 4, text: 'F.' }] }).replace('"INF"', '1e999');
+    const h = harness({ logs: { [SPATH]: sentences } });
+    h.runner.start('x');
+    await h.pane(h.item1); await settle(40);
+    await h.runner.loadCitations('ATT1');
+    const map = h.runner.citations.get('ATT1').map;
+    const rects = [1, 2, 3, 4, 5, 6].map(id => map.get(id).rects);
+    await h.runner.locate('ATT1', map.get(2)); await settle(20);
+    await h.runner.locate('ATT1', map.get(3)); await settle(20);
+    facts.citeRects = { rects, opened: h.log.readerOpened.map(o => o.location) };
   }
   // a page whose label is not its number: the prompt and the history name the PDF's page, the prompt the label beside it;
   // the box and the transcript show the label. An update hands the label over with the quote
@@ -771,71 +793,50 @@ def test_sentence_citations(facts):
     assert c["text"] == "核在旋转下不变 p.4，见附录 [#999]。"
     assert c["chip"] == "p.4" and c["id"] == "12" and c["head"] == ["第 4 页", "定位 ↗"]
     assert c["sentence"] == "We propose a kernel that is invariant to rotations."
-    assert c["opened"]["pageIndex"] == 3
+    assert c["opened"] == {"position": {"pageIndex": 3, "rects": [[72, 600, 300, 612]]}}
     assert c["viaLocate"] == [True, 1] and c["viaChip"] == [2, True]
+    assert c["opens"] == [c["opened"]] * 2 and c["navigated"] == [], "the chip as Locate; the reader goes there as it opens"
     assert "[#123]" in c["prompt"] and "sentences.json" in c["prompt"]
 
 
-def test_locate_opens_the_page_and_finds_the_sentence(facts):
+RECTS = [[72.5, 600.1, 300, 612.4], [72.5, 588, 210.25, 600]]
+
+
+def test_locate_opens_the_reader_at_the_sentence(facts):
     n = facts["locate"]["normal"]
-    assert n["opened"] == [3] and n["error"] is None
-    assert n["finds"][0] == {"toggled": {"primary": True, "open": True}, "ready": True}
-    f = n["finds"][1]
-    assert f["primary"] is True
-    assert f["state"]["query"] == "We propose a kernel." and f["state"]["active"] is True
-    assert f["state"]["popupOpen"] is True and f["state"]["highlightAll"] is False
-    assert len(n["finds"]) == 2 and len(n["cloned"]) == 2 and n["cloned"][0] == {"fake": "reader window"}
+    assert n["opened"] == [{"position": {"pageIndex": 3, "rects": RECTS}}] and n["error"] is None and n["logged"] == []
+    assert n["navigated"] == [] and n["finds"] == [], "no navigation of its own, no find"
 
 
-def test_locate_waits_for_the_view_of_a_reader_opened_just_now(facts):
-    n = facts["locate"]["late"]
-    assert n["opened"] == [3] and n["error"] is None
-    assert len(n["finds"]) == 2 and n["finds"][1]["state"]["query"] == "We propose a kernel."
-    never = facts["locate"]["never"]
-    assert never["opened"] == [3] and never["error"] is None and never["finds"] == [], "a view that does not come: the page jump only"
+def test_locate_of_a_sentence_without_a_position_opens_the_page(facts):
+    r = facts["locate"]["old"]
+    assert r["opened"] == [{"pageIndex": 3}] and r["navigated"] == [] and r["finds"] == []
+    assert r["error"] is None and r["logged"] == []
 
 
-def test_locate_without_a_find_is_the_page_jump(facts):
-    for k in ("plain", "throws", "nostate"):
-        r = facts["locate"][k]
-        assert r["opened"] == [3] and r["error"] is None and r["finds"] == []
-
-
-def test_locate_finds_the_first_words_of_a_long_sentence(facts):
-    f = facts["locate"]["long"]["finds"][1]
-    assert f["state"]["query"] == "We propose a kernel that is invariant to"
-
-
-def test_locate_query_of_text_without_spaces_is_its_first_20_characters(facts):
-    assert facts["locate"]["cjk"]["finds"][1]["state"]["query"] == "我们提出了一种在旋转下保持不变的核方法并证明了它的收敛性质。"[:20] and len("我们提出了一种在旋转下保持不变的核方法并证明了它的收敛性质。"[:20]) == 20
-
-
-def test_locate_query_is_at_most_60_characters_cut_at_a_word(facts):
-    assert facts["locate"]["words"]["finds"][1]["state"]["query"] == "aaaaaaaa bbbbbbbb cccccccc dddddddd eeeeeeee ffffffff"
-
-
-def test_locate_rejoins_a_word_broken_at_a_line_end(facts):
-    assert facts["locate"]["rejoin"]["finds"][1]["state"]["query"] == "Rotation invariance generalises to many kernels"
-
-
-def test_locate_drops_a_trailing_broken_word(facts):
-    assert facts["locate"]["trailing"]["finds"][1]["state"]["query"] == "Rotation invariance is the key property of"
+def test_locate_selects_a_tab_not_loaded_with_the_position(facts):
+    r = facts["locate"]["unloaded"]
+    assert r["opened"] == [{"position": {"pageIndex": 3, "rects": RECTS}}] and r["navigated"] == []
+    assert r["error"] is None and r["logged"] == []
 
 
 def test_locate_survives_a_reader_that_does_not_open(facts):
     r = facts["locate"]["rejects"]
-    assert r["error"] is None and r["finds"] == []
+    assert r["error"] is None and r["opened"] == [] and r["navigated"] == []
+    assert len(r["logged"]) == 1 and "no reader" in r["logged"][0]
 
 
 def test_locate_without_a_sentence_or_page_opens_nothing(facts):
     for k in ("nulls", "nopage"):
         r = facts["locate"][k]
-        assert r["error"] is None and r["opened"] == [] and r["finds"] == []
+        assert r["error"] is None and r["opened"] == [] and r["navigated"] == []
 
 
-def test_locate_cuts_a_hyphen_off_the_query_and_skips_an_empty_one(facts):
-    assert facts["locate"]["hyphen"]["finds"][1]["state"]["query"] == "Rotation invariance is the key property of generalises"
-    assert facts["locate"]["empty"]["finds"] == [] and facts["locate"]["empty"]["opened"] == [3]
+def test_positions_other_than_four_numbers_are_dropped(facts):
+    f = facts["citeRects"]
+    assert f["rects"] == [[[1, 2, 3, 4], [5.5, 6, 7, 8.25]], None, [[1, 2, 3, 4]], None, None, None]
+    assert f["opened"] == [{"pageIndex": 3}, {"position": {"pageIndex": 3, "rects": [[1, 2, 3, 4]]}}], \
+        "a sentence left without a position opens its page"
 
 
 def test_the_card_stays_while_the_pointer_is_on_the_chip_or_the_card(facts):

@@ -289,7 +289,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
                 ftl: [], tabs: [], selected: [], opened: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
                 prefPanes: [], openedPrefs: [], madeDirs: [], trashed: [], versionCalls: [], codexCalls: [], codexProcs: [], codexKills: 0, codexTurns: 0, steers: [],
-                mtimes: Object.assign({}, logTimes), clock: Date.now(), copied: [], removed: [], threads: 0, tmpPaths: [], reads: [], readerOpened: [], navigated: [], finds: [], cloned: [] };
+                mtimes: Object.assign({}, logTimes), clock: Date.now(), copied: [], removed: [], threads: 0, tmpPaths: [], reads: [], readerOpened: [], navigated: [], finds: [] };
   const co = Object.assign({ versions: CODEX_VERSIONS, scripts: [], skillAt: '/data', fail: null, failMessage: '' }, codex);
   const files = new Set((claudeExists ? [claudeAt] : []).concat(Object.keys(co.versions)));
   // 97-character chunks split JSON lines; 'WAIT' holds the stream open until the process is killed; 'STDERR:…' is what
@@ -548,25 +548,13 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       Reader: { registerEventListener: (type, handler, id) => log.listeners.push({ type, handler }),
                 unregisterEventListener: (type, handler) => { log.listeners = log.listeners.filter(l => l.handler !== handler); },
                 open: async (itemID, location) => { if (log.readerKind === 'rejects') throw Error('no reader'); log.readerOpened.push({ itemID, location });
-                                                    let ready = false;
-                                                    const reader = { navigate: async loc => { log.navigated.push(loc); }, _initPromise: new Promise(r => setTimeout(() => { ready = true; r(); }, 10)), _iframeWindow: { fake: 'reader window' } };
-                                                    // log.readerKind: 'plain' has no internal reader, 'throws' fails on the find
-                                                    if (log.readerKind === 'plain') return reader;
-                                                    // 'late': the view's find comes 60 ms after the reader is ready (the view a moment before it), as in
-                                                    // a reader opened just now; 'never': neither comes
-                                                    const view = { _findController: {} };
-                                                    reader._internalReader = {
-                                                      _primaryView: log.readerKind === 'late' ? {} : log.readerKind === 'never' ? undefined : view,
-                                                      toggleFindPopup: o => { if (log.readerKind === 'throws') throw Error('no find'); log.finds.push({ toggled: o, ready }); },
-                                                      _handleFindStateChange: (primary, state) => {
-                                                        if (!(reader._internalReader._primaryView || {})._findController) throw TypeError('this._findController is undefined');
-                                                        log.finds.push({ primary, state });
-                                                      },
-                                                      _state: { primaryViewFindState: { popupOpen: false, active: false, query: '', highlightAll: true, result: null } },
-                                                    };
-                                                    if (log.readerKind === 'late') setTimeout(() => { reader._internalReader._primaryView = view; }, 70);
-                                                    if (log.readerKind === 'nostate') delete reader._internalReader._state;
-                                                    return reader; } },
+                                                    // log.readerKind: 'unloaded' is a tab there but not loaded, selected with the location; nothing comes back
+                                                    if (log.readerKind === 'unloaded') return undefined;
+                                                    // the reader goes to the location as it opens; a navigation or a find of the plugin's own lands in
+                                                    // log.navigated or log.finds
+                                                    return { navigate: async loc => { log.navigated.push(loc); },
+                                                             _internalReader: { toggleFindPopup: o => log.finds.push(o),
+                                                                                _handleFindStateChange: (primary, state) => log.finds.push(state) } }; } },
     },
     Services: {
       prompt: { alert: (w, t, m) => log.alerts.push(m),
@@ -587,7 +575,6 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       classes: { '@mozilla.org/alerts-service;1': { getService: () => ({
         showAlertNotification: (img, title, body) => log.notifications.push({ title, body }) }) } },
       interfaces: { nsIAlertsService: {}, nsIFile: NSIFILE },
-      utils: { cloneInto: (o, win) => { log.cloned.push(win); return JSON.parse(JSON.stringify(o)); } },
     },
     PathUtils: { join: (...p) => {
       if (!p.every(x => typeof x === 'string') || !/^(\/|[A-Za-z]:[\\/])/.test(p[0])) {
