@@ -39,9 +39,9 @@
 - A failed question offers **Retry**; Esc twice on the same run stops it.
 - Scholium section: as in llm-for-zotero, each agent has its own conversations of a paper. **New chat** starts
   one, **History** lists them by day to open, rename or delete (with **Undo**; a deleted Codex conversation's thread
-  is archived), and switching the agent starts a new one. Messages go on in the conversation shown. Each
-  conversation has its log in `<out dir>/conversations/`; `claude-run.jsonl` and `codex-run.jsonl` of earlier
-  versions are each agent's first conversation.
+  is archived), and switching the agent shows the conversation that agent goes on with. Messages go on in the
+  conversation shown. Each conversation has its log in `<out dir>/conversations/`; `claude-run.jsonl` and
+  `codex-run.jsonl` of earlier versions are each agent's first conversation.
 - Scholium section: a new session is told which configuration, agent and time wrote the paper's annotations, and a
   session that goes on is told when another conversation rewrote them since, or that they are gone. The section
   shows when each run ended.

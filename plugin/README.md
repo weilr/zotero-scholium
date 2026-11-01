@@ -106,8 +106,8 @@ history and the annotation sessions are those of that PDF.
   run of that tab going on or waiting while the other tab is shown.
 - Under the tabs, the settings chip names the model and, smaller and grey, the effort (`Opus 5.5 medium ▾`); its tooltip
   and its layer name the agent. It opens a layer with the three choices; a click outside the layer or Esc closes it:
-  - **Agent**: Claude Code or Codex. As in llm-for-zotero, a switch starts a new conversation of the paper
-    shown; other papers show the conversation that agent goes on with.
+  - **Agent**: Claude Code or Codex. Each section shows the conversation of its paper that the chosen agent goes
+    on with.
   - **Model**: the models the chosen agent reports, asked once per Zotero session without calling a model:
     Claude Code through the initialize request of its stream-json protocol, Codex through `model/list`
     (hidden models are left out). For Claude Code, the latest Opus (`opus`) is used until another model is

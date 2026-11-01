@@ -1137,8 +1137,8 @@ SCENARIOS = r"""
     facts.codexModels.again = { model: p.view().model, effort: p.view().effort, calls: h.log.codexCalls.length };
   }
 
-  // a Codex run and a follow-up in its thread; then Claude Code chosen takes the conversation over in a session of its
-  // own, given the turns it has not seen, and Codex chosen again goes on in its thread, given Claude Code's turn
+  // a Codex annotation and a follow-up in its thread; then Claude Code chosen, which has no conversation of the paper,
+  // starts its own, given nothing of Codex's; Codex chosen again has no chat here, and its session goes on in its thread
   {
     const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex', 'extensions.scholium-bridge.codexModel': 'gpt-6-luna',
                                  'extensions.scholium-bridge.codexEffort': 'high' }, codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW, CODEX_FOLLOW] } });
@@ -1202,7 +1202,8 @@ SCENARIOS = r"""
     const args = h.log.calls.at(-1).opts.arguments;
     facts.switchedToClaude = { switched, calls: h.log.calls.length, resumed: args.includes('--resume'), prompt: h.log.stdin.at(-1),
                                conversations: convs(h).map(c => c.split('/').pop().split('-')[0]), codexKept: h.log.writes[logPath] === codexLog };
-    // Codex chosen again: a new conversation too; History opens the earlier one, which goes on in its thread
+    // Codex chosen again: it has no chat of this paper, and History lists none; the Annotations tab shows its annotation
+    // session, which goes on in its thread
     p.pane().agent.change('codex');
     await settle(200);
     const again = { entries: p.view().flat, shownConv: p.view().shownConv };
@@ -2333,9 +2334,8 @@ SCENARIOS = r"""
     h.runner.queue = [];
     h.runner.draining = false;
   }
-  // a switch of the agent in one section: the paper there gets a new conversation, the other sections show their
-  // papers' conversations of that agent; New chat asked for while the paper runs changes nothing; a deletion not yet
-  // done when the plugin stops is done then
+  // a switch of the agent in one section: every section shows its paper's conversation of that agent; New chat asked
+  // for while the paper runs changes nothing; a deletion not yet done when the plugin stops is done then
   {
     const conv2 = '/data/tmp/scholium/ATT2/conversations/claude-20261002-120000.jsonl';
     const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, gateFirst: true,
@@ -2363,6 +2363,32 @@ SCENARIOS = r"""
     h.runner.stop();
     await settle(100);
     facts.otherSections = { before, switched, running, current, pending, removed: !(CONV1 in h.log.writes) };
+  }
+  // switching the agent away and back: each agent goes on with its own conversation of the paper; a new chat asked for
+  // stays new
+  {
+    const h = harness({ codex: { scripts: [CODEX_FOLLOW] } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    const pane = p.pane();
+    pane.input.type('问题一'); pane.send.click(); await settle(400);
+    const claudeConv = pane.shownConv;
+    pane.agent.change('codex'); await settle(100);
+    const onCodex = pane.shownConv;
+    pane.input.type('问题二'); pane.send.click(); await settle(600);
+    const codexConv = pane.shownConv;
+    pane.agent.change('claude'); await settle(100);
+    const backClaude = { conv: pane.shownConv, runs: pane.list.children.filter(c => c.className === 'scholium-run').length };
+    pane.agent.change('codex'); await settle(100);
+    const backCodex = pane.shownConv;
+    await h.runner.newChat(pane); await settle(40);
+    pane.agent.change('claude'); await settle(100);
+    const claudeAfterNew = pane.shownConv;
+    pane.agent.change('codex'); await settle(100);
+    facts.switchBack = { claude: !!claudeConv, onCodex, codex: !!codexConv && codexConv !== claudeConv,
+                         backClaude: [backClaude.conv === claudeConv, backClaude.runs], backCodex: backCodex === codexConv,
+                         claudeAfterNew: !!claudeConv && claudeAfterNew === claudeConv, newKept: pane.shownConv };
   }
   // the configuration of a write that succeeded is kept whatever the run's end; a write that was refused is not; a
   // relative configuration is the one in the output folder when it is there
@@ -3519,13 +3545,13 @@ def test_each_agent_has_its_own_conversations(facts):
     s = c["switched"]
     assert s["entries"] == []
     assert (s["shownConv"], s["newChatDisabled"], s["ring"], s["placeholder"]) == (None, True, None, ASK)
-    assert s["index"] == {"claude": None}, "as llm-for-zotero's switch, a new conversation"
+    assert s["index"] == {}, "a switch chooses no conversation: Claude Code has none of this paper yet"
     assert c["calls"] == 1 and c["resumed"] is False
     assert c["prompt"].startswith("使用 zotero-scholium 技能读下面这篇论文") and HISTORY_HEAD not in c["prompt"]
     assert "\n\n用户的问题：\n它和 FNO 比怎么样？\n\n" in c["prompt"]
     assert c["conversations"] == ["annotate", "claude"] and c["codexKept"] is True
-    # Codex chosen again: a new conversation too, and no chat of Codex's in History; the annotation tab shows Codex's
-    # session, which goes on in its thread
+    # Codex chosen again: it has no chat of this paper (its run was an annotation session), none in History; the
+    # annotation tab shows Codex's session, which goes on in its thread
     b = facts["switchedBack"]
     assert b["again"] == {"entries": [["scholium-entry info", "这篇论文在 Claude Code 里有对话，把智能体换成 Claude Code 就能接着聊。"]],
                           "shownConv": None}
@@ -3926,10 +3952,19 @@ def test_conversations_of_a_paper_with_two_pdfs_and_hand_overs(facts):
 
 def test_a_switch_of_the_agent_shows_each_papers_conversation(facts):
     o = facts["otherSections"]
-    assert o["before"] == [None, None] and o["switched"] == [None, "claude-20261002-120000"], \
-        "the paper switched gets a new conversation, another section its paper's conversation of that agent"
+    assert o["before"] == [None, None] and o["switched"] == ["claude-20261001-120000", "claude-20261002-120000"], \
+        "every section, the one switched too, shows its paper's conversation of that agent"
     assert o["running"] == "ATT2" and o["current"] == "not written", "New chat while the paper runs changes nothing"
     assert o["pending"] == [1, True] and o["removed"] is True, "a deletion not done yet is done when the plugin stops"
+
+
+def test_switching_back_goes_on_with_the_agents_conversation(facts):
+    s = facts["switchBack"]
+    assert s["claude"] is True and s["onCodex"] is None and s["codex"] is True, "Codex had none of this paper yet"
+    assert s["backClaude"] == [True, 1], "back to Claude Code: its conversation, with its answer"
+    assert s["backCodex"] is True, "back to Codex: its own conversation"
+    assert s["claudeAfterNew"] is True, "Codex's new chat leaves Claude Code's conversation shown for Claude Code"
+    assert s["newKept"] is None, "a new chat asked for stays new across a switch"
 
 
 def test_review_cases_of_the_conversations(facts):

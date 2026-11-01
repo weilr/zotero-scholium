@@ -3289,8 +3289,8 @@ var ScholiumRunner = {
     return found.filter(Boolean).sort((a, b) => b.at - a.at);
   },
 
-  // the conversation the agent's messages about the paper go to: the one chosen last, none after New chat or a switch
-  // of the agent, else its newest
+  // the conversation the agent's messages about the paper go to: the one chosen last, none after New chat, else its
+  // newest
   async currentConv(key, agent) {
     const chosen = (await this.index(key)).current[agent];
     if (chosen === null) return null;
@@ -3586,7 +3586,7 @@ var ScholiumRunner = {
   },
 
   // what a section shows: the running paper's chat transcript, else the conversation of the paper that the chosen agent's
-  // messages go to (none after New chat or a switch of the agent); and on its annotation tab, the annotation session
+  // messages go to (none after New chat); and on its annotation tab, the annotation session
   async showConversation(pane) {
     const seq = pane.showing = (pane.showing || 0) + 1;
     const liveHere = () => this.job && pane.keys.includes(this.job.key) && (this.job.source.kind || "chat") === "chat";
@@ -3883,11 +3883,10 @@ var ScholiumRunner = {
     }
   },
 
-  // another agent: its models, and, as llm-for-zotero's switch, a new conversation of the paper shown; the other
-  // sections show the conversations its messages go to
+  // another agent: its models, and in every section the conversation its messages about the paper go to, so that
+  // switching back goes on where that agent was
   async switchAgent(pane, agent) {
     this.choose("agent", agent);
-    for (const key of pane.keys) await this.chooseConv(key, this.agent(), null);
     pane.preferKey = null;
     for (const p of [...this.panes.values()]) await this.showConversation(p);
   },
