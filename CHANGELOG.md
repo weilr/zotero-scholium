@@ -89,6 +89,10 @@
   `applied: "partial"` with `result.removeError`.
 - An item that is not in My Library is reported as not found there; group libraries are not supported.
 
+### Fixed
+
+- The Claude Code and Codex boxes of the settings page showed `undefined`; they show the program found.
+
 ### Removed
 
 - Scholium section: the **Agent**, **Model** and **Effort** rows, the row of **Annotate**, **Cancel**,

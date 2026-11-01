@@ -531,6 +531,7 @@ var ScholiumRunner = {
   paneID: null,
   citations: new Map(),     // attachment key -> { at, size, map } the paper's numbered sentences, as sentences.json has them
   cites: null,              // { key, map } the sentences of the paper whose transcript is being drawn
+  bridgeApi: null,          // { found(agent) } on Zotero.ScholiumBridge, for the settings page
   panes: new Map(),         // item pane section body -> { doc, keys, list, state, buttons, the conversation shown, seen }
   AGENTS: ["claude", "codex"],
   models: {},               // agent -> [{ value, label, title, efforts }] as the agent reports them; none until it answered
@@ -896,10 +897,16 @@ var ScholiumRunner = {
     return this.env("USERPROFILE") || this.env("HOME");
   },
 
-  // claude.exe directly (the npm shim is a .cmd file, which cannot be started without a shell)
+  // claude.exe directly (the npm shim is a .cmd file, which cannot be started without a shell): the one set on the
+  // settings page, else the one found
   async findClaude() {
     const configured = this.getPref("claudePath");
     if (configured) return (await this.exists(configured)) ? configured : null;
+    return this.autoClaude();
+  },
+
+  // claude.exe where it is usually installed, or on PATH
+  async autoClaude() {
     const home = this.home();
     const win = Services.appinfo.OS === "WINNT";
     const exe = win ? "claude.exe" : "claude";
@@ -912,12 +919,17 @@ var ScholiumRunner = {
     try { return await this.subprocess().pathSearch(exe); } catch (e) { return null; }
   },
 
-  // the newest codex executable among the usual places: the Codex app keeps its own copy in a folder
-  // that changes with each update, npm's package carries a native one (its shim is a .cmd file), and
-  // Cargo, Homebrew and PATH may hold others. An older Codex may not read a newer one's config.toml.
+  // the codex executable: the one set on the settings page, else the one found
   async findCodex() {
     const configured = this.getPref("codexPath");
     if (configured) return (await this.exists(configured)) ? configured : null;
+    return this.autoCodex();
+  },
+
+  // the newest codex executable among the usual places: the Codex app keeps its own copy in a folder
+  // that changes with each update, npm's package carries a native one (its shim is a .cmd file), and
+  // Cargo, Homebrew and PATH may hold others. An older Codex may not read a newer one's config.toml.
+  async autoCodex() {
     const home = this.home();
     const win = Services.appinfo.OS === "WINNT";
     const exe = win ? "codex.exe" : "codex";
@@ -950,6 +962,9 @@ var ScholiumRunner = {
     }
     return best ? best.path : null;
   },
+
+  // the program of an agent the plugin finds by itself, whatever the settings page names: its grey text there
+  foundProgram(agent) { return agent === "codex" ? this.autoCodex() : this.autoClaude(); },
 
   // "codex-cli 0.160.0" -> [0, 160, 0, ""]; null when it does not start or answer
   async codexVersion(path) {
@@ -5852,6 +5867,9 @@ var ScholiumRunner = {
                                         image: this.chrome + "icon20.svg", scripts: [this.rootURI + "settings.js"] })
         .then(id => { this.prefPaneID = id; }, e => this.log("settings page not registered: " + e));
     }
+    // the settings page asks what the plugin finds by itself, for the grey text of the program boxes
+    this.bridgeApi = { found: agent => this.foundProgram(agent) };
+    Zotero.ScholiumBridge = this.bridgeApi;
     for (const win of this.windows()) this.addToWindow(win);
     if (!update) {
       if (this.getPref("carryOver")) { try { Zotero.Prefs.set(this.pref + "carryOver", "", true); } catch (e) {} }
@@ -5975,6 +5993,8 @@ var ScholiumRunner = {
     this.selectionHandler = null;
     this.pendingQuotes.clear();
     this.prefPaneID = null;
+    if (Zotero.ScholiumBridge === this.bridgeApi) delete Zotero.ScholiumBridge;   // a newer copy's stays
+    this.bridgeApi = null;
     for (const body of [...this.panes.keys()]) this.dropPane(body);
     this.notes.clear();
     this.job = null;

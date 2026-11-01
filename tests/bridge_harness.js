@@ -679,7 +679,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     }, pane: () => runner.panes.get(body) };
   };
   const styles = () => mainDoc.documentElement.children.map(c => [c.tagName, c.id, c.attrs.rel, c.attrs.href]);
-  return { runner, log, item1, item2, att1, att2, note, pane, store, see, resize, focus, observers, timers, fire, styles, sheet, paneWin, paneDoc, lastFocus, El,
+  return { runner, zotero: context.Zotero, log, item1, item2, att1, att2, note, pane, store, see, resize, focus, observers, timers, fire, styles, sheet, paneWin, paneDoc, lastFocus, El,
            ann: (key, type, color, tags = ['zotero-scholium']) => annotation(key, tags, type, color),
            flat: view => flatNodes(runner, view),
            chromePackage: context.chromePackage, replacing: context.replacing, takingOver: context.takingOver,

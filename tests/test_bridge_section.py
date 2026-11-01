@@ -1018,6 +1018,20 @@ SCENARIOS = r"""
     facts.retryElsewhere = { shown: before[0], answer: (await h.runner.readLog('ATT1', old)).entries.some(e => e.text === '好了'),
                              log: (await h.runner.readLog('ATT1', old)).turns.length, stays: pane.shownConv === old && (await h.runner.currentConv('ATT1', 'claude')) === old, liveButton: live.children.some(c => c.children.some(k => k.className.includes('retry'))) };
   }
+  // the settings page asks the plugin for the programs it finds by itself, whatever is set there; gone once it stops
+  {
+    const h = harness({ prefs: { 'extensions.scholium-bridge.claudePath': '/custom/claude.exe',
+                                 'extensions.scholium-bridge.codexPath': '/custom/codex.exe' } });
+    h.runner.start('x');
+    const api = h.zotero.ScholiumBridge;
+    facts.found = { api: !!api, claude: api && await api.found('claude'), codex: api && await api.found('codex') };
+    h.runner.stop();
+    facts.found.after = 'ScholiumBridge' in h.zotero;
+    const none = harness({ claudeExists: false, codex: { versions: {} } });
+    none.runner.start('x');
+    facts.found.none = [await none.zotero.ScholiumBridge.found('claude'), await none.zotero.ScholiumBridge.found('codex')];
+    none.runner.stop();
+  }
   process.stdout.write(JSON.stringify(facts));
 })().catch(error => { console.error(error); process.exit(1); });
 """
@@ -1061,19 +1075,33 @@ class FilePicker {
 }
 Object.assign(FilePicker.prototype, { filterAll: 0x001, filterApps: 0x040, modeOpen: 0, returnOK: 0, returnCancel: 1 });
 const handlers = {};
-const document = { getElementById: id => ({ addEventListener: (t, f) => { handlers[id] = f; } }) };
+// zotero runs the script first and parses the markup after it: the elements exist only when `load` reaches the root
+let present = false, listener = null;
+const document = {
+  getElementById: id => (present ? { addEventListener: (t, f) => { handlers[id] = f; } } : null),
+  addEventListener: (t, f, capture) => { if (t === 'load' && capture) listener = f; },
+};
 vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {
   window: {}, document, Zotero: { Prefs: { set() {} } },
   ChromeUtils: { importESModule: () => ({ FilePicker }) },
 });
 (async () => {
+  const before = Object.keys(handlers);
+  present = true;
+  const other = { classList: { contains: c => c === 'other' } };
+  const root = { classList: { contains: c => c === 'scholium-settings' } };
+  listener({ target: other });
+  const afterOther = Object.keys(handlers);
+  listener({ target: root });
+  listener({ target: root });   // a second load wires nothing again
   for (const id of Object.keys(handlers)) { handlers[id](); await new Promise(r => setTimeout(r, 5)); }
-  process.stdout.write(JSON.stringify({ ids: Object.keys(handlers), filters }));
+  process.stdout.write(JSON.stringify({ before, afterOther, ids: Object.keys(handlers), filters }));
 })();
 '''
     out = subprocess.run([NODE, "-e", script, str(PLUGIN / "settings.js")], capture_output=True, encoding="utf-8", timeout=60)
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
+    assert got["before"] == [] and got["afterOther"] == [], "nothing is wired before the pane's markup is loaded"
     assert got["ids"] == ["scholium-claude-browse", "scholium-codex-browse"]
     assert got["filters"] == [0x001, 0x001], "all files, not only applications"
 
@@ -1097,7 +1125,8 @@ def test_the_settings_page_binds_every_preference():
         defined = set(re.findall(r"^([a-z][\w-]*)\s*=", ftl, re.M))
         assert ids <= defined, (locale, ids - defined)
     defaults = (PLUGIN / "prefs.js").read_text(encoding="utf8")
-    for p, v in (("sendShortcut", '"cmdAlways"'), ("followUpMode", '"queue"'), ("contextRing", "true")):
+    for p, v in (("sendShortcut", '"cmdAlways"'), ("followUpMode", '"queue"'), ("contextRing", "true"),
+                 ("claudePath", '""'), ("codexPath", '""'), ("savedPrompts", '""')):
         assert f'pref("extensions.scholium-bridge.{p}", {v});' in defaults
 
 
@@ -1124,7 +1153,7 @@ def test_the_settings_page_controls_show_their_words():
     labelled = [el.get("data-l10n-id") for el in root.iter() if el.tag in controls]
     assert len(labelled) == 8
     picker = re.findall(r'"(scholium-settings-[a-z-]+)"', (PLUGIN / "settings.js").read_text(encoding="utf8"))
-    assert picker == ["scholium-settings-claude", "scholium-settings-codex"]
+    assert picker == ["scholium-settings-claude", "scholium-settings-codex", "scholium-settings-not-found"]
     for locale in ("en-US", "zh-CN"):
         msgs = ftl_messages(locale)
         for i in labelled:
@@ -1133,6 +1162,7 @@ def test_the_settings_page_controls_show_their_words():
             assert msgs[i][0], (locale, i, "the file picker's title is a message's value")
     assert not [el for el in root.iter() if el.tag == "{%s}h2" % ns["h"]], "the page's heading is Zotero's"
     inputs = [el for el in root.iter() if el.tag == "{%s}input" % ns["h"]]
+    assert [el.get("id") for el in inputs] == ["scholium-claude-path", "scholium-codex-path"]
     assert len(inputs) == 2 and all("flex: 1" in (el.get("style") or "") for el in inputs), "a path box takes the row"
 
 
@@ -1525,3 +1555,42 @@ def test_a_retry_without_a_session(facts):
     assert first["session"] is None and first["ran"] == 1 and "用户的问题：\n问一" in first["prompt"] and "[第" not in first["prompt"], "the question's prompt, no history"
     assert later["session"] is None and later["ran"] == 1 and "新消息：\n问二" in later["prompt"]
     assert "[第 1 轮]\n用户：问一\n回答：答一" in later["prompt"] and "[第 2 轮]" not in later["prompt"], "the turns before the retried one"
+
+
+def test_the_settings_page_hears_the_programs_found(facts):
+    f = facts["found"]
+    assert f["api"] is True
+    assert f["claude"] == "/appdata/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe", "not the path set on the page"
+    assert f["codex"] == "/localappdata/OpenAI/Codex/bin/h1/codex.exe", "the newest copy found"
+    assert f["after"] is False
+    assert f["none"] == [None, None]
+
+
+def test_the_program_boxes_show_the_program_found():
+    script = r'''
+const vm = require('node:vm');
+const fs = require('node:fs');
+const inputs = { 'scholium-claude-path': { placeholder: '' }, 'scholium-codex-path': { placeholder: '' } };
+let present = false, listener = null;
+const document = { getElementById: id => (present ? inputs[id] || ({ addEventListener() {} }) : null),
+                   addEventListener: (t, f, capture) => { if (t === 'load' && capture) listener = f; },
+                   l10n: { formatValue: async id => (id === 'scholium-settings-not-found' ? 'NOT FOUND' : id) } };
+const found = { claude: 'C:/found/claude.exe', codex: null };
+vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {
+  window: {}, document, Zotero: { Prefs: { set() {} }, ScholiumBridge: { found: async agent => found[agent] } },
+  ChromeUtils: { importESModule: () => ({}) },
+});
+const out = {};
+setTimeout(() => {
+  out.before = [inputs['scholium-claude-path'].placeholder, inputs['scholium-codex-path'].placeholder];
+  present = true;
+  listener({ target: { classList: { contains: c => c === 'scholium-settings' } } });
+  setTimeout(() => { out.after = [inputs['scholium-claude-path'].placeholder, inputs['scholium-codex-path'].placeholder];
+                     process.stdout.write(JSON.stringify(out)); }, 20);
+}, 20);
+'''
+    out = subprocess.run([NODE, "-e", script, str(PLUGIN / "settings.js")], capture_output=True, encoding="utf-8", timeout=60)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["before"] == ["", ""], "no boxes yet when the script runs"
+    assert got["after"] == ["C:/found/claude.exe", "NOT FOUND"]

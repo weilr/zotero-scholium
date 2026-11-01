@@ -23,5 +23,6 @@ scholium-settings-ring =
 scholium-settings-claude = Claude Code program
 scholium-settings-codex = Codex program
 scholium-settings-program-desc = Leave empty to find it automatically
+scholium-settings-not-found = Not found
 scholium-settings-browse =
     .label = Browse…

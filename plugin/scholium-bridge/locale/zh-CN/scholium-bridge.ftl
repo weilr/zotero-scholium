@@ -23,5 +23,6 @@ scholium-settings-ring =
 scholium-settings-claude = Claude Code 程序
 scholium-settings-codex = Codex 程序
 scholium-settings-program-desc = 留空则自动查找
+scholium-settings-not-found = 未找到
 scholium-settings-browse =
     .label = 浏览…

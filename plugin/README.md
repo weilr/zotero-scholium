@@ -230,7 +230,7 @@ The Scholium page of Zotero's settings holds:
 | Claude Code program | a path, or **Browse…** | empty: found automatically |
 | Codex program | a path, or **Browse…** | empty: found automatically |
 
-When an agent's program is not found, the message points to this page.
+When a program box is empty, it shows the program found, greyed, or `Not found`. When an agent's program is not found, the message points to this page.
 
 While Zotero is in front, a notice in the corner of the window appears when a paper starts and when it
 ends, and closes by itself; while Zotero is in the background, a system notification reports the end
