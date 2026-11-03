@@ -280,10 +280,10 @@ SCENARIOS = r"""
     const second = { tab: pane.tab, chatShown: !pane.chatView.hidden, annotShown: !pane.annotView.hidden,
                      selected: [pane.tabChat.className, pane.tabAnnotate.className] };
     pane.tabChat.click(); pane.input.type('一个问题'); pane.send.click(); await settle(200);   // a chat run, held open
-    const chatState = p.view().state;
+    const chatState = p.view().state, chatTitle = pane.state.title;
     const dotHere = pane.tabChatDot.hidden;
     pane.tabAnnotate.click(); await settle(10);
-    facts.tabs = { first, second, chatState, dotHere, annotState: p.view().state, chatDot: pane.tabChatDot.hidden === false,
+    facts.tabs = { first, second, chatState, chatTitle, dotHere, annotState: p.view().state, chatDot: pane.tabChatDot.hidden === false,
                    annotDot: pane.tabAnnotateDot.hidden === false };
     h.runner.cancel(); await settle(200);
   }
@@ -767,19 +767,23 @@ SCENARIOS = r"""
     const step = (name, text) => ({ kind: 'tool', name, text });
     const foldView = hh => ({ doc: hh.paneDoc, foldOpen: new Map(), kind: 'chat' });
     r.models.codex = [{ value: '', label: 'Codex 默认' }, { value: 'gpt-6-luna', label: 'GPT-6-Luna' }];
+    r.job = { started: Date.now() - 12000 };   // the live line's time is the running paper's
     facts.words = {
       live: [step('Read', 'Read(D:/x/sentences.txt)'), step('Bash', 'Bash(python scholium.py extract)'), undefined]
-        .map(st => r.foldNode(foldView(hr), { start: 1, end: 0, steps: st ? [st] : [] }, 0, true).children[0].textContent),
+        .map(st => r.foldNode(foldView(hr), { start: Date.now() - 12000, end: 0, steps: st ? [st] : [] }, 0, true).children[0].textContent),
       durations: [0, 59400, 377000, 3725000].map(ms => r.durationWords(ms)),
       worked: [r.workedText({ start: 0, end: 5 }), r.workedText({ start: 1000, end: 378000 }), r.workedText({ start: 5000, end: 0 })],
       labels: [r.modelLabel('Claude Code · claude-opus-5-5'), r.modelLabel('claude-haiku-4-5-20251001'), r.modelLabel('Codex · gpt-6-luna'),
                r.modelLabel('Codex · gpt-x')],
       runLines: [r.entries({ type: 'scholium', subtype: 'run', agent: 'claude', at: 5 }), r.entries({ type: 'scholium', subtype: 'run', agent: 'claude' })],
     };
+    r.job = null;
     const he = harness({ locale: 'en-US' }), e = he.runner;
-    facts.words.english = [e.foldNode(foldView(he), { start: 1, end: 0, steps: [step('Read', 'Read(a/b.txt)')] }, 0, true).children[0].textContent,
+    e.job = { started: Date.now() - 12000 };
+    facts.words.english = [e.foldNode(foldView(he), { start: Date.now() - 12000, end: 0, steps: [step('Read', 'Read(a/b.txt)')] }, 0, true).children[0].textContent,
                            e.workedText({ start: 1000, end: 378000 }), e.workedText({ start: 0, end: 0 }),
                            ...[59400, 377000, 3725000].map(ms => e.durationWords(ms))];
+    e.job = null;
   }
   // History is a layer of this PDF's conversations; a row opens one and closes the layer; an empty chat offers questions
   {
@@ -1289,7 +1293,7 @@ def test_the_two_tabs(facts):
     assert t["first"] == {"tab": "chat", "chatShown": True, "annotShown": False}
     assert t["second"]["tab"] == "annotate" and t["second"]["chatShown"] is False and t["second"]["annotShown"] is True
     assert "on" in t["second"]["selected"][1] and "on" not in t["second"]["selected"][0]
-    assert t["chatState"] and not t["chatState"].startswith("上次")
+    assert t["chatState"] == "" and re.fullmatch(r"正在处理 · 已用 \d+s", t["chatTitle"]), "a question's line is its dot; the tooltip has the time"
     assert t["annotState"] is None, "the annotation tab does not show the chat's run"
     assert t["chatDot"] is True and t["annotDot"] is False
     assert t["dotHere"] is True, "the tab being shown carries no dot"
@@ -1410,7 +1414,7 @@ def test_the_section_fills_the_side_pane(facts):
 
 def test_the_transcript_by_runs(facts):
     r = facts["runs"]
-    assert r["liveLine"] == "正在处理"
+    assert re.fullmatch(r"正在处理 \d+ 秒", r["liveLine"])
     assert r["parts"] == ["scholium-entry prompt editable", "scholium-fold", "scholium-entry text", "scholium-meta"]
     assert re.fullmatch(r"已处理 \d+ 秒 ›", r["closed"][0]) and r["closed"][1] == 1, "the steps are folded"
     assert r["opened"][0] == "scholium-entry text" and "scholium-entry tool" in r["opened"] and "scholium-entry result" in r["opened"]
@@ -1421,8 +1425,8 @@ def test_the_transcript_by_runs(facts):
 
 def test_opened_steps_stay_open_and_a_reader_scrolled_up_stays(facts):
     f = facts["foldKept"]
-    assert f["drawnHead"] == "正在处理", "a section drawn meanwhile shows it live"
-    assert f["during"] == ["正在处理 ⌄", 5, "scholium-fold-head live"]
+    assert re.fullmatch(r"正在处理 \d+ 秒", f["drawnHead"]), "a section drawn meanwhile shows it live"
+    assert re.fullmatch(r"正在处理 \d+ 秒 ⌄", f["during"][0]) and f["during"][1:] == [5, "scholium-fold-head live"]
     assert re.fullmatch(r"已处理 \d+ 秒 ⌄", f["after"][0]) and f["after"][1:] == [11, "scholium-fold-head"], "the reader's choice wins"
     assert f["runs"] == 1, "the run is drawn again in its place"
     assert f["scrollTop"] == 0
@@ -1462,7 +1466,7 @@ def test_the_message_being_written_is_last_in_its_run(facts):
     assert f["parts"] == [["scholium-fold", "scholium-entry text", "scholium-meta"],
                           ["scholium-entry prompt editable", "scholium-fold", "scholium-entry text", "scholium-entry text draft"]], \
         "the earlier run is finished; the running one has its line and no line under it yet"
-    assert f["thinking"] == "正在处理" and f["earlier"] == "已处理 ⌄"
+    assert re.fullmatch(r"正在处理 \d+ 秒", f["thinking"]) and f["earlier"] == "已处理 ⌄"
     assert f["first"] == [2, True] and f["line"] == [2, True] and f["run"] == [3, True]
     assert f["clicked"] == [2, True], "opening the running run's steps keeps the message being written"
 
@@ -1483,8 +1487,9 @@ def test_a_run_that_ends_without_its_conversation_shown_again_is_drawn_finished(
     assert e["retry"] == [None, "等待第二次尝试", ["scholium-entry prompt", "scholium-entry final error", "scholium-entry info"]]
     assert e["noProgram"] == [["scholium-fold", "scholium-entry text", "scholium-meta"], ["scholium-entry final error"]], \
         "the run before keeps its line; the failure is a run of its own"
-    assert e["starting"] == [[["scholium-fold", "scholium-entry text", "scholium-meta"], ["scholium-fold"]],
-                             ["scholium-fold-head live", "正在处理"]], "the run before is finished from the start"
+    assert e["starting"][0] == [["scholium-fold", "scholium-entry text", "scholium-meta"], ["scholium-fold"]] \
+        and e["starting"][1][0] == "scholium-fold-head live" and re.fullmatch(r"正在处理 \d+ 秒", e["starting"][1][1]), \
+        "the run before is finished from the start"
 
 
 def test_the_runs_drawn_follow_the_transcript_when_its_first_run_goes(facts):
@@ -1495,12 +1500,12 @@ def test_the_runs_drawn_follow_the_transcript_when_its_first_run_goes(facts):
 
 def test_the_words_of_a_runs_line(facts):
     w = facts["words"]
-    assert w["live"] == ["正在处理"] * 3, "a live line says it works, whatever the last step is"
+    assert w["live"] == ["正在处理 12 秒"] * 3, "a live line says it works, whatever the last step is"
     assert w["durations"] == ["0 秒", "59 秒", "6 分 17 秒", "1 小时 2 分"]
     assert w["worked"] == ["已处理", "已处理 6 分 17 秒", "已处理"]
     assert w["labels"] == ["Opus 5.5", "Haiku 4.5", "GPT-6-Luna", "gpt-x"]
     assert w["runLines"] == [[{"kind": "run", "at": 5, "compact": False}], [{"kind": "run", "at": 0, "compact": False}]]
-    assert w["english"] == ["Working", "Worked for 6m 17s", "Worked", "59s", "6m 17s", "1h 2m"]
+    assert w["english"] == ["Working for 12s", "Worked for 6m 17s", "Worked", "59s", "6m 17s", "1h 2m"]
 
 
 def test_history_is_a_layer_of_this_pdfs_conversations(facts):

@@ -139,11 +139,27 @@ SCENARIOS = r"""
     gp.input.type('问'); gp.send.click();
     for (let i = 0; i < 3000 && !g.log.release; i++) await tick();
     await pause(40);
-    const chatRunning = gp.state.textContent;
+    const chatRunning = gp.state.textContent, chatTitle = gp.state.title;
+    // the run line's time is written again by the tick, in the same node; the tooltip's time is the same, taken once from
+    // the run's start
+    const live = gp.liveTime, before = live.node.textContent;
+    g.runner.job.started -= 65000;
+    await pause(1300);
+    const after = { same: gp.liveTime === live && gp.liveTime.node === live.node, connected: live.node.isConnected, before, text: live.node.textContent,
+                    title: gp.state.title };
+    // painted again between two ticks: still one time on both
+    g.runner.job.started -= 60000;
+    g.runner.refresh();
+    const between = [gp.liveTime.node.textContent, gp.state.title];
+    // a question that reconnects has the reconnecting on its line, and the time in the tooltip
+    const rr = g.runner, saved = rr.job;
+    rr.job = { asking: true, retry: { attempt: 2, max: 5 }, step: 'reading', started: Date.now() - 12000, source: {} };
+    const reconnect = { state: rr.runningState(), title: rr.runningTitle() };
+    rr.job = saved;
     gp.tabAnnotate.click(); await pause(40);
     const annot = gp.state.textContent;
     g.log.release(); await settle(300);
-    facts.tickChat = { chatRunning, annot };
+    facts.tickChat = { chatRunning, annot, chatTitle, after, between, reconnect };
   }
   // the line the plugin keeps of a compaction it did not see the boundary of: the size after it is the ring's
   {
@@ -1522,10 +1538,37 @@ def test_the_run_after_a_compaction_is_a_turn_of_its_own(facts):
 
 def test_the_state_line_is_painted_on_the_tab_of_the_run(facts):
     a = facts["tickAnnotation"]
-    assert re.search(r"已用 \d+s", a["running"]) and re.search(r"已用 \d+s", a["back"])
+    assert a["running"] == "第 6/6 步" and a["back"] == "第 6/6 步", "an annotation's line has no time"
     assert a["chat"] == "", "the chat tab has nothing to say while the annotation runs"
     c = facts["tickChat"]
-    assert re.search(r"已用 \d+s", c["chatRunning"]) and c["annot"] == ""
+    assert c["chatRunning"] == "" and c["annot"] == "", "a question's line is its dot"
+    assert re.fullmatch(r"正在处理 · 已用 \d+s", c["chatTitle"]), "the tooltip has the time"
+    assert re.fullmatch(r"正在处理 \d+ 秒", c["after"]["before"]) and re.fullmatch(r"正在处理 1 分 \d 秒", c["after"]["text"]) and c["after"]["same"] and c["after"]["connected"], \
+        "the tick writes the time into the same node, without drawing the run"
+    assert c["reconnect"]["state"] == "连接中断，正在重试（2/5）" and re.fullmatch(r"正在处理 · 连接中断，正在重试（2/5） · 已用 1\ds", c["reconnect"]["title"])
+
+
+def test_the_live_line_and_the_tooltip_give_one_time(facts):
+    def seconds(text):
+        m = re.search(r"(?:(\d+) ?(?:分|m) )?(\d+) ?(?:秒|s)", text)
+        return int(m.group(1) or 0) * 60 + int(m.group(2))
+    c = facts["tickChat"]
+    after = c["after"]
+    assert seconds(after["text"]) == seconds(after["title"]) >= 65, (after["text"], after["title"])
+    live, title = c["between"]
+    assert seconds(live) == seconds(title), (live, title)
+
+
+def test_the_live_line_is_swept_by_a_light_and_stops_for_reduced_motion():
+    rules = css_rules()
+    live = rules[".scholium-fold-head.live .scholium-working"]
+    assert "animation: scholium-shimmer 2s linear infinite" in live and "background-clip: text" in live and "color: transparent" in live
+    assert "background-size: 300% 100%" in live and "--scholium-sweep: color-mix(in srgb, var(--accent-blue) 45%, white)" in live
+    assert "var(--accent-blue) 45%, var(--scholium-sweep) 50%, var(--accent-blue) 55%" in live
+    text = (PLUGIN / "content" / "scholium.css").read_text(encoding="utf8")
+    assert re.search(r"@keyframes scholium-shimmer \{ from \{ background-position: 100% 0; \} to \{ background-position: 0% 0; \} \}", text)
+    reduced = re.search(r"@media \(prefers-reduced-motion: reduce\) \{\s*\.scholium-fold-head\.live \.scholium-working \{([^}]*)\}", text)
+    assert reduced and "animation: none" in reduced.group(1)
 
 
 def test_the_run_after_a_compaction_goes_on_with_the_turn_before(facts):

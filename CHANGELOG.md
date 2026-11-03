@@ -4,6 +4,9 @@
 
 ### Added
 
+- The run line of the transcript reads "Working for 12s" with a light sweeping across it; the sweep stops when the
+  system asks for reduced motion. The state line beside the settings chip has the step only for an annotation
+  ("step 3/6") and its dot for a question; the time is in its tooltip.
 - Saved prompts above the Chat tab's box (preference `savedPrompts`), sent with a click and edited,
   deleted (with **Undo**) and reordered in the row.
 - Editing an earlier question of the Chat tab (✎ on hover) asks it again, with the agent chosen, from the conversation
@@ -61,7 +64,7 @@
 ### Changed
 
 - Scholium section: the section fills the side pane's height. The state is one line beside the settings chip.
-  While a run goes on, one line says "Working"; once the answer is there, the steps fold into "Worked for 24s ›".
+  Once the answer is there, the steps of a run fold into "Worked for 24s ›".
   The history is a layer of the PDF's conversations by day. ■ stops a run.
 - Scholium section: annotating no longer continues the chat; the Chat tab is for questions.
 - Scholium section: the conversations and the history are those of one PDF, the item's best PDF in the library

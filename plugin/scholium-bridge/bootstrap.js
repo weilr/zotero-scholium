@@ -593,6 +593,7 @@ var ScholiumRunner = {
       copiedMessage: zh ? "已复制" : "Copied",
       worked: d => zh ? `已处理 ${d}` : `Worked for ${d}`,
       working: zh ? "正在处理" : "Working",
+      workingFor: d => zh ? `正在处理 ${d}` : `Working for ${d}`,
       workedPlain: zh ? "已处理" : "Worked",
       profileOpen: zh ? "个人配置 ↗" : "Personal profile ↗",
       profileTitle: zh ? "个人配置" : "Personal profile",
@@ -1372,21 +1373,39 @@ var ScholiumRunner = {
 
   stepText(step) {
     const i = this.STEPS.indexOf(step);
-    // a question's line says it works, without a step; an annotation's list of steps names them, so its line has the
-    // count only
+    // an annotation's list of steps names them, so its line has the count only
     if (i >= 0) {
-      return this.job && this.job.asking ? this.text("working") : this.job && this.job.annotation ? this.text("stepCount", i + 1, this.STEPS.length)
+      return this.job && this.job.annotation ? this.text("stepCount", i + 1, this.STEPS.length)
         : this.text("stepOf", i + 1, this.STEPS.length, this.text(step));
     }
     return step && step !== "starting" ? this.text(step) : this.text("starting", this.agentName(this.job && this.job.agent));
   },
 
-  // the running paper's state line: its step and the time so far
+  // the running paper's state line: a question's has only its dot (the run line in the transcript has the time), an
+  // annotation's its step; a compaction's has the time
   runningState() {
-    if (this.job.source && this.job.source.compact) return this.text("compactingState", this.duration(Date.now() - this.job.started));
+    if (this.job.source && this.job.source.compact) return this.runningTitle();
     const retry = this.job.retry;
-    const step = this.stepText(this.job.step) + (retry ? " · " + this.text("reconnecting", retry.attempt, retry.max) : "");
-    return this.text("running", step, this.duration(Date.now() - this.job.started));
+    const re = retry ? this.text("reconnecting", retry.attempt, retry.max) : "";
+    if (this.job.asking) return re;
+    return this.stepText(this.job.step) + (re ? " · " + re : "");
+  },
+
+  // the same with the time so far, for the line's tooltip
+  runningTitle() {
+    if (this.job.source && this.job.source.compact) return this.text("compactingState", this.duration(this.elapsed()));
+    const retry = this.job.retry;
+    const step = (this.job.asking ? this.text("working") : this.stepText(this.job.step)) + (retry ? " · " + this.text("reconnecting", retry.attempt, retry.max) : "");
+    return this.text("running", step, this.duration(this.elapsed()));
+  },
+
+  // the running paper's time so far in whole seconds, one value for its live line and its state line's tooltip: taken
+  // from the run's start when it starts and once a second by tick (fresh)
+  elapsed(fresh = false) {
+    const job = this.job;
+    if (!job) return 0;
+    if (fresh || !(job.elapsed >= 0)) job.elapsed = Math.max(0, Math.round((Date.now() - job.started) / 1000)) * 1000;
+    return job.elapsed;
   },
 
   windows() {
@@ -4447,9 +4466,12 @@ var ScholiumRunner = {
       const more = doc.createElement("span");
       more.className = "scholium-fold-more";
       more.textContent = " " + this.text("details") + (open ? " ⌄" : " ›");
-      head.append(doc.createTextNode(this.text("working")), more);
+      head.append(this.workingNode(view), more);
+    } else if (live) {
+      head.append(this.workingNode(view));
+      if (open) head.append(doc.createTextNode(" ⌄"));
     } else {
-      head.textContent = (live ? this.text("working") : this.workedText(run)) + (open ? " ⌄" : live ? "" : " ›");
+      head.textContent = this.workedText(run) + (open ? " ⌄" : " ›");
     }
     head.addEventListener("click", () => { view.foldOpen.set(key, !open); this.refreshRun(view, index); });
     node.append(head);
@@ -4460,6 +4482,17 @@ var ScholiumRunner = {
       node.append(body);
     }
     return node;
+  },
+
+  // the live line's words: Working for 12s, swept by a light; tick writes the time again without drawing the run
+  workingNode(view) {
+    const span = view.doc.createElement("span");
+    span.className = "scholium-working";
+    // every redraw of the line starts the sweep at the same phase
+    span.style.animationDelay = -(Date.now() % 2000) + "ms";
+    span.textContent = this.text("workingFor", this.durationWords(this.elapsed()));
+    view.liveTime = { node: span };
+    return span;
   },
 
   workedText(run) {
@@ -4700,7 +4733,7 @@ var ScholiumRunner = {
       pane.state.className = `scholium-state ${kind}`;
       // one line, cut where the pane is narrow: the whole of it in the tooltip, with the tokens' detail of a finished run
       pane.state.textContent = lines.join(" · ");
-      pane.state.title = [lines.join(" · "), title].filter(Boolean).join("\n");
+      pane.state.title = [running ? this.runningTitle() : lines.join(" · "), title].filter(Boolean).join("\n");
       this.show(pane.state, lines.length > 0);
       const busy = !!running || queuedAt >= 0;
       // any run of the paper, of either tab
@@ -5535,11 +5568,19 @@ var ScholiumRunner = {
     while (this.job === job) {
       await Zotero.Promise.delay(this.TICK_MS);
       if (this.job !== job) break;
+      const time = this.text("workingFor", this.durationWords(this.elapsed(true)));
       for (const pane of this.panes.values()) {
         if (!pane.keys.includes(job.key)) continue;
         try {
           // the line belongs to the tab of the run's kind; the other tab's outcome stays
-          if (pane.tab === (job.source.kind || "chat")) pane.state.textContent = pane.state.title = this.runningState();
+          if (pane.tab === (job.source.kind || "chat")) {
+            pane.state.textContent = this.runningState();
+            pane.state.title = this.runningTitle();
+          }
+          for (const view of this.paneViews(pane)) {
+            const t = view.liveTime;
+            if (t && t.node.isConnected) t.node.textContent = time;
+          }
           this.paintRing(pane);
         } catch (e) {}
       }
@@ -5573,7 +5614,7 @@ var ScholiumRunner = {
     const started = Date.now();
     const key = job.att.key;
     const agent = job.agent === "codex" ? "codex" : "claude";
-    this.job = { title: job.title, key, libraryID: job.att.libraryID, started, agent, step: job.resume && !job.annotate ? "continuing" : "starting",
+    this.job = { title: job.title, key, libraryID: job.att.libraryID, started, elapsed: 0, agent, step: job.resume && !job.annotate ? "continuing" : "starting",
                  source: job, session: job.resume || null, log: null, asking: this.asking(job), context: null };
     this.transcriptKind = job.kind || "chat";   // the tab whose run this is, from its start
     const running = this.job;

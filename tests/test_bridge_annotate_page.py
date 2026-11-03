@@ -979,11 +979,11 @@ def test_the_annotation_tab(facts):
     d = a["during"]
     assert [s[1] for s in d["steps"]] == ["加载技能", "提取句子", "通读论文", "撰写批注", "预演检查", "写入 Zotero"]
     assert [s[0] for s in d["steps"]] == ["scholium-step done"] * 5 + ["scholium-step now"]
-    assert d["go"] is True and d["round"] == "■" and d["live"] == "正在处理 详情 ›"
+    assert d["go"] is True and d["round"] == "■" and re.fullmatch(r"正在处理 \d+ 秒 详情 ›", d["live"])
     assert d["sendShown"] is True, "■ stops the annotation"
     assert d["reached"] == ["skill", "extract", "reading", "writing", "dryRun", "applying"]
-    assert re.fullmatch(r"第 6/6 步 · 已用 \d+s", d["state"]), "the step's name is in the list of steps, not on the state line"
-    assert d["stateTitle"] == d["state"], "a running state cut short is whole in its tooltip"
+    assert d["state"] == "第 6/6 步", "the step's name is in the list of steps, not on the state line; the time is on the live line"
+    assert re.fullmatch(r"第 6/6 步 · 已用 \d+s", d["stateTitle"]), "the tooltip has the time"
     assert d["times"] == ["5 秒", "1 分 0 秒", "1 小时 1 分", "5 秒", "1 分 0 秒", ""]
     f = a["after"]
     assert f["parts"] == ["scholium-entry prompt", "scholium-fold", "scholium-card"], "the closing words go into the folded steps"
@@ -1096,7 +1096,7 @@ def test_a_run_without_a_log_line_is_no_attempt_of_the_turn_before(facts):
 
 def test_words_to_the_annotation_session_name_their_step(facts):
     f = facts["wordsState"]
-    assert re.fullmatch(r"第 6/6 步 写入 Zotero · 已用 \d+s", f["state"]) and f["steps"] is False
+    assert f["state"] == "第 6/6 步 写入 Zotero" and f["steps"] is False
 
 
 def test_the_card_of_an_ended_annotation_stays_while_something_else_waits(facts):

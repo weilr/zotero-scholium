@@ -580,6 +580,20 @@
   color: var(--fill-secondary); cursor: pointer; }
 .scholium-fold-head.live { color: var(--accent-blue); }
 .scholium-fold-head.live::before { content: "◌ "; }
+/* the live line's words, swept by a light as Codex's Working; the lit colour is --scholium-sweep */
+.scholium-fold-head.live .scholium-working {
+  --scholium-sweep: color-mix(in srgb, var(--accent-blue) 45%, white);
+  background: linear-gradient(90deg, var(--accent-blue) 0%, var(--accent-blue) 45%, var(--scholium-sweep) 50%, var(--accent-blue) 55%, var(--accent-blue) 100%);
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: scholium-shimmer 2s linear infinite;
+}
+@keyframes scholium-shimmer { from { background-position: 100% 0; } to { background-position: 0% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .scholium-fold-head.live .scholium-working { animation: none; background: none; color: var(--accent-blue); }
+}
 .scholium-fold-body { border-inline-start: 2px solid var(--fill-quinary); margin-inline-start: 4px; padding-inline-start: 8px;
   display: flex; flex-direction: column; gap: 3px; }
 .scholium-meta { display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; color: var(--fill-tertiary); }

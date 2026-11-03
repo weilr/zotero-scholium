@@ -2943,12 +2943,12 @@ def test_a_section_on_screen_replaces_the_notices(facts):
 
 def test_section_shows_running_and_finished_state(facts):
     q = facts["queueWhileFirstRuns"]
-    assert run_time(q["pane1"]["state"]) == "第 6/6 步 · 已用 Ns", "the papers waiting are shown in their own sections"
+    assert q["pane1"]["state"] == "第 6/6 步", "the papers waiting are shown in their own sections"
     assert q["pane1"]["stateKind"] == "scholium-state running"
     assert q["pane1"]["round"] == ["■", "停止"], "the running paper has the stop button"
     assert q["pane2"]["state"] == "排队中，前面还有 1 篇" and q["pane2"]["annotateDisabled"] is True
     w = facts["whileRunning"]["view"]
-    assert run_time(w["state"]) == "第 1/6 步 · 已用 Ns" and w["stateKind"] == "scholium-state running"
+    assert w["state"] == "第 1/6 步" and w["stateKind"] == "scholium-state running"
     assert (w["annotateDisabled"], w["removeDisabled"]) == (True, True) and w["round"] == ["■", "停止"]
     assert w["flat"] == [ANNOTATE, STEPS] + TRANSCRIPT[:2], "the six steps, the first one going on, above what it does now"
     assert facts["otherRunning"] == {"state": None, "kind": "scholium-state info"}, "another paper's run is not shown here"
@@ -3575,11 +3575,11 @@ def test_the_agents_share_the_papers_conversations(facts):
 
 def test_codex_steps_and_cancel(facts):
     c = facts["codexCancel"]
-    assert run_time(c["during"]) == "第 2/6 步 · 已用 Ns"
+    assert c["during"] == "第 2/6 步"
     assert c["interrupt"] == {"threadId": "T1", "turnId": "U1"} and c["killed"] is True
     assert c["last"] == ["scholium-card failed", "已取消重试"] and c["state"] is None
     assert c["results"] == 0 and c["waits"] == [] and c["current"] is None and c["shutdown"] is True
-    assert run_time(c["begun"]) == "第 1/6 步 · 已用 Ns"
+    assert c["begun"] == "第 1/6 步"
     s = facts["codexSkillFound"]
     assert s["/data/tmp/scholium"]["methods"] == ["skills/list"]
     assert s["/data/tmp/scholium"]["input"] == [{"type": "skill", "name": "zotero-scholium", "path": "/home/u/.codex/skills/zotero-scholium/SKILL.md"}]
@@ -3592,8 +3592,8 @@ def test_codex_steps_and_cancel(facts):
 
 def test_a_lost_connection_shows_on_the_state_line_until_the_agent_answers_again(facts):
     r = facts["reconnecting"]
-    assert run_time(r["codex"]["state"]) == "第 1/6 步 · 连接中断，正在重试（2/5） · 已用 Ns"
-    assert run_time(r["codexBack"]["state"]) == "第 1/6 步 · 已用 Ns"
+    assert r["codex"]["state"] == "第 1/6 步 · 连接中断，正在重试（2/5）"
+    assert r["codexBack"]["state"] == "第 1/6 步"
     assert not any("连接" in str(e) or "Reconnecting" in str(e) for e in r["codex"]["entries"]), "the transcript gets no line of its own"
     assert "连接中断，正在重试（1/10）" in r["claude"]["state"]
     assert "连接中断" not in r["claudeBack"]["state"]
@@ -3761,8 +3761,8 @@ def test_a_question_starts_a_conversation_that_answers_without_annotating(facts)
         "",
         "写入了 Zotero 时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。",
     ])
-    assert run_time(a["during"]) == {"placeholder": ASK, "sendHidden": False, "stop": ["■", "停止"], "state": "正在处理 · 已用 Ns", "cleared": ""}, \
-        "a question's state line says it works, not its step"
+    assert run_time(a["during"]) == {"placeholder": ASK, "sendHidden": False, "stop": ["■", "停止"], "state": "", "cleared": ""}, \
+        "a question's state line is its dot"
     assert a["lines"] == [{"type": "scholium", "subtype": "prompt", "text": "这篇怎么估计后验？", "question": True}]
     assert run_time(a["notices"]) == [["已在后台开始回答。过程见条目侧栏的 Scholium 区块。"], ["完成 · Ns", "用变分推断估计后验。"]]
     assert a["entries"][0] == "这篇怎么估计后验？编辑" and a["entries"][-2:] == ["用变分推断估计后验。", a["entries"][-1]], "the question with its ✎"
@@ -3788,7 +3788,7 @@ def test_annotate_after_a_question_opens_a_session_of_its_own(facts):
     assert facts["ask"]["restarted"] == {"resumed": False, "prompt": n["prompt"].split("\n")[0], "profile": "- 画像：/data/zotero-scholium/profile.md"}
     assert facts["ask"]["later"] == {"placeholder": ASK, "session": "Q1"}, "the question's conversation stays a question's"
     assert facts["askOrder"] == ["ATT3", "ATT4", "ATT2"], "questions go before the papers still waiting, in their order"
-    assert run_time(facts["askBox"]) == {"asking": ASK, "annotating": extra, "state": "启动 Claude Code · 已用 Ns", "queued": []}, \
+    assert run_time(facts["askBox"]) == {"asking": ASK, "annotating": extra, "state": "启动 Claude Code", "queued": []}, \
         "an annotation that starts shows on its own tab"
     c = facts["askThenCodex"]
     assert c["claudeCalls"] == 1 and c["threads"] == ["thread/start"] and c["conversations"] == 2, "Codex starts a conversation of its own"
