@@ -50,7 +50,7 @@ Each Claude Code run:
 - runs without the user's MCP servers and hooks (`--strict-mcp-config`, `disableAllHooks`); the
   user's skills stay;
 - logs its events, without the streaming deltas, to the conversation's log,
-  `<data dir>/tmp/scholium/<attachment key>/conversations/claude-<time>.jsonl` (an annotation session's
+  `<data dir>/tmp/scholium/<attachment key>/conversations/chat-<time>.jsonl` (an annotation session's
   `annotate-claude-<time>.jsonl`); a tool's result is kept without
   Claude Code's own copy of it and without the data of images (the pages the agent looked at).
 
@@ -66,36 +66,42 @@ Each Codex run:
 - has Codex's automatic reviewer (`auto_review`) decide on requests beyond the sandbox; a request or
   question that reaches the plugin is declined;
 - logs Codex's notifications, without the streaming deltas, the user's message and the turn's diff, to the
-  conversation's log (`codex-<time>.jsonl`, an annotation session's `annotate-codex-<time>.jsonl`), between a
+  conversation's log (`chat-<time>.jsonl`, an annotation session's `annotate-codex-<time>.jsonl`), between a
   start line and a result line in Claude Code's form.
 
 A line that the log file does not take at once (locked a moment by a virus scanner or a backup) is written
 with the next ones; the run goes on.
 
-Both receive the item key, the attachment key, the PDF path, the output directory
-`<data dir>/tmp/scholium/<attachment key>` and the profile's path (or that there is none, so that the
-defaults apply and no profile is created), and are told not to ask questions or start sub-agents. A
-question is told to read the paper with the skill's `status` and `extract` and to write to Zotero only
-when it asks for that. A session that has not seen the paper's annotations of the tool is told how many
-there are and, when the plugin saw them written, the configuration that wrote them, the agent and the time
-(kept in `<out dir>/applied.json`); a session that goes on is told when another conversation rewrote them since
-its last run, or that they are gone. A follow-up that changes or adds annotations is told to edit the
-configuration they were written from, the paper's whole set, and apply it whole with `cleanup: true`. Besides the
-agent's events, a conversation's log holds the plugin's own lines: the start of each run with the user's words,
-the user's words or **Annotate** as shown (a question's marked as one), a continuation, a session the agent no
-longer has, the end of a run that has started and has no result of its own (cancelled, failed, interrupted), and
-when each run ended.
+Both receive the item key, the attachment key, the PDF path, the output directory `<data
+dir>/tmp/scholium/<attachment key>` and the profile's path (or that there is none, so that the defaults apply
+and no profile is created), and are told not to ask questions or start sub-agents. A question is told to read
+the paper with the skill's `status` and `extract` and to write to Zotero only when it asks for that. A session
+that has not seen the paper's annotations of the tool is told how many there are and, when the plugin saw them
+written, the configuration that wrote them, the agent and the time (kept in `<out dir>/applied.json`); a
+session that goes on is told when they were rewritten since its last run, in this conversation (by the other
+agent) or another, or that they are gone; an agent whose own rewrite in this conversation was cut away by an
+edit is told they were rewritten since its last turn. A follow-up that changes or adds annotations is told to
+edit the configuration they were written from, the paper's whole set, and apply it whole with `cleanup: true`.
+Besides the agent's events, a conversation's log holds the plugin's own lines: the start of each run with the
+user's words, the user's words or **Annotate** as shown (a question's marked as one), a continuation, a
+session the agent no longer has, the end of a run that has started and has no result of its own (cancelled,
+failed, interrupted), and when each run ended.
 
-As in llm-for-zotero, each agent has its own conversations of a paper, a log each in `<out dir>/conversations/`,
-with an index of their titles and of the one each agent goes on with. A message goes to that
-conversation, in the agent's session there (`claude -p --resume <session>`, Codex's `thread/resume`). When the
-conversation has no session, or the agent no longer has it (deleted in the Codex app, or cleaned up by Claude
-Code), a new session goes on with it and is given the conversation first: Codex as items of the new thread
-(`thread/inject_items`), Claude Code, and a Codex that does not take items, as text before the message. It gets
-each exchange's words and final answer; beyond ten exchanges, the latest five whole and the earlier ones as
-excerpts (250 characters of the words, 400 of the answer). A continuation after a limit or an update has nothing
-to go on with in a new session, and ends with that reason. The logs of earlier versions, `claude-run.jsonl` and
-`codex-run.jsonl`, are each agent's first conversation and go on where they are. The files in the output
+Claude Code and Codex share a paper's conversations, a log each in `<out dir>/conversations/` (`chat-<time>.jsonl`),
+with an index of their titles and of the one shown. A message goes to the agent chosen, in its own session of that
+conversation (`claude -p --resume <session>`, Codex's `thread/resume`), given before the message the turns after the
+last one that session saw, and those it saw that the other agent answered again since, numbered by the whole
+conversation; the text says the user went on asking in Zotero, some of it answered by another agent, each answer
+labelled, and that these turns are part of this conversation. When the agent has no session of the conversation, or no
+longer has it (deleted in the Codex app, or cleaned up by Claude Code), a new session goes on with it and is given the
+conversation first. Codex gets it as items of the new thread (`thread/inject_items`) when all the earlier answers are
+its own and it takes items; otherwise, and for Claude Code, it is text before the message, each answer labelled with
+the agent that gave it. It gets each exchange's words and final answer; beyond ten exchanges, the latest five whole and
+the earlier ones as excerpts (250 characters of the words, 400 of the answer). A failed queued message retried after a
+newer message went first is asked again as a new question at the end; the failed one stays in the conversation with its
+failure and the agent is not given those words twice. A continuation after a limit or an update has nothing to go on
+with in a new session, and ends with that reason. The logs of earlier versions, `claude-run.jsonl`, `codex-run.jsonl`,
+`claude-<time>.jsonl` and `codex-<time>.jsonl`, are in the list and go on where they are. The files in the output
 directory, such as the configuration the annotations were written from, are the same for every conversation.
 
 The *Scholium* section of the item pane, in the library and in the reader's side pane, fills the pane's height.
@@ -106,8 +112,7 @@ history and the annotation sessions are those of that PDF.
   run of that tab going on or waiting while the other tab is shown.
 - Under the tabs, the settings chip names the model and, smaller and grey, the effort (`Opus 5.5 medium ▾`); its tooltip
   and its layer name the agent. It opens a layer with the three choices; a click outside the layer or Esc closes it:
-  - **Agent**: Claude Code or Codex. Each section shows the conversation of its paper that the chosen agent goes
-    on with.
+  - **Agent**: Claude Code or Codex. The conversation shown stays; the next message goes to the agent chosen.
   - **Model**: the models the chosen agent reports, asked once per Zotero session without calling a model:
     Claude Code through the initialize request of its stream-json protocol, Codex through `model/list`
     (hidden models are left out). For Claude Code, the latest Opus (`opus`) is used until another model is
@@ -130,29 +135,33 @@ history and the annotation sessions are those of that PDF.
 
 **Chat tab**
 
-- **＋** starts a new conversation with the chosen agent (its first message starts it). **🕘** lists the agent's
-  conversations of the PDF by day (today, yesterday, the previous 7 and 30 days, older), titled by their first
-  message, the one shown highlighted: a click opens one, ✎ renames it (Enter keeps the new title, Esc the old
-  one), ✕ deletes it (**Undo** brings it back for six seconds; a deleted Codex conversation's thread is archived
-  at the next Codex run). While the paper runs or waits, **＋**, the history and **Agent** are off.
-- Saved prompts sit above the Chat tab's box. A click sends one: queued or steered while the agent answers, with the quoted passage.
+- **＋** starts a new conversation (its first message starts it). **🕘** lists the conversations of the PDF by day
+  (today, yesterday, the previous 7 and 30 days, older), titled by their first message, the one shown highlighted: a
+  click opens one, ✎ renames it (Enter keeps the new title, Esc the old one), ✕ deletes it (**Undo** brings it back for
+  six seconds; every Codex thread the conversation used is archived at the next Codex run once the six seconds end or
+  the plugin stops before then). While the paper runs or waits, **＋**, the history and **Agent** are off.
+- Saved prompts sit above the Chat tab's box. A click sends one: queued or steered while the agent answers, with the
+  quoted passage.
 - On hover, ✎ and 🗑 show beside each. ✎ and ＋ edit a label and a prompt in the row.
 - A deleted one comes back with **Undo** for six seconds. Dragging one moves it.
 - There are four built-in ones until the list is changed (preference `savedPrompts`).
 - The user's words are a bubble on the right. While a run goes on, one blue line says "Working" (「正在处理」), and the
   answer appears as it is written; once the answer is there, the steps fold into "Worked for 24s ›" (「已处理 24 秒 ›」),
   which opens them as Claude Code shows them: each tool call with its command or file, and the first lines of each
-  result (errors in red). A fold opened or closed by hand stays so. Under an answer, a line gives the model and the
-  time it ended, with a copy button. A failed question ends with its error and ↻ (**Retry**), which sends the same
-  words again. Web addresses and `zotero://` links in a message open on a click or with Enter, in the browser or in
-  Zotero; links to files are shown, not followed.
+  result (errors in red). A fold opened or closed by hand stays so. Under an answer, a line gives the agent, the model
+  and the time it ended, with a copy button (`Claude Code · Opus 5.5 · 12:01`). A failed question ends with its error
+  and ↻ (**Retry**), which sends the same words again to the agent chosen. Web addresses and `zotero://` links in a
+  message open on a click or with Enter, in the browser or in Zotero; links to files are shown, not followed.
 - On hover, ✎ shows under a question of the Chat tab, except while the paper runs or waits. It turns the question
   into a box in place, with its words and its quote; ✓ or the send shortcut asks again, ✕ or Esc cancels.
-- The question and everything after it are replaced. **Undo** under the new question brings them back for six
-  seconds, until another message of the conversation starts, with the conversation's title, and stops the new
-  answer without a notice; an edited question that waits for another paper's run leaves the queue.
-- Claude Code resumes the session at the answer before the question, as a new session (`--resume-session-at`,
-  `--fork-session`). Codex forks the thread through the turn before (`thread/fork`); **Undo** archives the fork.
+- The question and everything after it are replaced. **Undo** under the new question brings them back for six seconds,
+  until another message of the conversation starts, with the conversation's title, and stops the new answer without a
+  notice; an edited question that waits for another paper's run leaves the queue. The Codex threads only the replaced
+  part used are archived at the next Codex run after the **Undo** window ends or the plugin stops; **Undo** archives
+  those only the new part used, at the next Codex run.
+- The agent chosen answers. Each agent whose session went past the question goes back to its point before it: Claude
+  Code resumes its session at the answer before the question, as a new session (`--resume-session-at`,
+  `--fork-session`); Codex forks its thread through the turn before (`thread/fork`).
 - Where there is nothing to go back to (a compaction since) or the agent refuses it (an older Claude Code), a new
   session is given the conversation before the question. An edited first question starts a new session, and the
   conversation's title follows it unless it was renamed.
@@ -196,27 +205,30 @@ history and the annotation sessions are those of that PDF.
   the settings page says; the opposite shortcut does the other for one message: Ctrl+Enter when Enter sends,
   else Ctrl+Shift+Enter. A steered message joins the answer under way without stopping it (Codex's
   `turn/steer`); Claude Code does not support steering, and its follow-ups always queue.
-- Queued messages are listed at the top of the box, one line each, at most three tenths of the pane high: ⠿ drags
-  one to another place, a click on its text shows it whole, ↪ (**Steer**) sends it into the answer under way, 🗑
+- Queued messages are listed at the top of the box, one line each, at most three tenths of the pane high: ⠿ drags one
+  to another place, a click on its text shows it whole, ↪ (**Steer**) sends it into the answer under way, 🗑
   (**Delete**) deletes it (**Undo** for five seconds), and ⋯ offers **Edit message** (back to the box) and **Turn off
-  queueing** (the setting becomes Steer). When an answer ends, the first queued message is sent, marked
-  "Sending". After a stop the queue is held: "Queue paused because you interrupted" with ▶ (**Resume**), and each row
-  offers ▶ (**Send**); a new message sent meanwhile asks whether to **Clear queue** or **Send message** first. A queued
-  message that could not be sent is marked ⚠ with ↻ (**Retry**), and the queue waits until it is retried, edited or
-  deleted. During a compaction, and while a stopped answer ends, follow-ups queue. A follow-up joins the queue
-  after the messages and runs waiting for its own conversation. The queue is kept in memory for each conversation
-  and is handed over with the running paper when the plugin is updated.
-- Asking about a passage: in the reader, **Ask Scholium** under the colours of the selection popup shows the Chat
-  tab of the reader's section, opening the side pane and the section when they are closed, with the passage and
-  its page quoted above the box, and closes the popup as a colour does; ✕ removes the quote. The message tells the agent that the user quotes that
-  passage of page N, counted in the PDF as in `sentences.txt` and the citation chips, with the page's label where
-  it differs; the box and the transcript show the label, the transcript above the user's words. The section drawn
-  for another item has no quote.
+  queueing** (the setting becomes Steer). When an answer ends, the first queued message is sent, marked "Sending".
+  After a stop the queue is held: "Queue paused because you interrupted" with ▶ (**Resume**), and each row offers ▶
+  (**Send**); a new message sent meanwhile asks whether to **Clear queue** or **Send message** first. A queued message
+  that could not be sent is marked ⚠ with ↻ (**Retry**), and the queue waits until it is retried, edited or deleted;
+  retried after a newer message went first, it is asked again as a new question at the end. During a compaction, and
+  while a stopped answer ends, follow-ups queue. A follow-up joins the queue after the messages and runs waiting for
+  its own conversation. The queue is kept in memory for each conversation and is handed over with the running paper
+  when the plugin is updated.
+- Asking about a passage: in the reader, **Ask Scholium** under the colours of the selection popup shows the Chat tab
+  of the reader's section, opening the side pane and the section when they are closed, with the passage and its page
+  quoted above the box, and closes the popup as a colour does; ✕ removes the quote. The message tells the
+  agent that the user quotes that passage of page N, counted in the PDF as in `sentences.txt` and the citation chips,
+  with the page's label where it differs; the box and the transcript show the label, the transcript above the user's
+  words. The section drawn for another item has no quote.
 - Context ring: beside the round button, a ring whose arc is the share of the model's context window that the
-  conversation's session took up in its latest request (orange from 80%); its tooltip gives the share used and
+  chosen agent's session of the conversation took up in its latest request (orange from 80%), none while the chosen
+  agent has no session of the conversation; its tooltip gives the share used and
   left and the tokens in k. A click opens a layer with the numbers, a bar of input, cache and output, and
   **Compact this conversation's context**; `/compact` in the box, optionally followed by what to keep, does the
-  same, and stays in the box while the paper runs or the tab shows no conversation ("Cannot compact now"). Claude
+  same in the agent chosen's session of the conversation, and stays in the box while the paper runs or the tab shows no
+  conversation ("Cannot compact now"). Claude
   Code is sent `/compact` in its session (`claude -p --resume`); Codex compacts its thread with
   `thread/compact/start`. A compaction shows in the transcript as a dashed line, "Compacting context…" and then
   "Context compacted · 850k → 120k"; one the agent made by itself reads "Context compacted automatically".

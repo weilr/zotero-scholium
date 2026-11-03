@@ -575,7 +575,7 @@ SCENARIOS = r"""
     fold().children[0].click(); await settle(5);
     const opened = fold().children.length;
     const first = pane.shownConv, second = first === 'claude-20260901-120000' ? 'claude-20261001-120000' : 'claude-20260901-120000';
-    await h.runner.openConv(pane, { key: 'ATT1', agent: 'claude', id: second }); await settle(10);
+    await h.runner.openConv(pane, { key: 'ATT1', id: second }); await settle(10);
     const other = [pane.shownConv === second, fold().children.length];
     fold().children[0].click(); await settle(5);
     await h.runner.showConversation(pane); await settle(10);
@@ -800,7 +800,7 @@ SCENARIOS = r"""
     const rows = pane.popover.node.children.filter(r => r.className.startsWith('scholium-history-row')).map(r => r.children[0].children[0].textContent);
     pane.popover.node.children.find(r => r.className.startsWith('scholium-history-row') && r.children[0].textContent.startsWith('这篇论文要解决')).children[0].click();
     await settle(100);
-    facts.history = { keys, starters, asked, rows, after: [pane.popover, pane.shownConv && pane.shownConv.startsWith('claude-')],
+    facts.history = { keys, starters, asked, rows, after: [pane.popover, pane.shownConv && pane.shownConv.startsWith('chat-')],
                       shown: pane.list.children.at(-1).children.find(c => c.className === 'scholium-entry text').textContent };
   }
   // the layer toggles, is placed again once its rows are in, and goes when the paper runs; English starters; a group library has none
@@ -891,9 +891,9 @@ SCENARIOS = r"""
     await settle(200);
     const gpending = [!!g.runner.queue.length, gcount()];
     const conv = gp.shownConv;
-    await g.runner.chooseConv('ATT1', 'claude', null);
+    await g.runner.chooseConv('ATT1', null);
     await g.runner.retryFromView(gp); await settle(50);
-    const untouched = (await g.runner.currentConv('ATT1', 'claude')) === null && g.log.stdin.length;
+    const untouched = (await g.runner.currentConv('ATT1')) === null && g.log.stdin.length;
     g.runner.dequeue(['ATT1']);
     const d = harness({ scripts: [failed, failed] });
     d.runner.NET_RETRY_MS = 60000;
@@ -921,7 +921,7 @@ SCENARIOS = r"""
                              0];
     clearTimeout(l.runner.paused && l.runner.paused.timer);
   }
-  // the annotation view draws the chat's Retry for words to its session only; a retry runs the conversation's own agent; a
+  // the annotation view draws the chat's Retry for words to its session only; the chat's retry runs the agent chosen; a
   // retry without a session
   {
     const h = harness();
@@ -950,10 +950,11 @@ SCENARIOS = r"""
     pane.input.type('问'); pane.send.click();
     await settle(400); await new Promise(r => setTimeout(r, 120)); await settle(400);
     const conv = pane.shownConv, codexBefore = h.log.codexCalls.length, claudeBefore = h.log.stdin.length;
-    h.store.set('extensions.scholium-bridge.agent', 'codex');   // the chosen agent changes; the pane keeps showing the Claude conversation
+    h.store.set('extensions.scholium-bridge.agent', 'codex');   // the chosen agent changes; the pane keeps showing the conversation
     await h.runner.retryFromView(pane); await settle(400);
+    const after = await h.runner.readLog('ATT1', conv);
     facts.retryAgent = { claudeRan: h.log.stdin.length - claudeBefore, codexCalls: h.log.codexCalls.length - codexBefore, shown: pane.shownConv === conv,
-                         claudeCurrent: await h.runner.currentConv('ATT1', 'claude') === conv, answered: (await h.runner.readLog('ATT1', conv)).entries.some(e => e.text === '好了') };
+                         current: await h.runner.currentConv('ATT1') === conv, turns: after.turns.map(t => [t.user, t.agent, !!t.reply]) };
   }
   {
     // (a) the first question fails before any session; (b) a later turn fails without one: the history stops before the retried turn
@@ -973,7 +974,7 @@ SCENARIOS = r"""
       const before = h.log.stdin.length;
       const log = await h.runner.readLog('ATT1', pane.shownConv);
       await h.runner.retryFromView(pane); await settle(400);
-      out[name] = { session: log.session, turns: log.turns.length, ran: h.log.stdin.length - before, prompt: h.log.stdin.at(-1) };
+      out[name] = { session: own(log, 'claude').session, turns: log.turns.length, ran: h.log.stdin.length - before, prompt: h.log.stdin.at(-1) };
     }
     facts.retryNoSession = out;
   }
@@ -991,10 +992,10 @@ SCENARIOS = r"""
     pane.input.type('问'); pane.send.click();
     await settle(400); await new Promise(r => setTimeout(r, 120)); await settle(400);
     const old = pane.shownConv;
-    await h.runner.chooseConv('ATT1', 'claude', null);
+    await h.runner.chooseConv('ATT1', null);
     await h.runner.send(h.item1, '问', { retry: true, conv: old }); await settle(400);
     const log = await h.runner.readLog('ATT1', old);
-    facts.sendRetry = { answered: log.entries.some(e => e.text === '好了'), prompts: log.turns.length, current: await h.runner.currentConv('ATT1', 'claude') };
+    facts.sendRetry = { answered: log.entries.some(e => e.text === '好了'), prompts: log.turns.length, current: await h.runner.currentConv('ATT1') };
   }
   // the retry runs in the conversation shown, though the paper's current one is another; a run going on carries none
   {
@@ -1010,7 +1011,7 @@ SCENARIOS = r"""
     pane.input.type('为什么要用这个核？'); pane.send.click();
     await settle(400);
     const old = pane.shownConv;
-    await h.runner.chooseConv('ATT1', 'claude', null);   // the paper's current conversation is another (a new one); the pane still shows this one
+    await h.runner.chooseConv('ATT1', null);   // the paper's current conversation is another (a new one); the pane still shows this one
     const before = [pane.shownConv === old];
     const run = pane.list.children.at(-1);
     const retry = run.children.flatMap(c => c.children).find(c => c.className.includes('retry'));
@@ -1018,7 +1019,7 @@ SCENARIOS = r"""
     pane.runCount = 1;
     const live = h.runner.renderRun(pane, { start: 1, end: 2, prompt: null, lead: [], steps: [], answer: [], other: [{ kind: 'final', error: true, text: 'x' }], model: null }, 0, true);
     facts.retryElsewhere = { shown: before[0], answer: (await h.runner.readLog('ATT1', old)).entries.some(e => e.text === '好了'),
-                             log: (await h.runner.readLog('ATT1', old)).turns.length, stays: pane.shownConv === old && (await h.runner.currentConv('ATT1', 'claude')) === old, liveButton: live.children.some(c => c.children.some(k => k.className.includes('retry'))) };
+                             log: (await h.runner.readLog('ATT1', old)).turns.length, stays: pane.shownConv === old && (await h.runner.currentConv('ATT1')) === old, liveButton: live.children.some(c => c.children.some(k => k.className.includes('retry'))) };
   }
   // the settings page asks the plugin for the programs it finds by itself, whatever is set there; gone once it stops
   {
@@ -1414,7 +1415,7 @@ def test_the_transcript_by_runs(facts):
     assert re.fullmatch(r"已处理 \d+ 秒 ›", r["closed"][0]) and r["closed"][1] == 1, "the steps are folded"
     assert r["opened"][0] == "scholium-entry text" and "scholium-entry tool" in r["opened"] and "scholium-entry result" in r["opened"]
     assert r["reclosed"] == 1
-    assert re.fullmatch(r"Opus 5\.5 · \d\d:\d\d", r["meta"].replace("复制", "").strip())
+    assert re.fullmatch(r"Claude Code · Opus 5\.5 · \d\d:\d\d", r["meta"].replace("复制", "").strip())
     assert r["legacy"] == [["scholium-fold", "scholium-entry text", "scholium-meta"]]
 
 
@@ -1446,11 +1447,11 @@ def test_another_papers_run_leaves_a_sections_run_as_it_was(facts):
 
 def test_logs_are_read_as_runs(facts):
     f = facts["logRuns"]
-    assert f["runs"] == 1 and f["head"] == "已处理 6 分 17 秒 ›" and f["meta"] == "Opus 5.5 · " + f["clock"]
+    assert f["runs"] == 1 and f["head"] == "已处理 6 分 17 秒 ›" and f["meta"] == "Claude Code · Opus 5.5 · " + f["clock"]
     assert f["scrollTop"] == 1000, "at the latest"
     assert f["legacy"] == [
         [["scholium-entry final error", "出错了"]],
-        [["scholium-entry prompt editable", "第二个问题"], ["scholium-entry text", "回答 2"], ["scholium-entry text", "补充"], ["scholium-meta", "Opus 5.5"]],
+        [["scholium-entry prompt editable", "第二个问题"], ["scholium-entry text", "回答 2"], ["scholium-entry text", "补充"], ["scholium-meta", "Claude Code · Opus 5.5"]],
         [["scholium-entry prompt editable", "第三个问题"], ["scholium-entry text", "回答 3"], ["scholium-meta", ""]],
     ], "an earlier version's log: a run at each of the user's words"
     assert f["copied"] == ["回答 2\n\n补充"], "the whole answer"
@@ -1562,9 +1563,9 @@ def test_the_annotation_view_draws_retry_for_words_to_its_session_only(facts):
     assert r == {"annot": False, "kind": "annotate", "hasPane": True, "chat": True, "words": True}, "a run without words of its own has none"
 
 
-def test_a_retry_runs_the_conversations_own_agent(facts):
+def test_a_retry_runs_the_agent_chosen(facts):
     r = facts["retryAgent"]
-    assert r == {"claudeRan": 1, "codexCalls": 0, "shown": False, "claudeCurrent": True, "answered": True}
+    assert r == {"claudeRan": 0, "codexCalls": 1, "shown": True, "current": True, "turns": [["问", "codex", True]]}
 
 
 def test_a_retry_without_a_session(facts):
@@ -1572,7 +1573,7 @@ def test_a_retry_without_a_session(facts):
     first, later = r["first"], r["later"]
     assert first["session"] is None and first["ran"] == 1 and "用户的问题：\n问一" in first["prompt"] and "[第" not in first["prompt"], "the question's prompt, no history"
     assert later["session"] is None and later["ran"] == 1 and "新消息：\n问二" in later["prompt"]
-    assert "[第 1 轮]\n用户：问一\n回答：答一" in later["prompt"] and "[第 2 轮]" not in later["prompt"], "the turns before the retried one"
+    assert "[第 1 轮]\n用户：问一\n回答（Claude Code）：答一" in later["prompt"] and "[第 2 轮]" not in later["prompt"], "the turns before the retried one"
 
 
 def test_the_settings_page_hears_the_programs_found(facts):

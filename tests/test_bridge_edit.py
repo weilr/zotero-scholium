@@ -48,10 +48,10 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
     const c = await h.runner.readLog('ATT1', 'claude-20261001-120000');
     const x = await h.runner.readLog('ATT1', 'codex-20261001-120000');
     const k = await h.runner.readLog('ATT2', 'claude-20261001-120000');
-    facts.parse = { claude: c.turns.map(t => [t.start, t.point, !!t.prompted]), codex: x.turns.map(t => [t.start, t.point]),
-                    compacted: k.turns.map(t => t.point), promptTurns: c.entries.filter(e => e.kind === 'prompt').map(e => e.turn),
+    facts.parse = { claude: c.turns.map(t => [t.start, t.points.claude, !!t.prompted]), codex: x.turns.map(t => [t.start, t.points.codex]),
+                    compacted: k.turns.map(t => t.points.claude), promptTurns: c.entries.filter(e => e.kind === 'prompt').map(e => e.turn),
                     lengths: [claudeTurn(1, 'u1').length, claudeTurn(2, 'u2').length, codexTurn(1, 'K1').length, codexTurn(2, 'K2').length],
-                    rewind: c.rewind };
+                    rewind: own(c).rewind };
   }
   // Claude Code: a message with a point resumes the session there as a new session; a refusal starts a new session
   // given the conversation before
@@ -63,7 +63,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
       unknown: ["STDERR:error: unknown option '--resume-session-at'\n", 'EXIT:1'] })) {
       const h = harness({ logs: { [CLAUDE_CONV]: cut }, scripts: [refusal, answered('S3')] });
       h.runner.start('x');
-      await h.runner.chooseConv('ATT1', 'claude', 'claude-20261001-120000');
+      await h.runner.chooseConv('ATT1', 'claude-20261001-120000');
       await h.runner.send(h.item1, '新问题二', { kind: 'chat', conv: 'claude-20261001-120000', agent: 'claude', rewind: { uuid: 'u1' }, edited: true });
       await settle(600);
       const first = h.log.calls[0].opts.arguments, second = h.log.calls[1] ? h.log.calls[1].opts.arguments : [];
@@ -74,7 +74,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
         history: (h.log.stdin[1] || '').includes('问题1') && (h.log.stdin[1] || '').includes('回答1'),
         runRewind: lines.filter(l => l.subtype === 'run').map(l => l.rewind || null),
         prompts: lines.filter(l => l.subtype === 'prompt').map(l => l.text), gone: lines.some(l => l.subtype === 'gone'),
-        turns: log.turns.map(t => [t.user, t.reply]), session: log.session, rewind: log.rewind };
+        turns: log.turns.map(t => [t.user, t.reply]), session: own(log).session, rewind: own(log).rewind };
     }
   }
   // Claude Code: a message without a session has no point to go back to
@@ -90,7 +90,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
   {
     const h = harness({ logs: { [CLAUDE_CONV]: claudeTurn(1, 'u1') }, scripts: [['STDERR:Error: boom\n', 'EXIT:1'], answered('S2')] });
     h.runner.start('x');
-    await h.runner.chooseConv('ATT1', 'claude', 'claude-20261001-120000');
+    await h.runner.chooseConv('ATT1', 'claude-20261001-120000');
     await h.runner.send(h.item1, '新问题二', { kind: 'chat', conv: 'claude-20261001-120000', agent: 'claude', rewind: { uuid: 'u1' }, edited: true });
     await settle(400);
     const failed = await h.runner.readLog('ATT1', 'claude-20261001-120000');
@@ -98,7 +98,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
     await settle(400);
     const args = h.log.calls[1].opts.arguments;
     const after = await h.runner.readLog('ATT1', 'claude-20261001-120000');
-    facts.rewindKept = { failed: failed.rewind, retried: args.slice(args.indexOf('--resume'), args.indexOf('--resume') + 5), after: after.rewind, session: after.session };
+    facts.rewindKept = { failed: own(failed).rewind, retried: args.slice(args.indexOf('--resume'), args.indexOf('--resume') + 5), after: own(after).rewind, session: own(after).session };
   }
   // Codex: a fork of the thread through the turn before, without the skill; a refusal starts a new thread given the
   // conversation before
@@ -107,7 +107,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
       const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, logs: { [CODEX_CONV]: codexTurn(1, 'K1') },
                           codex: Object.assign({ scripts: [CODEX_FOLLOW, CODEX_FOLLOW] }, refuse ? { refuse: { 'thread/fork': 'turn not found: K1' } } : {}) });
       h.runner.start('x');
-      await h.runner.chooseConv('ATT1', 'codex', 'codex-20261001-120000');
+      await h.runner.chooseConv('ATT1', 'codex-20261001-120000');
       await h.runner.send(h.item1, '新问题二', { kind: 'chat', conv: 'codex-20261001-120000', agent: 'codex', rewind: { turnId: 'K1' }, edited: true });
       await settle(800);
       const sent = h.log.codexProcs.flatMap(p => p.sent).filter(m => typeof m.method === 'string');
@@ -116,7 +116,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
       const log = await h.runner.readLog('ATT1', 'codex-20261001-120000');
       return { fork: fork ? { threadId: fork.params.threadId, lastTurnId: fork.params.lastTurnId, excludeTurns: fork.params.excludeTurns } : null,
                methods: sent.map(m => m.method).filter(m => /^thread\/(start|resume|fork|inject_items)$/.test(m)),
-               skill: !!start && start.params.input.some(i => i.type === 'skill'), session: log.session, rewind: log.rewind };
+               skill: !!start && start.params.input.some(i => i.type === 'skill'), session: own(log).session, rewind: own(log).rewind };
     };
     facts.codexFork = { ok: await run(false), refused: await run(true) };
   }
@@ -127,7 +127,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
       .concat(LIMIT_HIT.map(l => l.split('"S1"').join('"S5"')));
     const h = harness({ logs: { [CLAUDE_CONV]: claudeTurn(1, 'u1') }, scripts: [forked, answered('S5')] });
     h.runner.start('x');
-    await h.runner.chooseConv('ATT1', 'claude', 'claude-20261001-120000');
+    await h.runner.chooseConv('ATT1', 'claude-20261001-120000');
     await h.runner.send(h.item1, '新问题二', { kind: 'chat', conv: 'claude-20261001-120000', agent: 'claude', rewind: { uuid: 'u1' }, edited: true });
     await settle(400);
     const paused = !!h.runner.paused;
@@ -137,7 +137,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
     const log = await h.runner.readLog('ATT1', 'claude-20261001-120000');
     facts.limitAfterFork = { paused, calls: h.log.calls.length, resume: args.slice(args.indexOf('--resume'), args.indexOf('--resume') + 2),
                              at: args.includes('--resume-session-at'), runRewind: convLines(h).filter(l => l.subtype === 'run').map(l => l.rewind || null),
-                             session: log.session, rewind: log.rewind };
+                             session: own(log).session, rewind: own(log).rewind };
   }
   // an update while an edited question runs: before the agent has it, the new copy goes back to the same point; after,
   // it goes on in the session the agent made of it
@@ -145,7 +145,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
     const handOver = async (script, next, tamper = c => c) => {
       const h = harness({ logs: { [CLAUDE_CONV]: claudeTurn(1, 'u1') }, scripts: [script] });
       h.runner.start('x');
-      await h.runner.chooseConv('ATT1', 'claude', 'claude-20261001-120000');
+      await h.runner.chooseConv('ATT1', 'claude-20261001-120000');
       await h.runner.send(h.item1, '新问题二', { kind: 'chat', conv: 'claude-20261001-120000', agent: 'claude', rewind: { uuid: 'u1' }, edited: true });
       await settle(150);
       h.runner.stop(true);
@@ -159,7 +159,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
       const job = JSON.parse(carried).jobs[0];
       const after = flag => (args.includes(flag) ? args[args.indexOf(flag) + 1] : null);
       return { handed: [job.resume, job.say, job.rewind || null], resume: after('--resume'), at: after('--resume-session-at'),
-               fork: args.includes('--fork-session'), session: log.session, rewind: log.rewind };
+               fork: args.includes('--fork-session'), session: own(log).session, rewind: own(log).rewind };
     };
     facts.handedEdit = {
       before: await handOver(['WAIT'], 'S6'),
@@ -175,45 +175,45 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
     // a turn whose messages say what the session held
     const used = text => text.split('\n').filter(Boolean).map(l => JSON.parse(l))
       .map(o => (o.type === 'assistant' ? Object.assign({}, o, { message: Object.assign({}, o.message, { usage }) }) : o)).map(L).join('');
-    const mark = point => L({ type: 'scholium', subtype: 'rewind', point });
+    const mark = (point, agent = 'claude') => L({ type: 'scholium', subtype: 'rewind', points: { [agent]: point } });
     const plain = used(claudeTurn(1, 'u1'));
     const UNMARKED = '/data/tmp/scholium/ATT2/conversations/claude-20261001-120000.jsonl';
     facts.marker = {};
     for (const [name, point] of Object.entries({ point: { uuid: 'u1' }, none: null })) {
       const h = harness({ logs: { [CLAUDE_CONV]: plain + mark(point), [UNMARKED]: plain }, scripts: [answered('S2')] });
       h.runner.start('x');
-      await h.runner.chooseConv('ATT1', 'claude', 'claude-20261001-120000');
+      await h.runner.chooseConv('ATT1', 'claude-20261001-120000');
       const before = await h.runner.readLog('ATT1', 'claude-20261001-120000');
       const unmarked = await h.runner.readLog('ATT2', 'claude-20261001-120000');
       await h.runner.send(h.item1, '新问题二', { kind: 'chat', conv: 'claude-20261001-120000', agent: 'claude' });
       await settle(400);
       const args = h.log.calls[0].opts.arguments;
       const after = await h.runner.readLog('ATT1', 'claude-20261001-120000');
-      facts.marker[name] = { session: before.session, rewind: before.rewind, used: [before.context && before.context.used, unmarked.context && unmarked.context.used],
+      facts.marker[name] = { session: own(before).session, rewind: own(before).rewind, used: [own(before).context && own(before).context.used, own(unmarked).context && own(unmarked).context.used],
                              sameEntries: JSON.stringify(before.entries) === JSON.stringify(unmarked.entries),
-                             drawn: h.runner.entries({ type: 'scholium', subtype: 'rewind', point }).length,
+                             drawn: h.runner.entries({ type: 'scholium', subtype: 'rewind', points: { claude: point } }).length,
                              resume: args.includes('--resume') ? args.slice(args.indexOf('--resume'), args.indexOf('--resume') + 5) : null,
                              history: (h.log.stdin[0] || '').includes('问题1') && (h.log.stdin[0] || '').includes('回答1'),
-                             after: [after.session, after.rewind], turns: after.turns.map(t => [t.user, t.reply]) };
+                             after: [own(after).session, own(after).rewind], turns: after.turns.map(t => [t.user, t.reply]) };
     }
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, logs: { [CODEX_CONV]: codexTurn(1, 'K1') + mark({ turnId: 'K1' }) },
+    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, logs: { [CODEX_CONV]: codexTurn(1, 'K1') + mark({ turnId: 'K1' }, 'codex') },
                         codex: { scripts: [CODEX_FOLLOW] } });
     h.runner.start('x');
-    await h.runner.chooseConv('ATT1', 'codex', 'codex-20261001-120000');
+    await h.runner.chooseConv('ATT1', 'codex-20261001-120000');
     const before = await h.runner.readLog('ATT1', 'codex-20261001-120000');
     await h.runner.send(h.item1, '新问题二', { kind: 'chat', conv: 'codex-20261001-120000' });
     await settle(800);
     const sent = h.log.codexProcs.flatMap(p => p.sent).filter(m => typeof m.method === 'string');
     const fork = sent.find(m => m.method === 'thread/fork');
     const after = await h.runner.readLog('ATT1', 'codex-20261001-120000');
-    facts.marker.codex = { rewind: before.rewind, fork: fork ? [fork.params.threadId, fork.params.lastTurnId, fork.params.excludeTurns] : null,
-                           methods: sent.map(m => m.method).filter(m => /^thread\/(start|resume|fork)$/.test(m)), after: [after.session, after.rewind] };
+    facts.marker.codex = { rewind: own(before).rewind, fork: fork ? [fork.params.threadId, fork.params.lastTurnId, fork.params.excludeTurns] : null,
+                           methods: sent.map(m => m.method).filter(m => /^thread\/(start|resume|fork)$/.test(m)), after: [own(after).session, own(after).rewind] };
   }
   // an edited question is not queued behind a run of the paper: it is sent when the paper is free
   {
     const h = harness({ logs: { [CLAUDE_CONV]: claudeTurn(1, 'u1') }, scripts: [['WAIT']] });
     h.runner.start('x');
-    await h.runner.chooseConv('ATT1', 'claude', 'claude-20261001-120000');
+    await h.runner.chooseConv('ATT1', 'claude-20261001-120000');
     await h.runner.send(h.item1, '问题二', { kind: 'chat', conv: 'claude-20261001-120000', agent: 'claude' });
     await settle(150);
     const busy = h.runner.busy('ATT1', 'chat');
@@ -250,9 +250,9 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
     const last = pane.list.children.at(-1);
     const strip = last.children.find(c => c.className === 'scholium-undo');
     facts.editClaude = { before, opened, composed, escaped, args: args.slice(args.indexOf('--resume'), args.indexOf('--resume') + 5), kept: text.startsWith(claudeTurn(1, 'u1')),
-                         marked: text.startsWith(claudeTurn(1, 'u1') + L({ type: 'scholium', subtype: 'rewind', point: { uuid: 'u1' } })),
+                         marked: text.startsWith(claudeTurn(1, 'u1') + L({ type: 'scholium', subtype: 'rewind', points: { claude: { uuid: 'u1' } } })),
                          left: ['问题2', '问题3', '回答3'].filter(w => text.includes('"' + w + '"')),
-                         turns: log.turns.map(t => [t.user, t.reply]), session: log.session, runs: pane.list.children.length,
+                         turns: log.turns.map(t => [t.user, t.reply]), session: own(log).session, runs: pane.list.children.length,
                          strip: strip ? [strip.children[0].textContent, labelOf(strip.children[1])] : null };
     // a box opened on the new question keeps its words when Undo goes
     editOf(1).click();
@@ -311,7 +311,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
     await h.runner.editTurn(view, h.runner.runsOf(view.entries)[1].prompt, '新问题二', null);
     await settle(600);
     const words = r => { const c = r.children[0] && r.children[0].children.find(x => x.className === 'scholium-content'); return c ? c.textContent : null; };
-    facts.freshKeepsUndo = { calls: h.log.calls.length, replaced: h.runner.replaced.size, session: (await h.runner.readLog('ATT1', 'claude-20261001-120000')).session,
+    facts.freshKeepsUndo = { calls: h.log.calls.length, replaced: h.runner.replaced.size, session: own(await h.runner.readLog('ATT1', 'claude-20261001-120000')).session,
                              under: pane.list.children.filter(r => r.children.some(c => c.className === 'scholium-undo')).map(words) };
   }
   // a new session took over after the agent refused (a point it no longer has, a session it no longer has): the refused
@@ -328,7 +328,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
     for (const [name, c] of Object.entries(cases)) {
       const h = harness({ logs: { [CLAUDE_CONV]: claudeTurn(1, 'u1') }, scripts: [c.refusal, answered('S3')] });
       h.runner.start('x');
-      await h.runner.chooseConv('ATT1', 'claude', 'claude-20261001-120000');
+      await h.runner.chooseConv('ATT1', 'claude-20261001-120000');
       // what the live transcript holds each time the sections are refreshed
       const live = [];
       const refresh = h.runner.refresh;
@@ -506,8 +506,8 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
     const log = await h.runner.readLog('ATT1', 'claude-20261001-120000');
     facts.editCompacted = { sent, resume: args.includes('--resume'), at: args.includes('--resume-session-at'),
                             history: (h.log.stdin[0] || '').includes('问题1') && (h.log.stdin[0] || '').includes('回答1'),
-                            marked: text.startsWith(kept + L({ type: 'scholium', subtype: 'rewind', point: null })),
-                            turns: log.turns.map(t => [t.user, t.reply]), session: log.session };
+                            marked: text.startsWith(kept + L({ type: 'scholium', subtype: 'rewind', points: { claude: null } })),
+                            turns: log.turns.map(t => [t.user, t.reply]), session: own(log).session };
   }
   // Undo while the new answer runs: it stops without 已取消, the log comes back as it was, the words do not go to the box
   {

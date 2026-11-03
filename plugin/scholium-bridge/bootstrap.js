@@ -498,12 +498,13 @@ var ScholiumRunner = {
   job: null,                // { title, key, libraryID, started, step } of the running paper
   last: null,               // { ok, title, key, libraryID, summary, log, at } of the latest finished paper
   notes: new Map(),         // <attachment key>/<kind> -> { text, error, at, title, conv }: the latest outcome of each kind
-  indexes: new Map(),       // attachment key -> { current: { claude, codex }, titles: { id: title } }: its conversations
+  indexes: new Map(),       // attachment key -> { chat, current, titles: { id: title }, annotation }: its conversations
   parsedLogs: new Map(),    // log path -> { at, size, log }: a log read before, while it is unchanged; `log` is the reading
                             // (parseLog), done or under way
-  deleting: new Map(),      // log path -> { key, id, agent, title, at, wasCurrent, timer }: a conversation deleted a moment ago,
+  deleting: new Map(),      // log path -> { key, id, title, at, wasCurrent, timer }: a conversation deleted a moment ago,
                             // until it can no longer be brought back
-  unsent: new Map(),        // "<library>/<item key>/<agent>/<conversation>" -> the words in a section's message box, not yet sent
+  unsent: new Map(),        // "<library>/<item key>/<tab>/<agent>/<conversation>" -> the words in a section's message box, not yet
+                            // sent; the agent only for an annotation session
   katexLib: undefined,      // KaTeX once loaded (null when it cannot be), for the formulas in messages
   mathCache: new Map(),     // "D"/"I" + TeX -> its MathML, or null when KaTeX cannot read it
   paused: null,             // { until, known, throttled, timer } while the usage limit or the service's limit holds the queue
@@ -735,8 +736,6 @@ var ScholiumRunner = {
       savedCancel: zh ? "取消" : "Cancel",
       savedEdit: zh ? "编辑" : "Edit",
       savedDelete: zh ? "删除" : "Delete",
-      otherAgentHas: name => zh ? `这篇论文在 ${name} 里有对话，把智能体换成 ${name} 就能接着聊。`
-                                : `This paper has a conversation in ${name}; choose ${name} as the agent to go on with it.`,
       groupToday: zh ? "今天" : "Today",
       groupYesterday: zh ? "昨天" : "Yesterday",
       groupWeek: zh ? "7 天内" : "Previous 7 days",
@@ -1013,12 +1012,13 @@ var ScholiumRunner = {
     return { att, path, parentKey: parent ? parent.key : "", title: (parent || att).getDisplayTitle() };
   },
 
-  // the message, after the conversation so far for a new session of it that is not given it otherwise
+  // the message, after the conversation so far for a new session that is not given it otherwise, or after the turns a
+  // session that goes on has not seen
   prompt(job, own, history = true) {
     if (job.compact) return "/compact" + (job.say ? " " + job.say : "");
     const message = this.taskPrompt(job, own);
     const before = history ? this.historyText(job.history || []) : "";
-    return before ? before + "\n\n" + message : message;
+    return [before, this.missedText(job.missed || [], job.missedFrom || 0), message].filter(Boolean).join("\n\n");
   },
 
   // what a session that has not seen them is told of the paper's annotations by this tool: how many, and the
@@ -1045,17 +1045,26 @@ var ScholiumRunner = {
                  + "with just new entries."];
   },
 
-  // what a session that goes on is told of the annotations changed since its last run: rewritten in another of the
-  // paper's conversations, or gone
+  // what a session that goes on is told of the annotations changed since its last run: rewritten by another agent in this
+  // conversation, or in another of the paper's conversations, or gone
   changedLines(job) {
     const zh = this.zh();
     if (!job.own && job.asking) return [];
     if (!job.own) return [zh ? "这篇论文现在没有本工具的批注（可能已在 Zotero 里删除）。" : "The paper carries no annotations of this tool now (they may have been deleted in Zotero)."];
     const a = job.applied;
-    if (!a || a.conv === job.conv || !(a.at > (job.since || 0))) return [];
-    return [zh ? `上次之后，${this.agentName(a.agent)} 在这篇论文的另一段对话里用配置 ${a.config} 重写了批注（${this.clock(a.at)}）；改批注前先读这份配置，不要用你记得的版本。`
-               : `Since your last turn, ${this.agentName(a.agent)} rewrote the annotations from the configuration ${a.config} in another conversation `
-                 + `about this paper (${this.clock(a.at)}); read that configuration before changing annotations, not the version you remember.`];
+    if (!a) return [];
+    // its own rewrite in this conversation is in its session only when its latest run made it
+    const own = a.conv === job.conv && a.agent === job.agent && (!job.sinceEnd || a.at <= job.sinceEnd);
+    if (!(a.at > (job.since || 0)) || own) return [];
+    const name = this.agentName(a.agent), when = this.clock(a.at);
+    if (a.conv === job.conv) {
+      return [zh ? `上次之后，${name} 在这段对话里用配置 ${a.config} 重写了批注（${when}）；改批注前先读这份配置，不要用你记得的版本。`
+                 : `Since your last turn, ${name} rewrote the annotations from the configuration ${a.config} in this conversation (${when}); `
+                   + "read that configuration before changing annotations, not the version you remember."];
+    }
+    return [zh ? `上次之后，${name} 在这篇论文的另一段对话里用配置 ${a.config} 重写了批注（${when}）；改批注前先读这份配置，不要用你记得的版本。`
+               : `Since your last turn, ${name} rewrote the annotations from the configuration ${a.config} in another conversation `
+                 + `about this paper (${when}); read that configuration before changing annotations, not the version you remember.`];
   },
 
   // the message itself: a follow-up in the agent's own session, a question (or a follow-up in a session the agent
@@ -2999,8 +3008,8 @@ var ScholiumRunner = {
       });
   },
 
-  // the conversation a tab shows, compacted by its agent: Claude Code's /compact in its session; false when it has no
-  // session yet or its paper is busy
+  // the conversation a tab shows, compacted by the agent chosen (an annotation session by its own agent): Claude Code's
+  // /compact in its session; false when it has no session yet or its paper is busy
   async compactFromPane(pane, focus = "") {
     if (!this.compactable(pane)) return false;
     const view = this.viewOf(pane, pane.tab);
@@ -3039,10 +3048,12 @@ var ScholiumRunner = {
   },
 
   // the words in a message box are kept for the tab and the conversation they are typed to until they are sent, across
-  // the section's renders; of the tab shown unless another view is named
+  // the section's renders and the agent chosen; an annotation session's for its agent. Of the tab shown unless another view
+  // is named
   unsentKey(pane, view = this.viewOf(pane, pane.tab)) {
     if (!pane.item) return "";
-    return `${pane.item.libraryID}/${pane.item.key}/${view.kind}/${view.shownAgent || this.agent()}/${view.shownConv || ""}`;
+    const agent = view.kind === "annotate" ? view.shownAgent || this.agent() : "";
+    return `${pane.item.libraryID}/${pane.item.key}/${view.kind}/${agent}/${view.shownConv || ""}`;
   },
 
   keepUnsent(pane) {
@@ -3195,9 +3206,10 @@ var ScholiumRunner = {
     });
   },
 
-  // a paper's conversations, each agent's own: a log each, <out dir>/conversations/<agent>-<time>.jsonl, with an index of
-  // the one each agent goes on with and their titles. The log of an earlier version (<out dir>/claude-run.jsonl,
-  // codex-run.jsonl) is that agent's first conversation.
+  // a paper's chat conversations: a log each, shared by the agents, <out dir>/conversations/chat-<time>.jsonl, with an
+  // index of the one its messages go to and their titles; the logs of earlier versions (<agent>-<time>.jsonl there,
+  // claude-run.jsonl and codex-run.jsonl in the out dir) are conversations of the list too. An annotation session is an
+  // agent's own: annotate-<agent>-<time>.jsonl
   LEGACY: { claude: "claude-run", codex: "codex-run" },
 
   convDir(key) { return PathUtils.join(this.outDir(key), "conversations"); },
@@ -3208,14 +3220,15 @@ var ScholiumRunner = {
 
   convAgent(id) { return /^(?:annotate-)?codex-/.test(String(id)) ? "codex" : "claude"; },
 
-  // { current: { agent: id, or null for a new one }, titles: { id: title }, annotation: { agent: its latest annotation
-  // session } }; an agent without a current one goes on with its newest. An index that is there but cannot be read is not
-  // written over: this session's choices stay in memory.
+  // { chat: the conversation the paper's messages go to, or null for a new one; current: each agent's of an earlier
+  // version; titles: { id: title }; annotation: { agent: its latest annotation session } }. An index that is there but
+  // cannot be read is not written over: this session's choices stay in memory.
   async index(key) {
     if (this.indexes.has(key)) return this.indexes.get(key);
     const index = { current: {}, titles: {}, annotation: {} };
     try {
       const saved = JSON.parse(await IOUtils.readUTF8(PathUtils.join(this.convDir(key), "index.json")));
+      if (saved && Object.prototype.hasOwnProperty.call(saved, "chat") && (saved.chat === null || typeof saved.chat === "string")) index.chat = saved.chat;
       if (saved && saved.current && typeof saved.current === "object") index.current = saved.current;
       if (saved && saved.titles && typeof saved.titles === "object") index.titles = saved.titles;
       if (saved && saved.annotation && typeof saved.annotation === "object") index.annotation = saved.annotation;
@@ -3235,60 +3248,70 @@ var ScholiumRunner = {
     try {
       await IOUtils.makeDirectory(this.convDir(key), { createAncestors: true, ignoreExisting: true });
       const path = PathUtils.join(this.convDir(key), "index.json");
-      await IOUtils.writeUTF8(path, JSON.stringify(index), { tmpPath: path + ".tmp" });
+      const saved = Object.assign({}, index);
+      if (!Object.keys(saved.current || {}).length) delete saved.current;   // an empty one is not written
+      await IOUtils.writeUTF8(path, JSON.stringify(saved), { tmpPath: path + ".tmp" });
     } catch (e) { this.log("conversation index not saved: " + e); }
   },
 
-  // the agent's conversations of the paper that hold something, newest first: [{ key, id, agent, path, at }]; one
-  // deleted a moment ago is left out
-  async conversations(key, agent) {
+  // the paper's conversations that hold something, newest first: [{ key, id, path, at }]; one deleted a moment ago is
+  // left out
+  async conversations(key) {
     const conv = async (id, path) => {
       if (this.deleting.has(path)) return null;
       try {
         const stat = await IOUtils.stat(path);
-        return stat.size > 0 ? { key, id, agent, path, at: stat.lastModified || 0 } : null;
+        return stat.size > 0 ? { key, id, path, at: stat.lastModified || 0 } : null;
       } catch (e) { return null; }
     };
-    const logs = [[this.LEGACY[agent], this.convPath(key, this.LEGACY[agent])]];
+    const logs = Object.values(this.LEGACY).map(id => [id, this.convPath(key, id)]);
     let children = [];
     try { children = await IOUtils.getChildren(this.convDir(key)); } catch (e) {}
     for (const path of children) {
-      const m = /[\\/]((claude|codex)-[\w-]+)\.jsonl$/.exec(path);
-      if (m && m[2] === agent && !Object.values(this.LEGACY).includes(m[1])) logs.push([m[1], path]);
+      const m = /[\\/]((?:chat|claude|codex)-[\w-]+)\.jsonl$/.exec(path);
+      if (m && !Object.values(this.LEGACY).includes(m[1])) logs.push([m[1], path]);
     }
     const found = await Promise.all(logs.map(([id, path]) => conv(id, path)));
     return found.filter(Boolean).sort((a, b) => b.at - a.at);
   },
 
-  // the conversation the agent's messages about the paper go to: the one chosen last, none after New chat, else its
-  // newest
-  async currentConv(key, agent) {
-    const chosen = (await this.index(key)).current[agent];
-    if (chosen === null) return null;
-    if (chosen && (await this.exists(this.convPath(key, chosen)))) return chosen;
-    const all = await this.conversations(key, agent);
+  // the conversation the paper's messages go to: the one chosen last, none after New chat, else the newest. An index of an
+  // earlier version names one per agent: the chosen agent's, kept as the paper's at once; a paper without any keeps none
+  async currentConv(key) {
+    const index = await this.index(key);
+    const chosen = () => Object.prototype.hasOwnProperty.call(index, "chat");
+    if (!chosen()) {
+      const was = index.current[this.agent()];
+      const id = was && (await this.exists(this.convPath(key, was))) ? was : ((await this.conversations(key))[0] || {}).id || null;
+      if (id && !chosen()) { index.chat = id; await this.saveIndex(key); }   // unless chosen meanwhile
+      return chosen() ? index.chat : null;
+    }
+    if (index.chat === null) return null;
+    if (index.chat && (await this.exists(this.convPath(key, index.chat)))) return index.chat;
+    const all = await this.conversations(key);
     return all.length ? all[0].id : null;
   },
 
-  async chooseConv(key, agent, id) {
+  async chooseConv(key, id) {
     const index = await this.index(key);
-    index.current[agent] = id;
+    index.chat = id;
     await this.saveIndex(key);
   },
 
-  // a new conversation of the agent, titled by its first message, which its messages go to from now on; an annotation
-  // session is the one the annotation tab shows from now on
+  // a new conversation of the paper, titled by its first message, which its messages go to from now on; an annotation
+  // session, the agent's own, is the one the annotation tab shows from now on
   async newConv(key, agent, title, kind = "chat") {
     const d = new Date();
     const two = n => String(n).padStart(2, "0");
-    const base = `${kind === "annotate" ? "annotate-" : ""}${agent}-${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}`;
+    const stamp = `${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}`;
+    const base = kind === "annotate" ? `annotate-${agent}-${stamp}` : `chat-${stamp}`;
     let id = base;
     for (let n = 2; await this.exists(this.convPath(key, id)); n++) id = `${base}-${n}`;
     await IOUtils.makeDirectory(this.convDir(key), { createAncestors: true, ignoreExisting: true });
     await IOUtils.writeUTF8(this.convPath(key, id), "");
     const index = await this.index(key);
     if (kind === "annotate") index.annotation[agent] = id;
-    else index.current[agent] = id;
+    else index.chat = id;
     index.titles[id] = this.cut(String(title || "").split("\n")[0], 64);
     await this.saveIndex(key);
     return id;
@@ -3309,9 +3332,9 @@ var ScholiumRunner = {
     return this.cut(first || this.text("annotateThis"), 64);
   },
 
-  // a conversation as its log has it: the entries, its session (null when it has none or the agent no longer has
-  // it), the turns (the user's words and the answer), whether a question started it and no annotation followed, the
-  // result of its latest run, the context its session took up last, and when its latest run started; null without a log
+  // a conversation as its log has it: the entries, the turns (the user's words and the answer), the result of its latest
+  // run, whether a question started it and no annotation followed, and each agent's own session of it (agents); null
+  // without a log
   async readLog(key, id) {
     if (!id) return null;
     const path = this.convPath(key, id);
@@ -3321,7 +3344,7 @@ var ScholiumRunner = {
     // sections that ask for it at once share one reading
     let cached = this.parsedLogs.get(path);
     if (!cached || cached.at !== stat.lastModified || cached.size !== stat.size) {
-      cached = { at: stat.lastModified, size: stat.size, log: this.parseLog(path) };
+      cached = { at: stat.lastModified, size: stat.size, log: this.parseLog(path, this.convAgent(id)) };
       this.parsedLogs.delete(path);
       this.parsedLogs.set(path, cached);
       if (this.parsedLogs.size > 20) this.parsedLogs.delete(this.parsedLogs.keys().next().value);   // the oldest
@@ -3331,39 +3354,65 @@ var ScholiumRunner = {
       if (this.parsedLogs.get(path) === cached) this.parsedLogs.delete(path);
       return null;
     }
-    return { entries: log.entries.slice(), session: log.session, turns: log.turns.map(t => Object.assign({}, t)), result: log.result,
-             question: log.question, context: log.context && Object.assign({}, log.context), lastAt: log.lastAt, path, id,
-             rewind: log.rewind, agent: this.convAgent(id) };
+    const copy = a => Object.assign({}, a, { context: a.context && Object.assign({}, a.context) });
+    const turns = log.turns.map(t => Object.assign({}, t, { points: Object.assign({}, t.points), sessions: Object.assign({}, t.sessions) }));
+    return { entries: log.entries.slice(), turns,
+             result: log.result, question: log.question, agents: { claude: copy(log.agents.claude), codex: copy(log.agents.codex) },
+             path, id };
   },
 
-  // what readLog gives of a log, read once; null when it cannot be read
-  async parseLog(path) {
+  // what readLog gives of a log, read once; null when it cannot be read. agent: whose the runs of a log without run
+  // lines are (a log of an earlier version)
+  async parseLog(path, agent = "claude") {
     let text;
     try { text = await IOUtils.readUTF8(path); } catch (e) { return null; }
     const entries = [], turns = [];
-    // a log of an earlier version starts with an annotation unless the user's words come first; a run's session,
-    // and its turn, count once the message reached the agent
-    let session = null, pending = null, result = null, question = false, opened = false, reached = false, context = null, lastAt = 0;
+    const own = a => (a === "claude" || a === "codex" ? a : null);
+    // each agent's own session of the conversation: the session, the last turn it saw (-1: none), the point an edited
+    // question takes it back to (Claude Code's last message, Codex's last turn), the point its next run goes back to until
+    // the session moves on, the context the session took up, when its latest run that did its work started and ended
+    // (lastEnd Infinity: the log ends with that run, cut short without its end), and the first turn it saw that another
+    // agent answered again since (Infinity: none)
+    const blank = () => ({ session: null, through: -1, point: null, rewind: null, context: null, lastAt: 0, lastEnd: 0, stale: Infinity });
+    const agents = { claude: blank(), codex: blank() };
+    let by = own(agent) || "claude";   // the agent of the run read
+    // a log of an earlier version starts with an annotation unless the user's words come first; a run's session, and its
+    // turn, count once the message reached the agent
+    let pending = null, result = null, question = false, opened = false, reached = false, runAt = 0, runMine = false, timed = false;
     let compacting = false;   // the run is a compaction: its result is no turn's
-    // where each turn starts in the text, and the point an edited question takes the session back to: Claude Code's
-    // last message, Codex's last turn; rewind: the point a run went back to, until the session moves on
-    let at = 0, point = null, rewind = null, bare = null;   // bare: where a run line without the user's words starts
+    // where each turn starts in the text; bare: where a run line without the user's words starts
+    let at = 0, bare = null;
+    // a turn knows each agent's point and session at its start, which a cut before it goes back to
+    const turn = (user, start) => ({ user, reply: "", ended: "", reached: false, start, agent: by,
+                                     points: { claude: agents.claude.point, codex: agents.codex.point },
+                                     sessions: { claude: agents.claude.session, codex: agents.codex.session } });
+    // an agent without its session, or without a point to go back to: a new session of it goes on with the conversation,
+    // and the point of the old one names a message or turn the new one does not have
+    const anew = a => {
+      Object.assign(agents[a], { session: null, through: -1, point: null, rewind: null, stale: Infinity });
+      if (agents[a].context) agents[a].context = Object.assign({}, agents[a].context, { used: 0, parts: null });
+    };
     for (const line of text.split("\n")) {
       const start = at;
       at += line.length + 1;
       if (!line.trim()) continue;
       let event;
       try { event = JSON.parse(line); } catch (e) { continue; }
-      // the start of a run, with the user's words when it starts a turn
+      // the start of a run, its agent, and the user's words when it starts a turn; a run without them answers the turn
+      // before (a second try, a retry, a continuation)
       if (event.type === "scholium" && event.subtype === "run") {
+        // a run that did its work and was cut short without its end (Zotero closed during it) ended before this one
+        if (runMine && !timed && event.at > 0) agents[by].lastEnd = event.at;
+        by = own(event.agent) || own(agent) || "claude";
         opened = typeof event.user === "string";
         compacting = !!event.compact;
         bare = !opened && !event.compact ? start : null;
-        if (opened) turns.push({ user: event.user, reply: "", ended: "", reached: false, start, point });
-        if (event.rewind) rewind = { point: event.rewind, from: session };
+        if (opened) turns.push(turn(event.user, start));
+        if (event.rewind) agents[by].rewind = { point: event.rewind, from: agents[by].session };
         reached = false;
         pending = null;
-        if (event.at > 0 && !event.compact) lastAt = event.at;   // since the session's last run that did its work
+        runAt = event.at > 0 && !event.compact ? event.at : 0;   // counts once the run reached the agent
+        runMine = timed = false;
         this.addEntries(entries, this.entries(event));
         continue;
       }
@@ -3374,10 +3423,23 @@ var ScholiumRunner = {
         this.addEntries(entries, this.entries(event));
         continue;
       }
+      // the cut of an edited question: each agent it names goes back to its point before the question, or, without one,
+      // to a new session given the conversation; an earlier version's marker names the point of the log's own agent
+      if (event.type === "scholium" && event.subtype === "rewind") {
+        const marked = event.points && typeof event.points === "object" ? event.points : { [own(agent) || "claude"]: event.point };
+        for (const a of this.AGENTS) {
+          if (!Object.prototype.hasOwnProperty.call(marked, a)) continue;
+          const back = this.pointOf(marked[a]);
+          if (back) agents[a].rewind = { point: back, from: agents[a].session };
+          else anew(a);
+        }
+        this.addEntries(entries, this.entries(event));
+        continue;
+      }
       if (event.type === "scholium" && event.subtype === "prompt") {
         question = event.question ? true : event.annotate ? false : question;
         if (!opened) {
-          turns.push({ user: String(event.text || ""), reply: "", ended: "", reached: false, start: bare === null ? start : bare, point });
+          turns.push(turn(String(event.text || ""), bare === null ? start : bare));
           reached = false;
         }
         bare = null;
@@ -3387,20 +3449,41 @@ var ScholiumRunner = {
       } else if (event.type !== "scholium") {
         opened = false;
         bare = null;
-        if (!turns.length) turns.push({ user: this.text("annotateThis"), reply: "", ended: "", reached: false, start, point: null });
+        if (!turns.length) turns.push(turn(this.text("annotateThis"), start));
+      }
+      const me = agents[by];
+      // the run's end time counts for the agent once the run reached it and did its work; a run cut short has its length
+      // on its end line
+      if (event.type === "scholium" && event.subtype === "time") {
+        timed = true;
+        if (runMine && event.at > 0) me.lastEnd = event.at;
+      } else if (event.type === "scholium" && event.subtype === "end" && runMine && !timed && event.duration_ms >= 0) {
+        timed = true;
+        me.lastEnd = runAt + event.duration_ms;
       }
       if (typeof event.session_id === "string" && event.session_id) {
         pending = event.session_id;
-        if (reached) session = pending;
+        if (reached) me.session = pending;
       }
       if (!reached && this.reached(event)) {
         reached = true;
-        if (pending) session = pending;
-        if (turns.length) turns[turns.length - 1].reached = true;
+        if (pending) me.session = pending;
+        if (runAt) { me.lastAt = runAt; runMine = true; }   // since the session's last run that did its work
+        if (turns.length) {
+          turns[turns.length - 1].reached = true;
+          // the agent that took the turn's message answers it (a retry hands it over once it is delivered); another agent
+          // whose session saw the turn has not seen this answer
+          if (!compacting) {
+            const k = turns.length - 1;
+            Object.assign(me, { through: k, stale: Infinity });
+            turns[k].agent = by;
+            for (const a of this.AGENTS) if (a !== by && agents[a].through >= k) agents[a].stale = Math.min(agents[a].stale, k);
+          }
+        }
       }
       // the agent no longer has the session: a new one goes on with the conversation
       if (event.type === "scholium" && event.subtype === "gone") {
-        session = null; rewind = null;
+        anew(own(event.agent) || by);
         // a new session took over the run's words: the refused run's error is not drawn
         if (event.resent === true) {
           this.dropRefused(entries);
@@ -3408,20 +3491,13 @@ var ScholiumRunner = {
           result = null;
         }
       }
-      // the cut of an edited question: the next run goes back to the point before it; without one, a new session goes on
-      // with the conversation
-      if (event.type === "scholium" && event.subtype === "rewind") {
-        const back = this.pointOf(event.point);
-        if (back) rewind = { point: back, from: session };
-        else { session = null; rewind = null; }
-      }
-      if (event.type === "assistant" && typeof event.uuid === "string" && !compacting) point = { uuid: event.uuid };
-      if (event.type === "system" && event.subtype === "compact_boundary") point = null;   // Claude Code keeps no messages before it
+      if (event.type === "assistant" && typeof event.uuid === "string" && !compacting) agents.claude.point = { uuid: event.uuid };
+      if (event.type === "system" && event.subtype === "compact_boundary") agents.claude.point = null;   // Claude Code keeps no messages before it
       if (event.method === "turn/completed" && event.params && event.params.turn && event.params.turn.id && !compacting) {
-        point = { turnId: String(event.params.turn.id) };
+        agents.codex.point = { turnId: String(event.params.turn.id) };
       }
-      if (rewind && session && session !== rewind.from) rewind = null;   // the run reached the agent: a session of its own
-      context = this.contextAfter(event, context);
+      if (me.rewind && me.session && me.session !== me.rewind.from) me.rewind = null;   // the run reached the agent: a session of its own
+      me.context = this.contextAfter(event, me.context);
       if (event.type === "system" && event.subtype === "init" && !compacting) result = null;
       if (event.type === "result" && !compacting) {
         result = event;
@@ -3438,7 +3514,12 @@ var ScholiumRunner = {
       if (event.type === "scholium" && event.subtype === "prompt") for (const e of made) if (e.kind === "prompt" && !e.steer) e.turn = turns.length - 1;
       this.addEntries(entries, made);
     }
-    return { entries: entries.slice(-this.MAX_ENTRIES), session, turns, result, question, context, lastAt, rewind: rewind ? rewind.point : null };
+    // the log ends with such a run: no rewrite of the agent's here came after it
+    if (runMine && !timed) agents[by].lastEnd = Infinity;
+    // stale: null when no turn it saw was answered again by another agent
+    const out = a => ({ session: a.session, through: a.through, point: a.point, rewind: a.rewind ? a.rewind.point : null,
+                        context: a.context, lastAt: a.lastAt, lastEnd: a.lastEnd, stale: a.stale === Infinity ? null : a.stale });
+    return { entries: entries.slice(-this.MAX_ENTRIES), turns, result, question, agents: { claude: out(agents.claude), codex: out(agents.codex) } };
   },
 
   // the error lines of the latest run, which a new session took over: they leave the entries
@@ -3472,8 +3553,6 @@ var ScholiumRunner = {
     } else if (event.type === "scholium" && event.subtype === "compacted" && Number(event.post) > 0) {
       c.used = Number(event.post);
       c.parts = null;
-    } else if (event.type === "scholium" && (event.subtype === "gone" || (event.subtype === "rewind" && !this.pointOf(event.point)))) {
-      c.used = 0;   // the new session reports its own
     } else if (event.type === "result" && event.modelUsage && typeof event.modelUsage === "object") {
       // the run's model's window, the largest of those it used
       const windows = Object.values(event.modelUsage).map(m => Number(m && m.contextWindow) || 0).filter(n => n > 0);
@@ -3501,19 +3580,22 @@ var ScholiumRunner = {
   },
 
   // a conversation for a new session of it, as llm-for-zotero gives one: beyond HISTORY_FROM exchanges the latest
-  // HISTORY_WHOLE whole and the earlier ones as excerpts; each answer is the run's last message
-  historyParts(turns) {
+  // HISTORY_WHOLE whole and the earlier ones as excerpts; each answer is the run's last message, with the agent that gave
+  // it. from: the number of turns before the first given
+  historyParts(turns, from = 0) {
     const zh = this.zh();
     const answer = t => t.reply || (t.done ? (zh ? "（没有文字回答）" : "(no text)")
       : zh ? `（没有完成${t.ended ? "：" + this.cut(t.ended, 300) : ""}）` : `(not finished${t.ended ? ": " + this.cut(t.ended, 300) : ""})`);
-    let whole = turns.map((t, i) => ({ n: i + 1, user: (t.quote ? this.quoteTag(t.quote) : "") + String(t.user || ""), answer: answer(t) }));
+    let whole = turns.map((t, i) => ({ n: t.n || from + i + 1, user: (t.quote ? this.quoteTag(t.quote) : "") + String(t.user || ""), answer: answer(t),
+                                       agent: t.agent }));
     let summary = "";
     if (whole.length > this.HISTORY_FROM) {
       const early = whole.slice(0, -this.HISTORY_WHOLE);
       whole = whole.slice(-this.HISTORY_WHOLE);
+      const name = t => this.agentName(t.agent);
       summary = [zh ? `之前的 ${early.length} 轮对话（摘录）：` : `Earlier conversation (${early.length} exchanges):`,
-                 ...early.map(t => (zh ? `用户：${this.cut(t.user, this.EXCERPT_USER)}\n回答：${this.cut(t.answer, this.EXCERPT_ANSWER)}`
-                                       : `User: ${this.cut(t.user, this.EXCERPT_USER)}\nAssistant: ${this.cut(t.answer, this.EXCERPT_ANSWER)}`))].join("\n\n");
+                 ...early.map(t => (zh ? `用户：${this.cut(t.user, this.EXCERPT_USER)}\n回答（${name(t)}）：${this.cut(t.answer, this.EXCERPT_ANSWER)}`
+                                       : `User: ${this.cut(t.user, this.EXCERPT_USER)}\nAnswer (${name(t)}): ${this.cut(t.answer, this.EXCERPT_ANSWER)}`))].join("\n\n");
     }
     return { summary, whole };
   },
@@ -3534,13 +3616,35 @@ var ScholiumRunner = {
   historyText(turns) {
     if (!turns.length) return "";
     const zh = this.zh();
-    const { summary, whole } = this.historyParts(turns);
     return [
-      zh ? "下面是这段对话之前的内容。原来的会话已经接不上了，这是 Zotero 里保存的记录："
-         : "Below is this conversation so far. Its earlier session cannot be continued; this is the record kept in Zotero:",
-      ...(summary ? [summary] : []),
-      ...whole.map(t => (zh ? `[第 ${t.n} 轮]\n用户：${t.user}\n回答：${t.answer}` : `[Turn ${t.n}]\nUser: ${t.user}\nAnswer: ${t.answer}`)),
+      zh ? "下面是这段对话之前的内容（Zotero 里保存的记录），每轮注明是谁回答的："
+         : "Below is this conversation so far (the record kept in Zotero), each answer with the agent that gave it:",
+      ...this.turnLines(this.historyParts(turns)),
       zh ? "——以上是之前的对话，新消息如下——" : "--- the earlier conversation ends; the new message follows ---",
+    ].join("\n\n");
+  },
+
+  // the turns as text, each answer with the agent that gave it
+  turnLines({ summary, whole }) {
+    const zh = this.zh();
+    return [...(summary ? [summary] : []),
+            ...whole.map(t => (zh ? `[第 ${t.n} 轮]\n用户：${t.user}\n回答（${this.agentName(t.agent)}）：${t.answer}`
+                                  : `[Turn ${t.n}]\nUser: ${t.user}\nAnswer (${this.agentName(t.agent)}): ${t.answer}`))];
+  },
+
+  // a session that goes on: the turns of the conversation after the last one it saw, before the message. from: the number
+  // of turns before them
+  missedText(turns, from) {
+    if (!turns.length) return "";
+    const zh = this.zh(), one = turns.length === 1;
+    return [
+      zh ? `下面是这段对话里，你上次回答之后的 ${turns.length} 轮。这期间用户在 Zotero 里接着问，有的由别的智能体回答，每轮注明了回答者。它们属于这段对话，请接着它们回答：`
+         : (one ? "Below is the exchange of this conversation after your last answer."
+                : `Below are the ${turns.length} exchanges of this conversation after your last answer.`)
+           + " Meanwhile the user went on asking in Zotero, some answered by another agent; each answer names the agent that gave it. They are part of this conversation; answer as its continuation:",
+      ...this.turnLines(this.historyParts(turns, from)),
+      zh ? "——以上是这段对话最近的几轮，下面是用户的新消息——"
+         : "--- the latest exchanges of this conversation end; the user's new message follows ---",
     ].join("\n\n");
   },
 
@@ -3556,25 +3660,18 @@ var ScholiumRunner = {
     await this.showConversation(pane);
   },
 
-  // what a section shows: the running paper's chat transcript, else the conversation of the paper that the chosen agent's
-  // messages go to (none after New chat); and on its annotation tab, the annotation session
+  // what a section shows: the running paper's chat transcript, else the conversation of the paper that its messages go
+  // to (none after New chat); and on its annotation tab, the annotation session
   async showConversation(pane) {
     const seq = pane.showing = (pane.showing || 0) + 1;
     const liveHere = () => this.job && pane.keys.includes(this.job.key) && (this.job.source.kind || "chat") === "chat";
     if (liveHere()) { this.showLive(pane, this.job.key, "chat"); await this.showAnnotation(pane); return; }
     const agent = this.agent();
     const keys = pane.preferKey && pane.keys.includes(pane.preferKey) ? [pane.preferKey].concat(pane.keys.filter(k => k !== pane.preferKey)) : pane.keys;
-    let shown = null, any = false;
+    let shown = null;
     for (const key of keys) {
-      const id = await this.currentConv(key, agent);
+      const id = await this.currentConv(key);
       if (id) { shown = { key, id }; break; }
-    }
-    if (!shown) for (const key of pane.keys) if ((await this.conversations(key, agent)).length) { any = true; break; }
-    // the other agent's conversations of the paper, which the chosen one does not see
-    let other = null;
-    for (const a of this.AGENTS) {
-      if (shown || any || other || a === agent) continue;
-      for (const key of pane.keys) if ((await this.conversations(key, a)).length) { other = a; break; }
     }
     const log = shown ? await this.readLog(shown.key, shown.id) : null;
     if (shown) await this.loadCitations(shown.key);
@@ -3589,20 +3686,16 @@ var ScholiumRunner = {
     if (pane.shownPath !== path) pane.foldOpen = new Map();   // the steps a reader opened are of the conversation shown
     Object.assign(pane, { shownKey: shown ? shown.key : null, shownConv: shown ? shown.id : null, shownAgent: agent, shownPath: path, live: memory,
                           history: !!log && !memory, turns: log ? log.turns.length : 0, question: !!(log && log.question),
-                          context: log ? log.context : null, draft: null });
+                          context: log ? log.agents[agent].context : null, draft: null });
     pane.past = log && log.result ? { text: this.text("lastRun") + this.outcome(log.result), error: !this.succeeded(log.result),
                                       title: this.tokenDetail(log.result) } : null;
     const entries = memory ? this.transcript : log ? log.entries : [];
-    // the run shown as it went is drawn again as finished; anything else anew, at the latest, so that what follows is followed;
-    // a chat without entries shows the note of the other agent's conversation
+    // the run shown as it went is drawn again as finished; anything else anew, at the latest, so that what follows is followed
     if (kept) this.refreshRun(pane, pane.runCount - 1);
     else if (entries.length) this.renderTranscript(pane, entries, false);
     else if (pane.item && pane.item.libraryID !== Zotero.Libraries.userLibraryID) {
       this.renderTranscript(pane, [{ kind: "info", text: this.text("noHistory") }], false);
-    } else {
-      this.renderTranscript(pane, [], false);
-      if (other) pane.list.append(this.entryNode(pane.doc, { kind: "info", text: this.text("otherAgentHas", this.agentName(other)) }));
-    }
+    } else this.renderTranscript(pane, [], false);
     this.swapUnsent(pane, before);
     this.paintPane(pane);
     if (pane.popover && pane.popover.name === "history") await this.renderHistory(pane);
@@ -3626,7 +3719,7 @@ var ScholiumRunner = {
     const path = log ? log.path : null;
     if (view.shownPath !== path) view.foldOpen = new Map();   // the steps a reader opened are of the session shown
     Object.assign(view, { shownKey: key, shownConv: log ? id : null, shownAgent: agent, shownPath: path, live: false,
-                          history: !!log, turns: log ? log.turns.length : 0, question: false, context: log ? log.context : null,
+                          history: !!log, turns: log ? log.turns.length : 0, question: false, context: log ? log.agents[agent].context : null,
                           entries: log ? log.entries : [], draft: null });
     if (intro) { view.list.replaceChildren(pane.annotIntro = intro); view.runCount = 0; }
     else this.renderTranscript(view, log.entries, false);
@@ -3854,19 +3947,19 @@ var ScholiumRunner = {
     }
   },
 
-  // another agent: its models, and in every section the conversation its messages about the paper go to, so that
-  // switching back goes on where that agent was
+  // another agent: its models; every section keeps the conversation it shows, which the next message of the agent goes on
+  // with
   async switchAgent(pane, agent) {
     this.choose("agent", agent);
     pane.preferKey = null;
     for (const p of [...this.panes.values()]) await this.showConversation(p);
   },
 
-  // a new conversation of the paper shown, with the chosen agent: its first message starts it. The paper's chat must be
-  // idle; an annotation may run
+  // a new conversation of the paper shown: its first message starts it. The paper's chat must be idle; an annotation may
+  // run
   async newChat(pane) {
     if (pane.keys.some(k => this.busy(k, "chat"))) return;
-    for (const key of pane.keys) await this.chooseConv(key, this.agent(), null);
+    for (const key of pane.keys) await this.chooseConv(key, null);
     pane.preferKey = null;
     for (const p of [...this.panes.values()]) if (p.keys.some(k => pane.keys.includes(k))) await this.showConversation(p);
   },
@@ -3884,14 +3977,13 @@ var ScholiumRunner = {
     return days <= 0 ? "groupToday" : days === 1 ? "groupYesterday" : days < 7 ? "groupWeek" : days < 30 ? "groupMonth" : "groupOlder";
   },
 
-  // the chosen agent's conversations of the paper shown, newest first, by day: each opens, is renamed or deleted; one
-  // deleted a moment ago can be brought back
+  // the conversations of the paper shown, newest first, by day: each opens, is renamed or deleted; one deleted a moment
+  // ago can be brought back
   async renderHistory(pane) {
-    const agent = this.agent();
     const all = [];
-    for (const key of pane.keys) all.push(...await this.conversations(key, agent));
+    for (const key of pane.keys) all.push(...await this.conversations(key));
     for (const [path, d] of this.deleting) {
-      if (d.agent === agent && pane.keys.includes(d.key)) all.push({ key: d.key, id: d.id, agent, path, at: d.at, title: d.title, deleted: true });
+      if (pane.keys.includes(d.key)) all.push({ key: d.key, id: d.id, path, at: d.at, title: d.title, deleted: true });
     }
     all.sort((a, b) => b.at - a.at);
     for (const c of all) if (!c.deleted) c.title = await this.convTitle(c.key, c.id);
@@ -3988,24 +4080,24 @@ var ScholiumRunner = {
     try { input.focus(); if (input.select) input.select(); } catch (e) {}
   },
 
-  // an earlier conversation, which the agent's messages about the paper go to from now on
+  // an earlier conversation, which the paper's messages go to from now on
   async openConv(pane, c) {
     if (this.busy(c.key, "chat")) return;
-    await this.chooseConv(c.key, c.agent, c.id);
+    await this.chooseConv(c.key, c.id);
     pane.preferKey = c.key;
     for (const p of [...this.panes.values()]) if (p.keys.includes(c.key)) await this.showConversation(p);
     this.closePopover(pane, "history");
   },
 
-  // a conversation goes after UNDO_MS, until then it can be brought back; the one the agent's messages went to is
+  // a conversation goes after UNDO_MS, until then it can be brought back; the one the paper's messages went to is
   // followed by a new one
   async deleteConv(pane, c) {
     if (this.busy(c.key, "chat") || this.deleting.has(c.path)) return;
     const index = await this.index(c.key);
-    const wasCurrent = (await this.currentConv(c.key, c.agent)) === c.id;
-    const entry = { key: c.key, id: c.id, agent: c.agent, title: c.title, at: c.at, wasCurrent, timer: null };
+    const wasCurrent = (await this.currentConv(c.key)) === c.id;
+    const entry = { key: c.key, id: c.id, title: c.title, at: c.at, wasCurrent, timer: null };
     this.deleting.set(c.path, entry);
-    if (wasCurrent) index.current[c.agent] = null;
+    if (wasCurrent) index.chat = null;
     await this.saveIndex(c.key);
     entry.timer = setTimeout(() => { this.finishDelete(c.path).catch(e => this.log("delete failed: " + e)); }, this.UNDO_MS);
     for (const p of [...this.panes.values()]) if (p.keys.includes(c.key)) await this.showConversation(p);
@@ -4017,14 +4109,14 @@ var ScholiumRunner = {
     clearTimeout(entry.timer);
     this.deleting.delete(path);
     const index = await this.index(entry.key);
-    if (entry.wasCurrent && index.current[entry.agent] === null) {
-      index.current[entry.agent] = entry.id;
+    if (entry.wasCurrent && index.chat === null) {
+      index.chat = entry.id;
       await this.saveIndex(entry.key);
     }
     for (const p of [...this.panes.values()]) if (p.keys.includes(entry.key)) await this.showConversation(p);
   },
 
-  // the log goes, and with it its title; a Codex conversation's thread is archived at the next Codex run
+  // the log goes, and with it its title
   async finishDelete(path) {
     const entry = this.deleting.get(path);
     if (!entry || entry.finishing) return;
@@ -4033,15 +4125,17 @@ var ScholiumRunner = {
     // its queued messages go with it
     const rows = this.queue.filter(j => j.qid && j.att.key === entry.key && j.conv === entry.id);
     if (rows.length) this.dropQueued(rows);
-    if (entry.agent === "codex") {
-      const log = await this.readLog(entry.key, entry.id);
-      if (log && log.session) this.queueArchive(log.session);
-    }
-    try { await IOUtils.remove(path); } catch (e) { this.log("conversation not deleted: " + e); }
+    // the Codex threads of the conversation are archived at the next Codex run, once its log is gone
+    let threads = new Set();
+    try { threads = this.codexThreads(await IOUtils.readUTF8(path)); } catch (e) {}
+    try {
+      await IOUtils.remove(path);
+      for (const thread of threads) this.queueArchive(thread);
+    } catch (e) { this.log("conversation not deleted: " + e); }
     this.parsedLogs.delete(path);
     const index = await this.index(entry.key);
     delete index.titles[entry.id];
-    if (index.current[entry.agent] === entry.id) index.current[entry.agent] = null;
+    if (index.chat === entry.id) index.chat = null;
     await this.saveIndex(entry.key);
     this.deleting.delete(path);
     for (const p of [...this.panes.values()]) if (p.popover && p.popover.name === "history" && p.keys.includes(entry.key)) await this.renderHistory(p);
@@ -4391,12 +4485,19 @@ var ScholiumRunner = {
     return c ? `${c[1][0].toUpperCase()}${c[1].slice(1)} ${c[2]}.${c[3]}` : name;
   },
 
-  // under a finished run's answer: the model and when it ended, and a button that copies the answer
+  // "Claude Code · Opus 5.5" for the start of a run "Claude Code · claude-opus-5-5": the agent and the model's label
+  answeredBy(info) {
+    const s = String(info), at = s.indexOf(" · ");
+    return at > 0 ? `${s.slice(0, at)} · ${this.modelLabel(s)}` : this.modelLabel(s);
+  },
+
+  // under a finished run's answer: who gave it (the agent and the model) and when it ended, and a button that copies the
+  // answer
   metaNode(doc, run) {
     const node = doc.createElement("div");
     node.className = "scholium-meta";
     const left = doc.createElement("span");
-    left.textContent = [run.model ? this.modelLabel(run.model) : "", run.end ? this.clock(run.end) : ""].filter(Boolean).join(" · ");
+    left.textContent = [run.model ? this.answeredBy(run.model) : "", run.end ? this.clock(run.end) : ""].filter(Boolean).join(" · ");
     node.append(left, this.copyButton(doc, run.answer.map(e => e.text).join("\n\n")));
     return node;
   },
@@ -4738,26 +4839,28 @@ var ScholiumRunner = {
     return ready.length;
   },
 
-  // a job's conversation: the one the agent's messages about the paper go to (on the annotation tab, its latest annotation
-  // session), its session there when the agent still holds one, and whether its message is the first one; a new
+  // a job's conversation: the one the paper's messages go to (on the annotation tab, the agent's latest annotation
+  // session), the agent's session there when it still holds one, and whether its message is the first one; a new
   // conversation (conv null) starts when the job runs
   async place(job) {
+    // the agent's own session of the conversation
+    const mine = log => (log && log.agents[job.agent === "codex" ? "codex" : "claude"]) || null;
     if ((job.retry || job.compact || job.qid) && job.conv) {
-      const log = await this.readLog(job.att.key, job.conv);
-      job.resume = (log && log.session) || null;
-      job.rewind = job.resume ? (log && log.rewind) || null : null;
+      const log = await this.readLog(job.att.key, job.conv), a = mine(log);
+      job.resume = (a && a.session) || null;
+      job.rewind = job.resume ? (a && a.rewind) || null : null;
       job.question = false;
       if (!job.annotate) job.asking = !!(log && log.question);
       return;
     }
     // an annotation starts a session of its own when it runs
     if (job.annotate) { Object.assign(job, { conv: null, resume: null, question: false, asking: false }); return; }
-    const conv = job.kind === "annotate" ? await this.annotationConv(job.att.key, job.agent) : await this.currentConv(job.att.key, job.agent);
-    const log = conv ? await this.readLog(job.att.key, conv) : null;
+    const conv = job.kind === "annotate" ? await this.annotationConv(job.att.key, job.agent) : await this.currentConv(job.att.key);
+    const log = conv ? await this.readLog(job.att.key, conv) : null, a = mine(log);
     job.conv = conv;
-    job.resume = (log && log.session) || null;
+    job.resume = (a && a.session) || null;
     // an edited question goes back to its point; a message after an edit whose run never reached the agent, to that one's
-    job.rewind = job.resume ? job.rewind || (log && log.rewind) || null : null;
+    job.rewind = job.resume ? job.rewind || (a && a.rewind) || null : null;
     // words to an annotation session are not a question
     job.question = job.kind !== "annotate" && !!job.say && !(log && log.turns.length);
     job.asking = job.question || !!(log && log.question);
@@ -4772,9 +4875,10 @@ var ScholiumRunner = {
     if (!turn) return;
     const att = Zotero.Items.getByLibraryAndKey(pane.item.libraryID, key);
     if (this.busy(key)) return;
-    const agent = this.convAgent(view.shownConv);   // the conversation's own agent, whichever is chosen now
+    // the chat's turn goes to the agent chosen now; an annotation session's to its own agent
+    const agent = view.kind === "chat" ? this.agent() : this.convAgent(view.shownConv);
     // the retried conversation is the one the chat's messages go to; the annotation tab's is its latest session already
-    if (view.kind === "chat") await this.chooseConv(key, agent, view.shownConv);
+    if (view.kind === "chat") await this.chooseConv(key, view.shownConv);
     await this.send(att, turn.user, { retry: true, conv: view.shownConv, kind: view.kind, agent, quote: turn.quote || null });
   },
 
@@ -4862,9 +4966,9 @@ var ScholiumRunner = {
     if (e) { try { e.box.replaceWith(e.said); } catch (err) {} }
   },
 
-  // an earlier question of the chat asked again with new words: the turns from it on leave the log, and the agent goes on
-  // from the conversation before it (Claude Code: that point of the session as a new session; Codex: a fork of the
-  // thread through the turn before); Undo brings the old log back for a few seconds
+  // an earlier question of the chat asked again with new words, answered by the agent chosen: the turns from it on leave the
+  // log, and the agents go on from the conversation before it (Claude Code: that point of the session as a new session;
+  // Codex: a fork of the thread through the turn before); Undo brings the old log back for a few seconds
   async editTurn(view, prompt, say, quote = null) {
     const pane = view.pane, key = view.shownKey, conv = view.shownConv;
     say = String(say || "").trim();
@@ -4876,22 +4980,37 @@ var ScholiumRunner = {
     let old;
     try { old = await IOUtils.readUTF8(path); } catch (e) { this.log("conversation not read: " + e); return false; }
     if (this.replaced.has(id)) this.endReplaced(id);   // the edit before: its old text goes now
-    const agent = this.convAgent(conv);
+    const agent = this.agent();   // the agent chosen now answers the edited question
     const index = await this.index(key);
-    const r = { key, conv, path, text: old, agent, session: log.session, note: this.notes.get(`${key}/chat`) || null,
+    const at = log.turns.indexOf(turn);
+    const r = { key, conv, path, text: old, note: this.notes.get(`${key}/chat`) || null,
                 title: index.titles[conv], retitled: false, timer: null, turn: prompt.turn };
     // the first question names the conversation, unless it was renamed
-    if (turn === log.turns[0] && index.titles[conv] === this.cut(String(prompt.text).split("\n")[0], 64)) {
+    if (at === 0 && index.titles[conv] === this.cut(String(prompt.text).split("\n")[0], 64)) {
       index.titles[conv] = this.cut(say.split("\n")[0], 64);
       r.retitled = true;
       await this.saveIndex(key);
     }
-    // the cut keeps the point before the question, which the next run goes back to even when it is sent anew; without a
-    // point, a new session is given the conversation. The first question leaves an empty log
-    const marker = turn === log.turns[0] ? "" : JSON.stringify({ type: "scholium", subtype: "rewind", point: turn.point || null }) + "\n";
-    // an edit before left its own marker at the end of the kept text: it goes, so that one marker is left
+    // an agent with a session at the question's start goes back to its point before it (one without a point, to a new
+    // session given the conversation before it) when it answers the edit or its session moved on since: it saw the question
+    // or what followed, waits to go back, or is another one now. An agent without a session there starts one from the
+    // conversation kept. The first question leaves an empty log
+    const points = {};
+    for (const a of this.AGENTS) {
+      const was = turn.sessions[a], now = log.agents[a];
+      if (was && (a === agent || now.session !== was || now.through >= at || now.rewind)) points[a] = turn.points[a] || null;
+    }
+    // an edit before left its own marker at the end of the kept text: it goes, so that one marker is left, which still
+    // takes back the agents only that one named (an earlier version's marker names the log's own agent)
     const kept = old.slice(0, turn.start).split("\n").reverse();
-    while (kept.length > 1 && this.isRewindMarker(kept[1])) kept.splice(1, 1);
+    while (kept.length > 1 && this.isRewindMarker(kept[1])) {
+      const was = JSON.parse(kept.splice(1, 1)[0]);
+      const named = was.points && typeof was.points === "object" ? was.points : { [this.convAgent(conv)]: was.point };
+      for (const a of this.AGENTS) {
+        if (Object.prototype.hasOwnProperty.call(named, a) && !Object.prototype.hasOwnProperty.call(points, a)) points[a] = this.pointOf(named[a]);
+      }
+    }
+    const marker = at === 0 ? "" : JSON.stringify({ type: "scholium", subtype: "rewind", points }) + "\n";
     try { await IOUtils.writeUTF8(path, kept.reverse().join("\n") + marker); }
     catch (e) {
       this.log("conversation not cut: " + e);
@@ -4900,10 +5019,10 @@ var ScholiumRunner = {
     }
     r.timer = setTimeout(() => this.endReplaced(id), this.UNDO_MS);
     this.replaced.set(id, r);
-    await this.chooseConv(key, agent, conv);
+    await this.chooseConv(key, conv);
     const att = Zotero.Items.getByLibraryAndKey(pane.item.libraryID, key);
     let sent = false;
-    try { sent = await this.send(att || pane.item, say, { kind: "chat", conv, agent, quote, rewind: turn.point || null, edited: true }); }
+    try { sent = await this.send(att || pane.item, say, { kind: "chat", conv, agent, quote, rewind: this.pointOf(points[agent]), edited: true }); }
     catch (e) { this.log("edit not sent: " + e); }
     if (!sent) { await this.undoReplace(id); return false; }
     // an edit that waits behind another paper's run: the sections show the conversation cut, with Undo
@@ -4932,10 +5051,14 @@ var ScholiumRunner = {
       this.cancel();
       for (let i = 0; i < 400 && running(); i++) await Zotero.Promise.delay(25);
     }
-    const now = await this.readLog(r.key, r.conv);
-    if (r.agent === "codex" && now && now.session && now.session !== r.session) this.queueArchive(now.session);
+    // the Codex threads made after the edit, which the old log does not use, are archived once the old log is back
+    let now = "";
+    try { now = await IOUtils.readUTF8(r.path); } catch (e) {}
+    const kept = this.codexThreads(r.text);
+    const gone = [...this.codexThreads(now)].filter(thread => !kept.has(thread));
     try { await IOUtils.writeUTF8(r.path, r.text); }
     catch (e) { this.log("conversation not restored: " + e); return; }
+    for (const thread of gone) this.queueArchive(thread);
     if (r.retitled) {
       const index = await this.index(r.key);
       if (r.title === undefined) delete index.titles[r.conv];
@@ -4963,6 +5086,15 @@ var ScholiumRunner = {
     clearTimeout(r.timer);
     this.replaced.delete(id);
     this.dropUndo(r.key, r.conv);
+    this.archiveReplaced(r);
+  },
+
+  // the Codex threads only the replaced text of an edit used are archived
+  archiveReplaced(r) {
+    IOUtils.readUTF8(r.path).then(now => {
+      const kept = this.codexThreads(now);
+      for (const thread of this.codexThreads(r.text)) if (!kept.has(thread)) this.queueArchive(thread);
+    }).catch(e => this.log("replaced threads not archived: " + e));
   },
 
   // the Undo of an edit leaves the chat views of its conversation: under a run or after them; the rest stays as it is, a
@@ -4977,7 +5109,7 @@ var ScholiumRunner = {
     }
   },
 
-  // the user's words to the paper, in the conversation the chosen agent's messages about it go to: the first message of
+  // the user's words to the paper, to the chosen agent in the conversation the paper's messages go to: the first message of
   // a new one, which answers without annotating, or the next one; while the paper's run of the tab goes on or waits, a
   // message queued behind it; false when that is not possible now. opts: retry (the same words again in conv, already
   // logged), compact, kind, conv (the conversation a queued message belongs to), before (a held queued message the words go
@@ -5009,8 +5141,8 @@ var ScholiumRunner = {
       return (await this.annotate([job.att], { extra: say })) > 0;
     }
     if (opts.retry) Object.assign(job, { conv: opts.conv, logged: true });
-    // a compaction is the shown conversation's, by its own agent
-    if (opts.compact) Object.assign(job, { conv: opts.conv, agent: this.convAgent(opts.conv) });
+    // a compaction is the shown conversation's: the chat's by the agent chosen, an annotation session's by its own agent
+    if (opts.compact) Object.assign(job, { conv: opts.conv, agent: kind === "annotate" ? this.convAgent(opts.conv) : job.agent });
     await this.place(job);
     if (job.compact && !job.resume) return false;
     if (this.busy(job.att.key, kind)) return false;
@@ -5027,7 +5159,8 @@ var ScholiumRunner = {
     const words = job.compact ? "/compact" + (job.say ? " " + job.say : "") : job.say;
     if (!words || this.started(job) || job.fresh || job.logged) return;
     const att = job.att;
-    const keys = [att.parentItemKey, att.key].filter(Boolean).map(item => `${att.libraryID}/${item}/${job.kind || "chat"}/${job.agent}/${job.conv || ""}`);
+    const agent = (job.kind || "chat") === "annotate" ? job.agent : "";
+    const keys = [att.parentItemKey, att.key].filter(Boolean).map(item => `${att.libraryID}/${item}/${job.kind || "chat"}/${agent}/${job.conv || ""}`);
     for (const k of keys) if (!this.unsent.get(k)) this.unsent.set(k, words);
     for (const pane of this.panes.values()) {
       if (!keys.includes(this.unsentKey(pane)) || String(pane.input.value || "").trim()) continue;
@@ -5428,6 +5561,14 @@ var ScholiumRunner = {
     return { ok: false, delivered: false, cancelled: true };
   },
 
+  // the words a job's run line gives its turn: the user's, or the annotation's request with its extra wishes
+  turnWords(job) { return job.say || this.annotateWords(job); },
+
+  annotateWords(job) { return this.text("annotateThis") + (job.extra ? "\n" + this.text("extraLabel") + job.extra : ""); },
+
+  // the old turns a job's words left behind (leftAt): a list, or the one index an earlier copy kept
+  leftOf(at) { return (Array.isArray(at) ? at : [at]).filter(i => Number.isInteger(i)); },
+
   async run(job) {
     const started = Date.now();
     const key = job.att.key;
@@ -5438,12 +5579,42 @@ var ScholiumRunner = {
     const running = this.job;
     // the conversation goes on in its log; a new one starts its own when the run is under way
     const log = job.conv ? await this.readLog(key, job.conv) : null;
-    // a new session of the conversation is given its turns. A second try, a new session after a gone one, and a message
-    // handed back before it reached the agent have their turn in the log already, which is their message
+    const mine = log ? log.agents[agent] : null;   // the agent's own session of the conversation
+    // a new session of the conversation is given its turns, a session that goes on the turns after the last one it saw. A
+    // second try, a new session after a gone one, and a message handed back before it reached the agent have their turn in
+    // the log already, which is their message
     const continuation = !!job.resume && !job.say && !job.annotate;
+    // words logged before whose turn is no longer the log's last (a newer message went first), or whose turn now holds
+    // other words (an edit cut the log): they are asked again as a new turn at the end, so that the log keeps its order.
+    // Each old turn of these words (leftAt) stays in the log but is not given to the agent, in its history or its missed
+    // turns, as its words come in the message; every copy of the job keeps them. An index that no longer points at these
+    // words leaves nothing out. A turn is theirs when it starts with the words its run line wrote
+    const words = this.turnWords(job);
+    const own = i => {
+      const t = Number.isInteger(i) && log ? log.turns[i] : null;
+      const user = t ? String(t.user || "") : null;
+      return user !== null && (user === words || user.startsWith(words + "\n\n"));   // words steered into it come after
+    };
+    if (log && !continuation && (job.logged || job.retried) && Number.isInteger(job.turnAt)
+        && (job.turnAt !== log.turns.length - 1 || !own(job.turnAt))) {
+      const lefts = this.leftOf(job.leftAt);
+      job.leftAt = own(job.turnAt) && !lefts.includes(job.turnAt) ? lefts.concat(job.turnAt) : lefts;
+      Object.assign(job, { logged: false, retried: false, fresh: false });
+    }
     const again = !!(job.retried || job.fresh || job.logged) && !continuation;
-    job.history = log && !job.resume ? (again ? log.turns.slice(0, -1) : log.turns) : [];
-    job.since = log ? log.lastAt : 0;
+    let before = log ? (again ? log.turns.slice(0, -1) : log.turns) : [];
+    const left = this.leftOf(job.leftAt).filter(i => own(i) && i < before.length);
+    if (left.length) before = before.map((t, i) => Object.assign({}, t, { n: i + 1 }));   // the others keep their numbers
+    // from the turn after the last one its session saw, or from the first one it saw that another agent answered again
+    job.missedFrom = mine ? Math.min(mine.through + 1, Number.isInteger(mine.stale) ? mine.stale : Infinity) : 0;
+    job.missed = job.resume && !continuation && !job.compact ? before.slice(job.missedFrom) : [];
+    job.history = log && !job.resume ? before : [];
+    if (left.length) {
+      job.missed = job.missed.filter(t => !left.includes(t.n - 1));
+      job.history = job.history.filter(t => !left.includes(t.n - 1));
+    }
+    job.since = mine ? mine.lastAt : 0;
+    job.sinceEnd = mine ? mine.lastEnd : 0;
     job.applied = await this.readApplied(key);
     if (this.job !== running) return;   // the plugin stopped meanwhile
     // the run is one of the transcript's from its start; its line goes into the log once the log is there. One that goes
@@ -5454,7 +5625,7 @@ var ScholiumRunner = {
     running.annotation = !!job.annotate || !!(turn && turn.annotate);
     this.transcriptKey = key;
     this.transcriptPath = log ? log.path : null;
-    running.context = log ? log.context : null;
+    running.context = mine ? mine.context : null;
     // another run of a conversation whose question was edited a moment ago: the edit can no longer be undone
     if (!job.edited && job.conv) this.endReplaced(`${key}/${job.conv}`);
     this.startPanes(key, this.transcriptKind);
@@ -5494,9 +5665,9 @@ var ScholiumRunner = {
     running.log = logPath;
     // the run's agent, and the user's words when it starts a turn; once this line is on its way an update hands the
     // paper over as logged, so that the new copy does not log the turn again
-    const user = job.compact || again || continuation ? null
-      : job.say || this.text("annotateThis") + (job.extra ? "\n" + this.text("extraLabel") + job.extra : "");
+    const user = job.compact || again || continuation ? null : this.turnWords(job);
     running.logged = true;
+    if (user !== null) job.turnAt = log ? log.turns.length : 0;   // the turn these words start
     await IOUtils.writeUTF8(logPath, JSON.stringify(Object.assign({ type: "scholium", subtype: "run", agent, user, at: started },
       job.compact ? { compact: true } : {}, job.rewind && job.resume ? { rewind: job.rewind } : {})) + "\n", { mode: "appendOrCreate" });
     if (!job.resume || job.annotate) job.profile = (await this.exists(this.profilePath())) ? this.profilePath() : null;
@@ -5506,8 +5677,7 @@ var ScholiumRunner = {
     const quoted = job.quote ? { quote: job.quote } : {};
     const mark = job.retried || job.fresh || job.logged ? null
       : job.compact ? { type: "scholium", subtype: "compact", text: job.say || "" }
-      : job.annotate ? Object.assign(prompted(this.text("annotateThis") + (job.extra ? "\n" + this.text("extraLabel") + job.extra : "")),
-                                     { annotate: true, extra: job.extra || "" })
+      : job.annotate ? Object.assign(prompted(this.annotateWords(job)), { annotate: true, extra: job.extra || "" })
       : job.question ? Object.assign(prompted(job.say), { question: true }, quoted)
       : job.say ? Object.assign(prompted(job.say), quoted)
       : job.resume ? { type: "scholium", subtype: "continue", reason: job.updated ? "update" : job.throttled ? "throttle" : undefined } : null;
@@ -5910,7 +6080,21 @@ var ScholiumRunner = {
     return /(?:[Dd]elta|summaryPartAdded|startupStatus\/updated|remoteControl\/status\/changed|^turn\/diff\/updated)$/.test(String(msg.method || ""));
   },
 
-  // the threads of deleted conversations, archived at the next Codex run as llm-for-zotero archives them
+  // the Codex threads a log's runs used: the session of each Codex start line
+  codexThreads(text) {
+    const threads = new Set();
+    for (const line of String(text || "").split("\n")) {
+      if (!line.includes('"codex"')) continue;
+      try {
+        const e = JSON.parse(line);
+        if (e && e.type === "system" && e.subtype === "init" && e.agent === "codex" && typeof e.session_id === "string" && e.session_id) threads.add(e.session_id);
+      } catch (err) {}
+    }
+    return threads;
+  },
+
+  // the Codex threads no conversation uses any more, archived at the next Codex run as llm-for-zotero archives them: a
+  // deleted conversation's, those only an edit's new run used (Undo), those only its replaced part used (once Undo is gone)
   queueArchive(thread) {
     let ids = [];
     try { ids = JSON.parse(this.getPref("codexArchive") || "[]"); } catch (e) {}
@@ -6101,10 +6285,10 @@ var ScholiumRunner = {
       const init = { type: "system", subtype: "init", agent: "codex", model: (opened && opened.model) || model, session_id: thread };
       await this.appendLog(ctx, [JSON.stringify(init)]);
       this.appendEntries(this.entries(init));
-      // a new thread of a conversation is given its turns as items of the thread, or as text before the message when
-      // Codex does not take them
+      // a new thread of a conversation is given its turns as items of the thread when all the answers are Codex's own, or
+      // as text before the message, each answer with its agent, when another agent gave one or Codex does not take items
       let asText = true;
-      if (!job.resume && job.history && job.history.length) {
+      if (!job.resume && job.history && job.history.length && job.history.every(t => t.agent === "codex")) {
         try {
           await rpc.request("thread/inject_items", { threadId: thread, items: this.historyItems(job.history) });
           asText = false;
@@ -6326,7 +6510,8 @@ var ScholiumRunner = {
                           resume: j.resume || null, asked: !!j.asked, question: !!j.question, annotate: !!j.annotate, own: j.own || 0,
                           interrupted: !!j.interrupted, updated: !!j.updated, fresh: !!j.fresh, conv: j.conv || null, asking: !!j.asking,
                           logged: !!j.logged, throttled: !!j.throttled, retried: !!j.retried, retryAt: j.retryAt || 0, kind: j.kind || "chat",
-                          compact: !!j.compact, qid: j.qid || null, failed: !!j.failed, quote: j.quote || null, rewind: j.rewind || null });
+                          compact: !!j.compact, qid: j.qid || null, failed: !!j.failed, quote: j.quote || null, rewind: j.rewind || null,
+                          turnAt: Number.isInteger(j.turnAt) ? j.turnAt : null, leftAt: this.leftOf(j.leftAt) });
     const jobs = [];
     if (running && running.source) {
       const j = running.source;
@@ -6367,7 +6552,8 @@ var ScholiumRunner = {
                            conv: typeof s.conv === "string" && s.conv ? s.conv : null, asking: !!(s.asking || s.question),
                            logged: !!s.logged, interrupted: !!s.interrupted, throttled: !!s.throttled, retried: !!s.retried,
                            retryAt: Number(s.retryAt) || 0, kind, compact: !!s.compact, qid, failed: !!(qid && s.failed),
-                           quote: this.quoteOf(s.quote), rewind: this.pointOf(s.rewind) });
+                           quote: this.quoteOf(s.quote), rewind: this.pointOf(s.rewind),
+                           turnAt: Number.isInteger(s.turnAt) ? s.turnAt : null, leftAt: this.leftOf(s.leftAt) });
       if (qid) this.qseq = Math.max(this.qseq, Number(qid) || 0);
       // a copy before the paper's conversations hands over its one conversation per agent, which became that agent's
       // first: a paper interrupted there has its turn in that log; an annotation not begun starts a session of its own
@@ -6415,7 +6601,11 @@ var ScholiumRunner = {
     this.queue = [];
     for (const r of this.removedQueued.values()) clearTimeout(r.timer);
     this.removedQueued.clear();
-    for (const r of this.replaced.values()) clearTimeout(r.timer);
+    // an edit's old conversation can no longer come back: the threads only it used are archived
+    for (const r of this.replaced.values()) {
+      clearTimeout(r.timer);
+      try { this.archiveReplaced(r); } catch (e) {}
+    }
     this.replaced.clear();
     if (this.savedRemoved) clearTimeout(this.savedRemoved.timer);
     this.savedRemoved = null;

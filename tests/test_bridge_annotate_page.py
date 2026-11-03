@@ -345,7 +345,7 @@ SCENARIOS = r"""
     const path = annotLogs(h)[0];
     const lines = path ? h.log.writes[path].trim().split('\n').map(l => JSON.parse(l)) : [];
     facts.annotWords = { session: !!path, prompts: lines.filter(l => l.subtype === 'prompt').map(l => [l.text, !!l.question, !!l.annotate]),
-                         chats: convs(h).filter(c => !c.includes('/annotate-')).length, current: JSON.parse(h.log.writes[DIR + 'index.json']).current };
+                         chats: convs(h).filter(c => !c.includes('/annotate-')).length, chat: JSON.parse(h.log.writes[DIR + 'index.json']).chat || null };
   }
 
   // a section drawn while the paper's chat runs shows that run, and its annotation tab the session
@@ -379,7 +379,7 @@ SCENARIOS = r"""
     h.runner.start('x');
     let release = null;
     const real = h.runner.currentConv.bind(h.runner);
-    h.runner.currentConv = async (k, a) => { if (!release) await new Promise(r => { release = r; }); return real(k, a); };
+    h.runner.currentConv = async k => { if (!release) await new Promise(r => { release = r; }); return real(k); };
     const drawing = h.pane(h.item1);
     for (let i = 0; i < 200 && !release; i++) await tick();
     await h.runner.send(h.item1, '一个问题'); await settle(100);
@@ -662,7 +662,7 @@ SCENARIOS = r"""
     const args = h.log.calls.at(-1).opts.arguments;
     facts.annotFollowRetry = { shown, calls: h.log.calls.length, resumed: args[args.indexOf('--resume') + 1],
                                answered: h.log.writes[DIR + SESSION + '.jsonl'].includes('改好了'),
-                               current: JSON.parse(h.log.writes[DIR + 'index.json']).current, sessions: annotLogs(h).length };
+                               chat: JSON.parse(h.log.writes[DIR + 'index.json']).chat || null, sessions: annotLogs(h).length };
   }
   // words of the annotation tab's kind without an annotation session go with a new annotation, as its extra wishes
   {
@@ -840,7 +840,8 @@ def facts(tmp_path_factory):
 def test_an_annotation_has_its_own_session(facts):
     a = facts["annotSession"]
     assert re.fullmatch(r"annotate-claude-\d{8}-\d{6}", a["annotConv"])
-    assert a["index"]["annotation"] == {"claude": a["annotConv"]} and a["index"]["current"] == {}
+    assert a["index"]["annotation"] == {"claude": a["annotConv"]} and a["index"]["chat"] == "claude-20261001-120000", \
+        "the chat's conversation stays the paper's"
     assert "问题一" not in a["prompt"], "a new annotation session is not given the chat"
     assert a["chatShown"] == "claude-20261001-120000" and a["chatSame"] is True
     assert a["historyRows"] == 1, "annotation sessions stay out of the chat's history"
@@ -925,7 +926,7 @@ def test_a_confirmed_annotation_asks_nothing(facts):
 
 
 def test_words_on_the_annotation_tab_without_a_session(facts):
-    assert facts["annotWords"] == {"session": True, "prompts": [["批注这篇\n附加要求：只看第 3 页", False, True]], "chats": 0, "current": {}}
+    assert facts["annotWords"] == {"session": True, "prompts": [["批注这篇\n附加要求：只看第 3 页", False, True]], "chats": 0, "chat": None}
 
 
 def test_the_annotation_tab_beside_a_running_chat(facts):
@@ -1049,7 +1050,7 @@ def test_a_failed_message_to_the_annotation_session_has_retry(facts):
     f = facts["annotFollowRetry"]
     assert f["shown"] == {"retry": True, "card": False}
     assert f["calls"] == 2 and f["resumed"] == "A0" and f["answered"] is True
-    assert f["current"] == {}, "the chat's conversation stays as it was"
+    assert f["chat"] is None, "the chat's conversation stays as it was: none"
     assert f["sessions"] == 1
 
 

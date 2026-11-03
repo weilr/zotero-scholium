@@ -469,7 +469,7 @@ SCENARIOS = r"""
     await settle(300);
     const list = h.flat(q.pane());
     const logged = convLines(h).filter(e => e.subtype === 'unfinished');
-    const fromLog = (await h.runner.readLog('ATT1', await h.runner.currentConv('ATT1', 'claude'))).entries.filter(e => e.unfinished);
+    const fromLog = (await h.runner.readLog('ATT1', await h.runner.currentConv('ATT1'))).entries.filter(e => e.unfinished);
     facts.unfinished = { restored, during, last: [tree(list.at(-3)), [list.at(-2).className, textOf(list.at(-2))]],
                          logged: logged.map(e => e.text), fromLog: fromLog.map(e => e.text), removeDisabledAfter: q.view().removeDisabled,
                          durations: [8000, 59400, 59600, 376500, 3725000].map(ms => h.runner.duration(ms)) };
@@ -1137,8 +1137,8 @@ SCENARIOS = r"""
     facts.codexModels.again = { model: p.view().model, effort: p.view().effort, calls: h.log.codexCalls.length };
   }
 
-  // a Codex annotation and a follow-up in its thread; then Claude Code chosen, which has no conversation of the paper,
-  // starts its own, given nothing of Codex's; Codex chosen again has no chat here, and its session goes on in its thread
+  // a Codex annotation and a follow-up in its thread; then Claude Code chosen, the paper having no conversation, starts
+  // one, given nothing of Codex's annotation session; Codex chosen again shows it, and its session goes on in its thread
   {
     const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex', 'extensions.scholium-bridge.codexModel': 'gpt-6-luna',
                                  'extensions.scholium-bridge.codexEffort': 'high' }, codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW, CODEX_FOLLOW] } });
@@ -1171,7 +1171,7 @@ SCENARIOS = r"""
       dirs: h.log.madeDirs.slice(),
       entries: p.view().flat, state: p.view().state, stateTitle: latestNote(h).title,
       logged: lines().filter(l => l.subtype !== 'run').map(l => l.method || l.type), init: lines().find(l => l.type === 'system'), result: lines().find(l => l.type === 'result'),
-      killed: h.log.codexProcs[before].killed, session: (await h.runner.readLog('ATT1', p.view().shownConv)).session,
+      killed: h.log.codexProcs[before].killed, session: own(await h.runner.readLog('ATT1', p.view().shownConv)).session,
       notices: h.log.notices.map(notice), sendShown: !p.view().sendHidden, claudeCalls: h.log.calls.length, ring: p.view().ring, ctxUsed: p.view().ctxUsed,
       userMessages: lines().filter(l => l.params && l.params.item && l.params.item.type === 'userMessage').length,
       applied: JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']).config,
@@ -1189,24 +1189,28 @@ SCENARIOS = r"""
                             disabled: sent2.find(m => m.method === 'turn/start').params.disabledPluginIds,
                             entries: p.view().flat.slice(-5), results: lines().filter(l => l.type === 'result').length,
                             markers: lines().filter(l => l.type === 'scholium' && l.subtype === 'prompt').map(l => l.text) };
-    // Claude Code chosen: a new conversation of its own, which knows nothing of Codex's
+    // Claude Code chosen: the chat keeps what it showed (none: Codex's run was an annotation session); its question starts
+    // the paper's conversation, which knows nothing of the annotation session
     const codexLog = h.log.writes[logPath];
     p.pane().tabChat.click();
+    const unswitched = p.view().shownConv;
     p.pane().agent.change('claude');
     await settle(100);
     const switched = { entries: p.view().flat, shownConv: p.view().shownConv, newChatDisabled: p.view().newChatDisabled, ring: p.view().ring,
-                       placeholder: p.view().placeholder, index: JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/conversations/index.json']).current };
+                       placeholder: p.view().placeholder, chosen: 'chat' in JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/conversations/index.json']), unswitched };
     p.pane().input.type('它和 FNO 比怎么样？');
     p.pane().send.click();
     await settle(500);
     const args = h.log.calls.at(-1).opts.arguments;
+    const chatConv = p.view().shownConv;
     facts.switchedToClaude = { switched, calls: h.log.calls.length, resumed: args.includes('--resume'), prompt: h.log.stdin.at(-1),
                                conversations: convs(h).map(c => c.split('/').pop().split('-')[0]), codexKept: h.log.writes[logPath] === codexLog };
-    // Codex chosen again: it has no chat of this paper, and History lists none; the Annotations tab shows its annotation
-    // session, which goes on in its thread
+    // Codex chosen again: the chat keeps the paper's conversation, Claude Code's answer in it, which History lists; the
+    // Annotations tab shows Codex's annotation session, which goes on in its thread
     p.pane().agent.change('codex');
     await settle(200);
-    const again = { entries: p.view().flat, shownConv: p.view().shownConv };
+    const again = { same: !!chatConv && p.view().shownConv === chatConv, asked: p.view().flat.some(e => /^scholium-entry prompt/.test(e[0]) && e[1].includes('它和 FNO 比怎么样？')),
+                    info: p.view().flat.filter(e => e[0] === 'scholium-entry info').length };
     p.pane().historyButton.click();
     await settle(100);
     const rows = p.view().historyRows;
@@ -1436,19 +1440,22 @@ SCENARIOS = r"""
       .map(([m, i]) => h.runner.transient(m, i));
   }
 
-  // the logs of an earlier version, one per agent: each is that agent's first conversation
+  // the logs of an earlier version, one per agent, are conversations of the paper: the newer one is shown whichever agent
+  // is chosen, and each is its agent's
   {
     const codexLog = [CODEX_INIT].concat(CODEX_SCRIPT.filter(l => l.includes('item/')), [CODEX_RESULT]).join('');
     const claudeLog = SCRIPT.slice(0, 4).concat([LAST, RESULT]).join('');
     const shown = {};
     for (const agent of ['codex', 'claude']) {
+      const other = agent === 'codex' ? 'claude' : 'codex';
       const h = harness({ logs: { '/data/tmp/scholium/ATT1/claude-run.jsonl': claudeLog, '/data/tmp/scholium/ATT1/codex-run.jsonl': codexLog },
-                          prefs: { 'extensions.scholium-bridge.agent': agent } });
+                          logTimes: { [`/data/tmp/scholium/ATT1/${agent}-run.jsonl`]: 2000, [`/data/tmp/scholium/ATT1/${other}-run.jsonl`]: 1000 },
+                          prefs: { 'extensions.scholium-bridge.agent': other } });
       h.runner.start('x');
       const p = await h.pane(h.item1);
       logFrom(p.pane());
       shown[agent] = { first: p.view().flat[0], count: p.view().flat.length, state: p.view().state, shownConv: p.view().shownConv,
-                       session: (await h.runner.readLog('ATT1', p.view().shownConv)).session, revealed: h.log.revealed[0],
+                       session: own(await h.runner.readLog('ATT1', p.view().shownConv)).session, revealed: h.log.revealed[0],
                        title: await h.runner.convTitle('ATT1', p.view().shownConv) };
     }
     facts.latestLog = shown;
@@ -1656,7 +1663,7 @@ SCENARIOS = r"""
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
-    const session = async (x = h) => { const id = await x.runner.currentConv('ATT1', 'claude'); const log = id && await x.runner.readLog('ATT1', id); return log ? log.session : null; };
+    const session = async (x = h) => { const id = await x.runner.currentConv('ATT1'); const log = id && await x.runner.readLog('ATT1', id); return log ? own(log, 'claude').session : null; };
     const look = () => ({ placeholder: p.view().placeholder, sendHidden: p.view().sendHidden, stop: p.view().round });
     p.pane().input.type('这篇怎么估计后验？');
     const sent = key(p.pane().input, { key: 'Enter', ctrlKey: true }).defaultPrevented;
@@ -1735,7 +1742,7 @@ SCENARIOS = r"""
     await h.runner.send(h.att1, '那它的损失函数呢？'); await settle(300);
     await h.runner.annotate([h.item1]); await settle(300);
     const log = await h.runner.readLog('ATT1', p.view().shownConv);
-    const failed = { session: log.session, question: log.question, placeholder: p.view().placeholder };
+    const failed = { session: own(log, 'claude').session, question: log.question, placeholder: p.view().placeholder };
     await h.runner.annotate([h.item1]); await settle(300);
     facts.askEdges = { owned: h.log.stdin[0].split('\n').find(l => l.startsWith('这篇论文已有')), followUp: h.log.stdin[1],
                        resumes: h.log.calls.map(c => c.opts.arguments.includes('--resume')), failed };
@@ -1766,7 +1773,7 @@ SCENARIOS = r"""
       runs: lines.filter(l => l.subtype === 'run').map(l => l.user), items: injected && injected.params.items,
       prompt: turn && turn.params.input[0].text, skill: !!(turn && turn.params.input.some(i => i.type === 'skill')),
       entries: p.view().flat.slice(-5).map(e => [e[0], e[1].slice(0, 60)]), state: noteOf(h),
-      session: (await h.runner.readLog('ATT1', p.view().shownConv)).session, placeholder: p.view().placeholder, conversations: convs(h).length };
+      session: own(await h.runner.readLog('ATT1', p.view().shownConv), 'codex').session, placeholder: p.view().placeholder, conversations: convs(h).length };
   }
   {
     const answer = '它是自适应层归一化。';
@@ -1783,7 +1790,7 @@ SCENARIOS = r"""
                          prompts: p.view().flat.filter(e => e[0] === 'scholium-entry prompt').map(e => e[1]),
                          metas: p.view().flat.filter(e => e[0] === 'scholium-meta').map(e => e[1]),
                          info: p.view().flat.filter(e => e[0] === 'scholium-entry info').map(e => e[1]),
-                         session: (await h.runner.readLog('ATT1', p.view().shownConv)).session, state: noteOf(h),
+                         session: own(await h.runner.readLog('ATT1', p.view().shownConv), 'claude').session, state: noteOf(h),
                          finals: p.view().flat.filter(e => e[0].includes('final')).map(e => e[1]), conversations: convs(h).length };
     const e = harness({ script: [ev({ type: 'result', subtype: 'error_during_execution', is_error: true, num_turns: 0, session_id: 'S9',
                                       errors: ['Credit balance is too low'] }), 'EXIT:1'] });
@@ -1806,9 +1813,9 @@ SCENARIOS = r"""
     await settle(100);
     p.pane().tabAnnotate.click(); lp.pane().tabAnnotate.click();
     facts.goneStopped = { calls: h.log.calls.length, queued: h.runner.queue.length, gone: lines.find(l => l.subtype === 'gone'),
-                          state: p.view().state, last: p.view().flat.filter(untimed).at(-1), session: (await h.runner.readLog('ATT1', p.view().shownConv)).session,
+                          state: p.view().state, last: p.view().flat.filter(untimed).at(-1), session: own(await h.runner.readLog('ATT1', p.view().shownConv), 'claude').session,
                           placeholder: p.view().placeholder,
-                          later: { session: (await later.runner.readLog('ATT1', lp.view().shownConv)).session, placeholder: lp.view().placeholder } };
+                          later: { session: own(await later.runner.readLog('ATT1', lp.view().shownConv), 'claude').session, placeholder: lp.view().placeholder } };
   }
   // a question to Codex starts a question's conversation
   {
@@ -1818,10 +1825,10 @@ SCENARIOS = r"""
     await settle(200);
     await h.runner.send(h.item1, '这篇讲什么？'); await settle(500);
     const log = await h.runner.readLog('ATT1', p.view().shownConv);
-    facts.codexQuestion = { session: log.session, question: log.question, placeholder: p.view().placeholder, title: await h.runner.convTitle('ATT1', p.view().shownConv) };
+    facts.codexQuestion = { session: own(log, 'codex').session, question: log.question, placeholder: p.view().placeholder, title: await h.runner.convTitle('ATT1', p.view().shownConv) };
   }
-  // the log of an earlier version is its agent's conversation: that agent goes on with it in place, the other one
-  // starts its own
+  // the log of an earlier version is a conversation of the paper: the agent chosen goes on with it in place, Claude Code
+  // given the conversation before, Codex in its own thread
   {
     const legacy = '/data/tmp/scholium/ATT1/codex-run.jsonl';
     const codexLog = [CODEX_INIT].concat(CODEX_SCRIPT.filter(l => l.includes('item/')), [CODEX_RESULT]).join('');
@@ -1829,7 +1836,7 @@ SCENARIOS = r"""
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(100);
-    const claude = { placeholder: p.view().placeholder, entries: p.view().flat };
+    const claude = { placeholder: p.view().placeholder, shown: p.view().shownConv, info: p.view().flat.filter(e => e[0] === 'scholium-entry info').length };
     p.pane().input.type('AdLN的作用是什么');
     p.pane().send.click();
     await settle(400);
@@ -1841,7 +1848,8 @@ SCENARIOS = r"""
     const sent = h.log.codexProcs.at(-1).sent;
     const lines = h.log.writes[legacy].slice(codexLog.length).trim().split('\n').map(l => JSON.parse(l));
     facts.legacyGoesOn = { claude, resume: sent.find(m => m.method === 'thread/resume').params.threadId,
-                           text: sent.find(m => m.method === 'turn/start').params.input[0].text.split('\n')[0],
+                           agents: lines.filter(l => l.subtype === 'run').map(l => l.agent),
+                           text: sent.find(m => m.method === 'turn/start').params.input[0].text,
                            appended: lines.filter(l => l.type === 'scholium').map(l => l.subtype), conversations: convs(h).length };
   }
   // the conversation for a new session: beyond ten exchanges the latest five whole and the earlier ones as excerpts; an
@@ -1857,8 +1865,8 @@ SCENARIOS = r"""
     const excerpted = n => h.runner.historyText(turns.slice(0, n)).includes('轮对话（摘录）');
     facts.historyParts = { head: text.split('\n\n')[0], summary: text.split('\n\n')[1], excerpts: (text.match(/^用户：问题 \d+/gm) || []).length,
                            whole: (text.match(/^\[第 (\d+) 轮\]/gm) || []), excerpt: text.split('\n\n')[2],
-                           unfinished: text.includes('[第 12 轮]\n用户：最后\n回答：（没有完成：Invalid API key）'),
-                           noText: text.includes('[第 13 轮]\n用户：只写入\n回答：（没有文字回答）'), end: text.split('\n\n').at(-1),
+                           unfinished: text.includes('[第 12 轮]\n用户：最后\n回答（Claude Code）：（没有完成：Invalid API key）'),
+                           noText: text.includes('[第 13 轮]\n用户：只写入\n回答（Claude Code）：（没有文字回答）'), end: text.split('\n\n').at(-1),
                            few: few.split('\n\n').map(b => b.split('\n')[0]), none: h.runner.historyText([]), noItems: h.runner.historyItems([]),
                            boundary: [excerpted(10), excerpted(11)],
                            items: items.map(i => [i.role, i.content[0].type, i.content[0].text.split('\n')[0].slice(0, 20)]),
@@ -1972,7 +1980,7 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await settle(40);
     await h.runner.send(h.item1, '它和 FNO 比怎么样？'); await settle(400);
-    const session = (await h.runner.readLog('ATT1', p.view().shownConv)).session;
+    const session = own(await h.runner.readLog('ATT1', p.view().shownConv), 'claude').session;
     await h.runner.send(h.att1, '那它的损失函数呢？'); await settle(400);
     facts.unreachedClaude = { session, resumed: h.log.calls[1].opts.arguments.includes('--resume'), prompt: h.log.stdin[1].split('\n\n').slice(1, 2),
                               conversations: convs(h).length };
@@ -1989,11 +1997,11 @@ SCENARIOS = r"""
     h.runner.start('x');
     await h.pane(h.item1);
     await settle(200);
-    const before = (await h.runner.readLog('ATT1', 'codex-run')).session;
+    const before = own(await h.runner.readLog('ATT1', 'codex-run')).session;
     await h.runner.send(h.att1, '还是太长'); await settle(500);
     const sent = h.log.codexProcs.at(-1).sent;
     facts.unreached = { before, thread: (sent.find(m => m.method === 'thread/resume') || { params: {} }).params.threadId,
-                        text: sent.find(m => m.method === 'turn/start').params.input[0].text.split('\n')[0] };
+                        text: sent.find(m => m.method === 'turn/start').params.input[0].text };
   }
   // the second try of a continuation goes on as the continuation
   {
@@ -2103,14 +2111,14 @@ SCENARIOS = r"""
     await h.runner.send(h.item1, '这篇怎么估计后验？'); await settle(300);
     const paused = { stop: p.view().round, queued: h.runner.queue.map(j => [j.resume || null, !!j.question, j.say]) };
     h.fire(); await settle(400);
-    const session = async () => (await h.runner.readLog('ATT1', p.view().shownConv)).session;
+    const session = async () => own(await h.runner.readLog('ATT1', p.view().shownConv), 'claude').session;
     const answered = { prompt: h.log.stdin[1], session: await session(), state: p.view().state };
     await h.runner.annotate([h.item1]); await settle(300);
     const annotating = { stop: p.view('annotate').round, queued: h.runner.queue.map(j => [j.resume || null, !!j.annotate]) };
     h.fire(); await settle(400);
     facts.askLimit = { paused, answered, annotating, annotatePrompt: h.log.stdin[2].split('\n')[0], continued: h.log.stdin[3],
                        resumes: h.log.calls.map(c => c.opts.arguments.includes('--resume')), session: await session(),
-                       annotSession: (await h.runner.readLog('ATT1', p.view('annotate').shownConv)).session };
+                       annotSession: own(await h.runner.readLog('ATT1', p.view('annotate').shownConv), 'claude').session };
   }
   // an update hands over a question not yet received with its words, and an annotation after a question as it stands:
   // before the agent answered with its whole task in a new session, after that with the plain continuation
@@ -2139,8 +2147,8 @@ SCENARIOS = r"""
                         annotateSent: await hand([ANSWERED, [init, 'WAIT']], annotate),
                         annotateAnswered: await hand([ANSWERED, [init, said('先读论文。'), 'WAIT']], annotate) };
   }
-  // New chat, and History: the agent's conversations of the paper by day, each opened, renamed or deleted; a deletion can
-  // be undone a moment, then the log goes; the words typed to each conversation stay with it
+  // New chat, and History: the paper's conversations by day, each opened, renamed or deleted; a deletion can be undone a
+  // moment, then the log goes; the words typed to each conversation stay with it
   {
     const reply = n => [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'Q' + n }), said('回答 ' + n),
                         ev({ type: 'result', subtype: 'success', is_error: false, result: '回答 ' + n, session_id: 'Q' + n })];
@@ -2155,7 +2163,7 @@ SCENARIOS = r"""
     typeIn('写给第一段对话的话');
     p.pane().newChat.click(); await settle(100);
     const fresh = { entries: p.view().flat, shownConv: p.view().shownConv, newChatDisabled: p.view().newChatDisabled, input: p.pane().input.value,
-                    placeholder: p.view().placeholder, current: JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/conversations/index.json']).current.claude };
+                    placeholder: p.view().placeholder, chat: JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/conversations/index.json']).chat };
     typeIn('第二个问题'); p.pane().send.click(); await settle(300);
     const second = p.view().shownConv;
     const resumedSecond = h.log.calls[1].opts.arguments.includes('--resume');
@@ -2205,7 +2213,7 @@ SCENARIOS = r"""
     const index = JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/conversations/index.json']);
     facts.conversations = { afterFire, first: !!first, before, fresh, second: second !== first, resumedSecond, rows, renamed, kept, opened, resumedFirst, followPrompt, deleting, undone,
                             deletedShown, removed: h.log.removed.map(r => r.split('/').pop() === first + '.jsonl'),
-                            files: convs(h).length, titles: Object.values(index.titles), current: index.current.claude,
+                            files: convs(h).length, titles: Object.values(index.titles), chat: index.chat,
                             busy: null };
     // while the paper's chat runs, its conversations stay as they are
     const g = harness({ gateFirst: true });
@@ -2334,8 +2342,8 @@ SCENARIOS = r"""
     h.runner.queue = [];
     h.runner.draining = false;
   }
-  // a switch of the agent in one section: every section shows its paper's conversation of that agent; New chat asked
-  // for while the paper runs changes nothing; a deletion not yet done when the plugin stops is done then
+  // a switch of the agent in one section: every section keeps its paper's conversation; New chat asked for while the
+  // paper runs changes nothing; a deletion not yet done when the plugin stops is done then
   {
     const conv2 = '/data/tmp/scholium/ATT2/conversations/claude-20261002-120000.jsonl';
     const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, gateFirst: true,
@@ -2352,20 +2360,22 @@ SCENARIOS = r"""
     p2.pane().input.type('丙');
     p2.pane().send.click(); await settle(100);
     const running = h.runner.job && h.runner.job.key;
+    const index2 = h.log.writes['/data/tmp/scholium/ATT2/conversations/index.json'];
     await h.runner.newChat(p2.pane());
-    const current = h.log.writes['/data/tmp/scholium/ATT2/conversations/index.json'] || 'not written';
+    const current = [JSON.parse(h.log.writes['/data/tmp/scholium/ATT2/conversations/index.json']).chat,
+                     h.log.writes['/data/tmp/scholium/ATT2/conversations/index.json'] === index2];
     h.log.calls[0].proc.kill(); await settle(200);
     // a deletion the plugin stops in the middle of
     p1.pane().agent.change('claude');
     await settle(100);
-    await h.runner.deleteConv(p1.pane(), { key: 'ATT1', id: 'claude-20261001-120000', agent: 'claude', path: CONV1, at: 0, title: '甲' });
+    await h.runner.deleteConv(p1.pane(), { key: 'ATT1', id: 'claude-20261001-120000', path: CONV1, at: 0, title: '甲' });
     const pending = [h.runner.deleting.size, CONV1 in h.log.writes];
     h.runner.stop();
     await settle(100);
     facts.otherSections = { before, switched, running, current, pending, removed: !(CONV1 in h.log.writes) };
   }
-  // switching the agent away and back: each agent goes on with its own conversation of the paper; a new chat asked for
-  // stays new
+  // switching the agent away and back: the paper's conversation stays, each agent going on with it; a new chat asked
+  // for stays new
   {
     const h = harness({ codex: { scripts: [CODEX_FOLLOW] } });
     h.runner.start('x');
@@ -2386,9 +2396,9 @@ SCENARIOS = r"""
     pane.agent.change('claude'); await settle(100);
     const claudeAfterNew = pane.shownConv;
     pane.agent.change('codex'); await settle(100);
-    facts.switchBack = { claude: !!claudeConv, onCodex, codex: !!codexConv && codexConv !== claudeConv,
-                         backClaude: [backClaude.conv === claudeConv, backClaude.runs], backCodex: backCodex === codexConv,
-                         claudeAfterNew: !!claudeConv && claudeAfterNew === claudeConv, newKept: pane.shownConv };
+    facts.switchBack = { claude: !!claudeConv, onCodex: onCodex === claudeConv, codex: codexConv === claudeConv,
+                         backClaude: [backClaude.conv === claudeConv, backClaude.runs], backCodex: backCodex === claudeConv,
+                         claudeAfterNew, newKept: pane.shownConv };
   }
   // the configuration of a write that succeeded is kept whatever the run's end; a write that was refused is not; a
   // relative configuration is the one in the output folder when it is there
@@ -2429,8 +2439,8 @@ SCENARIOS = r"""
     h.runner.queue = [];
     h.runner.draining = false;
   }
-  // the words typed to the new conversation of one agent stay with it when the agent changes; Undo after the deletion
-  // has begun does nothing; the ring takes the window of the latest run, and a session that is gone starts again
+  // the words typed to a new conversation stay in the box when the agent changes; Undo after the deletion has begun does
+  // nothing; the ring takes the window of the latest run, and a session that is gone starts again
   {
     const h = harness();
     h.runner.start('x');
@@ -2446,7 +2456,7 @@ SCENARIOS = r"""
     await g.pane(g.item1);
     await settle(40);
     const gp = [...g.runner.panes.values()][0];
-    await g.runner.deleteConv(gp, { key: 'ATT1', id: 'claude-20261001-120000', agent: 'claude', path: CONV1, at: 0, title: 'x' });
+    await g.runner.deleteConv(gp, { key: 'ATT1', id: 'claude-20261001-120000', path: CONV1, at: 0, title: 'x' });
     const finishing = g.runner.finishDelete(CONV1);
     const again = g.runner.finishDelete(CONV1);
     await g.runner.undoDelete(CONV1);
@@ -2583,9 +2593,9 @@ SCENARIOS = r"""
     const g = harness({ logs: { [CONV1]: SCRIPT[0] } });
     g.runner.start('x');
     await g.pane(g.item1); await settle(40);
-    await g.runner.chooseConv('ATT1', 'claude', null);
+    await g.runner.chooseConv('ATT1', null);
     facts.indexUnread = { kept: h.log.writes[index] === saved, shownConv: p.view().shownConv, tmp: h.log.tmpPaths,
-                          written: JSON.parse(g.log.writes[index]).current, tmpWritten: g.log.tmpPaths.includes(index + '.tmp') };
+                          written: JSON.parse(g.log.writes[index]).chat, tmpWritten: g.log.tmpPaths.includes(index + '.tmp') };
   }
   // Codex's server ending while it resumes the thread: the run fails, and the thread stays the conversation's
   {
@@ -2598,7 +2608,7 @@ SCENARIOS = r"""
     p.pane().input.type('再问一句');
     p.pane().send.click(); await settle(800);
     facts.codexExit = { gone: convLines(h).filter(l => l.subtype === 'gone').length, threads: h.log.threads,
-                        session: (await h.runner.readLog('ATT1', p.view().shownConv)).session, state: noteOf(h).split(' · ')[0],
+                        session: own(await h.runner.readLog('ATT1', p.view().shownConv), 'codex').session, state: noteOf(h).split(' · ')[0],
                         last: p.view().flat.filter(untimed).at(-1)[1] };
   }
   // the log of a conversation handed over without it is started again
@@ -2673,7 +2683,7 @@ CLAUDE = "/appdata/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 SUMMARY = "高亮 28 条（核心 12 条），页边批注 9 条，笔记《Deep latent》，无剩余警告。"
 BRIEF = "高亮 28 条（核心 12 条）\n页边批注 9 条\n无剩余警告"   # the summary in a notice
 ASK = "向这篇论文提问"   # the chat's placeholder while its conversation is a question's
-HISTORY_HEAD = "下面是这段对话之前的内容。原来的会话已经接不上了，这是 Zotero 里保存的记录："   # a new session's conversation, as text
+HISTORY_HEAD = "下面是这段对话之前的内容（Zotero 里保存的记录），每轮注明是谁回答的："   # a new session's conversation, as text
 HISTORY_END = "——以上是之前的对话，新消息如下——"
 CLOSING = "改了批注时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。"   # the end of a follow-up's prompt
 DONE_NOTICE = ["完成 · Ns"] + BRIEF.split("\n")   # a harness run's own time, read through run_time
@@ -2709,7 +2719,7 @@ TRANSCRIPT = [   # a run with its steps opened; the model is under it, with the 
     ["scholium-entry text", "Done.\n" + SUMMARY],
 ]
 ANNOTATE = ["scholium-entry prompt", "批注这篇"]   # the user's Annotate, as the transcript shows it
-ENDED = ["scholium-meta", "Opus 5.5 · HH:MM"]     # the model and when a run ended, under its answer
+ENDED = ["scholium-meta", "Claude Code · Opus 5.5 · HH:MM"]     # the model and when a run ended, under its answer
 
 
 def card(turns="26 轮 · 2,568k tokens", title="✓ 批注完成，没有剩余警告", nums=(0, 0, 0, 0, 0)):
@@ -2895,11 +2905,11 @@ def test_section_shows_the_transcript_like_claude_code(facts):
     assert re.fullmatch(r"/data/tmp/scholium/ATT1/conversations/annotate-claude-\d{8}-\d{6}\.jsonl", facts["revealed"][0])
     c = facts["firstConversation"]
     assert c["files"] == ["/data/tmp/scholium/ATT1/conversations/annotate-claude-TIME.jsonl"]
-    assert c["index"] == {"current": {}, "titles": {"annotate-claude-TIME": "批注这篇"}, "annotation": {"claude": "annotate-claude-TIME"}}
+    assert c["index"] == {"titles": {"annotate-claude-TIME": "批注这篇"}, "annotation": {"claude": "annotate-claude-TIME"}}
     assert c["applied"]["config"] == "/data/c.json" and c["applied"]["agent"] == "claude" and c["applied"]["conv"] in facts["revealed"][0]
     h = facts["history"]
     assert h["history"] is True and h["shownKey"] == "ATT1" and h["logDisabled"] is False
-    assert h["flat"] == TRANSCRIPT[:3] + [TRANSCRIPT[-1], ["scholium-meta", "Opus 5.5"]]
+    assert h["flat"] == TRANSCRIPT[:3] + [TRANSCRIPT[-1], ["scholium-meta", "Claude Code · Opus 5.5"]]
     assert h["state"] == "上次：" + DONE_STATE and h["stateKind"] == "scholium-state ok" and h["sendHidden"] is False
     assert facts["historyWithoutLastMessage"] == TRANSCRIPT[:3]
     assert facts["failedHistory"] == ["scholium-entry final error", "scholium.py: style_warnings remain重试"]
@@ -3187,7 +3197,7 @@ def test_the_agents_markdown_is_set_and_its_source_copied(facts):
          ["table", ["thead", ["tr", ["th[text-align: left]", "页"], ["th[text-align: right]", "条数"]]],
                    ["tbody", ["tr", ["td[text-align: left]", "5"], ["td[text-align: right]", "1"]]]]],
     ]
-    assert run_time(r["meta"]) == ["div.scholium-meta", ["span", "Opus 5.5 · HH:MM"], ["button.scholium-copy[title=复制这条回复（Markdown）]"]]
+    assert run_time(r["meta"]) == ["div.scholium-meta", ["span", "Claude Code · Opus 5.5 · HH:MM"], ["button.scholium-copy[title=复制这条回复（Markdown）]"]]
     assert r["copied"] == [r["reply"]]
     assert r["done"][:2] == ["scholium-copy done", "已复制"] and 1500 in r["done"][2]
     assert r["reset"] == ["scholium-copy", "复制这条回复（Markdown）"]
@@ -3430,7 +3440,7 @@ CODEX_TRANSCRIPT = [
     ["scholium-entry result", '⎿ {"applied": true}'],
     ["scholium-entry text", "Done.\n" + SUMMARY],
 ]
-CODEX_ENDED = ["scholium-meta", "GPT-6-Luna · HH:MM"]
+CODEX_ENDED = ["scholium-meta", "Codex · GPT-6-Luna · HH:MM"]
 CODEX_CARD = card("3 轮 · 2,647k tokens")
 
 
@@ -3519,11 +3529,12 @@ def test_an_unchanged_log_is_parsed_once(facts):
     c = facts["logCache"]
     assert c["first"] == c["again"] and c["unchanged"] == 0
     assert c["after"] == c["first"] + 1 and c["reparsed"] == 7
-    assert facts["quietTurn"] == [{"user": "只写入", "reply": "", "ended": "", "reached": True, "start": 0, "point": None, "done": True}], \
+    assert facts["quietTurn"] == [{"user": "只写入", "reply": "", "ended": "", "reached": True, "start": 0, "agent": "claude", "points": {"claude": None, "codex": None},
+                                  "sessions": {"claude": None, "codex": None}, "done": True}], \
         "a run that ended well without a word is not an unfinished one"
 
 
-def test_each_agent_has_its_own_conversations(facts):
+def test_the_agents_share_the_papers_conversations(facts):
     f = facts["codexFollowUp"]
     assert f["claudeCalls"] == 0
     assert f["methods"] == ["initialize", "initialized", "config/read", "plugin/installed", "thread/resume", "turn/start"]
@@ -3539,23 +3550,23 @@ def test_each_agent_has_its_own_conversations(facts):
     assert run_time(f["entries"]) == [["scholium-entry text", "Done.\n" + SUMMARY], CODEX_CARD, ["scholium-entry prompt", "第 5 页那条译文改短"],
                                       ["scholium-entry text", "改好了：第 5 页的译文已缩短。"], CODEX_ENDED]
     assert f["results"] == 2 and f["markers"] == ["批注这篇", "第 5 页那条译文改短"]
-    # Claude Code chosen: a new conversation of its own, given nothing of Codex's; Codex's log stays as it was. Codex's
-    # annotation session is no chat of Codex's
+    # Claude Code chosen: the chat keeps what it showed, none (Codex's annotation session is no chat); its question starts
+    # the paper's conversation, given nothing of the annotation session; Codex's log stays as it was
     c = facts["switchedToClaude"]
     s = c["switched"]
     assert s["entries"] == []
-    assert (s["shownConv"], s["newChatDisabled"], s["ring"], s["placeholder"]) == (None, True, None, ASK)
-    assert s["index"] == {}, "a switch chooses no conversation: Claude Code has none of this paper yet"
+    assert (s["unswitched"], s["shownConv"], s["newChatDisabled"], s["ring"], s["placeholder"]) == (None, None, True, None, ASK)
+    assert s["chosen"] is False, "a switch chooses no conversation: the paper has none yet"
     assert c["calls"] == 1 and c["resumed"] is False
     assert c["prompt"].startswith("使用 zotero-scholium 技能读下面这篇论文") and HISTORY_HEAD not in c["prompt"]
     assert "\n\n用户的问题：\n它和 FNO 比怎么样？\n\n" in c["prompt"]
-    assert c["conversations"] == ["annotate", "claude"] and c["codexKept"] is True
-    # Codex chosen again: it has no chat of this paper (its run was an annotation session), none in History; the
-    # annotation tab shows Codex's session, which goes on in its thread
+    assert c["conversations"] == ["annotate", "chat"] and c["codexKept"] is True
+    # Codex chosen again: the chat keeps the paper's conversation with Claude Code's turn, no note of another agent's,
+    # and History lists it; the annotation tab shows Codex's session, which goes on in its thread
     b = facts["switchedBack"]
-    assert b["again"] == {"entries": [["scholium-entry info", "这篇论文在 Claude Code 里有对话，把智能体换成 Claude Code 就能接着聊。"]],
-                          "shownConv": None}
-    assert b["rows"] == [["scholium-history-empty", "没有别的对话。"]]
+    assert b["again"] == {"same": True, "asked": True, "info": 0}
+    assert [r[0] for r in b["rows"]] == ["scholium-history-group", "scholium-history-row current"]
+    assert b["rows"][1][1].startswith("它和 FNO 比怎么样？")
     assert b["opened"] == {"shownConv": True, "historyRows": None, "entries": 16, "placeholder": "接着这次批注修改，例如：第 5 页那条译文改短"}
     assert b["methods"] == ["thread/resume"] and b["threadId"] == "T1" and b["skill"] is False, "Codex goes on in its own thread"
     assert b["text"].startswith("下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。") and b["text"].endswith("\n\n再短一点\n\n" + CLOSING)
@@ -3803,7 +3814,8 @@ def test_a_questions_follow_ups_failures_and_races(facts):
 
 def test_a_session_the_agent_no_longer_has_is_rebuilt_from_the_conversation(facts):
     question = "使用 zotero-scholium 技能读下面这篇论文（status 给出题录，extract 给出正文），回答用户在 Zotero 里提的问题。"
-    turn = "[第 1 轮]\n用户：批注这篇\n回答：Done.\n" + SUMMARY
+    turn = "[第 1 轮]\n用户：批注这篇\n回答（Codex）：Done.\n" + SUMMARY
+    claude_turn = turn.replace("（Codex）", "（Claude Code）")
     items = [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "批注这篇"}]},
              {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Done.\n" + SUMMARY}]}]
     for name in ("goneCodex", "goneCodexText"):
@@ -3815,7 +3827,7 @@ def test_a_session_the_agent_no_longer_has_is_rebuilt_from_the_conversation(fact
         assert c["items"] == items, name
         assert "\n\n用户的新消息：\nAdLN的作用是什么\n\n" in c["prompt"] and c["skill"] is True, name
         assert run_time(c["entries"][-3:]) == [["scholium-entry prompt", "AdLN的作用是什么"], ["scholium-entry text", "改好了：第 5 页的译文已缩短。"],
-                                               ["scholium-meta", "GPT-6-Astra · HH:MM"]], "nothing shows the session was rebuilt"
+                                               ["scholium-meta", "Codex · GPT-6-Astra · HH:MM"]], "nothing shows the session was rebuilt"
         assert c["state"].startswith("完成") and c["session"] == "T2" and c["conversations"] == 1, name
         assert c["placeholder"] == "接着这次批注修改，例如：第 5 页那条译文改短", name
     assert facts["goneCodex"]["prompt"].startswith(question), "the turns are items of the new thread, not text"
@@ -3823,11 +3835,11 @@ def test_a_session_the_agent_no_longer_has_is_rebuilt_from_the_conversation(fact
         "a Codex that does not take items gets them as text"
     k = facts["goneClaude"]
     assert k["resumes"] == [False, True, False]
-    assert k["prompt"].startswith(HISTORY_HEAD + "\n\n" + turn + "\n\n" + HISTORY_END + "\n\n" + question)
+    assert k["prompt"].startswith(HISTORY_HEAD + "\n\n" + claude_turn + "\n\n" + HISTORY_END + "\n\n" + question)
     assert "\n\n用户的新消息：\nAdLN的作用是什么\n\n" in k["prompt"]
     assert k["prompts"] == ["批注这篇", "AdLN的作用是什么"], "the words are not shown twice"
     # the follow-up's model and time (the annotation has its card)
-    assert run_time(k["metas"]) == ["Opus 5.5 · HH:MM"] and k["info"] == [] and k["finals"] == [], "Claude Code's own error for the missing session is not shown"
+    assert run_time(k["metas"]) == ["Claude Code · Opus 5.5 · HH:MM"] and k["info"] == [] and k["finals"] == [], "Claude Code's own error for the missing session is not shown"
     assert k["session"] == "Q2" and k["state"].startswith("完成") and k["conversations"] == 1
     assert k["errorsShown"] == {"last": ["scholium-card failed", "Credit balance is too low重试"], "notice": ["失败 · Credit balance is too low"]}
     s = facts["goneStopped"]
@@ -3844,16 +3856,18 @@ def test_a_session_the_agent_no_longer_has_is_rebuilt_from_the_conversation(fact
 def test_conversations_of_earlier_versions_and_the_history_given(facts):
     assert facts["codexQuestion"] == {"session": "T1", "question": True, "placeholder": ASK, "title": "这篇讲什么？"}
     g = facts["legacyGoesOn"]
-    assert g["claude"] == {"placeholder": ASK, "entries": [["scholium-entry info", "这篇论文在 Codex 里有对话，把智能体换成 Codex 就能接着聊。"]],
-                           "resumed": False, "conversations": 1,
-                           "prompt": "使用 zotero-scholium 技能读下面这篇论文（status 给出题录，extract 给出正文），回答用户在 Zotero 里提的问题。"}, \
-        "Claude Code starts its own conversation, given nothing of Codex's"
-    assert g["resume"] == "T1" and g["text"].startswith("下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。")
-    assert g["appended"] == ["run", "prompt", "time"] and g["conversations"] == 1, "Codex goes on in the earlier log itself"
+    assert g["claude"] == {"placeholder": "接着对话，例如：第 5 页那条译文改短一些", "shown": "codex-run", "info": 0,
+                           "resumed": False, "conversations": 0, "prompt": HISTORY_HEAD}, \
+        "Claude Code goes on with the conversation shown, given it as text"
+    assert g["resume"] == "T1" and g["text"].startswith("下面是这段对话里，你上次回答之后的 1 轮。这期间用户在 Zotero 里接着问，有的由别的智能体回答，每轮注明了回答者。它们属于这段对话，请接着它们回答：\n\n[第 2 轮]\n用户：AdLN的作用是什么\n回答（Claude Code）："), \
+        "Codex is given the turn of Claude Code's that its thread did not see"
+    assert "\n\n下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。" in g["text"]
+    assert g["agents"] == ["claude", "codex"] and g["conversations"] == 0, "both go on in the earlier log itself"
+    assert g["appended"] == ["run", "prompt", "time"] * 2
     h = facts["historyParts"]
     assert h["head"] == HISTORY_HEAD and h["end"] == HISTORY_END
     assert h["summary"] == "之前的 8 轮对话（摘录）：" and h["whole"] == ["[第 %d 轮]" % n for n in range(9, 14)]
-    assert h["excerpt"] == "用户：问题 1 " + "q" * 244 + "…\n回答：" + "x" * 399 + "…", "the user's words cut to 250, the answer to 400"
+    assert h["excerpt"] == "用户：问题 1 " + "q" * 244 + "…\n回答（Claude Code）：" + "x" * 399 + "…", "the user's words cut to 250, the answer to 400"
     assert h["excerpts"] == 11 and h["unfinished"] is True and h["noText"] is True
     assert h["few"] == [HISTORY_HEAD, "[第 1 轮]", "[第 2 轮]", HISTORY_END] and h["none"] == "" and h["noItems"] == []
     assert [i[:2] for i in h["items"]] == [["user", "input_text"], ["assistant", "output_text"]] * 6, "the excerpts, then five exchanges"
@@ -3885,14 +3899,16 @@ def test_new_and_resumed_sessions_know_the_annotations_and_turns(facts):
     assert a["gone"] == ["这篇论文现在没有本工具的批注（可能已在 Zotero 里删除）。"]
     assert a["commands"] == ["D:\\x y\\c.json", "c.json", None, "/abs/c.json"]
     assert facts["unreachedClaude"] == {"session": None, "resumed": False, "conversations": 1,
-                                        "prompt": ["[第 1 轮]\n用户：它和 FNO 比怎么样？\n回答：（没有完成：Invalid API key）"]}, \
+                                        "prompt": ["[第 1 轮]\n用户：它和 FNO 比怎么样？\n回答（Claude Code）：（没有完成：Invalid API key）"]}, \
         "a session that never had the message is not the conversation's"
     assert facts["legacyTwoTurns"] == "下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。" \
                                       "只是提问就直接回答；要改批注时按技能的流程修改配置，再写入 Zotero。", "both turns of the earlier log reached Codex"
     assert facts["handedInterrupted"] == [[True, True]]
     u = facts["unreached"]
     assert u["before"] == "T1" and u["thread"] == "T1", "a thread that never had the message is not Codex's session"
-    assert u["text"].startswith("下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。")
+    assert u["text"].startswith("下面是这段对话里，你上次回答之后的 1 轮。这期间用户在 Zotero 里接着问，有的由别的智能体回答，每轮注明了回答者。它们属于这段对话，请接着它们回答：\n\n[第 2 轮]\n用户：再短一点\n回答（Codex）：（没有完成："), \
+        "the turn that never reached the thread is given again"
+    assert "\n\n下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。" in u["text"]
     r = facts["retriedContinuation"]
     assert r["calls"] == 3 and r["prompts"][1:] == ["额度已恢复。请从中断的地方继续完成上面的任务，规则不变。"] * 2 and r["resumes"] == [False, True, True]
     i = facts["interruptedTurn"]
@@ -3908,7 +3924,7 @@ def test_new_chat_and_history(facts):
     c = facts["conversations"]
     new = []
     assert c["first"] is True and c["before"] == {"newChatDisabled": False, "historyDisabled": False}
-    assert c["fresh"] == {"entries": new, "shownConv": None, "newChatDisabled": True, "input": "", "placeholder": ASK, "current": None}
+    assert c["fresh"] == {"entries": new, "shownConv": None, "newChatDisabled": True, "input": "", "placeholder": ASK, "chat": None}
     assert c["second"] is True and c["resumedSecond"] is False, "the next message starts a conversation of its own"
     rows = [[cls, re.sub(r"\d{2}:\d{2}", "HH:MM", text)] for cls, text in c["rows"]]
     assert rows[0] == ["scholium-history-group", "今天"] and rows[1] == ["scholium-history-row current", "第二个问题HH:MM✎✕"]
@@ -3918,7 +3934,7 @@ def test_new_chat_and_history(facts):
     assert [k[:5] for k in c["kept"]] == ["第二个问题", c["kept"][1][:5], "很早的问题"] and c["kept"][1].startswith("估计方法"), "Esc keeps the old title"
     o = c["opened"]
     assert o["shownConv"] is True and o["input"] == "写给第一段对话的话" and o["historyOpen"] is False, "the words typed to it come back with it"
-    assert run_time(o["entries"]) == ["第一个问题编辑", "回答 1", "Opus 5.5 · HH:MM"], "the question with its ✎"
+    assert run_time(o["entries"]) == ["第一个问题编辑", "回答 1", "Claude Code · Opus 5.5 · HH:MM"], "the question with its ✎"
     assert c["resumedFirst"] == "Q1", "an earlier conversation goes on in its session"
     assert c["afterFire"] == 0, "a conversation gone for good leaves the layer's rows"
     assert c["followPrompt"] == ("下面是用户在 Zotero 里针对这篇论文发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
@@ -3930,7 +3946,7 @@ def test_new_chat_and_history(facts):
     assert c["undone"] == {"rows": 3, "timers": []}
     assert c["deletedShown"] == {"entries": new, "shownConv": None, "back": True}, \
         "the conversation shown is followed by a new one, and comes back with Undo"
-    assert c["removed"] == [True] and c["files"] == 2 and c["titles"] == ["第二个问题"] and c["current"] is None
+    assert c["removed"] == [True] and c["files"] == 2 and c["titles"] == ["第二个问题"] and c["chat"] is None
     assert c["busy"] == {"newChat": True, "history": True, "agent": True}, "the conversations stay as they are while the paper runs"
     a = facts["archived"]
     assert a["queued"] == '["T1"]' and a["archived"] == ["T1"] and a["left"] == ""
@@ -3950,21 +3966,20 @@ def test_conversations_of_a_paper_with_two_pdfs_and_hand_overs(facts):
         "an earlier version's paused question has its turn in that version's log; its annotation not begun starts a session of its own"
 
 
-def test_a_switch_of_the_agent_shows_each_papers_conversation(facts):
+def test_a_switch_of_the_agent_keeps_each_papers_conversation(facts):
     o = facts["otherSections"]
-    assert o["before"] == [None, None] and o["switched"] == ["claude-20261001-120000", "claude-20261002-120000"], \
-        "every section, the one switched too, shows its paper's conversation of that agent"
-    assert o["running"] == "ATT2" and o["current"] == "not written", "New chat while the paper runs changes nothing"
+    assert o["before"] == o["switched"] == ["claude-20261001-120000", "claude-20261002-120000"], \
+        "every section, the one switched too, keeps its paper's conversation"
+    assert o["running"] == "ATT2" and o["current"] == ["claude-20261002-120000", True], "New chat while the paper runs changes nothing"
     assert o["pending"] == [1, True] and o["removed"] is True, "a deletion not done yet is done when the plugin stops"
 
 
-def test_switching_back_goes_on_with_the_agents_conversation(facts):
+def test_switching_back_goes_on_with_the_same_conversation(facts):
     s = facts["switchBack"]
-    assert s["claude"] is True and s["onCodex"] is None and s["codex"] is True, "Codex had none of this paper yet"
-    assert s["backClaude"] == [True, 1], "back to Claude Code: its conversation, with its answer"
-    assert s["backCodex"] is True, "back to Codex: its own conversation"
-    assert s["claudeAfterNew"] is True, "Codex's new chat leaves Claude Code's conversation shown for Claude Code"
-    assert s["newKept"] is None, "a new chat asked for stays new across a switch"
+    assert s["claude"] is True and s["onCodex"] is True and s["codex"] is True, "Codex goes on with the conversation shown"
+    assert s["backClaude"] == [True, 2], "back to Claude Code: the same conversation, with both answers"
+    assert s["backCodex"] is True, "back to Codex: the same conversation"
+    assert s["claudeAfterNew"] is None and s["newKept"] is None, "a new chat asked for stays new across a switch"
 
 
 def test_review_cases_of_the_conversations(facts):
@@ -3974,9 +3989,9 @@ def test_review_cases_of_the_conversations(facts):
     assert k["codexFailed"] is False, "nor does a Codex write whose command failed"
     assert facts["legacyFollowUp"] == [["claude-run", 2, True, "S1"]], "an earlier version's follow-up: the annotations counted, a question's conversation"
     e = facts["reviewEdges"]
-    assert e["codexBox"] == "" and e["claudeBox"] == "写给 Claude 的话", "words stay with the conversation they were typed to"
+    assert e["codexBox"] == e["claudeBox"] == "写给 Claude 的话", "words stay with the conversation they were typed to, whichever agent"
     assert e["undoLate"] == [False, 0, None, True, 1], "Undo after the deletion began does nothing; the log goes once"
-    assert e["context"] == [{"used": 5, "window": 200000}, {"used": 0, "window": 1000000}, {"used": 5, "window": 1000000}]
+    assert e["context"] == [{"used": 5, "window": 200000}, {"used": 5, "window": 1000000}, {"used": 5, "window": 1000000}]
 
 
 def test_the_context_ring_follows_the_session(facts):
@@ -4094,7 +4109,7 @@ def test_a_paper_in_the_trash_is_left_out(facts):
 def test_an_unreadable_index_is_not_written_over(facts):
     i = facts["indexUnread"]
     assert i["kept"] is True and i["shownConv"] is None and i["tmp"] == []
-    assert i["written"] == {"claude": None} and i["tmpWritten"] is True, "a readable one is written through a temporary file"
+    assert i["written"] is None and i["tmpWritten"] is True, "a readable one is written through a temporary file"
 
 
 def test_a_codex_server_that_ends_does_not_lose_the_thread(facts):

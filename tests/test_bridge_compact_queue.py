@@ -50,7 +50,7 @@ SCENARIOS = r"""
       during, after: pane.list.children.at(-1).textContent, runs: pane.list.children.length,
       hidden: !/being continued|Compacted/.test(pane.list.textContent), ring: pane.ring.title,
       runLine: lines.filter(l => l.subtype === 'run').at(-1), marks: lines.filter(l => l.type === 'scholium' && /compact/.test(l.subtype)),
-      turns: log.turns.map(t => [t.user, t.reply]), session: log.session,
+      turns: log.turns.map(t => [t.user, t.reply]), session: own(log, 'claude').session,
     };
   }
   // compaction the agent does on its own in a run: a line in the run, and the ring follows
@@ -154,7 +154,7 @@ SCENARIOS = r"""
     const h = harness({ logs: { [CONV1]: log } });
     h.runner.start('x');
     const parsed = await h.runner.readLog('ATT1', 'claude-20261001-120000');
-    facts.compactedLine = parsed.context.used;
+    facts.compactedLine = own(parsed).context.used;
   }
   // the run that goes on after a compaction goes on with the last turn, not with the compaction
   {
@@ -177,7 +177,7 @@ SCENARIOS = r"""
                        ev({ type: 'result', subtype: 'success', is_error: false, result: '', num_turns: 0, session_id: 'OLD' })];
     const h = harness({ script: compacted, logs: { [DIR + OLD + '.jsonl']: logOf('claude', 'OLD', '旧'), [DIR + NEW + '.jsonl']: logOf('claude', 'NEW', '新'),
                                 [DIR + BARE + '.jsonl']: logOf('claude', null, '无'), [DIR + CODEX + '.jsonl']: logOf('codex', 'T1', '码'),
-                                [DIR + 'index.json']: JSON.stringify({ current: { claude: NEW }, titles: {}, annotation: {} }) } });
+                                [DIR + 'index.json']: JSON.stringify({ chat: NEW, titles: {}, annotation: {} }) } });
     h.runner.start('x');
     const bare = await h.runner.send(h.item1, '', { compact: true, conv: BARE, kind: 'chat' });
     const callsBefore = h.log.calls.length;
@@ -225,7 +225,7 @@ SCENARIOS = r"""
       await h.runner.send(h.item1, '', { compact: true, conv: 'claude-20261001-120000', kind: 'chat' }); await settle(300);
       const parsed = await h.runner.readLog('ATT1', 'claude-20261001-120000');
       const runs = convLines(h).filter(l => l.subtype === 'run');
-      facts.afterCompactionLog = { result: parsed.result && parsed.result.result, lastAtIsTurns: parsed.lastAt === runs[0].at, runs: runs.length };
+      facts.afterCompactionLog = { result: parsed.result && parsed.result.result, lastAtIsTurns: own(parsed).lastAt === runs[0].at, runs: runs.length };
     }
     // a compaction sent on the annotation tab, the chosen agent being another one than the session's
     {
@@ -302,7 +302,7 @@ SCENARIOS = r"""
     await settle(40);
     const pane = p.pane();
     pane.input.type('问题一'); pane.send.click(); await settle(500);
-    const before = (await h.runner.readLog('ATT1', pane.shownConv)).context;
+    const before = own(await h.runner.readLog('ATT1', pane.shownConv), 'codex').context;
     const conv = pane.shownConv;
     h.focus(false); const ok = await h.runner.compactFromPane(pane, ''); await settle(500);
     const proc = h.log.codexProcs.at(-1);
@@ -771,8 +771,8 @@ SCENARIOS = r"""
     pane.send.click(); await settle(300);                                     // ■
     await h.runner.newChat(pane); await settle(20);
     // the new chat shows none of the old conversation's rows, nor its held line
-    const fresh = { shown: pane.shownConv, current: (await h.runner.index('ATT1')).current.claude, rows: pane.queueBox.children.length, hidden: pane.queueBox.hidden };
-    await h.runner.openConv(pane, { key: 'ATT1', agent: 'claude', id: first }); await settle(20);   // back from History
+    const fresh = { shown: pane.shownConv, chat: (await h.runner.index('ATT1')).chat, rows: pane.queueBox.children.length, hidden: pane.queueBox.hidden };
+    await h.runner.openConv(pane, { key: 'ATT1', id: first }); await settle(20);   // back from History
     const back = pane.queueBox.children.map(c => c.className);
     pane.queueBox.children[0].children[1].click();                            // 继续
     await pump(3000); await settle(300);
@@ -824,7 +824,7 @@ SCENARIOS = r"""
     inB.cross = h.runner.queue.filter(j => j.qid).map(j => j.say);
     resume(); await settle(500);                                             // 继续, in B: B's row only
     const afterB = { held: h.runner.heldQueues.size, calls: h.log.stdin.length, last: (h.log.stdin.at(-1) || '').includes('B追问') };
-    await h.runner.openConv(pane, { key: 'ATT1', agent: 'claude', id: convA }); await settle(20);
+    await h.runner.openConv(pane, { key: 'ATT1', id: convA }); await settle(20);
     const inA = { rows: texts(), line: line() };
     resume(); await settle(500);                                             // 继续, in A
     const prompts = path => (h.log.writes[path] || '').trim().split('\n').filter(Boolean).map(l => JSON.parse(l))
@@ -1166,7 +1166,7 @@ SCENARIOS = r"""
   // a deleted conversation's queued rows go with it once it can no longer be brought back, and an update does not hand
   // them over
   {
-    const conv = h => ({ key: 'ATT1', id: h.pane0.shownConv, agent: 'claude', title: '问题一', at: 0,
+    const conv = h => ({ key: 'ATT1', id: h.pane0.shownConv, title: '问题一', at: 0,
                          path: '/data/tmp/scholium/ATT1/conversations/' + h.pane0.shownConv + '.jsonl' });
     const setUp = async () => {
       const h = harness({ scripts: [[qInit, said('答1'), 'WAIT']] });
@@ -1228,7 +1228,7 @@ SCENARIOS = r"""
     const own = h.runner.queue.filter(j => j.qid).map(j => [j.kind, j.own]);
     h.att1.getAnnotations = () => [h.ann('A1', 'highlight', '#ff6666'), h.ann('A2', 'highlight', '#ffd400')];
     h.log.release(); await settle(600);
-    facts.queueOwn = { own, told: /编辑写入它们的那份配置/.test(h.log.stdin[1] || ''), chat: (await h.runner.index('ATT1')).current.claude || null };
+    facts.queueOwn = { own, told: /编辑写入它们的那份配置/.test(h.log.stdin[1] || ''), chat: (await h.runner.index('ATT1')).chat || null };
   }
   // ---- final fixes ----
   // the agent's process being created, with a stop pressed meanwhile (pressed: what the run's process is created with)
@@ -1698,7 +1698,7 @@ def test_follow_ups_go_to_the_new_conversation_of_their_question(facts):
     for when, conv in [("before", [None]), ("after", [])]:
         f = facts["queuePointed"][when]
         assert f["conv"] == conv and f["first"] is True, when
-        assert f["fresh"] == {"shown": None, "current": None, "rows": 0, "hidden": True}, when
+        assert f["fresh"] == {"shown": None, "chat": None, "rows": 0, "hidden": True}, when
         assert f["back"] == ["scholium-queue-held", "scholium-queued"], when
         assert f["logs"] == 1 and f["prompts"] == ["问题一", "追问二"] and f["shown"] is True, when
 
@@ -1721,7 +1721,7 @@ def test_an_update_hands_the_queue_over(facts):
     f = facts["queueHandover"]
     assert f["busyAsk"] is False, "a message while the paper runs joins the held queue"
     assert f["carried"] == [["", None, False], ["追问二", "1", False], ["追问三", "2", True], ["再一条", "3", False]]
-    assert len(f["held"]) == 1 and re.fullmatch(r"ATT1/chat/claude-\d{8}-\d{6}", f["held"][0]), "a conversation's queue"
+    assert len(f["held"]) == 1 and re.fullmatch(r"ATT1/chat/chat-\d{8}-\d{6}", f["held"][0]), "a conversation's queue"
     assert f["restored"] == [["追问二", "1", False], ["追问三", "2", True], ["再一条", "3", False]]
     assert f["heldAfter"] == f["held"] and f["qseq"] == 3
     assert f["rows"] == ["scholium-queue-held", "scholium-queued", "scholium-queued failed", "scholium-queued"] and f["calls"] == 1
@@ -1819,7 +1819,7 @@ def test_a_deleted_conversation_takes_its_rows(facts):
 def test_a_held_row_keeps_its_hold_when_its_conversation_is_made(facts):
     f = facts["queueHeldPointed"]
     assert f["stopped"] == {"calls": 0, "held": ["ATT1/chat/"]}, "the stop ends the run before its process and its conversation"
-    assert f["calls"] == 1 and len(f["held"]) == 1 and re.fullmatch(r"ATT1/chat/claude-\d{8}-\d{6}", f["held"][0])
+    assert f["calls"] == 1 and len(f["held"]) == 1 and re.fullmatch(r"ATT1/chat/chat-\d{8}-\d{6}", f["held"][0])
     assert f["rows"] == ["scholium-queue-held", "scholium-queued"]
 
 

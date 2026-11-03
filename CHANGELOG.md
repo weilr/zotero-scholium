@@ -6,10 +6,11 @@
 
 - Saved prompts above the Chat tab's box (preference `savedPrompts`), sent with a click and edited,
   deleted (with **Undo**) and reordered in the row.
-- Editing an earlier question of the Chat tab (✎ on hover) asks it again from the conversation before it,
-  replacing what followed, with **Undo** for six seconds (Claude Code `--resume-session-at` with `--fork-session`;
-  Codex `thread/fork`; a new session given the conversation where that is refused or there is no point to go back
-  to).
+- Editing an earlier question of the Chat tab (✎ on hover) asks it again, with the agent chosen, from the conversation
+  before it, replacing what followed, with **Undo** for six seconds (Claude Code `--resume-session-at` with
+  `--fork-session`; Codex `thread/fork`; a new session given the conversation where that is refused or there is no
+  point to go back to); the Codex threads only the replaced part used are archived at the next Codex run once the six
+  seconds end or the plugin stops, on **Undo** those only the new part used.
 - Scholium section: two tabs, **Chat** and **Annotations**. A settings chip (model and effort) opens a
   layer with the three choices; ⋯ holds **Show log**, **Personal profile ↗**, **Settings…** and, on the
   Annotations tab, **Delete annotations**.
@@ -22,11 +23,11 @@
   until **Resume**; a queued message that could not be sent is marked and offers **Retry**. A stop also ends a run
   that is still starting; words its conversation does not have yet go back to the box, a queued message to its
   queue.
-- A context ring beside the send button: the share of the context window the conversation's session took up in
-  its latest request, with a layer of input, cache and output and **Compact this conversation's context**;
-  `/compact` in the box does the same, and stays in the box while the paper cannot compact. Compactions, also the
-  agents' own, show in the transcript with the sizes before and after. A compaction under way when the plugin is
-  updated is handed over and runs again.
+- A context ring beside the send button: the share of the context window the chosen agent's session of the
+  conversation took up in its latest request, with a layer of input, cache and output and **Compact this
+  conversation's context**; `/compact` in the box does the same, and stays in the box while the paper cannot compact.
+  Compactions, also the agents' own, show in the transcript with the sizes before and after. A compaction under way
+  when the plugin is updated is handed over and runs again.
 - Annotation sessions: each **Annotate** starts a session of its own (`annotate-<agent>-<time>.jsonl`, the
   index's `annotation`), shown on the Annotations tab with the six steps and their times, then a card with the
   highlights (core), margin notes, sticky notes and reading notes counted in Zotero, the warnings left, the turns
@@ -37,15 +38,22 @@
 - Sentence citations: answers cite the paper's sentences as `[#n]`, shown as chips with the page and, on hover,
   the sentence; **Locate ↗** opens the PDF, goes to the sentence and highlights it briefly; a sentence without a
   position in `sentences.json` opens its page.
-- A failed question offers **Retry**; Esc twice on the same run stops it.
-- Scholium section: as in llm-for-zotero, each agent has its own conversations of a paper. **New chat** starts
-  one, **History** lists them by day to open, rename or delete (with **Undo**; a deleted Codex conversation's thread
-  is archived), and switching the agent shows the conversation that agent goes on with. Messages go on in the
-  conversation shown. Each conversation has its log in `<out dir>/conversations/`; `claude-run.jsonl` and
-  `codex-run.jsonl` of earlier versions are each agent's first conversation.
+- A failed question offers **Retry** with the agent chosen; Esc twice on the same run stops it. A failed queued message
+  retried after a newer message went first is asked again as a new question at the end; the failed one stays in the
+  conversation with its failure.
+- Scholium section: Claude Code and Codex share a paper's conversations. **New chat** starts one, **History** lists
+  them by day to open, rename or delete (with **Undo**; every Codex thread the conversation used is archived at the
+  next Codex run once the six seconds end or the plugin stops before then). Switching the agent keeps the conversation
+  shown, and the agent chosen answers the next message: in its own session of the conversation, given the turns it
+  has not seen (the text says the user went on asking in Zotero, some of it answered by another agent, each answer
+  labelled), or in a new one given the conversation as text, each answer labelled with its agent (Codex as items of
+  its new thread when all the answers are its own). Under each answer, the agent, the model and the time. Each
+  conversation has its log in `<out dir>/conversations/`; the conversations of earlier versions (`claude-run.jsonl`,
+  `codex-run.jsonl`) are in the list.
 - Scholium section: a new session is told which configuration, agent and time wrote the paper's annotations, and a
-  session that goes on is told when another conversation rewrote them since, or that they are gone. The section
-  shows when each run ended.
+  session that goes on is told when they were rewritten since, in this conversation or another, or that they are
+  gone; an agent whose own rewrite in this conversation was cut away by an edit is told they were rewritten since its
+  last turn. The section shows when each run ended.
 - The plugin's apply returns `removeError` when the earlier notes cannot be moved to the trash after the new items
   are written.
 - `sentences.json` gives each sentence's position (`rects`).
@@ -61,9 +69,9 @@
 - Token counts are written in k with thousands separators (`2,568k tokens`), in Chinese too.
 - When an agent's program is not found, the message points to Zotero Settings → Scholium.
 - Scholium section: when the agent no longer has a conversation's session (deleted in the Codex app, or cleaned up
-  by Claude Code), a new session is given the conversation, Codex as items of its new thread and Claude Code as text,
-  beyond ten exchanges the earlier ones as excerpts; a continuation after a limit or an update ends with that
-  reason. A failed Claude Code run without text shows its errors.
+  by Claude Code), a new session is given the conversation, as text or, for Codex when all the answers are its own, as
+  items of its new thread, beyond ten exchanges the earlier ones as excerpts; a continuation after a limit or an
+  update ends with that reason. A failed Claude Code run without text shows its errors.
 - Scholium section: a conversation's log leaves out the image data in a Claude Code tool's result, Claude Code's own
   copy of the result and Codex's turn diff. A line the log file does not take at once is written with the next ones,
   and the run goes on.

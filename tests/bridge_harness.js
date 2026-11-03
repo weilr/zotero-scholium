@@ -284,7 +284,7 @@ const CONTENT = require('node:path').join(require('node:path').dirname(process.a
 function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, exitCode = 0, script = null, claudeExists = true, gateFirst = false,
                    home = 'dirsvc', eraseFails = false, logs = {}, models = 'ok', claudeAt = CLAUDE, scripts = [], readFails = false,
                    writeFails = false, codex = {}, logTimes = {}, notes = [], secondPdf = false, failLogWrites = null, stdinFails = false, holdDirs = false,
-                   unreadable = [] } = {}) {
+                   unreadable = [], unremovable = [] } = {}) {
   const log = { calls: [], stdin: [], notices: [], alerts: [], confirms: [], kills: 0, menus: [], unregistered: [], listeners: [],
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
                 ftl: [], tabs: [], selected: [], opened: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
@@ -592,7 +592,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
         if (!inside.length) throw Error('NotFoundError');
         return inside;
       },
-      remove: async p => { log.removed.push(p); delete log.writes[p]; },
+      remove: async p => { if (unremovable.includes(p)) throw Error('NotAllowedError'); log.removed.push(p); delete log.writes[p]; },
       stat: async p => { if (!(p in log.writes)) throw Error('NotFoundError'); return { lastModified: log.mtimes[p] || 0, size: log.writes[p].length }; },
       readUTF8: async p => {
         if (readFails && p === PROFILE_PATH) throw Error('NotReadableError');
@@ -711,6 +711,12 @@ const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descripti
 const convs = (h, key = 'ATT1') => Object.keys(h.log.writes).filter(p => p.startsWith(`/data/tmp/scholium/${key}/conversations/`) && p.endsWith('.jsonl'));
 const convText = (h, key = 'ATT1', i = -1) => h.log.writes[convs(h, key).at(i)] || '';
 const convLines = (h, key = 'ATT1', i = -1) => convText(h, key, i).trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
+// an agent's own session of a conversation read from its log: the agent of the conversation's id
+const own = (log, agent) => {
+  if (!log) return log;
+  if (!agent && /^chat-/.test(log.id)) throw new Error('own(): a chat-* conversation needs an explicit agent');
+  return log.agents[agent || (/^(?:annotate-)?codex-/.test(log.id) ? 'codex' : 'claude')];
+};
 const ours = h => Object.fromEntries(Object.entries(h.log.writes).filter(([p]) => p.startsWith('/data/tmp/scholium/')));
 const CONV1 = '/data/tmp/scholium/ATT1/conversations/claude-20261001-120000.jsonl';   // a conversation logged before
 // the outcome of a paper's latest run that ended, of either kind (the chat's state line shows a chat's)
