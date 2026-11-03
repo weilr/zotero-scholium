@@ -621,6 +621,64 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
     facts.oldRunLine = { starts, first: old(1).length, runs: lines.filter(l => l.subtype === 'run').length, last: lines.at(-1).subtype,
                          kept: written.startsWith(old(1)) };
   }
+  // a box being edited stays, with its words and its cursor, when its conversation is drawn again: an annotation of the
+  // paper ends, the list or one run is drawn anew; ✕ then puts back the question as drawn last. It closes once its
+  // question is gone: other words at its place, or another conversation shown
+  {
+    const h = harness({ logs: { [CLAUDE_CONV]: CLAUDE3 }, scripts: [SCRIPT.concat([LAST, RESULT]), answered('S2', '回答四')] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(60);
+    const pane = p.pane();
+    const said = i => pane.list.children[i].children[0];
+    const editOf = i => said(i).children.find(c => /edit-prompt/.test(c.className || ''));
+    const boxes = () => pane.list.children.filter(r => r.children.some(c => /scholium-edit/.test(c.className || ''))).length;
+    const first = said(1);
+    editOf(1).click();
+    const box = said(1), input = box.children.find(c => c.tagName === 'textarea');
+    input.type('问题二，改了一半');
+    await h.runner.annotate([h.item1], { confirmed: true });
+    await settle(600);
+    const annotated = { calls: h.log.calls.length, job: !!h.runner.job, same: said(1) === box, value: input.value,
+                        turn: pane.editing ? pane.editing.turn : null, ok: !box.children.at(-1).children[1].disabled };
+    // drawn anew while the box has the focus: the cursor goes back where it was
+    const ranges = [];
+    input.focused = false;
+    input.selectionStart = 3; input.selectionEnd = 5;
+    input.setSelectionRange = (a, b) => ranges.push([a, b]);
+    pane.doc.activeElement = input;
+    pane.list.scrollTop = 0;
+    h.runner.renderTranscript(pane, pane.entries, false);
+    const redrawn = { same: said(1) === box, value: input.value, focused: !!input.focused, ranges: ranges.slice(), boxes: boxes(),
+                      scroll: pane.list.scrollTop };
+    h.runner.refreshRun(pane, 1);
+    const refreshed = { same: said(1) === box, runs: pane.list.children.length, boxes: boxes(), ranges: ranges.length };
+    // ✕: the question as drawn last, with its ✎
+    box.children.at(-1).children[0].click();
+    const closed = { cls: said(1).className, fresh: said(1) !== first, edit: !!editOf(1), editing: !!pane.editing, boxes: boxes() };
+    // a message of the conversation runs and ends meanwhile: the box stays with its words
+    editOf(1).click();
+    const again = said(1);
+    again.children.find(c => c.tagName === 'textarea').type('边跑边改');
+    pane.input.type('问题四'); pane.send.click(); await settle(400);
+    const followed = { calls: h.log.calls.length, job: !!h.runner.job, runs: pane.list.children.length, same: said(1) === again,
+                       value: again.children.find(c => c.tagName === 'textarea').value, boxes: boxes() };
+    again.children.at(-1).children[0].click();
+    // other words at its place: the box closes
+    editOf(1).click();
+    said(1).children.find(c => c.tagName === 'textarea').type('又改');
+    const own = pane.entries;
+    pane.list.scrollTop = 0;
+    h.runner.renderTranscript(pane, own.map(e => (e.kind === 'prompt' && e.turn === 1 ? Object.assign({}, e, { text: '别的问题' }) : e)), false);
+    const otherWords = { editing: !!pane.editing, cls: said(1).className, boxes: boxes(),
+                         bottom: pane.list.scrollTop > 0 && pane.list.scrollTop === pane.list.scrollHeight };
+    // another conversation shown: the box closes
+    h.runner.renderTranscript(pane, own, false);
+    editOf(1).click();
+    pane.newChat.click(); await settle(100);
+    const otherConv = { editing: !!pane.editing, shownConv: pane.shownConv, runs: pane.list.children.length };
+    facts.editRedrawn = { annotated, redrawn, refreshed, closed, followed, otherWords, otherConv };
+  }
   process.stdout.write(JSON.stringify(facts));
 })().catch(e => { process.stderr.write(String(e.stack || e)); process.exit(1); });
 """
@@ -851,3 +909,19 @@ def test_an_old_run_line_without_words_goes_with_the_cut(facts):
     o = facts["oldRunLine"]
     assert o["starts"] == [0, o["first"]]
     assert o["kept"] is True and o["runs"] == 1 and o["last"] == "rewind"
+
+
+def test_a_box_being_edited_stays_when_its_conversation_is_drawn_again(facts):
+    r = facts["editRedrawn"]
+    assert r["annotated"] == {"calls": 1, "job": False, "same": True, "value": "问题二，改了一半", "turn": 1, "ok": True}, \
+        "an annotation of the paper ending leaves the box with its words"
+    assert r["redrawn"] == {"same": True, "value": "问题二，改了一半", "focused": True, "ranges": [[3, 5]], "boxes": 1, "scroll": 0}, \
+        "the list drawn anew: the box keeps its place, its words, the focus and the cursor; the list does not move"
+    assert r["refreshed"] == {"same": True, "runs": 3, "boxes": 1, "ranges": 2}, "one run drawn again keeps it too"
+    assert r["closed"] == {"cls": "scholium-entry prompt editable", "fresh": True, "edit": True, "editing": False, "boxes": 0}, \
+        "✕ puts back the question as drawn last"
+    assert r["followed"] == {"calls": 2, "job": False, "runs": 4, "same": True, "value": "边跑边改", "boxes": 1}, \
+        "a message of the conversation that runs and ends meanwhile leaves the box"
+    assert r["otherWords"] == {"editing": False, "cls": "scholium-entry prompt editable", "boxes": 0, "bottom": True}, \
+        "other words at its place: it closes, and the list goes to its end"
+    assert r["otherConv"] == {"editing": False, "shownConv": None, "runs": 0}, "another conversation shown: it closes"

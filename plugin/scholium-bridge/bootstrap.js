@@ -2244,8 +2244,7 @@ var ScholiumRunner = {
     };
     [pane.tabChat, pane.tabChatDot] = tab("chat", this.text("tabChat"));
     [pane.tabAnnotate, pane.tabAnnotateDot] = tab("annotate", this.text("tabAnnotate"));
-    pane.newChat = this.paneButton(doc, "＋", () => { this.newChat(pane).catch(e => this.log("new chat failed: " + e)); }, "quiet icon");
-    pane.newChat.title = this.text("newChat");
+    pane.newChat = this.iconButton(doc, "add", this.text("newChat"), () => { this.newChat(pane).catch(e => this.log("new chat failed: " + e)); });
     pane.historyButton = this.paneButton(doc, "🕘", () => { this.toggleHistory(pane).catch(e => this.log("history failed: " + e)); }, "quiet icon");
     pane.historyButton.title = this.text("historyButton");
     pane.chip = doc.createElement("button");
@@ -3146,13 +3145,7 @@ var ScholiumRunner = {
     if (sending) nodes.push(this.queuedRow(pane, sending, { sending: true }));
     for (const j of jobs) nodes.push(this.queuedRow(pane, j, { held }));
     for (const [qid, r] of this.removedQueued) {
-      if (!mine(r.job)) continue;
-      const gone = doc.createElement("div");
-      gone.className = "scholium-queue-removed";
-      const t = doc.createElement("span");
-      t.textContent = this.text("queuedRemoved");
-      gone.append(t, this.paneButton(doc, this.text("undo"), () => this.undoRemoveQueued(qid), "quiet small"));
-      nodes.push(gone);
+      if (mine(r.job)) nodes.push(this.undoStrip(doc, this.text("queuedRemoved"), () => this.undoRemoveQueued(qid)));
     }
     pane.queueBox.replaceChildren(...nodes);
     this.show(pane.queueBox, nodes.length > 0);
@@ -3203,7 +3196,7 @@ var ScholiumRunner = {
       first.title = can ? this.text("steerRowTip") : !this.canSteer(job.agent) ? this.text("noSteer", this.agentName(job.agent)) : this.text("steerNotNow");
     }
     const remove = this.iconButton(doc, "trash", this.text("queuedRemove"), () => this.removeQueued(pane, job.qid));
-    const more = this.paneButton(doc, "⋯", () => this.queuedMenu(pane, job, more), "quiet icon");
+    const more = this.paneButton(doc, "⋯", () => this.queuedMenu(pane, job, more), "quiet");
     row.append(first, remove, more);
     return row;
   },
@@ -4061,10 +4054,8 @@ var ScholiumRunner = {
     open.title = c.title;
     open.append(span("scholium-history-title", this.cut(c.title, 42)), span("scholium-history-time", this.clock(c.at)));
     open.addEventListener("click", () => { this.openConv(pane, c).catch(e => this.log("open failed: " + e)); });
-    const rename = this.paneButton(doc, "✎", () => { this.renameRow(pane, row, c); }, "quiet icon");
-    rename.title = this.text("renameConv");
-    const remove = this.paneButton(doc, "✕", () => { this.deleteConv(pane, c).catch(e => this.log("delete failed: " + e)); }, "quiet icon");
-    remove.title = this.text("deleteConv");
+    const rename = this.iconButton(doc, "edit", this.text("renameConv"), () => { this.renameRow(pane, row, c); });
+    const remove = this.iconButton(doc, "trash", this.text("deleteConv"), () => { this.deleteConv(pane, c).catch(e => this.log("delete failed: " + e)); });
     row.append(open, rename, remove);
     return row;
   },
@@ -4305,11 +4296,15 @@ var ScholiumRunner = {
     if (run.prompt) {
       const said = this.entryNode(doc, run.prompt);
       // the user's own words can be edited and asked again
-      if (this.promptEditable(view, run)) {
+      const editable = this.promptEditable(view, run);
+      if (editable) {
         said.className += " editable";
         said.append(this.iconButton(doc, "edit", this.text("editPrompt"), () => this.startEdit(view, run, said), "quiet edit-prompt"));
       }
-      node.append(said);
+      // the question being edited: its box stays, and stands for the words drawn now
+      const e = view.editing;
+      if (editable && e && this.isEditing(view, e, run.prompt)) { e.said = said; e.drawn = true; node.append(e.box); }
+      else node.append(said);
     }
     // the question that replaced the ones after it a moment ago: Undo under it
     if (this.replaced.size && this.undoAt(view) === index) node.append(this.undoNode(view));
@@ -4540,12 +4535,13 @@ var ScholiumRunner = {
     const runs = this.runsOf(entries);
     view.entries = entries;
     view.runCount = runs.length;   // before the runs are drawn: the last one carries the retry
-    view.list.replaceChildren(...runs.map((r, i) => this.renderRun(view, r, i, live && i === runs.length - 1)));
+    this.redraw(view, null, () => view.list.replaceChildren(...runs.map((r, i) => this.renderRun(view, r, i, live && i === runs.length - 1))));
     // an edited question that waits for its run: Undo after the conversation
     if (this.replaced.size && this.undoAt(view) === runs.length) view.list.append(this.undoNode(view));
     view.runCount = runs.length;
     view.head = this.headOf(runs);
-    view.list.scrollTop = view.list.scrollHeight;
+    // the list goes to its end, unless a box being edited kept its place in it
+    if (!(view.editing && view.editing.drawn)) view.list.scrollTop = view.list.scrollHeight;
   },
 
   // what tells the first run drawn: the last line of the transcript's first run while another run follows it (until
@@ -4561,9 +4557,12 @@ var ScholiumRunner = {
   refreshRun(view, index) {
     const runs = this.runsOf(view.entries);
     if (!runs[index]) return;
-    const node = this.renderRun(view, runs[index], index, this.showsRun(view) && index === runs.length - 1);
-    view.list.children[index].replaceWith(node);
-    if (view.draft && index === runs.length - 1) node.append(view.draft.node);   // the message being written stays last
+    const old = view.list.children[index];
+    this.redraw(view, old, () => {
+      const node = this.renderRun(view, runs[index], index, this.showsRun(view) && index === runs.length - 1);
+      old.replaceWith(node);
+      if (view.draft && index === runs.length - 1) node.append(view.draft.node);   // the message being written stays last
+    });
   },
 
   // the views of the latest run draw its last run again once the agent no longer works on it (a pause, the wait for a
@@ -4589,7 +4588,10 @@ var ScholiumRunner = {
         const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
         const runs = this.runsOf(this.transcript), live = this.showsRun(view);
         if (runs.length !== view.runCount || this.headOf(runs) !== view.head) this.renderTranscript(view, this.transcript, live);
-        else list.children[runs.length - 1].replaceWith(this.renderRun(view, runs[runs.length - 1], runs.length - 1, live));
+        else {
+          const old = list.children[runs.length - 1];
+          this.redraw(view, old, () => old.replaceWith(this.renderRun(view, runs[runs.length - 1], runs.length - 1, live)));
+        }
         if (view.draft) list.lastChild.append(view.draft.node);   // the draft stays last
         if (atBottom) list.scrollTop = list.scrollHeight;
       } catch (e) {}
@@ -4793,8 +4795,7 @@ var ScholiumRunner = {
     const text = pane.doc.createElement("span");
     text.className = "scholium-quote-text";
     text.textContent = this.quoteLabel(q);
-    const drop = this.paneButton(pane.doc, "✕", () => { pane.quote = null; this.paintQuote(pane); }, "quiet icon small");
-    drop.title = this.text("quoteRemove");
+    const drop = this.iconButton(pane.doc, "close", this.text("quoteRemove"), () => { pane.quote = null; this.paintQuote(pane); });
     pane.quoteBox.replaceChildren(text, drop);
   },
 
@@ -4989,8 +4990,30 @@ var ScholiumRunner = {
     box.append(input, tools);
     fit();
     said.replaceWith(box);
-    view.editing = { box, said, fit };   // paintPane fits it again when the paper starts or stops running
+    // paintPane fits it again when the paper starts or stops running; the list drawn again puts it in place of its
+    // question (its turn of the conversation, its words) drawn anew
+    view.editing = { box, said, fit, input, turn: prompt.turn, text: String(prompt.text), key: view.shownKey, conv: view.shownConv, drawn: false };
     try { input.focus(); } catch (e) {}
+  },
+
+  // whether the words of a run drawn are the question being edited: its turn of the same conversation, with its words
+  isEditing(view, e, prompt) {
+    return e.key === view.shownKey && e.conv === view.shownConv && prompt.turn === e.turn && String(prompt.text) === e.text;
+  },
+
+  // the list of a view drawn again by draw(), all of it (from: null) or the run node from: a question being edited keeps
+  // its box in place of the question drawn anew, with the focus and the cursor when it had them; the box closes when the
+  // part drawn had it and no longer has its question
+  redraw(view, from, draw) {
+    const e = view.editing;
+    if (!e) { draw(); return; }
+    const had = !from || from.contains(e.box);
+    let cursor = null;
+    try { if (view.doc.activeElement === e.input) cursor = [e.input.selectionStart, e.input.selectionEnd]; } catch (err) {}
+    e.drawn = false;
+    draw();
+    if (!e.drawn) { if (had) view.editing = null; return; }
+    if (cursor) { try { e.input.focus(); e.input.setSelectionRange(cursor[0], cursor[1]); } catch (err) {} }
   },
 
   stopEdit(view) {

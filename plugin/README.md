@@ -138,9 +138,10 @@ history and the annotation sessions are those of that PDF.
 
 - **＋** starts a new conversation (its first message starts it). **🕘** lists the conversations of the PDF by day
   (today, yesterday, the previous 7 and 30 days, older), titled by their first message, the one shown highlighted: a
-  click opens one, ✎ renames it (Enter keeps the new title, Esc the old one), ✕ deletes it (**Undo** brings it back for
+  click opens one, ✎ renames it (Enter keeps the new title, Esc the old one), 🗑 deletes it (**Undo** brings it back for
   six seconds; every Codex thread the conversation used is archived at the next Codex run once the six seconds end or
-  the plugin stops before then). While the paper runs or waits, **＋**, the history and **Agent** are off.
+  the plugin stops before then). While the paper runs or waits, **＋**, the history and **Agent** are off. ✎, 🗑, the
+  quote strip's ✕ and **＋** are icon buttons.
 - Saved prompts sit above the Chat tab's box. A click sends one: queued or steered while the agent answers, with the
   quoted passage.
 - On hover, ✎ and 🗑 show beside each. ✎ and ＋ edit a label and a prompt in the row.
@@ -154,8 +155,10 @@ history and the annotation sessions are those of that PDF.
   with a copy button (`Claude Code · Opus 5.5 · 12:01`). A failed question ends with its error and ↻ (**Retry**), which
   sends the same words again to the agent chosen. Web addresses and `zotero://` links in a message open on a click or
   with Enter, in the browser or in Zotero; links to files are shown, not followed.
-- On hover, ✎ shows under a question of the Chat tab, except while the paper runs or waits. It turns the question
-  into a box in place, with its words and its quote; ✓ or the send shortcut asks again, ✕ or Esc cancels.
+- On hover, ✎ shows under a question of the Chat tab, except while the paper runs or waits. It turns the question into
+  a box in place, with its words and its quote; ✓ or the send shortcut asks again, ✕ or Esc cancels. The box keeps its
+  words and quote when the conversation is drawn again, and closes when the question is gone or another conversation is
+  shown.
 - The question and everything after it are replaced. **Undo** under the new question brings them back for six seconds,
   until another message of the conversation starts, with the conversation's title, and stops the new answer without a
   notice; an edited question that waits for another paper's run leaves the queue. The Codex threads only the replaced
@@ -220,7 +223,7 @@ history and the annotation sessions are those of that PDF.
   when the plugin is updated.
 - Asking about a passage: in the reader, **Ask Scholium** under the colours of the selection popup shows the Chat tab
   of the reader's section, opening the side pane and the section when they are closed, with the passage and its page
-  quoted above the box, and closes the popup as a colour does; ✕ removes the quote. The message tells the
+  quoted above the box, and closes the popup as a colour does; the icon ✕ removes the quote. The message tells the
   agent that the user quotes that passage of page N, counted in the PDF as in `sentences.txt` and the citation chips,
   with the page's label where it differs; the box and the transcript show the label, the transcript above the user's
   words. The section drawn for another item has no quote.

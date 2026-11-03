@@ -46,6 +46,12 @@
   margin-inline-start: 4px;
 }
 
+/* 🕘 as high as the icon ＋ beside it */
+.scholium-tabs .scholium-button.icon {
+  height: 22px;
+  padding: 0 5px;
+}
+
 .scholium-line {
   display: flex;
   align-items: center;
@@ -420,15 +426,13 @@
   font-size: 11px;
 }
 
-/* rename and delete show while the pointer is over their row */
-.scholium-history-row .scholium-button.icon {
-  height: 22px;
-  padding: 0 6px;
+/* rename and delete show while the pointer or the keyboard is in their row */
+.scholium-history-row .scholium-button.glyph {
   visibility: hidden;
 }
 
-.scholium-history-row:hover .scholium-button.icon,
-.scholium-history-row .scholium-button.icon:focus-visible {
+.scholium-history-row:hover .scholium-button.glyph,
+.scholium-history-row:focus-within .scholium-button.glyph {
   visibility: visible;
 }
 
@@ -642,15 +646,15 @@
 .scholium-queue { display: flex; flex-direction: column; gap: 2px; overflow: auto; }
 .scholium-queue-held { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--fill-secondary); }
 .scholium-queue-held > span { flex: 1; }
-.scholium-queued, .scholium-queue-removed { display: flex; align-items: center; gap: 4px; font-size: 11.5px; padding: 2px 4px; border-radius: 4px; }
+.scholium-queued { display: flex; align-items: center; gap: 4px; font-size: 11.5px; padding: 2px 4px; border-radius: 4px; }
 .scholium-queued:hover { background: var(--fill-quinary); }
 .scholium-queued-handle { cursor: grab; color: var(--fill-tertiary); }
 .scholium-queued-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .scholium-queued.full .scholium-queued-text { white-space: pre-wrap; }
 .scholium-queued.failed .scholium-queued-text { color: var(--accent-red); }
 .scholium-queued .scholium-button { height: 20px; padding: 0 6px; }
-.scholium-queue-removed > span { flex: 1; }
-.scholium-queue-removed, .scholium-queued.sending { color: var(--fill-secondary); }
+.scholium-queue .scholium-undo { padding: 0 4px; font-size: 11.5px; }
+.scholium-queued.sending { color: var(--fill-secondary); }
 .scholium-queued-state { font-size: 10.5px; color: var(--fill-secondary); }
 
 .scholium-send-row {

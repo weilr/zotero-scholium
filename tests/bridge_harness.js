@@ -673,7 +673,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                  sendHidden: p.send.hidden, sendDisabled: p.send.disabled, placeholder: p.input.placeholder,
                  shownConv: v.shownConv, newChatDisabled: p.newChat.disabled, historyDisabled: p.historyButton.disabled,
                  agentDisabled: p.agent.disabled, ring: p.ring.hidden ? null : p.ring.title, ringClass: p.ring.className, ctxUsed: v.context ? v.context.used : null, round: [p.send.textContent, p.send.title],
-                 historyRows: !p.popover || p.popover.name !== 'history' ? null : p.popover.node.children.map(c => [c.className, c.textContent]) };
+                 historyRows: !p.popover || p.popover.name !== 'history' ? null : p.popover.node.children.map(c => [c.className, textOf(c)]) };
       } finally { if (other) { p.tab = was; runner.paintPane(p); } }
     }, pane: () => runner.panes.get(body) };
   };

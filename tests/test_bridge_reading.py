@@ -37,6 +37,7 @@ SCENARIOS = r"""
                         shown: [shown.children[0].className, shown.children[0].textContent, shown.children[1].textContent] };
     // the quote can be taken away before sending
     h.selection('Another passage.', 0, '1')[0].click(); await settle(10);
+    facts.selection.drop = [pane.quoteBox.children[1].className, labelOf(pane.quoteBox.children[1])];
     pane.quoteBox.children[1].click(); await settle(10);
     facts.selection.removed = [pane.quoteBox.hidden, pane.quote];
     // a selection without text has no button; the page falls back to its number
@@ -654,6 +655,7 @@ def test_ask_about_a_selection(facts):
     assert s["quote"] == {"text": PASSAGE, "page": "4"}
     assert s["shown"] == ["scholium-prompt-quote", "p.4 · " + PASSAGE, "这个核为什么不变？"]
     assert s["removed"] == [True, None]
+    assert s["drop"] == ["scholium-button quiet glyph close", "不引用这段"], "its ✕ is the close icon, its words its tooltip"
 
 
 def test_a_selection_without_text_or_page_label(facts):

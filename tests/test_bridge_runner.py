@@ -75,6 +75,7 @@ SCENARIOS = r"""
     facts.look = { state: p1.state.className, tool: toolNode.children.map(c => [c.tagName, c.className]),
                    name: toolNode.children[1].children.map(c => c.tagName || 'text'),
                    buttons: [p1.annotGo, p1.resume, p1.send].map(b => b.className), tabs: [p1.tabChat, p1.tabAnnotate].map(b => b.className),
+                   newChat: [p1.newChat.className, labelOf(p1.newChat)], history: p1.historyButton.className,
                    parts: p1.body.children[0].children.map(c => c.className), selects: [p1.agent.className, p1.model.className, p1.effort.className],
                    input: p1.input.className, inputNative: p1.input.attrs['no-native'], sendRow: p1.sendRow.className };
     const after = await h.pane(item1);              // rendered anew after the run: the annotation tab shows its session
@@ -2178,6 +2179,7 @@ SCENARIOS = r"""
     const rowOf = id => p.pane().popover.node.children.find(r => r.children[0] && r.children[0].title !== undefined
                                                           && r.children[0].children && r.children[0].children[0] && r.children[0].children[0].textContent.startsWith(id));
     const firstRow = rowOf('第一个问题');
+    const rowButtons = firstRow.children.slice(1).map(b => [b.className, labelOf(b)]);
     firstRow.children[1].click();
     const box = firstRow.children[0];
     box.value = '估计方法';
@@ -2211,7 +2213,7 @@ SCENARIOS = r"""
     h.fire(); await settle(200);
     const afterFire = p.view().historyRows.filter(r => r[0].includes('deleted')).length;
     const index = JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/conversations/index.json']);
-    facts.conversations = { afterFire, first: !!first, before, fresh, second: second !== first, resumedSecond, rows, renamed, kept, opened, resumedFirst, followPrompt, deleting, undone,
+    facts.conversations = { afterFire, first: !!first, before, fresh, second: second !== first, resumedSecond, rows, rowButtons, renamed, kept, opened, resumedFirst, followPrompt, deleting, undone,
                             deletedShown, removed: h.log.removed.map(r => r.split('/').pop() === first + '.jsonl'),
                             files: convs(h).length, titles: Object.values(index.titles), chat: index.chat,
                             busy: null };
@@ -2801,6 +2803,8 @@ def test_section_is_styled_by_its_stylesheet(facts):
     assert look["parts"] == ["scholium-tabs", "scholium-line", "scholium-view chat", "scholium-view annotate", "scholium-saved", "scholium-composer"]
     assert look["buttons"] == ["scholium-button primary small", "scholium-button quiet small", "scholium-round send"]
     assert look["tabs"] == ["scholium-tab on", "scholium-tab"]
+    assert look["newChat"] == ["scholium-button quiet glyph add", "新对话"], "New chat is the add icon, its words its tooltip"
+    assert look["history"] == "scholium-button quiet icon"
     assert look["selects"] == ["scholium-select"] * 3 and look["input"] == "scholium-input"
     assert look["inputNative"] == "true"   # Zotero's text-box look (a line under the text on focus) stays off
     assert look["tool"] == [["span", "scholium-bullet"], ["span", "scholium-content"]] and look["name"] == ["b", "text"]
@@ -2856,7 +2860,13 @@ def test_section_is_styled_by_its_stylesheet(facts):
     assert "background: var(--accent-red)" in rules[".scholium-button.danger"]
     assert "text-align: center" in rules[".scholium-annot-intro"] and "font-weight: 600" in rules[".scholium-annot-intro-title"]
     assert not any("scholium-entry.time" in sel or "draft .scholium-bullet" in sel for sel in rules), "no time line, no bullet on a message"
-    assert "visibility: hidden" in rules[".scholium-history-row .scholium-button.icon"]
+    assert "visibility: hidden" in rules[".scholium-history-row .scholium-button.glyph"]
+    assert "visibility: visible" in rules[".scholium-history-row:hover .scholium-button.glyph, .scholium-history-row:focus-within .scholium-button.glyph"], \
+        "rename and delete show with the pointer or the keyboard in their row, so that Tab reaches them"
+    assert "height: 22px" in rules[".scholium-tabs .scholium-button.icon"] and "height: 22px" in rules[".scholium-button.glyph"], \
+        "🕘 as high as ＋ beside it"
+    assert "padding: 0 4px" in rules[".scholium-queue .scholium-undo"] and "padding: 2px 4px" in rules[".scholium-queued"], \
+        "the queue's Undo strip starts where its rows do"
     assert "text-overflow: ellipsis" in rules[".scholium-history-title"] and "overflow: auto" in rules[".scholium-popover.history"]
 
 
@@ -3927,8 +3937,10 @@ def test_new_chat_and_history(facts):
     assert c["fresh"] == {"entries": new, "shownConv": None, "newChatDisabled": True, "input": "", "placeholder": ASK, "chat": None}
     assert c["second"] is True and c["resumedSecond"] is False, "the next message starts a conversation of its own"
     rows = [[cls, re.sub(r"\d{2}:\d{2}", "HH:MM", text)] for cls, text in c["rows"]]
-    assert rows[0] == ["scholium-history-group", "今天"] and rows[1] == ["scholium-history-row current", "第二个问题HH:MM✎✕"]
-    assert rows[2] == ["scholium-history-group", "昨天"] and re.fullmatch(r"第一个问题\d+月\d+日 HH:MM✎✕", rows[3][1])
+    assert rows[0] == ["scholium-history-group", "今天"] and rows[1] == ["scholium-history-row current", "第二个问题HH:MM重命名删除这段对话"]
+    assert rows[2] == ["scholium-history-group", "昨天"] and re.fullmatch(r"第一个问题\d+月\d+日 HH:MM重命名删除这段对话", rows[3][1])
+    assert c["rowButtons"] == [["scholium-button quiet glyph edit", "重命名"], ["scholium-button quiet glyph trash", "删除这段对话"]], \
+        "rename and delete are icons, their words their tooltips"
     assert rows[4] == ["scholium-history-group", "更早"] and rows[5][1].startswith("很早的问题"), "an earlier version's title is its first words"
     assert c["renamed"][3][1].startswith("估计方法") and [r[1] for r in c["renamed"]][1] == c["rows"][1][1]
     assert [k[:5] for k in c["kept"]] == ["第二个问题", c["kept"][1][:5], "很早的问题"] and c["kept"][1].startswith("估计方法"), "Esc keeps the old title"
@@ -3957,7 +3969,7 @@ def test_conversations_of_a_paper_with_two_pdfs_and_hand_overs(facts):
     t = facts["twoPdfs"]
     assert t["before"] == ["ATT1", "claude-20261001-120000"]
     assert t["keys"] == ["ATT1"]
-    assert t["rows"] == ["今天", "第一份✎✕"], "the best PDF's conversations only; one without a line is not listed"
+    assert t["rows"] == ["今天", "第一份重命名删除这段对话"], "the best PDF's conversations only; one without a line is not listed"
     assert t["after"] == ["ATT1", "claude-20261001-120000"]
     assert t["annotated"] == "ATT1", "Annotate goes to the PDF whose conversation is shown, as Send does"
     assert facts["livePanes"] == {"shownConv": "claude-x", "shownPath": "/data/tmp/scholium/ATT1/conversations/claude-x.jsonl",

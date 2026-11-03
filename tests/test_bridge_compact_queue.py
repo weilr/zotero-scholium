@@ -607,12 +607,14 @@ SCENARIOS = r"""
     pane.input.type('追问二'); pane.send.click(); await settle(20);
     pane.input.type('追问三'); pane.send.click(); await settle(20);
     const first = { rows: rows(), input: pane.input.value, buttons: row('追问二').children.slice(2).map(labelOf) };
+    const moreLook = row('追问二').children[4].className;
     const qids = h.runner.queue.map(j => j.qid);
     row('追问三').children[0].fire('dragstart'); const over = row('追问二').fire('dragover'); const drop = row('追问二').fire('drop'); await settle(10);
     const dragged = rows();
     row('追问二').children[3].click(); await settle(10);                       // ✕
-    const removed = { rows: rows(), undo: pane.queueBox.children.find(c => c.className.includes('removed')).textContent };
-    pane.queueBox.children.find(c => c.className.includes('removed')).children[1].click(); await settle(10);   // 撤销
+    const strip = pane.queueBox.children.find(c => c.className === 'scholium-undo');
+    const removed = { rows: rows(), undo: [strip.className, strip.children[0].textContent, labelOf(strip.children[1])] };
+    strip.children[1].click(); await settle(10);                                // 撤销
     const back = rows();
     // a click on its text shows the whole message, a second one its line again
     row('追问二').children[1].click(); await settle(5);
@@ -629,7 +631,7 @@ SCENARIOS = r"""
     h.log.release(); await settle(1200);
     // each goes on with the session of the answer before it
     const resumed = h.log.calls.slice(1).map(c => c.opts.arguments[c.opts.arguments.indexOf('--resume') + 1]);
-    facts.queue = { refused, first, qids, dragged, over: !!over.prevented, prevented: !!drop.prevented, removed, back, expanded, menu, edited, box, resumed,
+    facts.queue = { refused, first, moreLook, qids, dragged, over: !!over.prevented, prevented: !!drop.prevented, removed, back, expanded, menu, edited, box, resumed,
                     stdin: h.log.stdin.map(s => ['追问三', '追问二', '问题一'].find(w => s.includes(w))), after: rows() };
   }
   // a stop holds the queue: a line with Go on, Send on each row; a new message first asks whether to clear the queue
@@ -937,7 +939,7 @@ SCENARIOS = r"""
     qrows(pane)[0].children[3].click(); await settle(10);                    // ✕
     h.log.release(); await settle(300);
     const idle = h.log.stdin.length;
-    pane.queueBox.children.find(c => c.className.includes('removed')).children[1].click(); await settle(300);   // 撤销
+    pane.queueBox.children.find(c => c.className === 'scholium-undo').children[1].click(); await settle(300);   // 撤销
     facts.queueUndone = { idle, sent: h.log.stdin.length === 2 && h.log.stdin[1].includes('追问二'), rows: pane.queueBox.children.length };
   }
   // a queued message the agent had is no row any more: waiting for its second try, for the limit, or sent again in a
@@ -1045,7 +1047,7 @@ SCENARIOS = r"""
   // ---- review fix round 1 ----
   const yInit = ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S2' });
   const names = h => h.runner.queue.map(j => (j.qid ? 'Q:' + j.say : (j.say || j.att.key) + (j.retried ? '(retry)' : '')));
-  const undoRow = pane => pane.queueBox.children.find(c => c.className.includes('removed')).children[1].click();
+  const undoRow = pane => pane.queueBox.children.find(c => c.className === 'scholium-undo').children[1].click();
   // Send message while another paper's run goes: the new message goes ahead of the held queue, which goes on after it
   {
     const last = s => ['新消息', '追问二', '问题一'].map(w => [w, String(s).lastIndexOf(w)]).filter(x => x[1] >= 0).sort((a, b) => b[1] - a[1]).map(x => x[0])[0] || 'other';
@@ -1677,9 +1679,10 @@ def test_the_queue(facts):
     q = facts["queue"]
     assert q["refused"] == [False, False, 0], "a compaction or a retry while the paper runs is refused, not queued"
     assert q["first"] == {"rows": ["追问二", "追问三"], "input": "", "buttons": ["引导", "删除", "⋯"]}
+    assert q["moreLook"] == "scholium-button quiet", "⋯ of a row is a quiet text button"
     assert q["qids"] == ["1", "2"]
     assert q["dragged"] == ["追问三", "追问二"] and q["prevented"] is True and q["over"] is True
-    assert q["removed"]["rows"] == ["追问三"] and q["removed"]["undo"] == "已删除撤销"
+    assert q["removed"]["rows"] == ["追问三"] and q["removed"]["undo"] == ["scholium-undo", "已删除", "撤销"], "the strip with Undo the other ones are"
     assert q["back"] == ["追问三", "追问二"]
     assert q["expanded"] == ["scholium-queued full", "scholium-queued", "scholium-queued"]
     assert q["menu"] == [["编辑消息", False], ["关闭排队", True]], "Claude Code cannot be steered (branch B)"
@@ -1777,7 +1780,7 @@ def test_send_on_a_held_row(facts):
 
 def test_a_held_queue_emptied_lets_go(facts):
     e = facts["queueEmptied"]
-    assert e["during"] == {"held": 1, "rows": ["scholium-queue-removed"]}
+    assert e["during"] == {"held": 1, "rows": ["scholium-undo"]}
     assert e["after"] == {"held": 0, "rows": 0, "removed": 0, "hidden": True}
     assert e["asked"] is False and e["sent"] == 2
 

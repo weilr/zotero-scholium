@@ -109,6 +109,9 @@
 - Retry, Steer, Delete, Send and Resume, and a stopped run's mark, are icons with their words as tooltips; the send
   and stop button is larger.
 - The Annotations tab's introduction is one line.
+- A question being edited keeps its box, words and quote when the conversation is drawn again. The queue's deleted
+  row is the same **Undo** strip as elsewhere; the history rows' ✎ and 🗑, the quote strip's ✕ and **New chat** ＋ are
+  icons.
 
 ### Fixed
 
