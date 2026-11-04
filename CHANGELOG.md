@@ -79,6 +79,14 @@
 
 ### Changed
 
+- The plugin Scholium Bridge is now Scholium: add-on ID `scholium@zotero-scholium`, preferences
+  `extensions.scholium.*`, endpoints `/scholium/ping`, `/scholium/list` and `/scholium/apply`, token file
+  `scholium.token`, release file `scholium.xpi`. The tool's backend `bridge` is now `plugin` (`--backend bridge` still
+  works). Installed beside Scholium Bridge (0.1.9 or earlier), Scholium uninstalls it and takes over its preferences
+  and token; the conversations stay. A run under way in Scholium Bridge stops then, and its queued messages are not
+  kept. Scholium also answers at `/scholium-bridge/…` and writes its token to `scholium-bridge.token` as well, for the
+  skill of Scholium Bridge 0.1.9. Scholium Bridge does not update to Scholium by itself: install `scholium.xpi` from
+  the release.
 - Scholium section: the section fills the side pane's height. The state is one line beside the settings chip.
   Once the answer is there, the steps of a run fold into "Worked for 24s ›", a run without steps shows
   "Worked for 24s".
@@ -143,8 +151,7 @@
   there run in it after the annotation. An annotation's card counts the turns and tokens of all its parts, also those
   before a pause for a limit. `/compact` with no session starts none, and with nothing to compact yet says so under
   the box. Codex threads waiting to be archived stay listed until Codex has archived them.
-- After the update from v0.1.9, a question in progress continues as one turn, and a paper with the logs of both
-  agents opens the chosen agent's.
+- A paper with the logs of both agents from Scholium Bridge 0.1.9 opens the chosen agent's.
 - Each run is given `paper.json` in the paper's output folder (the PDF's path, the item and attachment keys, the
   output folder); prompts name that file instead of the PDF's path, and `extract` and `--list` take it with
   `--config`. The agent writes its own configuration to another file in the output folder; `paper.json` is the

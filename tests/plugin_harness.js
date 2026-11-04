@@ -1,5 +1,5 @@
-// The bridge plugin's test harness: a simulated Zotero, Claude Code and Codex. A test module appends its scenarios,
-// which write their facts to stdout. Run through bridge_harness.py.
+// The plugin's test harness: a simulated Zotero, Claude Code and Codex. A test module appends its scenarios,
+// which write their facts to stdout. Run through plugin_harness.py.
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(process.argv[2], 'utf8');
@@ -284,7 +284,7 @@ const CONTENT = require('node:path').join(require('node:path').dirname(process.a
 function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, exitCode = 0, script = null, claudeExists = true, gateFirst = false,
                    home = 'dirsvc', eraseFails = false, logs = {}, models = 'ok', claudeAt = CLAUDE, scripts = [], readFails = false,
                    writeFails = false, codex = {}, logTimes = {}, notes = [], secondPdf = false, failLogWrites = null, stdinFails = false, holdDirs = false,
-                   unreadable = [], unremovable = [] } = {}) {
+                   unreadable = [], unremovable = [], addonManager = null } = {}) {
   const log = { calls: [], stdin: [], notices: [], alerts: [], confirms: [], kills: 0, menus: [], unregistered: [], listeners: [],
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
                 ftl: [], tabs: [], selected: [], opened: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
@@ -379,7 +379,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       // a notification ahead of the answer: the request is still waiting while it is handled
       if (co.noticeBefore === msg.method) this.emit([ev({ method: 'thread/started', params: { thread: { id: 'T1' } } })]);
       switch (msg.method) {
-        case 'initialize': return answer({ userAgent: 'scholium-bridge/0.160.0', codexHome: '/home/u/.codex' });
+        case 'initialize': return answer({ userAgent: 'scholium/0.160.0', codexHome: '/home/u/.codex' });
         case 'model/list': return answer({ data: CODEX_MODELS, nextCursor: null });
         case 'config/read': return answer({ config: { model: 'gpt-6-astra', mcp_servers: { s: { env: { TOKEN: 'secret-token' } } } } });
         // the user's server s, Codex's own apps server and a plugin's server, as Codex 0.166 lists them
@@ -488,7 +488,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       if (id === 'zotero-item-details') return { scrollToPane: async (paneID, how) => log.scrolled.push([paneID, how]) };
       return this.documentElement.children.find(c => c.id === id) || null;
     },
-    querySelector: sel => (sel === '[href="scholium-bridge.ftl"]' && log.ftl.length ? { remove: () => log.ftl.push('removed') } : null),
+    querySelector: sel => (sel === '[href="scholium.ftl"]' && log.ftl.length ? { remove: () => log.ftl.push('removed') } : null),
     createElementNS: (ns, tag) => new El(tag),
     hasFocus: () => focused,   // the item pane is in the main window: one focus for both
   };
@@ -574,6 +574,15 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
         return { path: '/home/u' };
       } },
       appinfo: { OS: 'WINNT' },
+      // the preferences of `prefs` by branch, as Firefox's preference service gives them; a value's type is its own
+      prefs: { PREF_INVALID: 0, PREF_STRING: 32, PREF_INT: 64, PREF_BOOL: 128,
+               getBranch: root => ({
+                 getChildList: start => [...store.keys()].filter(k => k.startsWith(root + (start || ''))).map(k => k.slice(root.length)),
+                 prefHasUserValue: n => store.has(root + n),
+                 getPrefType: n => ({ string: 32, number: 64, boolean: 128 })[typeof store.get(root + n)] || 0,
+                 getStringPref: n => store.get(root + n), getIntPref: n => store.get(root + n), getBoolPref: n => store.get(root + n),
+                 setStringPref: (n, v) => { store.set(root + n, String(v)); }, setIntPref: (n, v) => { store.set(root + n, v | 0); },
+                 setBoolPref: (n, v) => { store.set(root + n, !!v); }, clearUserPref: n => { store.delete(root + n); } }) },
       scriptloader: { loadSubScript: (url, scope) => {
         log.scripts = (log.scripts || 0) + 1;
         const rel = url.replace(/^chrome:\/\/[^/]+\/content\//, '');
@@ -626,7 +635,8 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
         if (o && o.tmpPath) log.tmpPaths.push(o.tmpPath);
       },
     },
-    ChromeUtils: { importESModule: () => ({ Subprocess }) },
+    // AddonManager: a test's own, or none
+    ChromeUtils: { importESModule: url => (/AddonManager/.test(url) ? { AddonManager: addonManager } : { Subprocess }) },
   });
   vm.runInContext(source, context);
   const runner = context.ScholiumRunner;
@@ -691,6 +701,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
            ann: (key, type, color, tags = ['zotero-scholium']) => annotation(key, tags, type, color),
            flat: view => flatNodes(runner, view),
            chromePackage: context.chromePackage, replacing: context.replacing, takingOver: context.takingOver,
+           startup: context.startup, shutdown: context.shutdown, endpoints: context.ScholiumEndpoints, toggle: context.ScholiumToggle,
            live: () => timers.filter(t => t.live).map(t => t.ms), toolbarItems: () => mainDoc.bar.children.length,
            // a text selection in the reader's popup: the nodes its listener appends
            selection: (text, pageIndex, pageLabel, tabID = undefined) => {

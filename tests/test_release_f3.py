@@ -9,9 +9,9 @@ import subprocess
 
 import pytest
 
-from bridge_harness import BRIDGE, CORE, NODE, css_rules
+from plugin_harness import BOOTSTRAP, CORE, NODE, css_rules
 
-pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 SCENARIOS = r"""
 const L = o => JSON.stringify(o) + '\n';
@@ -114,7 +114,7 @@ const all = n => [n, ...((n && n.children) || []).filter(c => c && c.tagName).fl
   // the other agent wrote them: how many, by whom and when
   await step(async () => {
     const at = new Date(2026, 10, 4, 10, 0).getTime();
-    const h = harness({ existing: [['zotero-scholium'], ['zotero-scholium']], prefs: { 'extensions.scholium-bridge.agent': 'codex' },
+    const h = harness({ existing: [['zotero-scholium'], ['zotero-scholium']], prefs: { 'extensions.scholium.agent': 'codex' },
                         logs: { '/data/tmp/scholium/ATT1/applied.json': JSON.stringify({ config: 'D:/x/config.json', agent: 'claude', conv: 'annotate-claude-20261104-100000', at }) } });
     h.runner.start('x');
     const p = await h.pane(h.item1); await settle(40);
@@ -384,9 +384,9 @@ def facts(tmp_path_factory):
     core = CORE.read_text(encoding="utf-8")
     patched = core.replace("return { runner, zotero: context.Zotero,", "return { runner, toggle: context.ScholiumToggle, zotero: context.Zotero,")
     assert patched != core
-    script = tmp_path_factory.mktemp("bridge") / "harness.js"
+    script = tmp_path_factory.mktemp("plugin") / "harness.js"
     script.write_text(patched + "\n" + SCENARIOS, encoding="utf-8")
-    completed = subprocess.run([NODE, str(script), str(BRIDGE)], encoding="utf-8", capture_output=True, timeout=180)
+    completed = subprocess.run([NODE, str(script), str(BOOTSTRAP)], encoding="utf-8", capture_output=True, timeout=180)
     assert completed.returncode == 0, completed.stderr
     return json.loads(completed.stdout)
 

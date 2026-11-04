@@ -8,9 +8,9 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from bridge_harness import BRIDGE, NODE, PLUGIN, css_rules, run_scenarios
+from plugin_harness import BOOTSTRAP, NODE, PLUGIN, css_rules, run_scenarios
 
-pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 SCENARIOS = r"""
 (async () => {
@@ -19,20 +19,20 @@ SCENARIOS = r"""
   {
     const h = harness();
     h.runner.rootURI = 'jar:file:///x/scholium.xpi!/';
-    h.runner.start('scholium-bridge@zotero-scholium');
+    h.runner.start('scholium@zotero-scholium');
     await settle(20);
     const o = h.log.prefPanes[0];
     facts.settingsPage = { src: o.src, scripts: o.scripts, label: o.label, pluginID: o.pluginID, id: h.runner.prefPaneID };
     h.runner.openSettings();
     facts.settingsPage.opened = h.log.openedPrefs;
     facts.settingsPage.defaults = [h.runner.sendShortcut(), h.runner.followUpMode(), h.runner.contextRingOn()];
-    h.store.set('extensions.scholium-bridge.sendShortcut', 'enter');
-    h.store.set('extensions.scholium-bridge.followUpMode', 'steer');
-    h.store.set('extensions.scholium-bridge.contextRing', false);
+    h.store.set('extensions.scholium.sendShortcut', 'enter');
+    h.store.set('extensions.scholium.followUpMode', 'steer');
+    h.store.set('extensions.scholium.contextRing', false);
     facts.settingsPage.set = [h.runner.sendShortcut(), h.runner.followUpMode(), h.runner.contextRingOn()];
-    h.store.set('extensions.scholium-bridge.sendShortcut', 'bogus');
+    h.store.set('extensions.scholium.sendShortcut', 'bogus');
     facts.settingsPage.bogus = h.runner.sendShortcut();
-    h.store.set('extensions.scholium-bridge.sendShortcut', 'cmdIfMultiline');
+    h.store.set('extensions.scholium.sendShortcut', 'cmdIfMultiline');
     facts.settingsPage.multiline = h.runner.sendShortcut();
     h.runner.stop();
     facts.settingsPage.afterStop = h.runner.prefPaneID;
@@ -90,12 +90,12 @@ SCENARIOS = r"""
     const second = await h.pane(h.item2); await settle(20);
     facts.chip.secondParts = second.pane().chip.children.map(c => c.className);
     // a model without an effort shows only the model and the arrow
-    h.store.set('extensions.scholium-bridge.claudeModel', 'haiku');
+    h.store.set('extensions.scholium.claudeModel', 'haiku');
     h.runner.paintChip(pane);
     facts.chip.noEffort = pane.chip.children.map(c => [c.className, c.textContent]);
     // codex with no model saved: the name is the default's label, the tooltip still names the agent
-    h.store.set('extensions.scholium-bridge.agent', 'codex');
-    h.store.set('extensions.scholium-bridge.codexModel', '');
+    h.store.set('extensions.scholium.agent', 'codex');
+    h.store.set('extensions.scholium.codexModel', '');
     h.runner.models.codex = [{ value: 'gpt-x', label: 'GPT X', title: '', efforts: ['low'] }];
     h.runner.paintChip(pane);
     facts.chip.codexDefault = { name: pane.chip.children[0].textContent, tip: pane.chip.title };
@@ -400,18 +400,18 @@ SCENARIOS = r"""
     const idle = b();
     pane.input.type('第一个问题');
     const typed = b();
-    const keyAt = (mode, opts, text = 'x') => { h.store.set('extensions.scholium-bridge.sendShortcut', mode); return h.runner.sendKey(Object.assign({ key: 'Enter' }, opts), text); };
+    const keyAt = (mode, opts, text = 'x') => { h.store.set('extensions.scholium.sendShortcut', mode); return h.runner.sendKey(Object.assign({ key: 'Enter' }, opts), text); };
     const keys = {
       always: [keyAt('cmdAlways', {}), keyAt('cmdAlways', { ctrlKey: true }), keyAt('cmdAlways', { ctrlKey: true, shiftKey: true })],
       enter: [keyAt('enter', {}), keyAt('enter', { shiftKey: true }), keyAt('enter', { ctrlKey: true })],
       multiline: [keyAt('cmdIfMultiline', {}, 'one line'), keyAt('cmdIfMultiline', {}, 'two\nlines'), keyAt('cmdIfMultiline', { ctrlKey: true }, 'two\nlines')] };
     keys.composing = h.runner.sendKey({ key: 'Enter', ctrlKey: true, isComposing: true }, 'x');
     keys.other = h.runner.sendKey({ key: 'a', ctrlKey: true }, 'x');
-    h.store.set('extensions.scholium-bridge.sendShortcut', 'cmdAlways');
+    h.store.set('extensions.scholium.sendShortcut', 'cmdAlways');
     // the hint line under each shortcut, in both languages; the key sends, and passes whether it inverts
     const hints = {};
-    for (const mode of ['enter', 'cmdIfMultiline', 'cmdAlways']) { h.store.set('extensions.scholium-bridge.sendShortcut', mode); h.runner.paintPane(pane); hints[mode] = pane.hint.textContent; }
-    h.store.set('extensions.scholium-bridge.sendShortcut', 'cmdAlways'); h.runner.paintPane(pane);
+    for (const mode of ['enter', 'cmdIfMultiline', 'cmdAlways']) { h.store.set('extensions.scholium.sendShortcut', mode); h.runner.paintPane(pane); hints[mode] = pane.hint.textContent; }
+    h.store.set('extensions.scholium.sendShortcut', 'cmdAlways'); h.runner.paintPane(pane);
     const sends = [];
     const realSend = h.runner.sendFromPane;
     h.runner.sendFromPane = (pn, invert) => sends.push(invert);
@@ -427,7 +427,7 @@ SCENARIOS = r"""
     // follow-ups of a run: queued by default; steered when the setting says so and the agent can steer, or the key inverts it
     const follow = () => [h.runner.followUpFor(pane), h.runner.followUpFor(pane, true)];
     const followClaude = follow();
-    h.store.set('extensions.scholium-bridge.followUpMode', 'steer');
+    h.store.set('extensions.scholium.followUpMode', 'steer');
     const followClaudeSteer = follow();
     const job = h.runner.job, agent = job.agent, cur = h.runner.current;
     job.agent = 'codex'; cur.steer = async () => {};                         // a Codex turn under way, which takes words
@@ -436,7 +436,7 @@ SCENARIOS = r"""
     const steerTitle = pane.send.title;
     pane.tab = 'annotate'; const followAnnot = follow(); pane.tab = 'chat';      // another tab's run is not this one's to steer
     const keys0 = pane.keys; pane.keys = []; const followElsewhere = follow(); pane.keys = keys0;
-    h.store.set('extensions.scholium-bridge.followUpMode', 'queue');
+    h.store.set('extensions.scholium.followUpMode', 'queue');
     const followCodexQueue = follow();
     job.agent = agent; delete cur.steer;
     pane.input.type('');
@@ -487,7 +487,7 @@ SCENARIOS = r"""
     pane.ring.click();
     const layer = pane.popover && pane.popover.node.textContent;
     const noBar = pane.popover.node.children.length;
-    h.store.set('extensions.scholium-bridge.contextRing', false); h.runner.paintPane(pane);
+    h.store.set('extensions.scholium.contextRing', false); h.runner.paintPane(pane);
     const claude = h.runner.contextAfter({ type: 'assistant', message: { usage: { input_tokens: 2, cache_creation_input_tokens: 5000, cache_read_input_tokens: 40000, output_tokens: 100 } } }, null);
     const codex = h.runner.contextAfter({ method: 'thread/tokenUsage/updated', params: { tokenUsage: { modelContextWindow: 9000,
       last: { totalTokens: 1050, inputTokens: 1000, cachedInputTokens: 600, outputTokens: 50 } } } }, null);
@@ -700,7 +700,7 @@ SCENARIOS = r"""
     {
       const ROUTING = [note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }),
                        turnDone({ status: 'failed', error: { message: 'workspace routing discovery timed out', codexErrorInfo: 'other' } })];
-      const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [ROUTING] } });
+      const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [ROUTING] } });
       h.runner.NET_RETRY_MS = 60000;
       h.runner.start('x');
       const p = await h.pane(h.item1);
@@ -954,7 +954,7 @@ SCENARIOS = r"""
     pane.input.type('问'); pane.send.click();
     await settle(400); await new Promise(r => setTimeout(r, 120)); await settle(400);
     const conv = pane.shownConv, codexBefore = h.log.codexCalls.length, claudeBefore = h.log.stdin.length;
-    h.store.set('extensions.scholium-bridge.agent', 'codex');   // the chosen agent changes; the pane keeps showing the conversation
+    h.store.set('extensions.scholium.agent', 'codex');   // the chosen agent changes; the pane keeps showing the conversation
     await h.runner.retryFromView(pane); await settle(400);
     const after = await h.runner.readLog('ATT1', conv);
     facts.retryAgent = { claudeRan: h.log.stdin.length - claudeBefore, codexCalls: h.log.codexCalls.length - codexBefore, shown: pane.shownConv === conv,
@@ -1027,16 +1027,16 @@ SCENARIOS = r"""
   }
   // the settings page asks the plugin for the programs it finds by itself, whatever is set there; gone once it stops
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.claudePath': '/custom/claude.exe',
-                                 'extensions.scholium-bridge.codexPath': '/custom/codex.exe' } });
+    const h = harness({ prefs: { 'extensions.scholium.claudePath': '/custom/claude.exe',
+                                 'extensions.scholium.codexPath': '/custom/codex.exe' } });
     h.runner.start('x');
-    const api = h.zotero.ScholiumBridge;
+    const api = h.zotero.Scholium;
     facts.found = { api: !!api, claude: api && await api.found('claude'), codex: api && await api.found('codex') };
     h.runner.stop();
-    facts.found.after = 'ScholiumBridge' in h.zotero;
+    facts.found.after = 'Scholium' in h.zotero;
     const none = harness({ claudeExists: false, codex: { versions: {} } });
     none.runner.start('x');
-    facts.found.none = [await none.zotero.ScholiumBridge.found('claude'), await none.zotero.ScholiumBridge.found('codex')];
+    facts.found.none = [await none.zotero.Scholium.found('claude'), await none.zotero.Scholium.found('codex')];
     none.runner.stop();
   }
   // the annotation tab's introduction: its title and one line
@@ -1062,7 +1062,7 @@ def facts(tmp_path_factory):
 def test_the_settings_page_is_registered_and_opened(facts):
     s = facts["settingsPage"]
     assert s["src"] == "jar:file:///x/scholium.xpi!/settings.xhtml" and s["scripts"] == ["jar:file:///x/scholium.xpi!/settings.js"]
-    assert s["label"] == "Scholium" and s["pluginID"] == "scholium-bridge@zotero-scholium"
+    assert s["label"] == "Scholium" and s["pluginID"] == "scholium@zotero-scholium"
     assert s["multiline"] == "cmdIfMultiline" and s["afterStop"] is None
     assert s["id"] == "scholium-pane-id" and s["opened"] == ["scholium-pane-id"]
     assert s["defaults"] == ["cmdAlways", "queue", True] and s["set"] == ["enter", "steer", False] and s["bogus"] == "cmdAlways"
@@ -1135,22 +1135,22 @@ def test_the_settings_page_binds_every_preference():
     src = (PLUGIN / "settings.xhtml").read_text(encoding="utf8")
     root = ET.fromstring("<root xmlns='%s' xmlns:html='%s'>%s</root>" % (ns["x"], ns["h"], src))
     prefs = {el.get("preference") for el in root.iter() if el.get("preference")}
-    assert prefs == {"extensions.scholium-bridge." + p for p in ("sendShortcut", "followUpMode", "contextRing", "claudePath", "codexPath")}
+    assert prefs == {"extensions.scholium." + p for p in ("sendShortcut", "followUpMode", "contextRing", "claudePath", "codexPath")}
     ids = {el.get("data-l10n-id") for el in root.iter() if el.get("data-l10n-id")}
     for locale in ("en-US", "zh-CN"):
-        ftl = (PLUGIN / "locale" / locale / "scholium-bridge.ftl").read_text(encoding="utf8")
+        ftl = (PLUGIN / "locale" / locale / "scholium.ftl").read_text(encoding="utf8")
         defined = set(re.findall(r"^([a-z][\w-]*)\s*=", ftl, re.M))
         assert ids <= defined, (locale, ids - defined)
     defaults = (PLUGIN / "prefs.js").read_text(encoding="utf8")
     for p, v in (("sendShortcut", '"cmdAlways"'), ("followUpMode", '"queue"'), ("contextRing", "true"),
                  ("claudePath", '""'), ("codexPath", '""'), ("savedPrompts", '""')):
-        assert f'pref("extensions.scholium-bridge.{p}", {v});' in defaults
+        assert f'pref("extensions.scholium.{p}", {v});' in defaults
 
 
 def ftl_messages(locale):
     """{id: (value or None, {attribute names})} of the plugin's ftl of a locale."""
     out, last = {}, None
-    for line in (PLUGIN / "locale" / locale / "scholium-bridge.ftl").read_text(encoding="utf8").splitlines():
+    for line in (PLUGIN / "locale" / locale / "scholium.ftl").read_text(encoding="utf8").splitlines():
         m = re.match(r"^([a-z][\w-]*)\s*=\s*(.*)$", line)
         if m:
             last = m.group(1)
@@ -1199,14 +1199,14 @@ context.ScholiumRunner.start = () => { seen.push(context.ScholiumRunner.rootURI)
 context.startup({ id: 'x', version: '0.1.9', rootURI: 'jar:file:///x.xpi!/' }, 5)
   .then(() => process.stdout.write(JSON.stringify(seen)));
 """
-    out = json.loads(subprocess.run([NODE, "-e", script, str(BRIDGE)], text=True, capture_output=True, check=True, timeout=15).stdout)
+    out = json.loads(subprocess.run([NODE, "-e", script, str(BOOTSTRAP)], text=True, capture_output=True, check=True, timeout=15).stdout)
     assert out == ["jar:file:///x.xpi!/"]
 
 
 def test_the_release_workflow_zips_every_top_level_entry_of_the_plugin():
     workflow = (PLUGIN.parent.parent / ".github" / "workflows" / "release.yml").read_text(encoding="utf8")
-    line = next(l for l in workflow.splitlines() if l.strip().startswith("zip ") and "scholium-bridge.xpi" in l)
-    zipped = set(line.split("scholium-bridge.xpi", 1)[1].split())
+    line = next(l for l in workflow.splitlines() if l.strip().startswith("zip ") and "scholium.xpi" in l)
+    zipped = set(line.split("scholium.xpi", 1)[1].split())
     assert set(os.listdir(PLUGIN)) <= zipped, set(os.listdir(PLUGIN)) - zipped
 
 
@@ -1601,7 +1601,7 @@ const document = { getElementById: id => (present ? inputs[id] || ({ addEventLis
                    l10n: { formatValue: async id => (id === 'scholium-settings-not-found' ? 'NOT FOUND' : id) } };
 const found = { claude: 'C:/found/claude.exe', codex: null };
 vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {
-  window: {}, document, Zotero: { Prefs: { set() {} }, ScholiumBridge: { found: async agent => found[agent] } },
+  window: {}, document, Zotero: { Prefs: { set() {} }, Scholium: { found: async agent => found[agent] } },
   ChromeUtils: { importESModule: () => ({}) },
 });
 const out = {};

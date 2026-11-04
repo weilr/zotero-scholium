@@ -5,17 +5,17 @@
     const fp = new FilePicker();
     fp.init(window, document.l10n ? await document.l10n.formatValue(title) : "", fp.modeOpen);
     fp.appendFilters(fp.filterAll);   // the claude and codex executables are no app bundles
-    if (await fp.show() === fp.returnOK) Zotero.Prefs.set("extensions.scholium-bridge." + pref, fp.file, true);
+    if (await fp.show() === fp.returnOK) Zotero.Prefs.set("extensions.scholium." + pref, fp.file, true);
   };
   const wire = () => {
     document.getElementById("scholium-claude-browse")?.addEventListener("command", () => { browse("claudePath", "scholium-settings-claude"); });
     document.getElementById("scholium-codex-browse")?.addEventListener("command", () => { browse("codexPath", "scholium-settings-codex"); });
     // the boxes' grey text: the program the plugin finds by itself, or that it finds none
-    const bridge = typeof Zotero !== "undefined" ? Zotero.ScholiumBridge : null;
+    const plugin = typeof Zotero !== "undefined" ? Zotero.Scholium : null;
     for (const [id, agent] of [["scholium-claude-path", "claude"], ["scholium-codex-path", "codex"]]) {
       const input = document.getElementById(id);
-      if (!input || !bridge) continue;
-      bridge.found(agent).then(async path => {
+      if (!input || !plugin) continue;
+      plugin.found(agent).then(async path => {
         input.placeholder = path || (document.l10n ? await document.l10n.formatValue("scholium-settings-not-found") : "");
       }).catch(() => {});
     }

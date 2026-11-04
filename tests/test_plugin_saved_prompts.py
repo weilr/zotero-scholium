@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from bridge_harness import NODE, css_rules, run_scenarios
+from plugin_harness import NODE, css_rules, run_scenarios
 
-pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 SCENARIOS = r"""
 (async () => {
@@ -56,9 +56,9 @@ SCENARIOS = r"""
   // a list in the preference; one that cannot be read gives the built-in ones; English built-in ones
   {
     const saved = JSON.stringify([{ label: '局限', prompt: '这篇论文有哪些局限？' }, { label: '', prompt: '用一句话概括全文的核心贡献和结论' }]);
-    const h = harness({ prefs: { 'extensions.scholium-bridge.savedPrompts': saved } });
+    const h = harness({ prefs: { 'extensions.scholium.savedPrompts': saved } });
     h.runner.start('x');
-    const bad = harness({ prefs: { 'extensions.scholium-bridge.savedPrompts': '{not json' } });
+    const bad = harness({ prefs: { 'extensions.scholium.savedPrompts': '{not json' } });
     bad.runner.start('x');
     const en = harness({ locale: 'en-US' });
     en.runner.start('x');
@@ -81,7 +81,7 @@ SCENARIOS = r"""
     fields()[0].type('贡献点');
     fields()[1].type('列出主要贡献，每条一句。');
     fields()[2].children[1].click();                          // ✓
-    const kept = { labels: items(pane).map(c => c.children[0].textContent), pref: h.store.get('extensions.scholium-bridge.savedPrompts') };
+    const kept = { labels: items(pane).map(c => c.children[0].textContent), pref: h.store.get('extensions.scholium.savedPrompts') };
     items(pane)[0].children[1].click();
     fields()[1].type('不要的');
     key(fields()[1], { key: 'Escape' });
@@ -132,7 +132,7 @@ SCENARIOS = r"""
     const esc = key(field, { key: 'Escape', isComposing: true });
     const enter = key(field, { key: 'Enter', ctrlKey: true, isComposing: true });
     const during = { open: editor().className, value: field.value, escStopped: esc.stopped, enterPrevented: enter.defaultPrevented,
-                     pref: h.store.get('extensions.scholium-bridge.savedPrompts') || null };
+                     pref: h.store.get('extensions.scholium.savedPrompts') || null };
     const plain = key(field, { key: 'Escape' });
     facts.composing = { during, plainStopped: plain.stopped, labels: items(pane).map(c => c.children[0].textContent) };
   }

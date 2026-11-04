@@ -2,9 +2,9 @@
 quote above the chat tab's box; it goes with the user's words to the agent, and the transcript shows it above them."""
 import pytest
 
-from bridge_harness import NODE, css_rules, run_scenarios
+from plugin_harness import NODE, css_rules, run_scenarios
 
-pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 SCENARIOS = r"""
 (async () => {
@@ -88,8 +88,8 @@ SCENARIOS = r"""
     const queued = h.runner.queue.map(j => j.quote);
     const cleared = pane.quoteBox.hidden;
     h.runner.stop(true); await settle(40);
-    const carried = JSON.parse(h.store.get('extensions.scholium-bridge.carryOver'));
-    const h2 = harness({ prefs: { 'extensions.scholium-bridge.carryOver': JSON.stringify(carried) }, logs: ours(h),
+    const carried = JSON.parse(h.store.get('extensions.scholium.carryOver'));
+    const h2 = harness({ prefs: { 'extensions.scholium.carryOver': JSON.stringify(carried) }, logs: ours(h),
                          scripts: [[qInit, 'HOLD', ev({ type: 'result', subtype: 'success', is_error: false, result: '答', session_id: 'S1' })],
                                   [qInit, ev({ type: 'result', subtype: 'success', is_error: false, result: '答', session_id: 'S1' })]] });
     h2.runner.start('x', true);
@@ -132,7 +132,7 @@ SCENARIOS = r"""
   // a queued row steered into the answer under way tells the agent the passage; steering from the box keeps the quote
   // for the next message
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex', 'extensions.scholium-bridge.followUpMode': 'queue' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex', 'extensions.scholium.followUpMode': 'queue' },
                         codex: { scripts: [[note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }), 'WAIT']] } });
     h.runner.start('x');
     const p = await h.pane(h.item1); await settle(40);
@@ -171,7 +171,7 @@ SCENARIOS = r"""
   }
   // steering words into an annotation run takes no quote along
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' },
                         codex: { scripts: [[note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }), 'WAIT']] } });
     h.runner.start('x');
     const p = await h.pane(h.item1); await settle(40);
@@ -609,7 +609,7 @@ SCENARIOS = r"""
     const en = harness({ locale: 'en-US' });
     const carried = { jobs: [{ key: 'ATT1', libraryID: 1, agent: 'claude', say: '问', kind: 'chat', conv: null, quote: { text: 'A.', page: '9', label: '312' } }],
                       paused: null, held: [] };
-    const h3 = harness({ gateFirst: true, prefs: { 'extensions.scholium-bridge.carryOver': JSON.stringify(carried) } });
+    const h3 = harness({ gateFirst: true, prefs: { 'extensions.scholium.carryOver': JSON.stringify(carried) } });
     h3.runner.start('x', true); await settle(200);
     const restored = (h3.runner.job ? h3.runner.job.source : h3.runner.queue[0] || {}).quote || null;
     h3.runner.cancel(); await settle(100);

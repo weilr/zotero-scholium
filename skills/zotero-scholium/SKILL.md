@@ -21,7 +21,7 @@ Sticky notes (`kind: "note"`) only when the profile shows that habit or the user
 
 ## Requirements
 
-`scripts/scholium.py` needs Python 3.9 or later and PyMuPDF (if missing, ask the user to run `pip install -U pymupdf`). Zotero must be running. Only items in My Library are supported, not group libraries. The write channel (the bridge plugin when installed, else the local API on Zotero 10, a JavaScript file as fallback) is selected automatically; read `references/backends.md` only when `--apply` does not write.
+`scripts/scholium.py` needs Python 3.9 or later and PyMuPDF (if missing, ask the user to run `pip install -U pymupdf`). Zotero must be running. Only items in My Library are supported, not group libraries. The write channel (the Scholium plugin when installed, else the local API on Zotero 10, a JavaScript file as fallback) is selected automatically; read `references/backends.md` only when `--apply` does not write.
 
 ## Workflow
 

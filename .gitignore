@@ -14,7 +14,7 @@ out/
 
 # credentials (must not be committed)
 local-api-keys.json
-scholium-bridge.token
+scholium.token
 *.token
 
 # editors / OS

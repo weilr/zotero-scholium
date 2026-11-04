@@ -5,9 +5,9 @@ import re
 
 import pytest
 
-from bridge_harness import NODE, css_rules, run_scenarios
+from plugin_harness import NODE, css_rules, run_scenarios
 
-pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 SCENARIOS = r"""
 const pause = ms => new Promise(r => setTimeout(r, ms));   // the ticks of the state line are timers
@@ -75,7 +75,7 @@ const init = ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 
 
   // Codex compacts by itself in a turn: the same
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [[
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [[
       note('turn/started', { threadId: 'T1', turn: { id: 'TURN', status: 'inProgress' } }),
       coItem('started', { type: 'contextCompaction', id: 'cc1' }), 'WAIT']] } });
     h.runner.start('x');
@@ -159,7 +159,7 @@ def test_the_compaction_line_is_swept_as_the_run_line_and_stops_for_reduced_moti
     rules = css_rules()
     both = rules[".scholium-fold-head.live .scholium-working, .scholium-compact.live .scholium-working"]
     assert "animation: scholium-shimmer 2s linear infinite" in both and "background-clip: text" in both
-    from bridge_harness import PLUGIN
+    from plugin_harness import PLUGIN
     text = (PLUGIN / "content" / "scholium.css").read_text(encoding="utf8")
     reduced = re.search(r"@media \(prefers-reduced-motion: reduce\) \{\s*\.scholium-fold-head\.live \.scholium-working,\s*"
                         r"\.scholium-compact\.live \.scholium-working \{([^}]*)\}", text)

@@ -75,7 +75,7 @@
    ```bash
    npx skills add weilr/zotero-scholium -g -y
    ```
-3. 下载 [`scholium-bridge.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium-bridge.xpi)，在 Zotero 中安装：工具 → 插件 → ⚙ → 从文件安装插件。
+3. 下载 [`scholium.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium.xpi)，在 Zotero 中安装：工具 → 插件 → ⚙ → 从文件安装插件。已装 Scholium Bridge（0.1.9 及更早）的，也这样安装 Scholium：它会移除 Scholium Bridge，并保留原有的设置和对话；Scholium Bridge 里正在进行的任务会停下，排队的消息不保留。Scholium Bridge 不会自行更新到 Scholium。
 4. 选中一篇论文，打开 **Scholium** 区块，在 **批注** 页点 **批注这篇**。想提问时，在 **对话** 页写问题发送。
 
 ### 在代理对话里使用
@@ -102,7 +102,7 @@
 
 **手动安装：** 将 [`skills/zotero-scholium/`](skills/zotero-scholium/) 复制到代理的技能目录：Claude Code 为 `~/.claude/skills/`，Codex 为 `~/.codex/skills/`，其他代理为 `~/.agents/skills/`。该目录自成一体。
 
-**更新：** `npx skills update zotero-scholium`，或 `/plugin update zotero-scholium@zotero-scholium`。插件通过 Zotero 的插件更新机制自动更新。
+**更新：** `npx skills update zotero-scholium`，或 `/plugin update zotero-scholium@zotero-scholium`。插件通过 Zotero 的插件更新机制自动更新。Scholium Bridge 不会自动更新到 Scholium，请按第 3 步安装。
 
 </details>
 

@@ -1,4 +1,4 @@
-# scholium-bridge
+# Scholium
 
 The plugin has five functions:
 
@@ -20,7 +20,7 @@ The plugin has five functions:
 The eye button at the right end of the reader toolbar shows or hides the annotations that carry the
 tool's tag `zotero-scholium` in every reader view at once: reader tabs, reader windows, and the
 attachment preview in the item pane. The choice is kept in the preference
-`extensions.scholium-bridge.showAnnotations` and applies to readers opened later and after a restart;
+`extensions.scholium.showAnnotations` and applies to readers opened later and after a restart;
 until the button is first used, the annotations are hidden. Annotations that the tool writes or
 changes while a reader is open follow the current choice; an item-pane preview that is already
 showing follows on its next load.
@@ -324,25 +324,27 @@ Annotations tab, in place above the box); the new run replaces those annotations
 
 If the log refuses the first line of a Chat run, its words go back to the box (a queued message's to its row, marked,
 with **Retry**) and the state line says it failed, with the reason; an annotation's extra instructions go back to the
-Annotations tab's box. After the update from v0.1.9, a question in progress continues as one turn, and a paper with
-the logs of both agents opens the chosen agent's.
+Annotations tab's box. A paper with the logs of both agents from Scholium Bridge 0.1.9 opens the chosen agent's.
+
+At each start the plugin takes over the preferences of Scholium Bridge (`extensions.scholium-bridge.*`) that it has
+no value of its own for. It then clears every preference of Scholium Bridge.
 
 | Preference | Default | Meaning |
 |---|---|---|
-| `extensions.scholium-bridge.agent` | `claude` | `claude` or `codex`; set in the Scholium section |
-| `extensions.scholium-bridge.claudePath` | found automatically | path of the `claude` executable; set on the settings page |
-| `extensions.scholium-bridge.claudeModel` | `opus` (the latest Opus) | value of `--model`, none when empty; set in the Scholium section |
-| `extensions.scholium-bridge.claudeEffort` | `medium` | value of `--effort`; set in the Scholium section |
-| `extensions.scholium-bridge.claudePermissionMode` | `auto` | value of `--permission-mode` |
-| `extensions.scholium-bridge.codexPath` | the newest copy found | path of the `codex` executable; set on the settings page |
-| `extensions.scholium-bridge.codexModel` | empty (Codex's default) | Codex model; set in the Scholium section |
-| `extensions.scholium-bridge.codexEffort` | `medium` | Codex reasoning effort; set in the Scholium section |
-| `extensions.scholium-bridge.codexServers` | empty (listed at the first Codex run) | the names of the user's Codex MCP servers, switched off in each Codex thread, as `mcpServerStatus/list` gave them; renewed after the first Codex run of each Zotero session |
-| `extensions.scholium-bridge.codexDefault` | empty | the model a new Codex thread ran with when none was chosen (*Codex's default*), which the model menu names |
-| `extensions.scholium-bridge.sendShortcut` | `cmdAlways` | `enter`, `cmdIfMultiline` or `cmdAlways`; set on the settings page |
-| `extensions.scholium-bridge.followUpMode` | `queue` | `queue` or `steer`; set on the settings page |
-| `extensions.scholium-bridge.contextRing` | `true` | whether the context ring shows; set on the settings page |
-| `extensions.scholium-bridge.savedPrompts` | empty (the four built-in prompts) | the saved prompts as a JSON array of `{label, prompt}`; set in the Scholium section |
+| `extensions.scholium.agent` | `claude` | `claude` or `codex`; set in the Scholium section |
+| `extensions.scholium.claudePath` | found automatically | path of the `claude` executable; set on the settings page |
+| `extensions.scholium.claudeModel` | `opus` (the latest Opus) | value of `--model`, none when empty; set in the Scholium section |
+| `extensions.scholium.claudeEffort` | `medium` | value of `--effort`; set in the Scholium section |
+| `extensions.scholium.claudePermissionMode` | `auto` | value of `--permission-mode` |
+| `extensions.scholium.codexPath` | the newest copy found | path of the `codex` executable; set on the settings page |
+| `extensions.scholium.codexModel` | empty (Codex's default) | Codex model; set in the Scholium section |
+| `extensions.scholium.codexEffort` | `medium` | Codex reasoning effort; set in the Scholium section |
+| `extensions.scholium.codexServers` | empty (listed at the first Codex run) | the names of the user's Codex MCP servers, switched off in each Codex thread, as `mcpServerStatus/list` gave them; renewed after the first Codex run of each Zotero session |
+| `extensions.scholium.codexDefault` | empty | the model a new Codex thread ran with when none was chosen (*Codex's default*), which the model menu names |
+| `extensions.scholium.sendShortcut` | `cmdAlways` | `enter`, `cmdIfMultiline` or `cmdAlways`; set on the settings page |
+| `extensions.scholium.followUpMode` | `queue` | `queue` or `steer`; set on the settings page |
+| `extensions.scholium.contextRing` | `true` | whether the context ring shows; set on the settings page |
+| `extensions.scholium.savedPrompts` | empty (the four built-in prompts) | the saved prompts as a JSON array of `{label, prompt}`; set in the Scholium section |
 
 ## Deleting the tool's annotations
 
@@ -358,17 +360,20 @@ annotations again.
 ## Write endpoints
 
 The plugin registers three endpoints on Zotero's built-in local HTTP server (`http://127.0.0.1:23119`,
-which listens on localhost only):
+which listens on localhost only), and the same three at the paths of Scholium Bridge 0.1.9, which its skill calls:
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /scholium-bridge/ping` | returns `{ok, version, dataDir}`; no token required |
-| `POST /scholium-bridge/list` | lists the annotations of one attachment (the tool's own whole, with the dates they were added and changed) and the child notes of its parent item, with their tags, and the plugin's version |
-| `POST /scholium-bridge/apply` | writes a child note (unless a note of the tool has the same text), then, in one transaction, creates highlights and text annotations and, with `cleanup`, deletes those the tool created earlier; with `note.trashOwn`, moves the tool's earlier notes to the trash; returns the keys it created |
+| `GET /scholium/ping` | returns `{ok, version, dataDir}`; no token required |
+| `POST /scholium/list` | lists the annotations of one attachment (the tool's own whole, with the dates they were added and changed) and the child notes of its parent item, with their tags, and the plugin's version |
+| `POST /scholium/apply` | writes a child note (unless a note of the tool has the same text), then, in one transaction, creates highlights and text annotations and, with `cleanup`, deletes those the tool created earlier; with `note.trashOwn`, moves the tool's earlier notes to the trash; returns the keys it created |
+| `/scholium-bridge/ping`, `/scholium-bridge/list`, `/scholium-bridge/apply` | the same three, for the skill of Scholium Bridge 0.1.9 |
 
 Requests must carry the header `X-Annotate-Token`, whose value is the content of
-`<Zotero data directory>/scholium-bridge.token`, a random string written by the plugin on first
-start. The endpoints accept **data only**; no code is evaluated. The `apply` endpoint can create
+`<Zotero data directory>/scholium.token`, a random string written by the plugin on first
+start, or taken from Scholium Bridge 0.1.9's `scholium-bridge.token` when only that file is there. The plugin writes
+the same value to `scholium-bridge.token`, which the skill of Scholium Bridge 0.1.9 reads. The endpoints accept
+**data only**; no code is evaluated. The `apply` endpoint can create
 annotations and notes, can delete only annotations that carry the tool's tag, or, when
 `cleanupExternal: true` is passed explicitly, annotations that Zotero imported from the PDF file, and
 can move to the trash only notes that carry the tool's tag. The tool's tags (`zotero-scholium` and those
@@ -378,15 +383,20 @@ goes only under the attachment's own parent item.
 ## Installation
 
 In Zotero, open Tools → Plugins, click the gear icon, choose *Install Plugin From File…*, and select
-`scholium-bridge.xpi` (available from the GitHub release, or built locally as described below). No
+`scholium.xpi` (available from the GitHub release, or built locally as described below). No
 restart is required. One-click runs read the library through Zotero's local API: turn it on in
 Settings → Advanced → *Allow other applications on this computer to communicate with Zotero*.
+
+With Scholium Bridge installed (0.1.9 or earlier), install Scholium the same way: at its start it uninstalls Scholium
+Bridge (add-on `scholium-bridge@zotero-scholium`) and takes over its preferences and token, and the conversations
+stay. A run under way in Scholium Bridge stops when Scholium uninstalls it; its queued messages are not kept.
+Scholium Bridge does not update to Scholium by itself.
 
 ## Build
 
 ```bash
-cd plugin/scholium-bridge
-zip -r ../scholium-bridge.xpi manifest.json bootstrap.js prefs.js settings.xhtml settings.js content locale
+cd plugin/scholium
+zip -r ../scholium.xpi manifest.json bootstrap.js prefs.js settings.xhtml settings.js content locale
 ```
 
 `manifest.json`, `bootstrap.js`, `prefs.js`, `settings.xhtml`, `settings.js` and the `content/` and `locale/` folders
@@ -404,7 +414,7 @@ to `Zotero.Reader._readers` (before it loads its annotations) or returns it from
 `Zotero.Reader.openPreview`. These two hooks are removed once the prototype is reached. The button is
 added through `Zotero.Reader.registerEventListener("renderToolbar", …)`.
 
-The `content/` folder is registered as `chrome://scholium-bridge-<version>/content/`, with the plugin
+The `content/` folder is registered as `chrome://scholium-<version>/content/`, with the plugin
 version in the package name. Zotero keeps the stylesheets of a chrome address after a plugin is
 installed over a running copy, so under a fixed address the section would get the previous version's
 stylesheet. The profile editor is built in the main window's page, like the section, rather than in a

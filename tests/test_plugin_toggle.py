@@ -1,4 +1,4 @@
-"""Run the bridge's reader toggle against a simulated Zotero reader.
+"""Run the plugin's reader toggle against a simulated Zotero reader.
 
 The simulation follows Zotero's reader code: a reader tab or window is pushed to
 Zotero.Reader._readers right after construction and loads its annotations after an await,
@@ -16,9 +16,9 @@ import pytest
 from zotero_scholium import cli
 
 
-BRIDGE = Path(__file__).resolve().parents[1] / "plugin/scholium-bridge/bootstrap.js"
+BOOTSTRAP = Path(__file__).resolve().parents[1] / "plugin/scholium/bootstrap.js"
 NODE = shutil.which("node")
-pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 HARNESS = r"""
 const fs = require('node:fs');
@@ -154,7 +154,7 @@ class ReaderManager {
 // a copy of the plugin in its own sandbox; `Reader` is shared when two copies run at once
 function boot(locale, prefs = {}, Reader = new ReaderManager()) {
   const store = new Map(Object.entries(prefs));
-  const full = name => { if (!name.startsWith('extensions.scholium-bridge.')) throw Error('unexpected preference ' + name); };
+  const full = name => { if (!name.startsWith('extensions.scholium.')) throw Error('unexpected preference ' + name); };
   const context = vm.createContext({ Zotero: {
     debug() {}, locale, version: '10.0.7', Reader, Items: { get: id => attachments.get(id) || null },
     Prefs: {
@@ -165,7 +165,7 @@ function boot(locale, prefs = {}, Reader = new ReaderManager()) {
   vm.runInContext(source, context);
   return { Reader, toggle: context.ScholiumToggle, store };
 }
-const PREF = 'extensions.scholium-bridge.showAnnotations';
+const PREF = 'extensions.scholium.showAnnotations';
 const sorted = set => [...set].sort();
 const buttons = reader => reader.doc.querySelectorAll('.scholium-toggle');
 const describe = button => ({
@@ -190,7 +190,7 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
   // first run, nothing saved: two tabs, one click, updates, a third tab, previews, shutdown
   {
     const { Reader, toggle, store } = boot('en-US');
-    toggle.start('scholium-bridge@zotero-scholium');
+    toggle.start('scholium@zotero-scholium');
     facts.tag = toggle.tag;
     facts.hooksBeforeFirstReader = { push: hasOwn(Reader._readers, 'push'), openPreview: hasOwn(Reader, 'openPreview') };
     const att = newAttachment();
@@ -249,7 +249,7 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
   // a later session: the saved choice applies from the start, and shutdown leaves it alone
   {
     const { Reader, toggle, store } = boot('en-US', { [PREF]: true });
-    toggle.start('scholium-bridge@zotero-scholium');
+    toggle.start('scholium@zotero-scholium');
     const att = newAttachment();
     const tab = Reader.open(att);
     await settle();
@@ -268,7 +268,7 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
     const tab = Reader.open(att);
     await settle();
     facts.preexistingBeforeStart = sorted(tab.view);
-    toggle.start('scholium-bridge@zotero-scholium');
+    toggle.start('scholium@zotero-scholium');
     await settle();
     facts.preexistingAfterStart = sorted(tab.view);
     facts.preexistingButtons = buttons(tab).length;
@@ -283,7 +283,7 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
   // the first reader after start is an item-pane preview
   {
     const { Reader, toggle } = boot('en-US');
-    toggle.start('scholium-bridge@zotero-scholium');
+    toggle.start('scholium@zotero-scholium');
     const att = newAttachment();
     const preview = await Reader.openPreview(att);
     await settle();
@@ -296,7 +296,7 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
   // Zotero's update handlers do not wait for each other: the running copy can be started a second
   // time, or left running beside the new one; either way each reader keeps one button
   {
-    const ID = 'scholium-bridge@zotero-scholium';
+    const ID = 'scholium@zotero-scholium';
     const { Reader, toggle } = boot('en-US');
     toggle.start(ID); toggle.start(ID);
     const tab = Reader.open(newAttachment());
@@ -337,7 +337,7 @@ const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 @pytest.fixture(scope="module")
 def facts():
     completed = subprocess.run(
-        [NODE, "-e", HARNESS, str(BRIDGE)], encoding="utf-8", capture_output=True, timeout=30
+        [NODE, "-e", HARNESS, str(BOOTSTRAP)], encoding="utf-8", capture_output=True, timeout=30
     )
     assert completed.returncode == 0, completed.stderr
     return json.loads(completed.stdout)

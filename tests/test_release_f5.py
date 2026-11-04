@@ -5,9 +5,9 @@ import re
 
 import pytest
 
-from bridge_harness import BRIDGE, NODE, run_scenarios
+from plugin_harness import BOOTSTRAP, NODE, run_scenarios
 
-pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 SCENARIOS = r"""
 const L = o => JSON.stringify(o) + '\n';
@@ -348,7 +348,7 @@ def test_the_text_boxes_opt_out_of_zotero_7_and_8_native_looks(facts):
     n = facts["nativeLook"]
     for box in ("input", "edit", "label", "words"):
         assert n[box] == ["true", "true"], box
-    source = BRIDGE.read_text(encoding="utf-8")
+    source = BOOTSTRAP.read_text(encoding="utf-8")
     sites = re.findall(r'(\w+(?:\.\w+)?)\.setAttribute\("no-native", "true"\);\n\s*(\w+(?:\.\w+)?)\.setAttribute\("no-windows-native", "true"\);', source)
     assert len(sites) == source.count('setAttribute("no-native", "true")') == 4 and all(a == b for a, b in sites)
 

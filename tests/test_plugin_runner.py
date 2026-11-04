@@ -1,4 +1,4 @@
-"""Run the bridge's one-click annotation runner against a simulated Zotero, a scripted Claude Code and
+"""Run the plugin's one-click annotation runner against a simulated Zotero, a scripted Claude Code and
 a scripted Codex.
 
 The simulated Subprocess replays stream-json output (split across chunks) and answers the model list
@@ -19,9 +19,9 @@ import subprocess
 
 import pytest
 
-from bridge_harness import BRIDGE, NODE, PLUGIN, css_rules, run_scenarios
+from plugin_harness import BOOTSTRAP, NODE, PLUGIN, css_rules, run_scenarios
 
-pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 SCENARIOS = r"""
 (async () => {
@@ -31,7 +31,7 @@ SCENARIOS = r"""
   {
     const h = harness({ logs: { '/data/c.json': '{}' } });   // the configuration SCRIPT applies
     const { runner, log, item1, item2, note } = h;
-    runner.start('scholium-bridge@zotero-scholium');
+    runner.start('scholium@zotero-scholium');
     const sec = log.sections[0];
     facts.section = { paneID: sec.paneID, header: sec.header, sidenav: sec.sidenav, ftl: log.ftl.slice(), styles: h.styles() };
     facts.contextMenus = { menus: log.menus.length, readerListeners: log.listeners.map(l => l.type) };
@@ -50,7 +50,7 @@ SCENARIOS = r"""
     const p1 = before.pane();
     p1.model.change('fable');
     p1.effort.change('high');
-    facts.settings = { model: h.store.get('extensions.scholium-bridge.claudeModel'), effort: h.store.get('extensions.scholium-bridge.claudeEffort'),
+    facts.settings = { model: h.store.get('extensions.scholium.claudeModel'), effort: h.store.get('extensions.scholium.claudeEffort'),
                        otherModel: other.pane().model.value, otherEffort: other.pane().effort.value };
 
     // the transcript box: its own background
@@ -116,7 +116,7 @@ SCENARIOS = r"""
   {
     const efforts = {};
     for (const saved of ['xhigh', '', 'auto']) {
-      const h = harness({ prefs: { 'extensions.scholium-bridge.claudeEffort': saved, 'extensions.scholium-bridge.claudeModel': '' } });
+      const h = harness({ prefs: { 'extensions.scholium.claudeEffort': saved, 'extensions.scholium.claudeModel': '' } });
       h.runner.start('x');
       const p = await h.pane(h.item1);
       await h.runner.annotate([h.item1]); await settle(300);
@@ -126,7 +126,7 @@ SCENARIOS = r"""
     facts.savedEfforts = efforts;
   }
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.claudeEffort': 'xhigh' } });
+    const h = harness({ prefs: { 'extensions.scholium.claudeEffort': 'xhigh' } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
@@ -144,14 +144,14 @@ SCENARIOS = r"""
     const backToOpus = p.view().effort;
     p.pane().model.change('');
     await h.runner.annotate([h.item2]); await settle(300);
-    const claudeDefault = { model: h.store.get('extensions.scholium-bridge.claudeModel'), passed: h.log.calls[1].opts.arguments.includes('--model') };
+    const claudeDefault = { model: h.store.get('extensions.scholium.claudeModel'), passed: h.log.calls[1].opts.arguments.includes('--model') };
     facts.modelEfforts = { first, opus46, sonnet46, haiku, haikuArgs: { model: args[args.indexOf('--model') + 1], effort: args.includes('--effort') },
-                           saved: h.store.get('extensions.scholium-bridge.claudeEffort'), backToOpus, claudeDefault };
+                           saved: h.store.get('extensions.scholium.claudeEffort'), backToOpus, claudeDefault };
   }
 
   // an older Claude Code without the model list: the default and the chosen model, asked once
   {
-    const h = harness({ models: 'silent', prefs: { 'extensions.scholium-bridge.claudeModel': 'claude-sonnet-5-5' } });
+    const h = harness({ models: 'silent', prefs: { 'extensions.scholium.claudeModel': 'claude-sonnet-5-5' } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
@@ -295,7 +295,7 @@ SCENARIOS = r"""
 
   // the plugin stops while Claude Code's process or Codex's server is created: it is stopped at once
   for (const agent of ['claude', 'codex']) {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': agent } });
+    const h = harness({ prefs: { 'extensions.scholium.agent': agent } });
     h.runner.start('x');
     await h.pane(h.item1);
     await settle(200);
@@ -327,7 +327,7 @@ SCENARIOS = r"""
     const runs = [];
     // Claude Code: the run's last write, which goes when the run ends
     for (const failLogWrites of [null, agent === 'claude' ? '"num_turns":26' : '"thread/started"']) {
-      const h = harness({ failLogWrites, prefs: { 'extensions.scholium-bridge.agent': agent }, codex: { noticeBefore: 'thread/start' } });
+      const h = harness({ failLogWrites, prefs: { 'extensions.scholium.agent': agent }, codex: { noticeBefore: 'thread/start' } });
       h.runner.start('x');
       const p = await h.pane(h.item1);
       await settle(200);
@@ -495,7 +495,7 @@ SCENARIOS = r"""
     facts.failedInside = {
       claude: await order(harness({ exitCode: 1, script: [SCRIPT[0], piece('写到一半'),
         ev({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Invalid API key', session_id: 'S1' })] }), 'claude'),
-      codex: await order(harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [[
+      codex: await order(harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [[
         note('turn/started', { threadId: 'T1', turn: { id: 'TURN', status: 'inProgress' } }),
         note('item/agentMessage/delta', { threadId: 'T1', turnId: 'TURN', itemId: 'a9', delta: '写到一半' }),
         turnDone({ status: 'failed', error: { message: 'Invalid API key' } })]] } }), 'codex'),
@@ -852,13 +852,13 @@ SCENARIOS = r"""
     const h = harness();
     const doc = h.runner.windows()[0].document;
     const old = doc.createElementNS('', 'link');
-    old.id = 'scholium-bridge-style';
-    old.setAttribute('href', 'chrome://scholium-bridge-0-1-6/content/scholium.css');
+    old.id = 'scholium-style';
+    old.setAttribute('href', 'chrome://scholium-0-1-6/content/scholium.css');
     doc.documentElement.append(old);
     h.runner.start('x');
-    const sheets = () => doc.documentElement.children.filter(c => c.id === 'scholium-bridge-style').map(c => c.attrs.href);
+    const sheets = () => doc.documentElement.children.filter(c => c.id === 'scholium-style').map(c => c.attrs.href);
     const replaced = sheets();
-    doc.documentElement.children.find(c => c.id === 'scholium-bridge-style').setAttribute('href', 'chrome://scholium-bridge-0-1-9/content/scholium.css');
+    doc.documentElement.children.find(c => c.id === 'scholium-style').setAttribute('href', 'chrome://scholium-0-1-9/content/scholium.css');
     const ftl = h.log.ftl.length;
     h.runner.stop();
     facts.sheets = { replaced, oldRemoved: old.removed, afterStop: sheets(), labelsRemoved: h.log.ftl.slice(ftl).includes('removed') };
@@ -1043,14 +1043,14 @@ SCENARIOS = r"""
                        state: p.view('annotate').state };
   }
   {
-    const { runner, log, item1 } = harness({ prefs: { 'extensions.scholium-bridge.claudeModel': 'claude-sonnet-5-5',
-      'extensions.scholium-bridge.claudePermissionMode': 'dontAsk' } });
+    const { runner, log, item1 } = harness({ prefs: { 'extensions.scholium.claudeModel': 'claude-sonnet-5-5',
+      'extensions.scholium.claudePermissionMode': 'dontAsk' } });
     runner.start('x');
     await runner.annotate([item1]); await settle(300);
     facts.prefArgs = log.calls[0].opts.arguments;
   }
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.claudeModel': 'claude-sonnet-5-5' } });
+    const h = harness({ prefs: { 'extensions.scholium.claudeModel': 'claude-sonnet-5-5' } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
@@ -1089,10 +1089,10 @@ SCENARIOS = r"""
     facts.codexFound = { path: await h.runner.findCodex(), asked: h.log.versionCalls.slice() };
     const later = harness({ codex: { versions: Object.assign({}, CODEX_VERSIONS, { [CODEX_NPM]: 'codex-cli 0.161.0\n' }) } });
     facts.codexFound.npmNewer = await later.runner.findCodex();
-    const h2 = harness({ prefs: { 'extensions.scholium-bridge.codexPath': '/custom/codex.exe' },
+    const h2 = harness({ prefs: { 'extensions.scholium.codexPath': '/custom/codex.exe' },
                          codex: { versions: { '/custom/codex.exe': 'codex-cli 0.1.0\n' } } });
     facts.codexConfigured = { path: await h2.runner.findCodex(), asked: h2.log.versionCalls.length };
-    const h3 = harness({ prefs: { 'extensions.scholium-bridge.codexPath': '/custom/missing.exe' } });
+    const h3 = harness({ prefs: { 'extensions.scholium.codexPath': '/custom/missing.exe' } });
     facts.codexConfiguredMissing = await h3.runner.findCodex();
     facts.codexNewer = [[[0, 160, 0, ''], [0, 160, 0, '-alpha.3']], [[0, 160, 0, '-alpha.3'], [0, 160, 0, '']], [[0, 161, 0, ''], [0, 160, 9, '']],
                         [[0, 9, 0, ''], [0, 10, 0, '']], [[1, 0, 0, ''], [0, 99, 99, '']], [[0, 160, 0, ''], [0, 160, 0, '']]]
@@ -1116,7 +1116,7 @@ SCENARIOS = r"""
     const v = p.view();
     const proc = h.log.codexProcs[0];
     const call = h.log.codexCalls[0];
-    facts.codexModels = { agent: h.store.get('extensions.scholium-bridge.agent'), shown: p.pane().agent.value, otherShown: other.pane().agent.value,
+    facts.codexModels = { agent: h.store.get('extensions.scholium.agent'), shown: p.pane().agent.value, otherShown: other.pane().agent.value,
                           agents: p.pane().agent.children.map(o => [o.value, o.textContent]),
                           models: v.models, labels: v.modelLabels, model: v.model, efforts: v.efforts, effort: v.effort,
                           call: { command: call.command, args: call.arguments, workdir: call.workdir }, sent: proc.sent.map(m => m.method),
@@ -1127,9 +1127,9 @@ SCENARIOS = r"""
     facts.codexModels.legacy = { efforts: p.view().efforts, effort: p.view().effort };
     p.pane().model.change('gpt-6-luna');
     p.pane().effort.change('high');
-    facts.codexModels.chosen = { model: h.store.get('extensions.scholium-bridge.codexModel'), effort: h.store.get('extensions.scholium-bridge.codexEffort'),
-                                 claudeModel: h.store.get('extensions.scholium-bridge.claudeModel') || null,
-                                 claudeEffort: h.store.get('extensions.scholium-bridge.claudeEffort') || null, otherModel: other.pane().model.value };
+    facts.codexModels.chosen = { model: h.store.get('extensions.scholium.codexModel'), effort: h.store.get('extensions.scholium.codexEffort'),
+                                 claudeModel: h.store.get('extensions.scholium.claudeModel') || null,
+                                 claudeEffort: h.store.get('extensions.scholium.claudeEffort') || null, otherModel: other.pane().model.value };
     p.pane().agent.change('claude');
     await settle(40);
     facts.codexModels.back = { model: p.view().model, effort: p.view().effort, labels: p.view().modelLabels.slice(0, 2) };
@@ -1141,8 +1141,8 @@ SCENARIOS = r"""
   // a Codex annotation and a follow-up in its thread; then Claude Code chosen, the paper having no conversation, starts
   // one, given nothing of Codex's annotation session; Codex chosen again shows it, and its session goes on in its thread
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex', 'extensions.scholium-bridge.codexModel': 'gpt-6-luna',
-                                 'extensions.scholium-bridge.codexEffort': 'high' }, codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW, CODEX_FOLLOW] },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex', 'extensions.scholium.codexModel': 'gpt-6-luna',
+                                 'extensions.scholium.codexEffort': 'high' }, codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW, CODEX_FOLLOW] },
                         logs: { '/data/tmp/scholium/c.json': '{}' } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
@@ -1235,7 +1235,7 @@ SCENARIOS = r"""
 
   // a Codex step by step: the skill, then the extraction, while the turn runs; cancelling interrupts the turn
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT.slice(0, 7).concat(['WAIT'])] } });
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT.slice(0, 7).concat(['WAIT'])] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]);
@@ -1252,7 +1252,7 @@ SCENARIOS = r"""
   }
   {
     // the turn has begun with the skill: its first step; shutting down does not wait for the turn to end
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT.slice(0, 2).concat(['WAIT'])] } });
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT.slice(0, 2).concat(['WAIT'])] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]);
@@ -1269,7 +1269,7 @@ SCENARIOS = r"""
     const states = {};
     for (const [name, script] of [['codex', CODEX_SCRIPT.slice(0, 2).concat([reconnecting, 'WAIT'])],
                                   ['codexBack', CODEX_SCRIPT.slice(0, 2).concat([reconnecting, CODEX_SCRIPT[3], 'WAIT'])]]) {
-      const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [script] } });
+      const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [script] } });
       h.runner.start('x');
       const p = await h.pane(h.item1);
       await h.runner.annotate([h.item1]);
@@ -1297,7 +1297,7 @@ SCENARIOS = r"""
     // the skill in Codex's own skills folder: no extra root; no skill at all: the run ends before a conversation opens
     const found = {};
     for (const skillAt of ['/data/tmp/scholium', null]) {
-      const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { skillAt } });
+      const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { skillAt } });
       h.runner.start('x');
       await h.runner.annotate([h.item1]);
       await settle(400);
@@ -1312,7 +1312,7 @@ SCENARIOS = r"""
 
   // the Codex usage limit: the queue waits until the window resets, then the thread continues
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_LIMIT, CODEX_FOLLOW] } });
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [CODEX_LIMIT, CODEX_FOLLOW] } });
     h.runner.start('x');
     const p1 = await h.pane(h.item1);
     await h.runner.annotate([h.item1, h.item2]);
@@ -1337,7 +1337,7 @@ SCENARIOS = r"""
                      shell('c1', 'python C:/skills/scholium.py extract --pdf x.pdf', { output: '412 sentences' }),
                      turnDone({ status: 'failed', error: { message: 'stream disconnected before completion',
                                                            codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 502 } } } })];
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [failing] } });
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [failing] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]);
@@ -1346,7 +1346,7 @@ SCENARIOS = r"""
                           notices: h.log.notices.map(notice), turns: h.log.codexTurns, queue: h.runner.queue.length };
   }
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex', 'extensions.scholium-bridge.codexModel': 'gpt-9' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex', 'extensions.scholium.codexModel': 'gpt-9' },
                         codex: { fail: 'thread/start', failMessage: 'model gpt-9 is not available' } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
@@ -1355,7 +1355,7 @@ SCENARIOS = r"""
     facts.codexRefused = { last: p.view('annotate').flat.filter(untimed).at(-1), state: p.view('annotate').state, killed: h.log.codexProcs.at(-1).killed, turns: h.log.codexTurns };
   }
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { versions: {} } });
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { versions: {} } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
@@ -1374,7 +1374,7 @@ SCENARIOS = r"""
                                                                 codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 502 } } } })];
     const retry = {};
     for (const [name, first, second] of [['ok', ROUTING, CODEX_SCRIPT], ['again', DISCONNECTED, ROUTING]]) {
-      const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [first, second] } });
+      const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [first, second] } });
       h.runner.NET_RETRY_MS = 60000;
       h.runner.start('x');
       const p = await h.pane(h.item1);
@@ -1394,7 +1394,7 @@ SCENARIOS = r"""
                       entries: p.view().flat.slice(0, 4), notifications: h.log.notifications.map(n => n.title) };
     }
     // cancelling while the paper waits for its second try
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [ROUTING] } });
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [ROUTING] } });
     h.runner.NET_RETRY_MS = 60000;
     h.runner.start('x');
     const p = await h.pane(h.item1);
@@ -1408,7 +1408,7 @@ SCENARIOS = r"""
     // a refusal is not the connection: no second try
     const refused = [note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }),
                      turnDone({ status: 'failed', error: { message: 'unauthorized', codexErrorInfo: 'unauthorized' } })];
-    const h2 = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [refused] } });
+    const h2 = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [refused] } });
     h2.runner.start('x');
     await h2.runner.annotate([h2.item1]);
     await new Promise(r => setTimeout(r, 60));
@@ -1452,7 +1452,7 @@ SCENARIOS = r"""
       const other = agent === 'codex' ? 'claude' : 'codex';
       const h = harness({ logs: { '/data/tmp/scholium/ATT1/claude-run.jsonl': claudeLog, '/data/tmp/scholium/ATT1/codex-run.jsonl': codexLog },
                           logTimes: { [`/data/tmp/scholium/ATT1/${agent}-run.jsonl`]: 1000, [`/data/tmp/scholium/ATT1/${other}-run.jsonl`]: 2000 },
-                          prefs: { 'extensions.scholium-bridge.agent': agent } });
+                          prefs: { 'extensions.scholium.agent': agent } });
       h.runner.start('x');
       const p = await h.pane(h.item1);
       logFrom(p.pane());
@@ -1491,11 +1491,11 @@ SCENARIOS = r"""
     await settle(300);
     const until = h.runner.paused && h.runner.paused.claude.until;
     h.runner.stop(true);
-    const carried = h.store.get('extensions.scholium-bridge.carryOver');
-    const h2 = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried } });
+    const carried = h.store.get('extensions.scholium.carryOver');
+    const h2 = harness({ prefs: { 'extensions.scholium.carryOver': carried } });
     h2.runner.start('x', true);
     await settle(300);
-    const r = harness({ prefs: { 'extensions.scholium-bridge.carryOver': JSON.stringify({ jobs: [{ key: 'ATT1', libraryID: 1, agent: 'claude',
+    const r = harness({ prefs: { 'extensions.scholium.carryOver': JSON.stringify({ jobs: [{ key: 'ATT1', libraryID: 1, agent: 'claude',
                                                                                               retried: true, retryAt: Date.now() + 600000 }] }) } });
     r.runner.start('x', true);
     await settle(200);
@@ -1503,7 +1503,7 @@ SCENARIOS = r"""
     n.runner.start('x');
     await n.runner.annotate([n.item1], { extra: '只标方法部分' }); await settle(100);
     n.runner.stop(true);
-    const handed = JSON.parse(n.store.get('extensions.scholium-bridge.carryOver')).jobs[0];
+    const handed = JSON.parse(n.store.get('extensions.scholium.carryOver')).jobs[0];
     facts.carriedPause = { paused: h2.runner.paused && { until: h2.runner.paused.claude.until, known: h2.runner.paused.claude.known }, until, calls: h2.log.calls.length,
                            queue: h2.runner.queue.map(j => [j.att.key, j.resume || null]), waits: h2.live(),
                            retry: { calls: r.log.calls.length, queued: r.runner.queue.map(j => [j.att.key, !!j.retried, j.retryAt > Date.now()]) },
@@ -1516,7 +1516,7 @@ SCENARIOS = r"""
     for (const [name, codex] of [['failed', { fail: 'skills/list', failMessage: 'invalid type: integer' }],
                                  ['errors', { skillAt: null, skillErrors: [{ path: '/home/u/.codex/skills/x/SKILL.md', message: 'invalid YAML' }] }],
                                  ['off', { skillAt: '/data/tmp/scholium', skillOff: true }]]) {
-      const c = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex });
+      const c = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex });
       c.runner.start('x');
       await c.runner.annotate([c.item1]); await settle(400);
       said[name] = [c.runner.transcript.filter(e => e.kind !== 'time').at(-1).text, (latestNote(c) || {}).text.slice(0, 2)];
@@ -1565,8 +1565,8 @@ SCENARIOS = r"""
     h.runner.stop(true);
     await settle(40);
     const logPath = convs(h)[0];
-    const carried = h.store.get('extensions.scholium-bridge.carryOver');
-    const h2 = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried }, logs: ours(h) });
+    const carried = h.store.get('extensions.scholium.carryOver');
+    const h2 = harness({ prefs: { 'extensions.scholium.carryOver': carried }, logs: ours(h) });
     h2.runner.start('x', true);
     const p2 = await h2.pane(h2.item1);
     await settle(600);
@@ -1580,16 +1580,16 @@ SCENARIOS = r"""
     await settle(40);
     // Zotero starts the new copy of an update with ADDON_INSTALL (it has forgotten the old version by then); a
     // hand-over that no copy took is dropped when Zotero starts
-    const stale = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried } });
+    const stale = harness({ prefs: { 'extensions.scholium.carryOver': carried } });
     stale.runner.start('x');
     await settle(200);
     facts.reasons = { takingOver: [1, 2, 3, 4, 5, 6, 7, 8].filter(r => h.takingOver(r)), replacing: [1, 2, 3, 4, 5, 6, 7, 8].filter(r => h.replacing(r)),
-                      staleDropped: stale.store.get('extensions.scholium-bridge.carryOver'), staleRuns: stale.log.calls.length };
+                      staleDropped: stale.store.get('extensions.scholium.carryOver'), staleRuns: stale.log.calls.length };
     facts.update = { kills: h.log.kills, end: JSON.parse(h.log.writes[logPath].trim().split('\n').at(-1)), carried: JSON.parse(carried),
                      prompts: h2.log.stdin, resume: h2.log.calls[0].opts.arguments.includes('--resume'),
-                     cleared: h2.store.get('extensions.scholium-bridge.carryOver'), entries: p2.view('annotate').flat.map(e => e[1]),
+                     cleared: h2.store.get('extensions.scholium.carryOver'), entries: p2.view('annotate').flat.map(e => e[1]),
                      history: history.view('annotate').state, historyLast: history.view('annotate').flat.filter(untimed).at(-1), conversations: convs(h2).length,
-                     disabled: { carried: d.store.get('extensions.scholium-bridge.carryOver') ?? null, end: convLines(d).at(-1).outcome } };
+                     disabled: { carried: d.store.get('extensions.scholium.carryOver') ?? null, end: convLines(d).at(-1).outcome } };
   }
   // a cancelled run's end is in its log, and its history shows it
   {
@@ -1756,7 +1756,7 @@ SCENARIOS = r"""
     // any failure to resume the thread; a Codex that does not take items
     const refuse = inject ? { 'thread/resume': 'thread T1 is archived' }
                           : { 'thread/resume': 'no rollout found for thread id T1', 'thread/inject_items': 'unknown method thread/inject_items' };
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW], newThreads: true, refuse } });
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW], newThreads: true, refuse } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
@@ -1821,7 +1821,7 @@ SCENARIOS = r"""
   }
   // a question to Codex starts a question's conversation
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_FOLLOW] } });
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [CODEX_FOLLOW] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
@@ -1845,7 +1845,7 @@ SCENARIOS = r"""
     claude.resumed = h.log.calls[0].opts.arguments.includes('--resume');
     claude.prompt = h.log.stdin[0].split('\n')[0];
     claude.conversations = convs(h).length;
-    h.store.set('extensions.scholium-bridge.agent', 'codex');
+    h.store.set('extensions.scholium.agent', 'codex');
     await h.runner.send(h.att1, '再短一点'); await settle(500);
     const sent = h.log.codexProcs.at(-1).sent;
     const lines = h.log.writes[legacy].slice(codexLog.length).trim().split('\n').map(l => JSON.parse(l));
@@ -1876,7 +1876,7 @@ SCENARIOS = r"""
   }
   // Annotate again opens a session of its own, in a new thread
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, CODEX_SCRIPT] } });
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, CODEX_SCRIPT] } });
     h.runner.start('x');
     await h.pane(h.item1);
     await settle(200);
@@ -1896,8 +1896,8 @@ SCENARIOS = r"""
     await h.runner.annotate([h.item1]); await settle(300);
     await h.runner.send(h.att1, 'AdLN的作用是什么', { kind: 'annotate' }); await settle(150);
     h.runner.stop(true);
-    const carried = h.store.get('extensions.scholium-bridge.carryOver');
-    const h2 = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried }, logs: ours(h) });
+    const carried = h.store.get('extensions.scholium.carryOver');
+    const h2 = harness({ prefs: { 'extensions.scholium.carryOver': carried }, logs: ours(h) });
     h2.runner.start('x', true);
     await settle(400);
     const job = JSON.parse(carried).jobs[0];
@@ -1911,7 +1911,7 @@ SCENARIOS = r"""
   // is told when another conversation rewrote them since, or that they are gone
   {
     const answered = [SCRIPT[0], said('讲的是方法。'), ev({ type: 'result', subtype: 'success', is_error: false, result: '讲的是方法。', session_id: 'S1' })];
-    const h = harness({ existing: [['zotero-scholium'], ['zotero-scholium']], prefs: { 'extensions.scholium-bridge.agent': 'codex' },
+    const h = harness({ existing: [['zotero-scholium'], ['zotero-scholium']], prefs: { 'extensions.scholium.agent': 'codex' },
                         codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW, CODEX_FOLLOW, CODEX_FOLLOW, CODEX_FOLLOW] }, scripts: [answered],
                         logs: { '/data/tmp/scholium/c.json': '{}' } });
     h.runner.start('x');
@@ -1922,7 +1922,7 @@ SCENARIOS = r"""
     await settle(100);
     await h.runner.send(h.att1, '第 3 页那条讲了什么？'); await settle(400);   // Claude Code, conversation B
     const fresh = h.log.stdin.at(-1).split('\n').find(l => /^这篇论文(已有|目前)/.test(l));
-    h.store.set('extensions.scholium-bridge.agent', 'codex');
+    h.store.set('extensions.scholium.agent', 'codex');
     await h.runner.send(h.att1, '再短一点', { kind: 'annotate' }); await settle(500);   // Codex, conversation A: nothing changed since
     const unchanged = h.log.codexProcs.at(-1).sent.find(m => m.method === 'turn/start').params.input[0].text;
     const applied = JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']);
@@ -1953,7 +1953,7 @@ SCENARIOS = r"""
       + JSON.stringify({ type: 'scholium', subtype: 'prompt', text: '第 5 页那条译文改短' }) + '\n'
       + ev({ type: 'system', subtype: 'init', agent: 'codex', model: 'gpt-6-luna', session_id: 'T1' }) + CODEX_FOLLOW.join('')
       + ev({ type: 'result', agent: 'codex', subtype: 'success', is_error: false, result: '改好了：第 5 页的译文已缩短。', session_id: 'T1' });
-    const h = harness({ logs: { [legacy]: log }, prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_FOLLOW] } });
+    const h = harness({ logs: { [legacy]: log }, prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [CODEX_FOLLOW] } });
     h.runner.start('x');
     await h.pane(h.item1);
     await settle(200);
@@ -1971,7 +1971,7 @@ SCENARIOS = r"""
     await settle(40);
     await h.runner.send(h.item1, '这篇讲什么？'); await settle(300);
     h.runner.stop(true);
-    facts.handedInterrupted = JSON.parse(h.store.get('extensions.scholium-bridge.carryOver')).jobs.map(j => [j.interrupted, j.logged]);
+    facts.handedInterrupted = JSON.parse(h.store.get('extensions.scholium.carryOver')).jobs.map(j => [j.interrupted, j.logged]);
   }
   // a session Claude Code opened but that never had the message is not the conversation's: the next message starts a new
   // one, given the turn that did not get through
@@ -1996,7 +1996,7 @@ SCENARIOS = r"""
       + JSON.stringify({ type: 'scholium', subtype: 'prompt', text: '再短一点' }) + '\n'
       + ev({ type: 'system', subtype: 'init', agent: 'codex', model: 'gpt-6-luna', session_id: 'T9' })
       + JSON.stringify({ type: 'scholium', subtype: 'end', outcome: 'failed', text: 'turn/start refused' }) + '\n';
-    const h = harness({ logs: { [legacy]: log }, prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_FOLLOW] } });
+    const h = harness({ logs: { [legacy]: log }, prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [CODEX_FOLLOW] } });
     h.runner.start('x');
     await h.pane(h.item1);
     await settle(200);
@@ -2038,7 +2038,7 @@ SCENARIOS = r"""
   }
   // an agent that is missing: its new conversation fails, the other agent's stays as it was
   {
-    const h = harness({ claudeExists: false, prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT] } });
+    const h = harness({ claudeExists: false, prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
@@ -2063,11 +2063,11 @@ SCENARIOS = r"""
   {
     const carried = JSON.stringify({ jobs: [{ key: 'ATT1', libraryID: 1, agent: 'claude', resume: 'S1', updated: true }],
                                      paused: { until: Date.now() + 600000, known: true } });
-    const h = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried } });
+    const h = harness({ prefs: { 'extensions.scholium.carryOver': carried } });
     h.runner.start('x', true);
     await settle(100);
     h.runner.stop(true);
-    const job = JSON.parse(h.store.get('extensions.scholium-bridge.carryOver')).jobs[0];
+    const job = JSON.parse(h.store.get('extensions.scholium.carryOver')).jobs[0];
     facts.handedTwice = { calls: h.log.calls.length, updated: job.updated, conv: job.conv };
   }
   // a question goes before the papers still waiting for their first run, after the questions before it
@@ -2136,9 +2136,9 @@ SCENARIOS = r"""
       h.runner.start('x');
       await act(h); await settle(150);
       h.runner.stop(true);
-      const carried = h.store.get('extensions.scholium-bridge.carryOver');
+      const carried = h.store.get('extensions.scholium.carryOver');
       const job = JSON.parse(carried).jobs[0];
-      const n = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried }, logs: ours(h) });
+      const n = harness({ prefs: { 'extensions.scholium.carryOver': carried }, logs: ours(h) });
       n.runner.start('x', true);
       await settle(400);
       const out = { handed: [job.question, job.annotate, job.say, job.resume, !!job.updated], prompt: (n.log.stdin[0] || '').split('\n')[0],
@@ -2229,7 +2229,7 @@ SCENARIOS = r"""
   }
   // a deleted Codex conversation's thread is archived at the next Codex run
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, CODEX_SCRIPT], newThreads: true } });
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, CODEX_SCRIPT], newThreads: true } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
@@ -2237,11 +2237,11 @@ SCENARIOS = r"""
     p.pane().historyButton.click(); await settle(100);
     p.pane().popover.node.children[1].children[2].click(); await settle(100);
     h.fire(); await settle(200);
-    const queued = h.store.get('extensions.scholium-bridge.codexArchive');
+    const queued = h.store.get('extensions.scholium.codexArchive');
     await h.runner.annotate([h.item2]); await settle(500);
     const sent = h.log.codexProcs.at(-1).sent;
     facts.archived = { queued, archived: sent.filter(m => m.method === 'thread/archive').map(m => m.params.threadId),
-                       order: sent.map(m => m.method).filter(m => /^(initialize|thread\/)/.test(m || '')), left: h.store.get('extensions.scholium-bridge.codexArchive') };
+                       order: sent.map(m => m.method).filter(m => /^(initialize|thread\/)/.test(m || '')), left: h.store.get('extensions.scholium.codexArchive') };
   }
   // the context the conversation's session takes up: live while it runs, then from its log; orange near the limit
   {
@@ -2266,7 +2266,7 @@ SCENARIOS = r"""
     await settle(50);
     await h.runner.send(h.att1, '再详细一点'); await settle(300);
     const windowed = CODEX_FOLLOW.map(l => l.replace('"modelContextWindow":null', '"modelContextWindow":828400'));
-    const codex = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, windowed] } });
+    const codex = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, windowed] } });
     codex.runner.start('x');
     const cp = await codex.pane(codex.item1);
     await settle(200);
@@ -2297,7 +2297,7 @@ SCENARIOS = r"""
     for (let i = 0; i < 200 && !h.log.releaseDir; i++) await tick();
     h.runner.stop(true);
     h.log.releaseDir(); await queued; await settle(100);
-    const job = JSON.parse(h.store.get('extensions.scholium-bridge.carryOver')).jobs[0];
+    const job = JSON.parse(h.store.get('extensions.scholium.carryOver')).jobs[0];
     facts.stopBeforeLine = { logs: convs(h).map(c => h.log.writes[c]), handed: [job.say, job.logged, job.conv] };
   }
   // a paper with two PDFs: History lists the conversations of its best PDF only; a conversation without a line is not listed
@@ -2338,7 +2338,7 @@ SCENARIOS = r"""
   {
     const carried = JSON.stringify({ jobs: [{ key: 'ATT1', libraryID: 1, agent: 'codex', say: '这篇讲什么？', question: true, interrupted: true },
                                             { key: 'ATT2', libraryID: 1, agent: 'claude', extra: '只标方法' }] });
-    const h = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried } });
+    const h = harness({ prefs: { 'extensions.scholium.carryOver': carried } });
     h.runner.draining = true;   // the queue is only looked at
     h.runner.start('x', true);
     await settle(100);
@@ -2350,7 +2350,7 @@ SCENARIOS = r"""
   // paper runs changes nothing; a deletion not yet done when the plugin stops is done then
   {
     const conv2 = '/data/tmp/scholium/ATT2/conversations/claude-20261002-120000.jsonl';
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, gateFirst: true,
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, gateFirst: true,
                         logs: { [CONV1]: JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'claude', user: '甲' }) + '\n' + SCRIPT[0],
                                 [conv2]: JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'claude', user: '乙' }) + '\n' + SCRIPT[0] } });
     h.runner.start('x');
@@ -2424,7 +2424,7 @@ SCENARIOS = r"""
                          shell('c5', 'python C:/skills/scholium.py --config c.json --apply'),
                          shell('c5', 'python C:/skills/scholium.py --config c.json --apply', { exitCode: 2, status: 'failed', output: 'style_warnings: 1' }),
                          coItem('completed', { type: 'agentMessage', id: 'a9', text: '没写入。' }), turnDone({ status: 'completed', durationMs: 1000 })];
-    const c = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [failedApply] } });
+    const c = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [failedApply] } });
     c.runner.start('x');
     await c.runner.annotate([c.item1]); await settle(500);
     facts.appliedKept.codexFailed = '/data/tmp/scholium/ATT1/applied.json' in c.log.writes;
@@ -2435,7 +2435,7 @@ SCENARIOS = r"""
     const log = JSON.stringify({ type: 'scholium', subtype: 'prompt', text: '这篇讲什么？', question: true }) + '\n' + SCRIPT[0]
       + said('讲的是方法。') + ev({ type: 'result', subtype: 'success', is_error: false, result: '讲的是方法。', session_id: 'S1' });
     const carried = JSON.stringify({ jobs: [{ key: 'ATT1', libraryID: 1, agent: 'claude', say: '再问一句', resume: 'S1', question: false }] });
-    const h = harness({ existing: [['zotero-scholium'], ['zotero-scholium']], logs: { [legacy]: log }, prefs: { 'extensions.scholium-bridge.carryOver': carried } });
+    const h = harness({ existing: [['zotero-scholium'], ['zotero-scholium']], logs: { [legacy]: log }, prefs: { 'extensions.scholium.carryOver': carried } });
     h.runner.draining = true;   // the queue is only looked at
     h.runner.start('x', true);
     await settle(100);
@@ -2488,7 +2488,7 @@ SCENARIOS = r"""
                       plain: convText(h).includes(SCRIPT[3].trim()), shown: p.view('annotate').flat.filter(e => e[0].includes('result')).at(-1)[1] };
     // Codex: the turn's diff stays out
     const diff = note('turn/diff/updated', { threadId: 'T1', turnId: 'TURN', diff: 'diff --git a/x b/x\n+line' });
-    const c = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT.slice(0, -1).concat([diff, diff, CODEX_SCRIPT.at(-1)])] } });
+    const c = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT.slice(0, -1).concat([diff, diff, CODEX_SCRIPT.at(-1)])] } });
     c.runner.start('x');
     await c.runner.annotate([c.item1]); await settle(500);
     facts.slimLog.diff = [convText(c).includes('turn/diff/updated'), convLines(c).some(l => l.type === 'result' && !l.is_error)];
@@ -2603,7 +2603,7 @@ SCENARIOS = r"""
   }
   // Codex's server ending while it resumes the thread: the run fails, and the thread stays the conversation's
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW], newThreads: true, exitOn: 'thread/resume' } });
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW], newThreads: true, exitOn: 'thread/resume' } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
@@ -2618,7 +2618,7 @@ SCENARIOS = r"""
   // the log of a conversation handed over without it is started again
   {
     const carried = JSON.stringify({ jobs: [{ key: 'ATT1', libraryID: 1, agent: 'claude', say: '再问一句', conv: 'claude-20261001-120000', question: true }] });
-    const h = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried } });
+    const h = harness({ prefs: { 'extensions.scholium.carryOver': carried } });
     h.runner.start('x', true);
     await settle(400);
     facts.logGone = { calls: h.log.calls.length, logged: (h.log.writes[CONV1] || '').includes('"subtype":"run"') };
@@ -2741,10 +2741,10 @@ RUN = [ANNOTATE] + TRANSCRIPT + [CARD]   # an annotation on its tab: the closing
 def test_section_is_registered_and_removed_without_menus_or_toolbar_status(facts):
     assert facts["section"] == {
         "paneID": "scholium",
-        "header": {"l10nID": "scholium-section", "l10nArgs": "{}", "icon": "chrome://scholium-bridge/content/icon16.svg"},
-        "sidenav": {"l10nID": "scholium-sidenav", "l10nArgs": "{}", "icon": "chrome://scholium-bridge/content/icon20.svg"},
-        "ftl": ["scholium-bridge.ftl"],
-        "styles": [["link", "scholium-bridge-style", "stylesheet", "chrome://scholium-bridge/content/scholium.css"]],
+        "header": {"l10nID": "scholium-section", "l10nArgs": "{}", "icon": "chrome://scholium/content/icon16.svg"},
+        "sidenav": {"l10nID": "scholium-sidenav", "l10nArgs": "{}", "icon": "chrome://scholium/content/icon20.svg"},
+        "ftl": ["scholium.ftl"],
+        "styles": [["link", "scholium-style", "stylesheet", "chrome://scholium/content/scholium.css"]],
     }
     assert facts["contextMenus"] == {"menus": 0, "readerListeners": ["renderTextSelectionPopup"]}
     assert facts["stopped"] == {"sections": ["scholium-pane"], "ftl": "removed", "panes": 0, "toolbarItems": 0, "observers": 0,
@@ -3195,8 +3195,8 @@ def test_steps_and_notice_openings(facts):
 
 def test_a_newer_copy_keeps_its_stylesheet_and_labels(facts):
     s = facts["sheets"]
-    assert s["replaced"] == ["chrome://scholium-bridge/content/scholium.css"] and s["oldRemoved"] is True
-    assert s["afterStop"] == ["chrome://scholium-bridge-0-1-9/content/scholium.css"] and s["labelsRemoved"] is False
+    assert s["replaced"] == ["chrome://scholium/content/scholium.css"] and s["oldRemoved"] is True
+    assert s["afterStop"] == ["chrome://scholium-0-1-9/content/scholium.css"] and s["labelsRemoved"] is False
 
 
 def test_the_agents_markdown_is_set_and_its_source_copied(facts):
@@ -3332,8 +3332,8 @@ def test_new_profile_keeps_its_rules_through_a_statistics_run(facts):
 
 def test_plugin_addresses_carry_the_version(facts):
     v = facts["versioned"]
-    assert v["pkg"] == "scholium-bridge-0-1-3-10022049" and v["release"] == "scholium-bridge-0-2-0"
-    base = "chrome://scholium-bridge-0-1-3-10022049/content/"
+    assert v["pkg"] == "scholium-0-1-3-10022049" and v["release"] == "scholium-0-2-0"
+    base = "chrome://scholium-0-1-3-10022049/content/"
     assert v["icons"] == [base + "icon16.svg", base + "icon20.svg"]
     assert v["style"] == base + "scholium.css"
 
@@ -3345,7 +3345,7 @@ def test_plugin_ships_the_section_icons_and_localization():
         assert svg.tagName == "svg" and "context-fill" in svg.toxml()
     assert (PLUGIN / "content" / "scholium.css").is_file()
     for lang in ("en-US", "zh-CN"):
-        ftl = (PLUGIN / "locale" / lang / "scholium-bridge.ftl").read_text(encoding="utf8")
+        ftl = (PLUGIN / "locale" / lang / "scholium.ftl").read_text(encoding="utf8")
         assert "scholium-section =\n    .label = Scholium" in ftl and "scholium-sidenav =\n    .tooltiptext = Scholium" in ftl
 
 
@@ -3473,7 +3473,7 @@ def test_codex_models_come_from_its_app_server(facts):
     assert m["agents"] == [["claude", "Claude Code"], ["codex", "Codex"]]
     assert m["call"] == {"command": CODEX_APP, "args": ["app-server"], "workdir": "/data"}
     assert m["sent"] == ["initialize", "initialized", "model/list"] and m["killed"] is True
-    assert m["hello"]["clientInfo"]["name"] == "scholium-bridge" and m["secretKept"] is False and m["calls"] == 1
+    assert m["hello"]["clientInfo"]["name"] == "scholium" and m["secretKept"] is False and m["calls"] == 1
     assert m["models"] == ["", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna", "gpt-5.5"] and m["model"] == ""
     assert m["labels"] == ["Codex 默认", "GPT-6.1-Sol", "GPT-6-Astra", "GPT-6-Luna", "GPT-5.5"], "no model named before a thread ran it"
     assert m["efforts"] == LEVELS and m["effort"] == "medium"
@@ -3492,7 +3492,7 @@ def test_codex_runs_the_skill_in_a_sandbox_through_its_app_server(facts):
     assert r["skillLists"] == [["/data/tmp/scholium"], ["/data"]] and r["roots"] == ["/data/.agents/skills"]
     # the user's MCP servers and installed plugins stay out of the thread
     assert r["thread"] == {"cwd": "/data/tmp/scholium", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
-                           "sandbox": "workspace-write", "serviceName": "scholium-bridge", "model": "gpt-6-luna",
+                           "sandbox": "workspace-write", "serviceName": "scholium", "model": "gpt-6-luna",
                            "config": {"mcp_servers": {"s": {"enabled": False}}}}
     roots = ["/data/tmp/scholium", "/data/zotero-scholium", "/appdata/zotero-scholium"]
     assert r["turn"] == {"threadId": "T1", "model": "gpt-6-luna", "effort": "high", "disabledPluginIds": ["superpowers@m", "zotero@remote"],
@@ -3504,7 +3504,7 @@ def test_codex_runs_the_skill_in_a_sandbox_through_its_app_server(facts):
     assert "附件 key：ATT1" in r["prompt"] and "不要向用户提问" in r["prompt"]
     # questions that reach the plugin are declined: nobody is there to answer
     assert r["answers"] == [{"id": "q1", "result": {"decision": "decline"}}, {"id": "q2", "result": {"answers": {}}},
-                            {"id": "q3", "error": {"code": -32601, "message": "not handled by scholium-bridge"}}]
+                            {"id": "q3", "error": {"code": -32601, "message": "not handled by scholium"}}]
     assert r["killed"] is True and r["session"] == "T1" and r["claudeCalls"] == 0
     assert r["applied"] == "/data/tmp/scholium/c.json", "the configuration of its apply, in Codex's folder"
 
@@ -3550,7 +3550,7 @@ def test_the_agents_share_the_papers_conversations(facts):
     assert f["claudeCalls"] == 0
     assert f["methods"] == ["initialize", "initialized", "plugin/installed", "thread/resume", "turn/start"], "the servers listed once"
     assert f["resume"] == {"threadId": "T1", "excludeTurns": True, "cwd": "/data/tmp/scholium", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
-                           "sandbox": "workspace-write", "serviceName": "scholium-bridge", "model": "gpt-6-luna",
+                           "sandbox": "workspace-write", "serviceName": "scholium", "model": "gpt-6-luna",
                            "config": {"mcp_servers": {"s": {"enabled": False}}}}
     assert f["disabled"] == ["superpowers@m", "zotero@remote"]
     assert len(f["input"]) == 1 and f["input"][0]["text"].endswith("第 5 页那条译文改短\n\n" + CLOSING)

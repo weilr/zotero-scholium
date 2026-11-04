@@ -16,7 +16,7 @@ versions = {
     ".claude-plugin/plugin.json": json.loads(text(".claude-plugin/plugin.json"))["version"],
     ".claude-plugin/marketplace.json (metadata)": market["metadata"]["version"],
     ".claude-plugin/marketplace.json (plugin)": market["plugins"][0]["version"],
-    "plugin/scholium-bridge/manifest.json": json.loads(text("plugin/scholium-bridge/manifest.json"))["version"],
+    "plugin/scholium/manifest.json": json.loads(text("plugin/scholium/manifest.json"))["version"],
 }
 if len(sys.argv) > 1:
     versions["tag " + sys.argv[1]] = sys.argv[1].lstrip("v")

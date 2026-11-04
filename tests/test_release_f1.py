@@ -5,9 +5,9 @@ import json
 
 import pytest
 
-from bridge_harness import NODE, run_scenarios
+from plugin_harness import NODE, run_scenarios
 
-pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 SCENARIOS = r"""
 const L = o => JSON.stringify(o) + '\n';
@@ -196,13 +196,13 @@ const resumeOf = c => (c.opts.arguments.includes('--resume') ? c.opts.arguments[
                                         { key: 'ATT2', libraryID: 1, agent: 'claude', extra: '', say: '问乙', resume: null, asked: false, question: true,
                                           annotate: false, own: 0, interrupted: false, updated: false, throttled: false, retried: false, retryAt: 0 }],
                                  paused: { until: Date.now() + 600000, known: true, throttled: false } });
-    const h = harness({ prefs: { 'extensions.scholium-bridge.carryOver': old } });
+    const h = harness({ prefs: { 'extensions.scholium.carryOver': old } });
     h.runner.start('x', true); await settle(600);
     const restored = { paused: Object.keys(h.runner.paused || {}), claudeCalls: h.log.calls.length, codexTurns: h.log.codexTurns,
                        queue: h.runner.queue.map(j => [j.att.key, j.agent]) };
     h.runner.stop(true);
-    const carried = JSON.parse(h.store.get('extensions.scholium-bridge.carryOver'));
-    const h2 = harness({ prefs: { 'extensions.scholium-bridge.carryOver': JSON.stringify(carried) } });
+    const carried = JSON.parse(h.store.get('extensions.scholium.carryOver'));
+    const h2 = harness({ prefs: { 'extensions.scholium.carryOver': JSON.stringify(carried) } });
     h2.runner.start('x', true); await settle(400);
     facts.carriedPausePerAgent = { restored, carried: Object.keys(carried.paused || {}), known: carried.paused && carried.paused.codex && carried.paused.codex.known,
                                    again: Object.keys(h2.runner.paused || {}), calls: h2.log.calls.length, turns: h2.log.codexTurns,
@@ -343,12 +343,12 @@ const resumeOf = c => (c.opts.arguments.includes('--resume') ? c.opts.arguments[
 
   // the threads waiting to be archived stay listed until Codex archived them or refused them
   for (const [name, codex] of [['ended', { exitOn: 'thread/archive' }], ['refused', { refuse: { 'thread/archive': 'thread not found' } }], ['archived', {}]]) {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.codexArchive': JSON.stringify(['TA', 'TB', 'TC']), 'extensions.scholium-bridge.agent': 'codex' },
+    const h = harness({ prefs: { 'extensions.scholium.codexArchive': JSON.stringify(['TA', 'TB', 'TC']), 'extensions.scholium.agent': 'codex' },
                         codex: Object.assign({ scripts: [codexSays('x')] }, codex) });
     h.runner.start('x');
     await h.runner.send(h.att1, '一个问题'); await settle(1500);
     facts['archive_' + name] = { asked: h.log.codexProcs.flatMap(p => p.sent).filter(m => m.method === 'thread/archive').map(m => m.params.threadId),
-                                 left: h.store.get('extensions.scholium-bridge.codexArchive') || '' };
+                                 left: h.store.get('extensions.scholium.codexArchive') || '' };
     h.runner.stop();   // a request sent after the server ended has no answer here
   }
 
@@ -376,7 +376,7 @@ const resumeOf = c => (c.opts.arguments.includes('--resume') ? c.opts.arguments[
     };
     for (const [name, [text, carried]] of Object.entries(cases)) {
       const h = harness({ logs: { [OUT + 'claude-run.jsonl']: text }, scripts: [answered('S1', '继续完成。')],
-                          prefs: { 'extensions.scholium-bridge.carryOver': JSON.stringify({ jobs: [carried], paused: null }) } });
+                          prefs: { 'extensions.scholium.carryOver': JSON.stringify({ jobs: [carried], paused: null }) } });
       h.runner.start('x', true);
       const p = await h.pane(h.item1);
       await settle(800);
@@ -396,7 +396,7 @@ const resumeOf = c => (c.opts.arguments.includes('--resume') ? c.opts.arguments[
     const codexLog = L({ type: 'scholium', subtype: 'prompt', text: '问 Codex', question: true })
       + L({ type: 'result', agent: 'codex', subtype: 'success', is_error: false, result: '答', session_id: 'T1' });
     const shown = async (agent, logs) => {
-      const h = harness({ prefs: { 'extensions.scholium-bridge.agent': agent }, logs, logTimes: { [OUT + 'claude-run.jsonl']: 10, [OUT + 'codex-run.jsonl']: 20 } });
+      const h = harness({ prefs: { 'extensions.scholium.agent': agent }, logs, logTimes: { [OUT + 'claude-run.jsonl']: 10, [OUT + 'codex-run.jsonl']: 20 } });
       h.runner.start('x');
       const p = await h.pane(h.item1); await settle(60);
       const index = h.log.writes[DIR + 'index.json'];

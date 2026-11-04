@@ -1,39 +1,47 @@
-/* Scholium Bridge: a minimal plugin for Zotero 7 and later.
+/* Scholium: a minimal plugin for Zotero 7 and later.
  * Reader toggle (all versions): the eye button in the reader toolbar shows or hides annotations tagged
  * by zotero-scholium in every reader view (tab, window, item-pane preview) at once. The choice is kept
- * in the preference extensions.scholium-bridge.showAnnotations; until it is first switched on, the
+ * in the preference extensions.scholium.showAnnotations; until it is first switched on, the
  * annotations are hidden. Hiding removes them from the view only; stored items are not changed.
  * One-click annotation (the Scholium section of the item pane): starts the installed Claude Code or
  * Codex in the background for the paper shown (see ScholiumRunner).
  * Endpoints, on Zotero's built-in local HTTP server (http://127.0.0.1:23119); the tool writes through them
  * when the plugin is installed, and on Zotero 7 to 9 they are its only write channel:
- *   GET  /scholium-bridge/ping   -> { ok, version, dataDir }                       (no token)
- *   POST /scholium-bridge/list   -> annotations and notes of one attachment, the plugin's version (token)
- *   POST /scholium-bridge/apply  -> clean up + create annotations / child note, the new keys (token)
+ *   GET  /scholium/ping   -> { ok, version, dataDir }                       (no token)
+ *   POST /scholium/list   -> annotations and notes of one attachment, the plugin's version (token)
+ *   POST /scholium/apply  -> clean up + create annotations / child note, the new keys (token)
+ * The same endpoints answer at /scholium-bridge/ping, /list and /apply, which the skill of Scholium Bridge 0.1.9 calls.
  * No code is evaluated: requests carry plain data (highlight, text, and note annotations).
- * The token is stored in <Zotero data directory>/scholium-bridge.token (created on first start).
+ * The token is stored in <Zotero data directory>/scholium.token (created on first start), and in
+ * scholium-bridge.token, which the skill of Scholium Bridge 0.1.9 reads.
  */
 
-var ScholiumBridge = {
+var ScholiumEndpoints = {
   version: "",              // the plugin's, from its manifest (startup)
   // the tags that mark the tool's annotations and notes, the current one first: only these are removed or trashed
   OWN_TAGS: ["zotero-scholium", "zotero-marginalia", "zotero-paper-annotate"],
   token: null,
   timer: null,
-  paths: ["/scholium-bridge/ping", "/scholium-bridge/list", "/scholium-bridge/apply"],
+  // the second three are Scholium Bridge 0.1.9's paths, which its skill calls
+  paths: ["/scholium/ping", "/scholium/list", "/scholium/apply", "/scholium-bridge/ping", "/scholium-bridge/list", "/scholium-bridge/apply"],
 
-  log(msg) { Zotero.debug("[scholium-bridge] " + msg); },
+  log(msg) { Zotero.debug("[scholium] " + msg); },
 
+  // the token of scholium.token; without that file, the one of scholium-bridge.token (Scholium Bridge 0.1.9's), else a
+  // new one. Both files hold it: the skill of Scholium Bridge 0.1.9 reads the second
   async loadToken() {
-    const path = PathUtils.join(Zotero.DataDirectory.dir, "scholium-bridge.token");
-    try {
-      if (await IOUtils.exists(path)) {
-        const t = (await IOUtils.readUTF8(path)).trim();
-        if (t.length >= 16) return t;
-      }
-    } catch (e) { this.log("token read failed: " + e); }
-    const t = Zotero.Utilities.randomString(40);
-    await IOUtils.writeUTF8(path, t);
+    const files = ["scholium.token", "scholium-bridge.token"].map(name => PathUtils.join(Zotero.DataDirectory.dir, name));
+    const held = [];   // each file's text, null without the file
+    for (const path of files) {
+      try { held.push(await IOUtils.exists(path) ? (await IOUtils.readUTF8(path)).trim() : null); }
+      catch (e) { held.push(""); this.log("token read failed: " + e); }
+    }
+    const valid = t => typeof t === "string" && t.length >= 16;
+    const t = valid(held[0]) ? held[0] : held[0] === null && valid(held[1]) ? held[1] : Zotero.Utilities.randomString(40);
+    if (held[0] !== t) await IOUtils.writeUTF8(files[0], t);
+    if (held[1] !== t) {
+      try { await IOUtils.writeUTF8(files[1], t); } catch (e) { this.log("token not written to scholium-bridge.token: " + e); }
+    }
     return t;
   },
 
@@ -183,7 +191,7 @@ var ScholiumBridge = {
       supportedDataTypes = ["application/json"];
       // init must declare exactly one parameter: Zotero's server treats an init of arity 0 or 2 as the
       // legacy callback style, and the request would never resolve.
-      init = async (options) => self.reply(200, { ok: true, name: "scholium-bridge", version: self.version, dataDir: Zotero.DataDirectory.dir });
+      init = async (options) => self.reply(200, { ok: true, name: "scholium", version: self.version, dataDir: Zotero.DataDirectory.dir });
     }
     class List {
       supportedMethods = ["POST"];
@@ -203,7 +211,8 @@ var ScholiumBridge = {
         catch (e) { return self.reply(500, { ok: false, error: String(e && e.message || e) }); }
       };
     }
-    this.endpoints = { "/scholium-bridge/ping": Ping, "/scholium-bridge/list": List, "/scholium-bridge/apply": Apply };
+    this.endpoints = { "/scholium/ping": Ping, "/scholium/list": List, "/scholium/apply": Apply,
+                       "/scholium-bridge/ping": Ping, "/scholium-bridge/list": List, "/scholium-bridge/apply": Apply };
     Object.assign(Zotero.Server.Endpoints, this.endpoints);
   },
 
@@ -224,7 +233,7 @@ var ScholiumBridge = {
 
 var ScholiumToggle = {
   tag: "zotero-scholium",
-  pref: "extensions.scholium-bridge.showAnnotations",
+  pref: "extensions.scholium.showAnnotations",
   active: false,
   shown: false,             // one state for every reader, loaded from and saved to the preference
   handler: null,
@@ -233,7 +242,7 @@ var ScholiumToggle = {
   wrapper: null,
   hooks: [],                // [object, property, replacement] used until the prototype is reached
 
-  log(msg) { Zotero.debug("[scholium-bridge] " + msg); },
+  log(msg) { Zotero.debug("[scholium] " + msg); },
 
   isOwn(item) {
     try { return !!item && item.isAnnotation() && item.getTags().some(t => t.tag === this.tag); }
@@ -516,7 +525,7 @@ var ScholiumRunner = {
   restoreTimer: null,
   RETRY_MS: 10 * 60000,     // the wait when the agent names no reset time
   NET_RETRY_MS: 30000,      // the wait before the second try of a run whose connection failed
-  pref: "extensions.scholium-bridge.",
+  pref: "extensions.scholium.",
   STEPS: ["skill", "extract", "reading", "writing", "dryRun", "applying"],
   // a conversation given to a new session of its agent: beyond HISTORY_FROM exchanges, the latest HISTORY_WHOLE whole and the
   // earlier ones as excerpts of the user's words and of the answer
@@ -545,7 +554,7 @@ var ScholiumRunner = {
   codexRefused: new Set(),  // the names a thread refused as servers of config.toml, in this session
   CODEX_LIST_MS: 10000,     // the longest a run waits for the servers' list, when Codex never listed them
   cites: null,              // { key, map } the sentences of the paper whose transcript is being drawn
-  bridgeApi: null,          // { found(agent) } on Zotero.ScholiumBridge, for the settings page
+  settingsApi: null,          // { found(agent) } on Zotero.Scholium, for the settings page
   panes: new Map(),         // item pane section body -> { doc, keys, list, state, buttons, the conversation shown, seen }
   AGENTS: ["claude", "codex"],
   models: {},               // agent -> [{ value, label, title, efforts }] as the agent reports them; none until it answered
@@ -556,10 +565,10 @@ var ScholiumRunner = {
   DEFAULT_EFFORT: "medium", // until another level is chosen
   PANE_HEAD: 34,            // a section's header and its gap below the body, when they cannot be measured
   MIN_PANE: 360,            // the least height of a section
-  chrome: "chrome://scholium-bridge/content/",   // the content folder; startup() puts the version into it
+  chrome: "chrome://scholium/content/",   // the content folder; startup() puts the version into it
   version: "",              // the plugin's, which it gives Codex as its client version
 
-  log(msg) { Zotero.debug("[scholium-bridge] " + msg); },
+  log(msg) { Zotero.debug("[scholium] " + msg); },
 
   zh() { return String(Zotero.locale || "").toLowerCase().startsWith("zh"); },
 
@@ -1477,16 +1486,16 @@ var ScholiumRunner = {
 
   // the labels of the section's header and sidenav button, and the section's stylesheet, in a main window
   addToWindow(win) {
-    try { if (win.MozXULElement) win.MozXULElement.insertFTLIfNeeded("scholium-bridge.ftl"); } catch (e) {}
+    try { if (win.MozXULElement) win.MozXULElement.insertFTLIfNeeded("scholium.ftl"); } catch (e) {}
     try {
       const doc = win.document;
       const href = this.chrome + "scholium.css";
-      let link = doc.getElementById("scholium-bridge-style");
+      let link = doc.getElementById("scholium-style");
       // another version's sheet, left by a copy that a plugin update left running (see ScholiumToggle.start)
       if (link && link.getAttribute("href") !== href) { link.remove(); link = null; }
       if (!link) {
         link = doc.createElementNS("http://www.w3.org/1999/xhtml", "link");
-        link.id = "scholium-bridge-style";
+        link.id = "scholium-style";
         link.setAttribute("rel", "stylesheet");
         link.setAttribute("href", href);
         doc.documentElement.append(link);
@@ -1498,10 +1507,10 @@ var ScholiumRunner = {
     if (this.editor && this.editor.doc === win.document) this.closeProfile(this.editor, false);
     try {
       // a newer copy that replaced this copy's sheet keeps its sheet and its labels
-      const style = win.document.getElementById("scholium-bridge-style");
+      const style = win.document.getElementById("scholium-style");
       if (style && style.getAttribute("href") !== this.chrome + "scholium.css") return;
       if (style) style.remove();
-      const link = win.document.querySelector('[href="scholium-bridge.ftl"]');
+      const link = win.document.querySelector('[href="scholium.ftl"]');
       if (link) link.remove();
     } catch (e) {}
   },
@@ -5069,10 +5078,10 @@ var ScholiumRunner = {
   notify(title, body) {
     try {
       const svc = Components.classes["@mozilla.org/alerts-service;1"].getService(Components.interfaces.nsIAlertsService);
-      try { svc.showAlertNotification(null, title, body, false, "", null, "scholium-bridge"); return; }
+      try { svc.showAlertNotification(null, title, body, false, "", null, "scholium"); return; }
       catch (e) {
         const alert = Components.classes["@mozilla.org/alert-notification;1"].createInstance(Components.interfaces.nsIAlertNotification);
-        alert.init("scholium-bridge", null, title, body);
+        alert.init("scholium", null, title, body);
         svc.showAlert(alert);
       }
     } catch (e) { this.log("notification failed: " + e); }
@@ -6499,7 +6508,7 @@ var ScholiumRunner = {
   },
 
   async codexHello(rpc) {
-    await rpc.request("initialize", { clientInfo: { name: "scholium-bridge", title: "Scholium", version: this.version || "0" } });
+    await rpc.request("initialize", { clientInfo: { name: "scholium", title: "Scholium", version: this.version || "0" } });
     rpc.notify("initialized");
   },
 
@@ -6515,7 +6524,7 @@ var ScholiumRunner = {
       case "item/tool/requestUserInput": return { result: { answers: {} } };
       case "mcpServer/elicitation/request": return { result: { action: "decline", content: null, _meta: null } };
     }
-    return { error: { code: -32601, message: "not handled by scholium-bridge" } };
+    return { error: { code: -32601, message: "not handled by scholium" } };
   },
 
   // streaming deltas and start-up chatter stay out of the log, the whole items carry the same text; so does the user's
@@ -6809,7 +6818,7 @@ var ScholiumRunner = {
       await this.archiveThreads(rpc);
       const model = this.modelPref("codex");
       const settings = { cwd, approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandbox: "workspace-write",
-                         serviceName: "scholium-bridge" };
+                         serviceName: "scholium" };
       if (model) settings.model = model;
       const quiet = await this.codexQuiet(rpc);
       state.listAfter = quiet.listAfter;
@@ -7059,8 +7068,8 @@ var ScholiumRunner = {
         .then(id => { this.prefPaneID = id; }, e => this.log("settings page not registered: " + e));
     }
     // the settings page asks what the plugin finds by itself, for the grey text of the program boxes
-    this.bridgeApi = { found: agent => this.foundProgram(agent) };
-    Zotero.ScholiumBridge = this.bridgeApi;
+    this.settingsApi = { found: agent => this.foundProgram(agent) };
+    Zotero.Scholium = this.settingsApi;
     for (const win of this.windows()) this.addToWindow(win);
     if (!update) {
       if (this.getPref("carryOver")) { try { Zotero.Prefs.set(this.pref + "carryOver", "", true); } catch (e) {} }
@@ -7212,19 +7221,19 @@ var ScholiumRunner = {
     this.selectionHandler = null;
     this.pendingQuotes.clear();
     this.prefPaneID = null;
-    if (Zotero.ScholiumBridge === this.bridgeApi) delete Zotero.ScholiumBridge;   // a newer copy's stays
-    this.bridgeApi = null;
+    if (Zotero.Scholium === this.settingsApi) delete Zotero.Scholium;   // a newer copy's stays
+    this.settingsApi = null;
     for (const body of [...this.panes.keys()]) this.dropPane(body);
     this.notes.clear();
     this.job = null;
   },
 };
 
-var chromeHandle = null;   // chrome://scholium-bridge-<version>/content/ -> the plugin's content/ folder
+var chromeHandle = null;   // chrome://scholium-<version>/content/ -> the plugin's content/ folder
 
-// a chrome package per version, e.g. scholium-bridge-0-1-3
+// a chrome package per version, e.g. scholium-0-1-3
 function chromePackage(version) {
-  return "scholium-bridge-" + String(version || "0").replace(/[^0-9a-z]+/gi, "-").toLowerCase();
+  return "scholium-" + String(version || "0").replace(/[^0-9a-z]+/gi, "-").toLowerCase();
 }
 
 // a reader listener of the plugin let go of. Zotero 7–9's unregisterEventListener keeps the one listener it is given
@@ -7259,8 +7268,55 @@ function takingOver(reason) {
   return replacing(reason) || reason === (typeof ADDON_INSTALL === "number" ? ADDON_INSTALL : 5);
 }
 
+// Scholium Bridge 0.1.9 (the add-on scholium-bridge@zotero-scholium) is uninstalled, enabled or not, before this plugin
+// registers anything: on Zotero 7–9 its shutdown drops every reader listener of the types it used, other plugins' too,
+// and it removes its endpoints. A failure, or no end within 10 seconds, is logged and the start goes on
+async function removeScholiumBridge() {
+  const log = msg => Zotero.debug("[scholium] " + msg);
+  let manager = null;
+  try { manager = ChromeUtils.importESModule("resource://gre/modules/AddonManager.sys.mjs").AddonManager; }
+  catch (e) {
+    try { manager = ChromeUtils.import("resource://gre/modules/AddonManager.jsm").AddonManager; } catch (e2) {}
+  }
+  if (!manager) { log("Scholium Bridge not looked for: AddonManager not loaded"); return; }
+  const removal = (async () => {
+    const addon = await manager.getAddonByID("scholium-bridge@zotero-scholium");
+    if (!addon) return "";
+    await addon.uninstall();
+    return "Scholium Bridge uninstalled";
+  })().catch(e => "Scholium Bridge not uninstalled: " + e);
+  let timer = null;
+  const limit = new Promise(resolve => { timer = setTimeout(() => resolve("Scholium Bridge not uninstalled within 10 seconds"), 10000); });
+  const outcome = await Promise.race([removal, limit]);
+  clearTimeout(timer);
+  if (outcome) log(outcome);
+}
+
+// Scholium Bridge 0.1.9's preferences (extensions.scholium-bridge.*) become this plugin's where it has no value of its
+// own; the old ones are cleared
+function takeOverPreferences() {
+  try {
+    const prefs = Services.prefs, from = prefs.getBranch("extensions.scholium-bridge."), to = prefs.getBranch("extensions.scholium.");
+    for (const name of from.getChildList("")) {
+      if (!from.prefHasUserValue(name)) continue;
+      try {
+        if (!to.prefHasUserValue(name)) {
+          const type = from.getPrefType(name);
+          if (type === prefs.PREF_STRING) to.setStringPref(name, from.getStringPref(name));
+          else if (type === prefs.PREF_INT) to.setIntPref(name, from.getIntPref(name));
+          else if (type === prefs.PREF_BOOL) to.setBoolPref(name, from.getBoolPref(name));
+          else continue;
+        }
+        from.clearUserPref(name);
+      } catch (e) { Zotero.debug("[scholium] preference not taken over: " + name + ": " + e); }
+    }
+  } catch (e) { Zotero.debug("[scholium] Scholium Bridge's preferences not taken over: " + e); }
+}
+
 async function startup({ id, version, rootURI }, reason) {
   await Zotero.initializationPromise;
+  await removeScholiumBridge();
+  takeOverPreferences();
   try {
     const aomStartup = Components.classes["@mozilla.org/addons/addon-manager-startup;1"]
       .getService(Components.interfaces.amIAddonManagerStartup);
@@ -7268,23 +7324,23 @@ async function startup({ id, version, rootURI }, reason) {
     chromeHandle = aomStartup.registerChrome(Services.io.newURI(rootURI + "manifest.json"),
       [["content", pkg, rootURI + "content/"]]);
     ScholiumRunner.chrome = "chrome://" + pkg + "/content/";
-  } catch (e) { Zotero.debug("[scholium-bridge] chrome registration failed: " + e); }
-  ScholiumRunner.version = ScholiumBridge.version = version;
+  } catch (e) { Zotero.debug("[scholium] chrome registration failed: " + e); }
+  ScholiumRunner.version = ScholiumEndpoints.version = version;
   try { ScholiumToggle.start(id); ScholiumToggle.log("reader toggle registered"); }
   catch (e) { ScholiumToggle.log("reader toggle failed: " + e); }
   ScholiumRunner.rootURI = rootURI;
   try { ScholiumRunner.start(id, takingOver(reason)); ScholiumRunner.log("annotation menu registered"); }
   catch (e) { ScholiumRunner.log("annotation menu failed: " + e); }
-  ScholiumBridge.token = await ScholiumBridge.loadToken();
-  ScholiumBridge.register();
-  if (takingOver(reason)) ScholiumBridge.keep();
-  ScholiumBridge.log("endpoints registered");
+  ScholiumEndpoints.token = await ScholiumEndpoints.loadToken();
+  ScholiumEndpoints.register();
+  if (takingOver(reason)) ScholiumEndpoints.keep();
+  ScholiumEndpoints.log("endpoints registered");
 }
 
 function shutdown(data, reason) {
   try { ScholiumRunner.stop(replacing(reason)); } catch (e) {}
   try { ScholiumToggle.stop(); } catch (e) {}
-  try { ScholiumBridge.unregister(); } catch (e) {}
+  try { ScholiumEndpoints.unregister(); } catch (e) {}
   try { if (chromeHandle) chromeHandle.destruct(); } catch (e) {}
   chromeHandle = null;
 }

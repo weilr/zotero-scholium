@@ -3,9 +3,9 @@ the agents taken back to that point (Claude Code's --resume-session-at with --fo
 session given the conversation when they refuse, and the edit in the section with Undo."""
 import pytest
 
-from bridge_harness import NODE, css_rules, run_scenarios
+from plugin_harness import NODE, css_rules, run_scenarios
 
-pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 SCENARIOS = r"""
 const L = o => JSON.stringify(o) + '\n';
@@ -104,7 +104,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
   // conversation before
   {
     const run = async refuse => {
-      const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, logs: { [CODEX_CONV]: codexTurn(1, 'K1') },
+      const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, logs: { [CODEX_CONV]: codexTurn(1, 'K1') },
                           codex: Object.assign({ scripts: [CODEX_FOLLOW, CODEX_FOLLOW] }, refuse ? { refuse: { 'thread/fork': 'turn not found: K1' } } : {}) });
       h.runner.start('x');
       await h.runner.chooseConv('ATT1', 'codex-20261001-120000');
@@ -149,8 +149,8 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
       await h.runner.send(h.item1, '新问题二', { kind: 'chat', conv: 'claude-20261001-120000', agent: 'claude', rewind: { uuid: 'u1' }, edited: true });
       await settle(150);
       h.runner.stop(true);
-      const carried = tamper(h.store.get('extensions.scholium-bridge.carryOver'));
-      const h2 = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried }, logs: ours(h), scripts: [answered(next)] });
+      const carried = tamper(h.store.get('extensions.scholium.carryOver'));
+      const h2 = harness({ prefs: { 'extensions.scholium.carryOver': carried }, logs: ours(h), scripts: [answered(next)] });
       h2.runner.start('x', true);
       await settle(400);
       const args = h2.log.calls[0] ? h2.log.calls[0].opts.arguments : [];
@@ -196,7 +196,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
                              history: (h.log.stdin[0] || '').includes('问题1') && (h.log.stdin[0] || '').includes('回答1'),
                              after: [own(after).session, own(after).rewind], turns: after.turns.map(t => [t.user, t.reply]) };
     }
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, logs: { [CODEX_CONV]: codexTurn(1, 'K1') + mark({ turnId: 'K1' }, 'codex') },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, logs: { [CODEX_CONV]: codexTurn(1, 'K1') + mark({ turnId: 'K1' }, 'codex') },
                         codex: { scripts: [CODEX_FOLLOW] } });
     h.runner.start('x');
     await h.runner.chooseConv('ATT1', 'codex-20261001-120000');
@@ -367,7 +367,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
   }
   // words steered into the edited answer leave Undo under the edited question
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex', 'extensions.scholium-bridge.followUpMode': 'steer' }, logs: { [CODEX_CONV]: CODEX3 },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex', 'extensions.scholium.followUpMode': 'steer' }, logs: { [CODEX_CONV]: CODEX3 },
                         codex: { scripts: [[note('turn/started', { threadId: 'F1', turn: { id: 'TURN', status: 'inProgress' } }), 'WAIT']] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
@@ -532,7 +532,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
   }
   // Codex: Undo leaves the forked thread to be archived
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, logs: { [CODEX_CONV]: CODEX3 }, codex: { scripts: [CODEX_FOLLOW] } });
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, logs: { [CODEX_CONV]: CODEX3 }, codex: { scripts: [CODEX_FOLLOW] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(60);
@@ -542,7 +542,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
     await settle(600);
     await h.runner.undoReplace('ATT1/codex-20261001-120000');
     await settle(100);
-    facts.undoCodex = { same: h.log.writes[CODEX_CONV] === CODEX3, archive: h.store.get('extensions.scholium-bridge.codexArchive') };
+    facts.undoCodex = { same: h.log.writes[CODEX_CONV] === CODEX3, archive: h.store.get('extensions.scholium.codexArchive') };
   }
   // no ✎ while the paper runs, on words steered into a turn, or on the annotation tab; editTurn refuses while it runs
   {

@@ -8,7 +8,7 @@ import pymupdf
 import pytest
 
 from zotero_scholium import cli
-from bridge_harness import NODE, run_scenarios
+from plugin_harness import NODE, run_scenarios
 from test_apply_safety import MemoryApi, annotation, run_main
 
 SCENARIOS = r"""
@@ -47,7 +47,7 @@ const L = o => JSON.stringify(o) + '\n';
     const cmd = 'python C:/skills/scholium.py --config ' + B + ' --apply --allow-missed';
     const s = [note('turn/started', { threadId: 'T1', turn: { id: 'TURN', status: 'inProgress' } }), shell('c5', cmd), shell('c5', cmd, done),
                coItem('completed', { type: 'agentMessage', id: 'a9', text: '完成。' }), turnDone({ status: 'completed', durationMs: 1000 })];
-    const c = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, logs: { [APPLIED]: keptA, [A]: '{}', [B]: '{}' }, codex: { scripts: [s] } });
+    const c = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, logs: { [APPLIED]: keptA, [A]: '{}', [B]: '{}' }, codex: { scripts: [s] } });
     c.runner.start('x');
     await c.runner.annotate([c.item1]); await settle(500);
     facts.codexKept[name] = JSON.parse(c.log.writes[APPLIED]).config;
@@ -113,8 +113,8 @@ const L = o => JSON.stringify(o) + '\n';
   }
   // Codex: the user's MCP servers named by mcpServerStatus/list, not from its configuration; Codex's own server and the
   // plugins' are left alone; listed in the first run when never listed before, kept as names, and not listed again
-  const CX = { 'extensions.scholium-bridge.agent': 'codex' };
-  const SERVERS = 'extensions.scholium-bridge.codexServers';
+  const CX = { 'extensions.scholium.agent': 'codex' };
+  const SERVERS = 'extensions.scholium.codexServers';
   const start = sent => sent.find(m => m.method === 'thread/start').params;
   {
     const c = harness({ prefs: CX, codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW] } });
@@ -221,9 +221,9 @@ const L = o => JSON.stringify(o) + '\n';
     const asked = methods(h.log.codexProcs[0].sent);
     const before = p.view().modelLabels[0], effortsBefore = p.view().efforts;
     await h.runner.annotate([h.item1]); await settle(500);
-    facts.codexDefault = { asked, before, effortsBefore, after: p.view().modelLabels[0], pref: h.store.get('extensions.scholium-bridge.codexDefault'),
+    facts.codexDefault = { asked, before, effortsBefore, after: p.view().modelLabels[0], pref: h.store.get('extensions.scholium.codexDefault'),
                            efforts: p.view().efforts };
-    const g = harness({ prefs: { 'extensions.scholium-bridge.codexDefault': 'gpt-6-astra' } });
+    const g = harness({ prefs: { 'extensions.scholium.codexDefault': 'gpt-6-astra' } });
     g.runner.start('x');
     const q = await g.pane(g.item1);
     await settle(40);
@@ -298,7 +298,7 @@ PAPER = OUT + "/paper.json"
 @pytest.fixture(scope="module")
 def facts(tmp_path_factory):
     if NODE is None:
-        pytest.skip("Node.js is required for bridge tests")
+        pytest.skip("Node.js is required for plugin tests")
     return run_scenarios(SCENARIOS, tmp_path_factory, timeout=300)
 
 
@@ -334,13 +334,13 @@ def test_misses_still_fail_a_dry_run_a_refused_write_and_a_partial_one(tmp_path,
 
 # R3-1: what the plugin keeps in applied.json
 
-@pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+@pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 def test_a_write_is_kept_when_its_output_says_it_was_made_whatever_the_exit_code(facts):
     assert facts["claudeKept"] == {"allowMissed": B, "partial": B, "partialBlocks": B, "refused": A, "refusedThenNothing": A, "succeeded": B}
     assert facts["codexKept"] == {"allowMissed": B, "partial": B, "refused": A, "succeeded": B}
 
 
-@pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+@pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 def test_a_write_from_a_configuration_not_found_keeps_none(facts):
     windows_b = "D:\\Zotero\\tmp\\scholium\\ATT1\\config-B.json"
     assert facts["paths"] == [None] * 9 + [windows_b, windows_b, "\\\\fs\\home$\\u\\Zotero\\tmp\\scholium\\ATT1\\config.json"]
@@ -350,7 +350,7 @@ def test_a_write_from_a_configuration_not_found_keeps_none(facts):
 
 # R3-2: the paper handed over as paper.json
 
-@pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+@pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 def test_the_paper_is_handed_over_in_paper_json_not_on_a_command_line(facts):
     p = facts["paper"]
     assert p["file"] == {"pdf": "D:/Zotero/storage/ATT1/paper.pdf", "item_key": "ITEM1", "attachment_key": "ATT1", "out_dir": OUT}
@@ -400,7 +400,7 @@ def test_extract_and_list_take_the_paper_from_paper_json(tmp_path, monkeypatch, 
 
 # R3-3: Codex's configuration is not read
 
-@pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+@pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 def test_codex_mcp_servers_are_named_without_reading_its_configuration(facts):
     q = facts["codexQuiet"]
     assert "config/read" not in q["first"] + q["second"]
@@ -420,7 +420,7 @@ def test_codex_mcp_servers_are_named_without_reading_its_configuration(facts):
     assert r["second"] == ["thread/start"] and r["secondConfig"] is False and r["kept"] == "[]", "nothing listed again, s left out"
 
 
-@pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+@pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 def test_codex_mcp_server_names_are_kept_and_no_run_waits_long_for_them(facts):
     s = facts["codexSaved"]
     assert "mcpServerStatus/list" not in s["run"], "the names kept from an earlier session, at once"
@@ -437,7 +437,7 @@ def test_codex_mcp_server_names_are_kept_and_no_run_waits_long_for_them(facts):
     assert facts["codexRefused"]["ended"] == o["ended"]
 
 
-@pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+@pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 def test_codex_default_model_is_named_once_a_thread_ran_it(facts):
     d = facts["codexDefault"]
     assert d["asked"] == ["initialize", "initialized", "model/list"]
@@ -449,12 +449,12 @@ def test_codex_default_model_is_named_once_a_thread_ran_it(facts):
 
 # R3-6, R3-7
 
-@pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+@pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 def test_whole_file_rewrites_go_through_a_temporary_file(facts):
     assert facts["atomicLog"] == {"cut": 1, "restored": 2, "back": True}
     assert facts["atomicProfile"] == {"tmp": True, "saved": True}
 
 
-@pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+@pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 def test_the_citations_cache_keeps_the_papers_shown_last(facts):
     assert facts["citations"] == {"size": 20, "shownAgain": True, "oldest": [False] * 5 + [True], "newest": True, "afterStop": 0}

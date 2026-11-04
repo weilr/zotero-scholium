@@ -1,4 +1,4 @@
-"""Run the real bridge apply handler with an in-memory Zotero boundary."""
+"""Run the plugin's real apply handler with an in-memory Zotero boundary."""
 
 import json
 from pathlib import Path
@@ -10,9 +10,9 @@ import pytest
 from zotero_scholium import cli
 
 
-BRIDGE = Path(__file__).resolve().parents[1] / "plugin/scholium-bridge/bootstrap.js"
+BOOTSTRAP = Path(__file__).resolve().parents[1] / "plugin/scholium/bootstrap.js"
 NODE = shutil.which("node")
-pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 RUN_APPLY = r"""
 const fs = require('node:fs');
@@ -50,7 +50,7 @@ if (input.script) {
   applied = vm.runInContext('(async function () {\n' + input.script + '\n})()', context);
 } else {
   vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
-  applied = context.ScholiumBridge.apply(input.data);
+  applied = context.ScholiumEndpoints.apply(input.data);
 }
 applied.then(result => {
   process.stdout.write(JSON.stringify({ result, remaining: existing.map(a => a.key), saved }));
@@ -60,7 +60,7 @@ applied.then(result => {
 
 def run_apply(data, existing, script=None):
     completed = subprocess.run(
-        [NODE, "-e", RUN_APPLY, str(BRIDGE)],
+        [NODE, "-e", RUN_APPLY, str(BOOTSTRAP)],
         input=json.dumps({"data": data, "existing": existing, "script": script}),
         text=True,
         capture_output=True,
@@ -131,13 +131,13 @@ const context = vm.createContext({
   PathUtils: { join: (...p) => p.join('/') }, IOUtils: { exists: async () => false, writeUTF8: async () => {} },
 });
 vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
-// startup gives the bridge the version of the manifest it was installed with
+// startup gives the endpoints the version of the manifest it was installed with
 context.startup({ id: manifest.applications.zotero.id, version: manifest.version, rootURI: '' })
-  .then(() => context.ScholiumBridge.list({ attachmentKey: 'ATTACH01' }))
+  .then(() => context.ScholiumEndpoints.list({ attachmentKey: 'ATTACH01' }))
   .then(r => process.stdout.write(JSON.stringify(r)));
 """
-    manifest = BRIDGE.parent / "manifest.json"
-    out = json.loads(subprocess.run([NODE, "-e", script, str(BRIDGE), str(manifest)], text=True, capture_output=True, check=True,
+    manifest = BOOTSTRAP.parent / "manifest.json"
+    out = json.loads(subprocess.run([NODE, "-e", script, str(BOOTSTRAP), str(manifest)], text=True, capture_output=True, check=True,
                                     timeout=15).stdout)
     assert out["ok"] and out["version"] == json.loads(manifest.read_text(encoding="utf8"))["version"] == cli.__version__
     assert out["annotations"] == []
@@ -176,19 +176,19 @@ def run_failing_apply(data, existing, script=None):
         ".catch(error => { process.stdout.write(JSON.stringify({ error: error.message, remaining: existing.map(a => a.key) })); });",
     )
     completed = subprocess.run(
-        [NODE, "-e", harness, str(BRIDGE)],
+        [NODE, "-e", harness, str(BOOTSTRAP)],
         input=json.dumps({"data": data, "existing": existing, "script": script}),
         text=True, capture_output=True, check=True, timeout=15,
     )
     return json.loads(completed.stdout)
 
 
-@pytest.mark.parametrize("channel", ["bridge", "generated-js"])
+@pytest.mark.parametrize("channel", ["plugin", "generated-js"])
 def test_a_failed_write_keeps_the_old_annotations(channel):
     annotations = [{"type": "highlight", "comment": "", "text": f"new {i}", "color": "#ffd400", "pageLabel": "1",
                     "sortIndex": "0", "position": {"pageIndex": 0, "rects": [[1, 1, 5, 5]]}} for i in range(2)]
     existing = [{"key": "OLD_OWN", "comment": "old output", "tags": ["zotero-scholium"]}, {"key": "USER", "comment": "mine"}]
-    if channel == "bridge":
+    if channel == "plugin":
         data = {"attachmentKey": "ATTACH01", "tag": "zotero-scholium", "annotations": annotations}
         output = run_failing_apply(data, existing)
     else:
@@ -241,7 +241,7 @@ if (input.script) {
   applied = vm.runInContext('(async function () {\n' + input.script + '\n})()', context);
 } else {
   vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
-  applied = context.ScholiumBridge.apply(input.data);
+  applied = context.ScholiumEndpoints.apply(input.data);
 }
 applied.then(result => { process.stdout.write(JSON.stringify({ result, created, trashed })); })
   .catch(error => { console.error(error); process.exitCode = 1; });
@@ -257,8 +257,8 @@ NEW_NOTE = "<h1>Paper</h1><p>The new reading note.</p>"
 
 
 def run_notes(channel, notes, html, replace, prefix="", trash_fails=False):
-    """A note written by the bridge or by the generated JavaScript: (result, notes created, keys moved to the trash)."""
-    if channel == "bridge":
+    """A note written by the plugin or by the generated JavaScript: (result, notes created, keys moved to the trash)."""
+    if channel == "plugin":
         data = {"attachmentKey": "ATTACH01", "itemKey": "PARENT01", "tag": "zotero-scholium", "legacyTags": ["zotero-marginalia"],
                 "annotations": [], "note": {"html": html, "titlePrefix": "", "trashOwn": replace, "trashTitlePrefix": prefix}}
         payload = {"data": data, "notes": notes, "script": None, "trashFails": trash_fails}
@@ -270,13 +270,13 @@ def run_notes(channel, notes, html, replace, prefix="", trash_fails=False):
                "note_title_prefix": prefix or None}
         payload = {"data": {}, "notes": notes, "script": cli.render_js(cfg, [])}
         os.unlink(f.name)
-    completed = subprocess.run([NODE, "-e", RUN_NOTES, str(BRIDGE)], input=json.dumps(payload), text=True,
+    completed = subprocess.run([NODE, "-e", RUN_NOTES, str(BOOTSTRAP)], input=json.dumps(payload), text=True,
                                capture_output=True, check=True, timeout=15)
     out = json.loads(completed.stdout)
     return out["result"], out["created"], out["trashed"]
 
 
-@pytest.mark.parametrize("channel", ["bridge", "generated-js"])
+@pytest.mark.parametrize("channel", ["plugin", "generated-js"])
 def test_note_replace_moves_only_the_tools_notes_to_the_trash(channel):
     result, created, trashed = run_notes(channel, EARLIER_NOTES, NEW_NOTE, True)
     assert len(created) == 1 and "The new reading note." in created[0]
@@ -285,44 +285,44 @@ def test_note_replace_moves_only_the_tools_notes_to_the_trash(channel):
     assert trashed == ["OWN_OLD", "LEGACY"], "with a title prefix only the tool's notes under that title"
     result, created, trashed = run_notes(channel, EARLIER_NOTES, NEW_NOTE, False)
     assert len(created) == 1 and trashed == [], "without note_replace nothing goes"
-    if channel == "bridge":
+    if channel == "plugin":
         assert result["noteKeys"] == ["NOTE1"]
 
 
-def test_the_bridge_says_when_the_earlier_notes_could_not_go():
-    result, created, trashed = run_notes("bridge", EARLIER_NOTES, NEW_NOTE, True, trash_fails=True)
+def test_the_plugin_says_when_the_earlier_notes_could_not_go():
+    result, created, trashed = run_notes("plugin", EARLIER_NOTES, NEW_NOTE, True, trash_fails=True)
     assert result["ok"] is True and len(created) == 1 and trashed == [], "the new note is written"
     assert result["notesTrashed"] == 0 and result["removeError"] == "the trash is not available"
-    result, created, trashed = run_notes("bridge", EARLIER_NOTES, NEW_NOTE, True)
+    result, created, trashed = run_notes("plugin", EARLIER_NOTES, NEW_NOTE, True)
     assert "removeError" not in result
 
 
-@pytest.mark.parametrize("channel", ["bridge", "generated-js"])
+@pytest.mark.parametrize("channel", ["plugin", "generated-js"])
 def test_a_note_with_the_same_text_is_not_written_again(channel):
     notes = EARLIER_NOTES + [{"key": "SAME", "html": "<h1>Paper (v3, 2026-10-16)</h1><p>The new reading note.</p>",
                               "tags": ["zotero-scholium"]}]
     result, created, trashed = run_notes(channel, notes, NEW_NOTE, True)
     assert created == [] and "SAME" not in trashed and trashed == ["OWN_OLD", "LEGACY", "OWN_OTHER"]
-    if channel == "bridge":
+    if channel == "plugin":
         assert result["noteKeys"] == []
     # the same text in the user's own note is no reason to skip
     result, created, trashed = run_notes(channel, [{"key": "USER", "html": NEW_NOTE}], NEW_NOTE, False)
     assert len(created) == 1
 
 
-def test_the_bridge_refuses_another_tag():
+def test_the_plugin_refuses_another_tag():
     """Only the tool's own tags mark what a run may remove; a request cannot name others."""
     data = {"attachmentKey": "ATTACH01", "tag": "to-read", "cleanup": True, "annotations": []}
-    completed = subprocess.run([NODE, "-e", RUN_APPLY, str(BRIDGE)], input=json.dumps({"data": data, "existing": [
+    completed = subprocess.run([NODE, "-e", RUN_APPLY, str(BOOTSTRAP)], input=json.dumps({"data": data, "existing": [
         {"key": "USER", "comment": "", "tags": ["to-read"]}], "script": None}), text=True, capture_output=True, timeout=15)
     assert completed.returncode != 0 and "tag must be zotero-scholium" in completed.stderr
 
 
 @pytest.mark.parametrize("item_key, fragment", [("OTHER001", "is not the parent of attachment ATTACH01")])
-def test_the_bridge_refuses_a_note_for_another_item(item_key, fragment):
+def test_the_plugin_refuses_a_note_for_another_item(item_key, fragment):
     data = {"attachmentKey": "ATTACH01", "itemKey": item_key, "tag": "zotero-scholium", "annotations": [],
             "note": {"html": NEW_NOTE, "titlePrefix": "", "trashOwn": True, "trashTitlePrefix": ""}}
-    completed = subprocess.run([NODE, "-e", RUN_NOTES, str(BRIDGE)], input=json.dumps({"data": data, "notes": EARLIER_NOTES, "script": None}),
+    completed = subprocess.run([NODE, "-e", RUN_NOTES, str(BOOTSTRAP)], input=json.dumps({"data": data, "notes": EARLIER_NOTES, "script": None}),
                                text=True, capture_output=True, timeout=15)
     assert completed.returncode != 0 and fragment in completed.stderr
 
@@ -346,7 +346,7 @@ context.ScholiumRunner.start = (id, update) => { started.push(update); };
   process.stdout.write(JSON.stringify(started));
 })();
 """
-    out = json.loads(subprocess.run([NODE, "-e", script, str(BRIDGE)], text=True, capture_output=True, check=True, timeout=15).stdout)
+    out = json.loads(subprocess.run([NODE, "-e", script, str(BOOTSTRAP)], text=True, capture_output=True, check=True, timeout=15).stdout)
     assert out == [False, False, True, True, True]
 
 
@@ -359,7 +359,7 @@ const endpoints = {};
 const copy = () => {
   const context = vm.createContext({ Zotero: { Server: { Endpoints: endpoints }, debug() {} } });
   vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
-  return context.ScholiumBridge;
+  return context.ScholiumEndpoints;
 };
 const old = copy(), fresh = copy();
 old.register();
@@ -369,8 +369,8 @@ const kept = Object.keys(endpoints).filter(p => endpoints[p] === fresh.endpoints
 fresh.unregister();
 process.stdout.write(JSON.stringify({ kept, left: Object.keys(endpoints).length }));
 """
-    out = json.loads(subprocess.run([NODE, "-e", script, str(BRIDGE)], text=True, capture_output=True, check=True, timeout=15).stdout)
-    assert out == {"kept": 3, "left": 0}
+    out = json.loads(subprocess.run([NODE, "-e", script, str(BOOTSTRAP)], text=True, capture_output=True, check=True, timeout=15).stdout)
+    assert out == {"kept": 6, "left": 0}
 
 
 def test_after_an_update_the_endpoints_an_older_copy_removed_come_back():
@@ -381,12 +381,12 @@ const vm = require('node:vm');
 const endpoints = {}, later = [];
 const context = vm.createContext({ Zotero: { Server: { Endpoints: endpoints }, debug() {} }, setTimeout: f => later.push(f), clearTimeout() {} });
 vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
-const bridge = context.ScholiumBridge;
-bridge.register();
-bridge.keep();
+const plugin = context.ScholiumEndpoints;
+plugin.register();
+plugin.keep();
 for (const p of Object.keys(endpoints)) delete endpoints[p];
 later.forEach(f => f());
-process.stdout.write(JSON.stringify(Object.keys(endpoints).filter(p => endpoints[p] === bridge.endpoints[p]).length));
+process.stdout.write(JSON.stringify(Object.keys(endpoints).filter(p => endpoints[p] === plugin.endpoints[p]).length));
 """
-    out = json.loads(subprocess.run([NODE, "-e", script, str(BRIDGE)], text=True, capture_output=True, check=True, timeout=15).stdout)
-    assert out == 3
+    out = json.loads(subprocess.run([NODE, "-e", script, str(BOOTSTRAP)], text=True, capture_output=True, check=True, timeout=15).stdout)
+    assert out == 6

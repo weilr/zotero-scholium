@@ -5,9 +5,9 @@ import re
 
 import pytest
 
-from bridge_harness import NODE, PLUGIN, css_rules, run_scenarios
+from plugin_harness import NODE, PLUGIN, css_rules, run_scenarios
 
-pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 SCENARIOS = r"""
 (async () => {
@@ -216,8 +216,8 @@ SCENARIOS = r"""
     await h.runner.send(h.item1, '', { compact: true, conv: 'claude-20261001-120000', kind: 'chat' }); await settle(50);
     const waiting = h.runner.queue.filter(j => j.compact).map(j => h.runner.started(j));
     h.runner.stop(true); await settle(40);
-    const carried = JSON.parse(h.store.get('extensions.scholium-bridge.carryOver'));
-    const h2 = harness({ gateFirst: true, prefs: { 'extensions.scholium-bridge.carryOver': JSON.stringify(carried) }, logs: ours(h) });
+    const carried = JSON.parse(h.store.get('extensions.scholium.carryOver'));
+    const h2 = harness({ gateFirst: true, prefs: { 'extensions.scholium.carryOver': JSON.stringify(carried) }, logs: ours(h) });
     h2.runner.start('x', true); await settle(200);
     facts.compactHandover = { waiting, carried: carried.jobs.map(j => [j.key, !!j.compact]),
                               restored: [h2.runner.job && h2.runner.job.source].concat(h2.runner.queue).filter(Boolean).map(j => [j.att.key, !!j.compact]) };
@@ -268,8 +268,8 @@ SCENARIOS = r"""
       await h.runner.send(h.item1, '侧重方法', { compact: true, conv: 'claude-20261001-120000', kind: 'chat' });
       for (let i = 0; i < 3000 && !(h.runner.job && h.runner.job.delivered); i++) await tick();
       h.runner.stop(true); await settle(40);
-      const carried = JSON.parse(h.store.get('extensions.scholium-bridge.carryOver'));
-      const h2 = harness({ script: done, prefs: { 'extensions.scholium-bridge.carryOver': JSON.stringify(carried) }, logs: ours(h) });
+      const carried = JSON.parse(h.store.get('extensions.scholium.carryOver'));
+      const h2 = harness({ script: done, prefs: { 'extensions.scholium.carryOver': JSON.stringify(carried) }, logs: ours(h) });
       h2.runner.start('x', true); await settle(300);
       facts.compactDelivered = { carried: carried.jobs.map(j => [j.key, !!j.compact, j.resume, j.say]), stdin: h2.log.stdin,
                                  continued: convLines(h2).filter(l => l.subtype === 'continue').length };
@@ -312,7 +312,7 @@ SCENARIOS = r"""
                    coItem('completed', { type: 'agentMessage', id: 'a1', text: '回答一' }),
                    usage(tok(849000, 800000, 1000), tok(849000, 800000, 1000)),
                    turnDone({ status: 'completed', durationMs: 1000 })];
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [first] } });
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [first] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
@@ -332,7 +332,7 @@ SCENARIOS = r"""
                            runLine: lines.filter(l => l.subtype === 'run').at(-1), turns: log.turns.map(t => [t.user, t.reply]),
                            titles: h.log.notifications.map(n => n.title).slice(-1), bodies: h.log.notifications.map(n => n.body).slice(-1) };
     // the agent's own compaction in a turn: a line without numbers
-    const auto = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [[
+    const auto = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [[
       note('turn/started', { threadId: 'T1', turn: { id: 'TURN', status: 'inProgress' } }),
       coItem('started', { type: 'contextCompaction', id: 'cc1' }), coItem('completed', { type: 'contextCompaction', id: 'cc1' }),
       coItem('completed', { type: 'agentMessage', id: 'a1', text: '好' }), turnDone({ status: 'completed' })]] } });
@@ -342,7 +342,7 @@ SCENARIOS = r"""
     q.pane().input.type('问'); q.pane().send.click(); await settle(400);
     facts.compactCodexAuto = q.pane().list.children.at(-1).children.map(c => c.textContent).filter(t => /压缩/.test(t));
     // a compaction that fails leaves no marker of sizes
-    const bad = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [first], compactScript: [
+    const bad = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [first], compactScript: [
       codexNote('turn/started', { threadId: 'T1', turn: { id: 'C1', status: 'inProgress' } }),
       turnDone({ id: 'C1', status: 'failed', error: { message: 'compaction failed' } })] } });
     bad.runner.start('x');
@@ -352,7 +352,7 @@ SCENARIOS = r"""
     await bad.runner.compactFromPane(r.pane(), ''); await settle(500);
     facts.compactCodexFailed = { after: r.pane().list.children.at(-1).textContent, marks: convLines(bad).filter(l => l.subtype === 'compacted').length };
     // a compaction under way when an update lands is handed over as the conversation going on, not as a compaction
-    const wait = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, codex: { scripts: [first], compactScript: ['WAIT'] } });
+    const wait = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [first], compactScript: ['WAIT'] } });
     wait.runner.start('x');
     const w = await wait.pane(wait.item1);
     await settle(40);
@@ -360,7 +360,7 @@ SCENARIOS = r"""
     await wait.runner.compactFromPane(w.pane(), '');
     for (let i = 0; i < 3000 && !(wait.runner.job && wait.runner.job.delivered); i++) await tick();
     wait.runner.stop(true); await settle(40);
-    facts.compactCodexDelivered = JSON.parse(wait.store.get('extensions.scholium-bridge.carryOver')).jobs.map(j => [j.key, !!j.compact, j.resume]);
+    facts.compactCodexDelivered = JSON.parse(wait.store.get('extensions.scholium.carryOver')).jobs.map(j => [j.key, !!j.compact, j.resume]);
   }
   // the context layer's button compacts the conversation; it is greyed while the paper is busy or the conversation
   // has no session yet
@@ -433,7 +433,7 @@ SCENARIOS = r"""
   // user's in the transcript and the turn's words in the log; with Queue chosen a send while busy steers nothing, and
   // the inverted shortcut steers
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex', 'extensions.scholium-bridge.followUpMode': 'queue' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex', 'extensions.scholium.followUpMode': 'queue' },
                         codex: { scripts: [[note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }), 'WAIT']] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
@@ -464,7 +464,7 @@ SCENARIOS = r"""
       reread: (await h.runner.readLog('ATT1', pane.shownConv)).entries.filter(e => e.kind === 'prompt').map(e => [e.text, !!e.steer]),
     };
     // a steer after the turn ended: nothing is steered, the words go as a turn of their own
-    const late = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' } });
+    const late = harness({ prefs: { 'extensions.scholium.agent': 'codex' } });
     late.runner.start('x');
     const q = await late.pane(late.item1);
     await settle(40);
@@ -475,7 +475,7 @@ SCENARIOS = r"""
   // what can be steered: the busy paper's own turn on the tab of its kind, and a job of that paper and kind; never a
   // compaction, nor the other tab, nor a turn over
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' },
                         codex: { scripts: [[note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }), 'WAIT']] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
@@ -498,7 +498,7 @@ SCENARIOS = r"""
   }
   // a refused steer (the turn is over on the server) queues the words, and the log has no steer line
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex', 'extensions.scholium-bridge.followUpMode': 'steer' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex', 'extensions.scholium.followUpMode': 'steer' },
                         codex: { scripts: [[note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }), 'WAIT']],
                                  refuse: { 'turn/steer': 'no active turn to steer' } } });
     h.runner.start('x');
@@ -514,7 +514,7 @@ SCENARIOS = r"""
   }
   // Claude Code cannot be steered: its follow-ups are never steered, with Steer chosen as well
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.followUpMode': 'steer' }, script: SCRIPT.concat(['HOLD', LAST, RESULT]) });
+    const h = harness({ prefs: { 'extensions.scholium.followUpMode': 'steer' }, script: SCRIPT.concat(['HOLD', LAST, RESULT]) });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
@@ -533,7 +533,7 @@ SCENARIOS = r"""
   // an annotation steered from its tab: its words open a new segment that goes on with the annotation, whose one card
   // stays on the last segment
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' },
                         codex: { scripts: [[note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }), 'WAIT']] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
@@ -553,7 +553,7 @@ SCENARIOS = r"""
   }
   // the chat's retry: a steered turn that failed offers Retry once, on its last segment
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' },
                         codex: { scripts: [[note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }), 'WAIT']] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
@@ -709,7 +709,7 @@ SCENARIOS = r"""
   // with Codex, Steer on a row puts its words into the turn under way and takes the row out; ⋯ offers Turn off queueing
   // until Steer is the follow-up behaviour
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex', 'extensions.scholium-bridge.followUpMode': 'queue' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex', 'extensions.scholium.followUpMode': 'queue' },
                         codex: { scripts: [[note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }), 'WAIT']] } });
     h.runner.start('x');
     const p = await h.pane(h.item1); await settle(40);
@@ -722,7 +722,7 @@ SCENARIOS = r"""
     row().children[4].click(); await settle(5);
     const menu = pane.popover.node.children.map(c => [c.textContent, !!c.disabled]);
     pane.popover.node.children[1].click(); await settle(5);                    // 关闭排队
-    const mode = h.store.get('extensions.scholium-bridge.followUpMode');
+    const mode = h.store.get('extensions.scholium.followUpMode');
     row().children[4].click(); await settle(5);
     const menuSteer = pane.popover.node.children.map(c => !!c.disabled);
     h.runner.closePopover(pane);
@@ -731,7 +731,7 @@ SCENARIOS = r"""
                          queue: h.runner.queue.length, lines: convLines(h).filter(l => l.subtype === 'steer').map(l => l.text) };
     h.runner.cancel(); await settle(100);
     // Codex refuses: the row stays
-    const g = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' },
+    const g = harness({ prefs: { 'extensions.scholium.agent': 'codex' },
                         codex: { scripts: [[note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }), 'WAIT']], refuse: { 'turn/steer': 'no active turn to steer' } } });
     g.runner.start('x');
     const q = await g.pane(g.item1); await settle(40);
@@ -867,8 +867,8 @@ SCENARIOS = r"""
     pane.input.type('再一条'); pane.send.click(); await settle(20);         // while it runs: queued, held, without the question
     const busyAsk = !pane.confirmRow.hidden;
     h.runner.stop(true); await settle(40);
-    const carried = JSON.parse(h.store.get('extensions.scholium-bridge.carryOver'));
-    const h2 = harness({ prefs: { 'extensions.scholium-bridge.carryOver': JSON.stringify(carried) }, logs: ours(h), scripts: [[qInit, said('续'), qDone(3)]] });
+    const carried = JSON.parse(h.store.get('extensions.scholium.carryOver'));
+    const h2 = harness({ prefs: { 'extensions.scholium.carryOver': JSON.stringify(carried) }, logs: ours(h), scripts: [[qInit, said('续'), qDone(3)]] });
     h2.runner.start('x', true); await settle(300);
     const q = await h2.pane(h2.item1); await settle(40);
     facts.queueHandover = { busyAsk, carried: carried.jobs.map(j => [j.say, j.qid, !!j.failed]), held: carried.held,
@@ -882,7 +882,7 @@ SCENARIOS = r"""
     gp.input.type('追问二'); gp.send.click(); await settle(20);
     const r1 = g.log.release; r1(); await nextRelease(g, r1);                 // 追问二's agent has it
     g.runner.stop(true); await settle(40);
-    facts.queueHandover.running = JSON.parse(g.store.get('extensions.scholium-bridge.carryOver')).jobs.map(j => [j.say, j.qid, j.resume]);
+    facts.queueHandover.running = JSON.parse(g.store.get('extensions.scholium.carryOver')).jobs.map(j => [j.say, j.qid, j.resume]);
   }
   // Send on a row of a held queue: that message first, then the rest
   {
@@ -986,7 +986,7 @@ SCENARIOS = r"""
   // no second Retry, and Retry on the row goes on with its own turn
   {
     const refuse = {};
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' },
                         codex: { refuse, scripts: [[note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }), 'WAIT'],
                                                    [note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }), 'WAIT']] } });
     h.runner.start('x');
@@ -1028,7 +1028,7 @@ SCENARIOS = r"""
   // with nothing to steer yet; ■ takes the annotation out of the queue, and the words queued for its session with it,
   // back to the box
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' },
                         codex: { scripts: [[note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }), 'WAIT']] } });
     h.runner.start('x');
     await h.runner.annotate([h.item2]); await settle(400);                    // another paper's annotation runs
@@ -1205,7 +1205,7 @@ SCENARIOS = r"""
     const after = { rows: h.runner.queue.filter(j => j.qid).length, held: h.runner.heldQueues.size };
     const g = await setUp();
     g.runner.stop(true); await settle(20);
-    const carried = g.store.get('extensions.scholium-bridge.carryOver');
+    const carried = g.store.get('extensions.scholium.carryOver');
     facts.queueConvDeleted = { during, after, carried: carried ? JSON.parse(carried).jobs.length : 0 };
   }
   // a held row queued before its conversation had its log keeps its hold when a run gives it that conversation
@@ -1327,7 +1327,7 @@ SCENARIOS = r"""
   }
   // ■ while Codex's server starts: the server is closed and no turn starts
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' },
                         codex: { scripts: [[note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }), 'WAIT']] } });
     h.runner.start('x');
     const p = await h.pane(h.item1); await settle(40);
@@ -1360,7 +1360,7 @@ SCENARIOS = r"""
   }
   // ■ in Steer mode: the turn being interrupted takes no more words; a message sent meanwhile queues
   {
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex', 'extensions.scholium-bridge.followUpMode': 'steer' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex', 'extensions.scholium.followUpMode': 'steer' },
                         codex: { scripts: [[note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }), 'WAIT']] } });
     h.runner.start('x');
     const p = await h.pane(h.item1); await settle(40);
@@ -1380,7 +1380,7 @@ SCENARIOS = r"""
                    coItem('completed', { type: 'agentMessage', id: 'a1', text: '回答一' }),
                    usage(tok(849000, 800000, 1000), tok(849000, 800000, 1000)),
                    turnDone({ status: 'completed', durationMs: 1000 })];
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex', 'extensions.scholium-bridge.followUpMode': 'steer' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex', 'extensions.scholium.followUpMode': 'steer' },
                         codex: { scripts: [first], compactScript: ['WAIT'] } });
     h.runner.start('x');
     const p = await h.pane(h.item1); await settle(40);
@@ -1669,11 +1669,11 @@ def test_a_steered_chat_that_failed_offers_retry_on_its_last_segment_only(facts)
 
 
 def test_the_settings_page_says_that_claude_code_does_not_steer():
-    from bridge_harness import PLUGIN
+    from plugin_harness import PLUGIN
     key = "scholium-followup-claude-note"
     assert f'data-l10n-id="{key}"' in (PLUGIN / "settings.xhtml").read_text(encoding="utf-8")
-    zh = (PLUGIN / "locale/zh-CN/scholium-bridge.ftl").read_text(encoding="utf-8")
-    en = (PLUGIN / "locale/en-US/scholium-bridge.ftl").read_text(encoding="utf-8")
+    zh = (PLUGIN / "locale/zh-CN/scholium.ftl").read_text(encoding="utf-8")
+    en = (PLUGIN / "locale/en-US/scholium.ftl").read_text(encoding="utf-8")
     assert f"{key} = Claude Code 不支持引导，它的跟进消息总是排队。" in zh
     assert f"{key} = Claude Code does not support steering; its follow-ups always queue." in en
 
@@ -1881,8 +1881,8 @@ def test_a_queued_annotation_message_counts_the_annotations_when_it_goes(facts):
 
 
 def test_the_queue_strings_follow_codex():
-    from bridge_harness import BRIDGE
-    src = BRIDGE.read_text(encoding="utf-8")
+    from plugin_harness import BOOTSTRAP
+    src = BOOTSTRAP.read_text(encoding="utf-8")
     for en in ["Queue paused because you interrupted", "Submit without interrupting the model", "Edit message", "Turn off queueing",
                "This queued message could not be sent · Retry, edit, or delete it to continue the queue", "Clear queue", "Send message",
                "Delete queued message", "Sending"]:

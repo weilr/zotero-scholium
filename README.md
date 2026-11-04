@@ -75,7 +75,7 @@ You need Zotero 7 or later with its local API turned on (Settings → Advanced �
    ```bash
    npx skills add weilr/zotero-scholium -g -y
    ```
-3. Download [`scholium-bridge.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium-bridge.xpi) and install it in Zotero: Tools → Plugins → ⚙ → Install Plugin From File.
+3. Download [`scholium.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium.xpi) and install it in Zotero: Tools → Plugins → ⚙ → Install Plugin From File. With Scholium Bridge installed (0.1.9 or earlier), install Scholium the same way: it removes Scholium Bridge and keeps its settings and conversations; a run under way in Scholium Bridge stops, and its queued messages are not kept. Scholium Bridge does not update to Scholium by itself.
 4. Select a paper, open the **Scholium** section and press **Annotate** on its **Annotations** tab. To ask about the paper, type the question on its **Chat** tab and send it.
 
 ### From your agent
@@ -102,7 +102,7 @@ Close and reopen the PDF afterwards to see the result. Without the plugin, Zoter
 
 **Manual:** copy [`skills/zotero-scholium/`](skills/zotero-scholium/) into the agent's skills directory: `~/.claude/skills/` for Claude Code, `~/.codex/skills/` for Codex, `~/.agents/skills/` for other agents. The directory is self-contained.
 
-**Updating:** `npx skills update zotero-scholium`, or `/plugin update zotero-scholium@zotero-scholium`. The plugin updates itself through Zotero's add-on updater.
+**Updating:** `npx skills update zotero-scholium`, or `/plugin update zotero-scholium@zotero-scholium`. The plugin updates itself through Zotero's add-on updater. Scholium Bridge does not update to Scholium: install Scholium (step 3).
 
 </details>
 

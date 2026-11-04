@@ -11,12 +11,12 @@ For one PDF attachment the tool creates (the PDF file itself is never modified):
   * optionally a child note (HTML) under the parent item
 
 Backends (--backend auto takes the plugin from 0.1.9, else the local API on Zotero 10, else an older plugin):
-  bridge  the bundled scholium-bridge plugin (Zotero 7 and later): a run's annotations in one transaction
+  plugin  the bundled Scholium plugin (Zotero 7 and later): a run's annotations in one transaction
   api     official local API of Zotero 10 and later (no plugin; one confirmation dialog on first use)
   js      a "Run JavaScript" file for manual execution in Zotero (last resort)
 
 Requires: pip install pymupdf
-Usage:    scholium --config config.json [--apply] [--list] [--backend auto|api|bridge|js]
+Usage:    scholium --config config.json [--apply] [--list] [--backend auto|api|plugin|js]
           scholium status ITEM_KEY | --query WORDS
           scholium extract --pdf paper.pdf [--sentences sentences.json] [--out sentences.txt]
           scholium samples [KEY ...] [--query WORDS]
@@ -63,7 +63,7 @@ DEFAULTS = {
                                 # By default existing notes are preserved and a new note receives a versioned title.
     "cleanup": False,           # True: a complete redo; the tool's earlier annotations on the attachment are deleted once the new
                                 # ones are written. False: keep every existing annotation (the tool's own included); only add
-    "cleanup_external": False,  # bridge backend only: additionally delete annotations Zotero imported from the PDF file
+    "cleanup_external": False,  # plugin backend only: additionally delete annotations Zotero imported from the PDF file
     "band_min_font_size": 8,    # a top or bottom band without room at its font size is set smaller, down to this size;
                                 # without room even then it becomes a sticky note
     "core_range": None,         # [low, high]: expected number of highlights in core_color; outside it an advisory style warning
@@ -1758,7 +1758,7 @@ class LocalApi:
 
 
 def parse_position(value):
-    """annotationPosition arrives as a JSON string from the local API and as an object from the bridge plugin."""
+    """annotationPosition arrives as a JSON string from the local API and as an object from the plugin."""
     try:
         return json.loads(value) if isinstance(value, str) else (value or {})
     except ValueError:
@@ -1853,7 +1853,7 @@ def api_apply(cfg, out, api):
 
 
 # ---------------------------------------------------------------------------
-# Backend 2: scholium-bridge plugin (Zotero 7 and later)
+# Backend 2: Scholium plugin (Zotero 7 and later)
 # ---------------------------------------------------------------------------
 def zotero_prefs_data_dir(profile_roots=None):
     """Data directory recorded in Zotero's prefs.js (`extensions.zotero.dataDir`), or None."""
@@ -1922,41 +1922,49 @@ def legacy_profile_dir():
     return os.path.join(os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config"), "zotero-scholium")
 
 
-def bridge_connect(cfg):
-    """(token, the attachment's listing) once the plugin answers; (None, reason) otherwise. The connection
-    check is the list request itself, so the listing comes with it ({"ok": False, "error": ...} when it failed)."""
+PLUGIN_PATHS = ("/scholium", "/scholium-bridge")   # the endpoints' base paths; Scholium Bridge 0.1.9 has only the second
+TOKEN_FILES = ("scholium.token", "scholium-bridge.token")   # Scholium Bridge 0.1.9 keeps its token in the second
+
+
+def plugin_connect(cfg):
+    """(token, the attachment's listing, the endpoints' base path) once the plugin answers; (None, reason, None)
+    otherwise. The connection check is the list request itself, so the listing comes with it ({"ok": False, "error": ...}
+    when it failed). Scholium Bridge 0.1.9's endpoints are asked when Scholium's are not found."""
     token = None
     for d in _data_dir_candidates(cfg):
-        tok_path = os.path.join(d, "scholium-bridge.token")
-        if os.path.exists(tok_path):
-            token = open(tok_path, encoding="utf8").read().strip()
+        found = [p for p in (os.path.join(d, name) for name in TOKEN_FILES) if os.path.exists(p)]
+        if found:
+            token = open(found[0], encoding="utf8").read().strip()
             break
-    s, h, t = http("POST", "/scholium-bridge/list", {"attachmentKey": cfg.get("attachment_key", "")},
-                   {"X-Annotate-Token": token or ""}, timeout=15)
+    for base in PLUGIN_PATHS:
+        s, h, t = http("POST", base + "/list", {"attachmentKey": cfg.get("attachment_key", "")},
+                       {"X-Annotate-Token": token or ""}, timeout=15)
+        if s != 404:
+            break
     if s == 0:
-        return None, "Zotero is not running or its local server is disabled (" + t[:80] + ")"
+        return None, "Zotero is not running or its local server is disabled (" + t[:80] + ")", None
     if s == 404:
-        return None, "scholium-bridge plugin is not installed (HTTP 404)"
+        return None, "Scholium plugin is not installed (HTTP 404)", None
     if s == 401:
-        return None, "token mismatch or token file not found (scholium-bridge.token in the Zotero data directory; set data_dir in the config)"
+        return None, "token mismatch or token file not found (scholium.token in the Zotero data directory; set data_dir in the config)", None
     if not token:
-        return None, "token file not found (looked in: %s)" % ", ".join(_data_dir_candidates(cfg))
+        return None, "token file not found (looked in: %s)" % ", ".join(_data_dir_candidates(cfg)), None
     res = json.loads(t) if s == 200 else {}
     if not res.get("ok"):
-        return token, {"ok": False, "error": "list failed (HTTP %s): %s" % (s, t[:200])}
-    res["backend"] = "bridge"
-    return token, res
+        return token, {"ok": False, "error": "list failed (HTTP %s): %s" % (s, t[:200])}, base
+    res["backend"] = "plugin"
+    return token, res, base
 
 
-def bridge_list(cfg):
-    token, res = bridge_connect(cfg)
+def plugin_list(cfg):
+    token, res, _ = plugin_connect(cfg)
     if not token:
         return None, res
     return (res, None) if res["ok"] else (None, res["error"])
 
 
-def bridge_apply(cfg, out):
-    token, lst = bridge_connect(cfg)
+def plugin_apply(cfg, out):
+    token, lst, base = plugin_connect(cfg)
     if not token:
         return None, lst
     html = read_text(cfg["note_html"]) if cfg.get("note_html") else None
@@ -1971,13 +1979,13 @@ def bridge_apply(cfg, out):
     payload = {"itemKey": cfg["item_key"], "attachmentKey": cfg["attachment_key"],
                "cleanup": bool(cfg.get("cleanup", False)), "cleanupExternal": bool(cfg.get("cleanup_external")), "tag": TAG, "legacyTags": sorted(LEGACY_TAGS), "annotations": out,
                "note": {"html": html, "titlePrefix": prefix, "trashOwn": replace, "trashTitlePrefix": only} if html else None}
-    s, h, t = http("POST", "/scholium-bridge/apply", payload, {"X-Annotate-Token": token}, timeout=LocalApi.WRITE_TIMEOUT)
+    s, h, t = http("POST", base + "/apply", payload, {"X-Annotate-Token": token}, timeout=LocalApi.WRITE_TIMEOUT)
     res = json.loads(t) if s == 200 else {}
     if not res.get("ok"):
         return None, "apply failed (HTTP %s): %s" % (s, t[:200])
-    res["backend"] = "bridge"
+    res["backend"] = "plugin"
     if html and replace and "notesTrashed" not in res:
-        res["noteReplace"] = "not done: plugins before 0.1.9 leave earlier notes in place; update the plugin"
+        res["noteReplace"] = "not done: plugins before 0.1.9 leave earlier notes in place; install Scholium"
     return res, None
 
 
@@ -2311,7 +2319,7 @@ def _sha256(path):
     return h.hexdigest()
 
 
-BRIDGE_FIRST = (0, 1, 9)   # from this plugin version on, `auto` writes through the plugin: one transaction, keys returned
+PLUGIN_FIRST = (0, 1, 9)   # from this plugin version on, `auto` writes through the plugin: one transaction, keys returned
 
 
 def _version(text):
@@ -2319,12 +2327,12 @@ def _version(text):
 
 
 def pick_backend(requested, cfg):
-    """Return (name, handle, reason). `auto` takes the scholium-bridge plugin when it is recent enough, else the
+    """Return (name, handle, reason). `auto` takes the Scholium plugin when it is recent enough, else the
     local API on Zotero 10, else an older plugin. When `auto` falls back to the JavaScript file, the reason names
     why each write channel was unavailable."""
-    bridge = bridge_connect(cfg) if requested in ("auto", "bridge") else None
-    if requested == "auto" and bridge[0] and isinstance(bridge[1], dict) and _version(bridge[1].get("version")) >= BRIDGE_FIRST:
-        return "bridge", bridge[0], f"scholium-bridge plugin {bridge[1]['version']}"
+    plugin = plugin_connect(cfg) if requested in ("auto", "plugin") else None
+    if requested == "auto" and plugin[0] and isinstance(plugin[1], dict) and _version(plugin[1].get("version")) >= PLUGIN_FIRST:
+        return "plugin", plugin[0], f"Scholium plugin {plugin[1]['version']}"
     ver, sid = zotero_version() if requested in ("auto", "api") else (None, None)
     why_not = []
     if requested in ("auto", "api"):
@@ -2340,11 +2348,11 @@ def pick_backend(requested, cfg):
             why_not.append("Zotero is not running or its local server is disabled")
         if requested == "api":
             return None, None, why_not[-1]
-    if requested in ("auto", "bridge"):
-        token, info = bridge
+    if requested in ("auto", "plugin"):
+        token, info, _ = plugin
         if token:
-            return "bridge", token, "scholium-bridge plugin"
-        if requested == "bridge":
+            return "plugin", token, "Scholium plugin"
+        if requested == "plugin":
             return None, None, info
         if not any(str(info).startswith(w) for w in why_not):
             why_not.append(str(info))
@@ -2352,6 +2360,11 @@ def pick_backend(requested, cfg):
         return "js", None, ("no write channel available (" + "; ".join(why_not) + "); generated a Run-JavaScript file instead"
                             if requested == "auto" else "Run-JavaScript file requested")
     return None, None, "no backend available"
+
+
+def backend_choice(value):
+    """--backend: `bridge` is taken as `plugin`."""
+    return "plugin" if value == "bridge" else value
 
 
 def _get(path):
@@ -2607,7 +2620,7 @@ def main(argv=None):
     ap.add_argument("--apply", action="store_true", help="write the annotations into Zotero using the backend selected by --backend")
     ap.add_argument("--list", action="store_true", help="list the attachment's current annotations and notes without writing")
     ap.add_argument("--full", action="store_true", help="with --list: print every annotation with text, comment and position")
-    ap.add_argument("--backend", default="auto", choices=["auto", "api", "bridge", "js"])
+    ap.add_argument("--backend", default="auto", choices=["auto", "api", "plugin", "js"], type=backend_choice)
     ap.add_argument("--allow-missed", action="store_true", help="apply even if some phrases could not be located in the PDF")
     ap.add_argument("--allow-warnings", action="store_true", help="apply even if style or layout warnings are reported")
     ap.add_argument("--accept", default="", metavar="KIND[,KIND]",
@@ -2633,8 +2646,8 @@ def main(argv=None):
         try:
             if name == "api":
                 res, err = api_list(cfg, handle), None
-            elif name == "bridge":
-                res, err = bridge_list(cfg)
+            elif name == "plugin":
+                res, err = plugin_list(cfg)
             else:
                 res, err = None, why
         except Exception as e:
@@ -2648,8 +2661,8 @@ def main(argv=None):
         try:
             if name == "api":
                 listing = api_list(cfg, handle)
-            elif name == "bridge":
-                listing, err = bridge_list(cfg)
+            elif name == "plugin":
+                listing, err = plugin_list(cfg)
                 why = err or why
         except Exception as e:
             listing, why = None, str(e)
@@ -2659,7 +2672,7 @@ def main(argv=None):
                              "avoided_rects": sum(len(v) for v in obstacles.values())}
         else:
             existing_info = f"unavailable ({why}); existing annotations were not taken into account"
-            if name in ("api", "bridge"):   # a write channel that cannot list: --apply could write a second copy
+            if name in ("api", "plugin"):   # a write channel that cannot list: --apply could write a second copy
                 unread = why
     pdf_before = _sha256(cfg["pdf"])
     out, missed = build(cfg, obstacles)
@@ -2713,8 +2726,8 @@ def main(argv=None):
             try:
                 if name == "api":
                     res = api_apply(cfg, out, handle)
-                elif name == "bridge":
-                    res, err = bridge_apply(cfg, out)
+                elif name == "plugin":
+                    res, err = plugin_apply(cfg, out)
             except Exception as e:
                 res, err = None, str(e)
             report["applied"] = False
@@ -2727,7 +2740,7 @@ def main(argv=None):
                     report["result"] = dict({k: v for k, v in res.items() if k not in ("createdKeys", "noteKeys")}, keys=keys_path)
             if res and res.get("ok"):
                 try:
-                    lst = api_list(cfg, handle) if name == "api" else bridge_list(cfg)[0]
+                    lst = api_list(cfg, handle) if name == "api" else plugin_list(cfg)[0]
                     if not lst:
                         raise RuntimeError("read-back unavailable")
                     report["now_in_zotero"] = {"annotations": len(lst["annotations"]), "notes": [n["title"][:70] for n in lst["notes"]]}

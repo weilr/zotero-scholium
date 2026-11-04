@@ -25,4 +25,4 @@ jobs:
       - run: python scripts/measure_context.py --max-skill-tokens 3000
       - run: pytest -q
       - name: syntax-check the plugin
-        run: node --check plugin/scholium-bridge/bootstrap.js
+        run: node --check plugin/scholium/bootstrap.js

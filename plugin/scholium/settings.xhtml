@@ -1,11 +1,11 @@
 <linkset>
-  <html:link rel="localization" href="scholium-bridge.ftl"/>
+  <html:link rel="localization" href="scholium.ftl"/>
 </linkset>
 <vbox class="scholium-settings">
   <groupbox>
     <label data-l10n-id="scholium-settings-send"/>
     <description data-l10n-id="scholium-settings-send-desc"/>
-    <menulist preference="extensions.scholium-bridge.sendShortcut" native="true">
+    <menulist preference="extensions.scholium.sendShortcut" native="true">
       <menupopup>
         <menuitem value="enter" data-l10n-id="scholium-settings-send-enter"/>
         <menuitem value="cmdIfMultiline" data-l10n-id="scholium-settings-send-multiline"/>
@@ -14,23 +14,23 @@
     </menulist>
     <label data-l10n-id="scholium-settings-followup"/>
     <description data-l10n-id="scholium-settings-followup-desc"/>
-    <radiogroup preference="extensions.scholium-bridge.followUpMode" orient="horizontal">
+    <radiogroup preference="extensions.scholium.followUpMode" orient="horizontal">
       <radio value="queue" data-l10n-id="scholium-settings-followup-queue"/>
       <radio value="steer" data-l10n-id="scholium-settings-followup-steer"/>
     </radiogroup>
     <description data-l10n-id="scholium-followup-claude-note"/>
-    <checkbox preference="extensions.scholium-bridge.contextRing" data-l10n-id="scholium-settings-ring"/>
+    <checkbox preference="extensions.scholium.contextRing" data-l10n-id="scholium-settings-ring"/>
   </groupbox>
   <groupbox>
     <label data-l10n-id="scholium-settings-claude"/>
     <description data-l10n-id="scholium-settings-program-desc"/>
     <hbox align="center">
-      <html:input id="scholium-claude-path" type="text" style="flex: 1" preference="extensions.scholium-bridge.claudePath"/>
+      <html:input id="scholium-claude-path" type="text" style="flex: 1" preference="extensions.scholium.claudePath"/>
       <button id="scholium-claude-browse" data-l10n-id="scholium-settings-browse"/>
     </hbox>
     <label data-l10n-id="scholium-settings-codex"/>
     <hbox align="center">
-      <html:input id="scholium-codex-path" type="text" style="flex: 1" preference="extensions.scholium-bridge.codexPath"/>
+      <html:input id="scholium-codex-path" type="text" style="flex: 1" preference="extensions.scholium.codexPath"/>
       <button id="scholium-codex-browse" data-l10n-id="scholium-settings-browse"/>
     </hbox>
   </groupbox>

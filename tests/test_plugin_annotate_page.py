@@ -4,9 +4,9 @@ import re
 
 import pytest
 
-from bridge_harness import NODE, run_scenarios
+from plugin_harness import NODE, run_scenarios
 
-pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 SCENARIOS = r"""
 (async () => {
@@ -397,7 +397,7 @@ SCENARIOS = r"""
     const real = h.runner.annotationConv.bind(h.runner);
     h.runner.annotationConv = async (k, a) => { if (!release) await new Promise(r => { release = r; }); return real(k, a); };
     const older = h.runner.showAnnotation(pane);                 // Claude Code's session, read slowly
-    h.store.set('extensions.scholium-bridge.agent', 'codex');
+    h.store.set('extensions.scholium.agent', 'codex');
     await h.runner.showAnnotation(pane);                         // Codex chosen meanwhile: none
     release(); await older; await settle(5);
     facts.annotLate = { shown: pane.annot.shownConv, intro: pane.annot.list.children.includes(pane.annotIntro) };
@@ -489,8 +489,8 @@ SCENARIOS = r"""
     await h.runner.annotate([h.item2]); await settle(100);                  // another paper runs
     await h.runner.send(h.item1, '一个问题'); await h.runner.annotate([h.item1]); await settle(50);
     h.runner.stop(true); await settle(40);
-    const carried = JSON.parse(h.store.get('extensions.scholium-bridge.carryOver'));
-    const h2 = harness({ gateFirst: true, prefs: { 'extensions.scholium-bridge.carryOver': JSON.stringify(carried) }, logs: ours(h) });
+    const carried = JSON.parse(h.store.get('extensions.scholium.carryOver'));
+    const h2 = harness({ gateFirst: true, prefs: { 'extensions.scholium.carryOver': JSON.stringify(carried) }, logs: ours(h) });
     h2.runner.start('x', true); await settle(200);
     const restored = [h2.runner.job && [h2.runner.job.key, h2.runner.job.source.kind]].concat(h2.runner.queue.map(j => [j.att.key, j.kind]));
     h2.runner.cancel(); await settle(100); h2.runner.stop();
@@ -498,7 +498,7 @@ SCENARIOS = r"""
     const h3 = harness({ gateFirst: true, logs: ours(h) });
     h3.runner.start('x');
     await h3.runner.send(h3.item1, '另一个问题'); await settle(100);
-    h3.store.set('extensions.scholium-bridge.carryOver', JSON.stringify({ jobs: carried.jobs.filter(j => j.key === 'ATT1' && j.kind === 'annotate') }));
+    h3.store.set('extensions.scholium.carryOver', JSON.stringify({ jobs: carried.jobs.filter(j => j.key === 'ATT1' && j.kind === 'annotate') }));
     await h3.runner.restoreQueue();
     facts.handedKinds = { carried: carried.jobs.map(j => [j.key, j.kind]), restored, besideChat: h3.runner.queue.map(j => [j.att.key, j.kind]) };
     h3.runner.cancel(); await settle(100); h3.runner.stop();
@@ -742,7 +742,7 @@ SCENARIOS = r"""
   {
     const edit = [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'A0' }), said('改好了'),
                   ev({ type: 'result', subtype: 'success', is_error: false, result: '改好了', session_id: 'A0' })];
-    const h = harness({ scripts: [edit], logs: sessionLogs(), prefs: { 'extensions.scholium-bridge.agent': 'codex' } });
+    const h = harness({ scripts: [edit], logs: sessionLogs(), prefs: { 'extensions.scholium.agent': 'codex' } });
     h.runner.start('x');
     const sent = await h.runner.send(h.item1, '改短', { kind: 'annotate', retry: true, conv: SESSION, agent: 'claude' }); await settle(400);
     const args = h.log.calls.length ? h.log.calls[0].opts.arguments : [];

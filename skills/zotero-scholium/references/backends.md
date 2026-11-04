@@ -4,7 +4,7 @@
 
 | Backend | Zotero | Notes |
 |---|---|---|
-| `bridge`: plugin | 7 and later | Taken first when the plugin is 0.1.9 or later: the annotations are written, and with `cleanup` the old ones removed, in one transaction, and the new keys are checked on read-back. An older plugin leaves `note_replace` undone (`result.noteReplace` says so). On Zotero 7 to 9, whose local API is read-only, it is the only write channel; ask the user once to download `scholium-bridge.xpi` from https://github.com/weilr/zotero-scholium/releases and install it (Tools → Plugins → gear icon → Install Plugin From File). |
+| `plugin`: Scholium plugin | 7 and later | Taken first when the plugin is 0.1.9 or later: the annotations are written, and with `cleanup` the old ones removed, in one transaction, and the new keys are checked on read-back. An older plugin leaves `note_replace` undone (`result.noteReplace` says so). On Zotero 7 to 9, whose local API is read-only, it is the only write channel; ask the user once to download `scholium.xpi` from https://github.com/weilr/zotero-scholium/releases and install it (Tools → Plugins → gear icon → Install Plugin From File). |
 | `api`: official local API | 10 and later | Taken without the plugin or with an older one. The first run opens an "Allow / Always Allow" dialog in Zotero; tell the user in advance to choose "Always Allow". The key is stored under `%APPDATA%/zotero-scholium/` (or `~/.config/zotero-scholium/`). |
 | `js`: script file | fallback | `create_annotations.js`, to be executed in Tools → Developer → Run JavaScript with "Run as async function" enabled. |
 
@@ -23,9 +23,9 @@ Do not write to `zotero.sqlite` directly (the database is locked while Zotero is
 
 ## Pitfalls
 
-- Locked or duplicated annotations originate from a PDF that once contained annotations; Zotero imports them as external. Never write into the PDF, and leave external annotations untouched unless the user asks otherwise (`cleanup_external`, bridge backend only).
+- Locked or duplicated annotations originate from a PDF that once contained annotations; Zotero imports them as external. Never write into the PDF, and leave external annotations untouched unless the user asks otherwise (`cleanup_external`, plugin backend only).
 - Hard line breaks in text annotations make them impractical to edit.
 - Follow the user's colour rules; otherwise use the profile or default core/other levels.
 - Never delete a user's notes. `note_replace: true` moves only the tool's own earlier notes to the trash, for a redo; do not move or delete notes through the API yourself.
-- The tool does not write `annotationAuthorName`. API, bridge and generated JavaScript recognise ownership only by `zotero-scholium` or the legacy tags `zotero-marginalia`, `zotero-paper-annotate`; identical content alone never establishes ownership. The bridge's explicit `cleanup_external` option is separate.
+- The tool does not write `annotationAuthorName`. API, plugin and generated JavaScript recognise ownership only by `zotero-scholium` or the legacy tags `zotero-marginalia`, `zotero-paper-annotate`; identical content alone never establishes ownership. The plugin's explicit `cleanup_external` option is separate.
 - Open reader tabs do not reload annotations created externally: close and reopen the PDF.

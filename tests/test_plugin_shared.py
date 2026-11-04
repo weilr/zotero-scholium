@@ -3,9 +3,9 @@ list and the current conversation of the paper, the agent chosen answering the n
 seen, and the line under each answer."""
 import pytest
 
-from bridge_harness import NODE, run_scenarios
+from plugin_harness import NODE, run_scenarios
 
-pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for bridge tests")
+pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 SCENARIOS = r"""
 const L = o => JSON.stringify(o) + '\n';
@@ -241,9 +241,9 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
     const next = h.log.calls[1].opts.arguments;
     facts.unseenEdit = { claude: { args: args.slice(args.indexOf('--resume'), args.indexOf('--resume') + 5), marker, back: [back.session, back.through],
                                    next: [next.slice(next.indexOf('--resume'), next.indexOf('--resume') + 2), next.includes('--resume-session-at')],
-                                   archived: h.store.get('extensions.scholium-bridge.codexArchive') || null } };
+                                   archived: h.store.get('extensions.scholium.codexArchive') || null } };
     // Codex chosen edits a question Claude Code answered after Codex's last turn
-    const g = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' },
+    const g = harness({ prefs: { 'extensions.scholium.agent': 'codex' },
                         logs: { [DIR + conv + '.jsonl']: codexTurn(1, 'K1', 'T1') + claudeTurn(2, 'u2', 'S1'), [DIR + 'index.json']: IDX },
                         codex: { scripts: [codexSays('新答二')] } });
     g.runner.start('x');
@@ -254,7 +254,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
       .map(m => [m.method, m.params.threadId || null, m.params.lastTurnId || null]);
     const gmarker = convLines(g).filter(l => l.subtype === 'rewind');
     await g.runner.undoReplace('ATT1/' + conv); await settle(100);
-    facts.unseenEdit.codex = { sent, marker: gmarker, archived: JSON.parse(g.store.get('extensions.scholium-bridge.codexArchive') || '[]'),
+    facts.unseenEdit.codex = { sent, marker: gmarker, archived: JSON.parse(g.store.get('extensions.scholium.codexArchive') || '[]'),
                                back: (await g.runner.readLog('ATT1', conv)).agents.codex.session };
   }
   // an edit of the last question, then of an earlier one, Codex not having run since: the first marker goes with the cut
@@ -295,7 +295,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
     const pane = p.pane();
     await h.runner.deleteConv(pane, (await h.runner.conversations('ATT1'))[0]);
     await h.runner.finishDelete(DIR + conv + '.jsonl');
-    facts.deleted = { archive: JSON.parse(h.store.get('extensions.scholium-bridge.codexArchive') || '[]'),
+    facts.deleted = { archive: JSON.parse(h.store.get('extensions.scholium.codexArchive') || '[]'),
                       index: JSON.parse(h.log.writes[DIR + 'index.json']).chat };
   }
   // every Codex thread of a deleted conversation is archived, not only the current one
@@ -307,7 +307,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
     const p = await h.pane(h.item1); await settle(40);
     await h.runner.deleteConv(p.pane(), (await h.runner.conversations('ATT1'))[0]);
     await h.runner.finishDelete(DIR + conv + '.jsonl');
-    facts.deletedAll = JSON.parse(h.store.get('extensions.scholium-bridge.codexArchive') || '[]');
+    facts.deletedAll = JSON.parse(h.store.get('extensions.scholium.codexArchive') || '[]');
   }
   // a log that cannot be removed keeps its threads: nothing is archived
   {
@@ -319,7 +319,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
     const p = await h.pane(h.item1); await settle(40);
     await h.runner.deleteConv(p.pane(), (await h.runner.conversations('ATT1'))[0]);
     await h.runner.finishDelete(path);
-    facts.deleteFails = { kept: path in h.log.writes, archive: h.store.get('extensions.scholium-bridge.codexArchive') || null };
+    facts.deleteFails = { kept: path in h.log.writes, archive: h.store.get('extensions.scholium.codexArchive') || null };
   }
   // Undo of an edit archives the threads only the edit's new run used, never one the old log still uses; the end of the
   // Undo window, and the plugin stopping within it, archive the threads only the replaced part used (the second question
@@ -331,7 +331,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
     facts.archiving = {};
     for (const [name, agent] of [['claude', 'claude'], ['codex', 'codex']]) {
       for (const how of ['undo', 'end', 'stop']) {
-        const h = harness({ prefs: { 'extensions.scholium-bridge.agent': agent }, logs: { [DIR + conv + '.jsonl']: log, [DIR + 'index.json']: IDX },
+        const h = harness({ prefs: { 'extensions.scholium.agent': agent }, logs: { [DIR + conv + '.jsonl']: log, [DIR + 'index.json']: IDX },
                             scripts: [answered('S5', '新答')], codex: { scripts: [codexSays('新答')] } });
         h.runner.start('x');
         const p = await h.pane(h.item1); await settle(40);
@@ -342,7 +342,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
         else if (how === 'end') h.runner.endReplaced('ATT1/' + conv);
         else h.runner.stop();
         await settle(200);
-        facts.archiving[name + '-' + how] = { used: [...used].sort(), archived: JSON.parse(h.store.get('extensions.scholium-bridge.codexArchive') || '[]') };
+        facts.archiving[name + '-' + how] = { used: [...used].sort(), archived: JSON.parse(h.store.get('extensions.scholium.codexArchive') || '[]') };
       }
     }
     // an end without a readable log does nothing
@@ -353,9 +353,9 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
     await g.runner.editTurn(gp.pane(), gprompt, '新问题'); await settle(400);
     delete g.log.writes[DIR + conv + '.jsonl'];
     g.runner.endReplaced('ATT1/' + conv); await settle(100);
-    facts.archiving.unreadable = g.store.get('extensions.scholium-bridge.codexArchive') || null;
+    facts.archiving.unreadable = g.store.get('extensions.scholium.codexArchive') || null;
     // an Undo whose log cannot be written back archives nothing: the log keeps the edit's fork
-    const f = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' }, logs: { [DIR + conv + '.jsonl']: log, [DIR + 'index.json']: IDX },
+    const f = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, logs: { [DIR + conv + '.jsonl']: log, [DIR + 'index.json']: IDX },
                         codex: { scripts: [codexSays('新答')] }, failLogWrites: (p, t) => t === log });
     f.runner.start('x');
     const fp = await f.pane(f.item1); await settle(40);
@@ -363,7 +363,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
     await f.runner.editTurn(fp.pane(), fprompt, '新问题'); await settle(600);
     await f.runner.undoReplace('ATT1/' + conv); await settle(200);
     facts.archiving.undoFails = { restored: f.log.writes[DIR + conv + '.jsonl'] === log, refused: !!f.log.lockedOnce,
-                                  archived: f.store.get('extensions.scholium-bridge.codexArchive') || null };
+                                  archived: f.store.get('extensions.scholium.codexArchive') || null };
   }
   // an agent whose session an edit took back before its own rewrite of the annotations is told of it; one whose latest run
   // made it is not
@@ -376,7 +376,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
     const applied = { config: 'D:/out/config.json', agent: 'claude', conv, at: 3050 };
     facts.ownRewrite = {};
     for (const edited of [false, true]) {
-      const h = harness({ prefs: { 'extensions.scholium-bridge.agent': edited ? 'codex' : 'claude' },
+      const h = harness({ prefs: { 'extensions.scholium.agent': edited ? 'codex' : 'claude' },
                           logs: { [DIR + conv + '.jsonl']: log, [DIR + 'index.json']: IDX, '/data/tmp/scholium/ATT1/applied.json': JSON.stringify(applied) },
                           scripts: [answered('S1', '答四')], codex: { scripts: [codexSays('Codex 答')] } });
       h.runner.start('x');
@@ -408,7 +408,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
     facts.cutShort = {};
     for (const [name, log] of [['ends', base + cut3(false)], ['followed', base + cut3(false) + codexTurn(4, 'K4', 'T1', 4000)],
                                ['endLine', base + cut3(true)]]) {
-      const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'claude' },
+      const h = harness({ prefs: { 'extensions.scholium.agent': 'claude' },
                           logs: { [DIR + conv + '.jsonl']: log, [DIR + 'index.json']: IDX, '/data/tmp/scholium/ATT1/applied.json': JSON.stringify(applied) },
                           scripts: [answered('S1', '答')] });
       h.runner.start('x');
@@ -458,7 +458,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
   // a new Codex thread of a conversation whose answers are all Codex's own is given it as items of the thread
   {
     const conv = 'chat-20261101-120000';
-    const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' },
                         logs: { [DIR + conv + '.jsonl']: codexTurn(1, 'K1', 'T1') + codexTurn(2, 'K2', 'T1')
                                   + L({ type: 'scholium', subtype: 'gone', agent: 'codex', resent: false }),
                                 [DIR + 'index.json']: JSON.stringify({ chat: conv, titles: {}, annotation: {} }) },
@@ -668,10 +668,10 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
     if (mode === 'carry') {
       h.runner.queue[0].leftAt = [3];
       h.runner.carryOver(null);
-      const carried = JSON.parse(h.store.get('extensions.scholium-bridge.carryOver'));
+      const carried = JSON.parse(h.store.get('extensions.scholium.carryOver'));
       // the list read back, and the one index an earlier copy handed over
       const restore = async saved => {
-        const h2 = harness({ gateFirst: true, prefs: { 'extensions.scholium-bridge.carryOver': JSON.stringify(saved) }, logs: { [DIR + conv + '.jsonl']: log } });
+        const h2 = harness({ gateFirst: true, prefs: { 'extensions.scholium.carryOver': JSON.stringify(saved) }, logs: { [DIR + conv + '.jsonl']: log } });
         h2.runner.start('x', true); await settle(200);
         const j = [h2.runner.job && h2.runner.job.source].concat(h2.runner.queue).filter(Boolean)[0];
         return j ? [j.turnAt, j.leftAt] : null;
