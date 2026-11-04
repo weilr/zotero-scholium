@@ -11,7 +11,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-latest]
         python: ["3.9", "3.12"]   # the oldest supported (requires-python) and a recent one
     steps:
       - uses: actions/checkout@v4
