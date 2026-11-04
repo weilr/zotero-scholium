@@ -6,7 +6,8 @@
 
 - The run line of the transcript reads "Working for 12s" with a light sweeping across it; the sweep stops when the
   system asks for reduced motion. The state line beside the settings chip has the step only for an annotation
-  ("step 3/6") and its dot for a question; the time is in its tooltip.
+  ("step 3/6") and its dot for a question; the time is in its tooltip. Every finished run shows "Worked for 24s"
+  with the run, with › to open its steps only when it has steps; the state line of a finished run gives no duration.
 - Saved prompts above the Chat tab's box (preference `savedPrompts`), sent with a click and edited,
   deleted (with **Undo**) and reordered in the row.
 - Editing an earlier question of the Chat tab (✎ on hover) asks it again, with the agent chosen, from the conversation
@@ -36,8 +37,18 @@
   highlights (core), margin notes, sticky notes and reading notes counted in Zotero, the warnings left, the turns
   and the tokens. Words typed there continue the session; **Annotate again** asks in place; a failed annotation
   offers **Retry**.
-- **Ask Scholium** in the reader's selection popup puts the passage and its page label above the box of the Chat
-  tab, and the next message quotes it to the agent with its page in the PDF and, where it differs, the label.
+- **Ask Scholium** in the selection popup of a PDF reader (not of an EPUB or snapshot reader) closes the popup, puts
+  the passage and its page label above the box of the Chat tab with the cursor in the box, and the next message
+  quotes it to the agent with its page in the PDF and, where it differs, the label.
+- The Annotations tab says how many of the tool's annotations the paper carries ("This paper carries 12 Scholium
+  annotations", with who wrote them and when, where that is known), and its button reads **Annotate again**.
+  **Delete annotations** deletes the tool's annotations of the PDF the section shows and trashes the paper's reading
+  notes; its texts say "this PDF".
+- Keyboard: the context ring and the citation chips take the focus; Enter or Space opens the ring's layer or locates
+  the sentence; a focused chip shows its card, which opens on keyboard focus only. A layer opened from the keyboard
+  (settings, ⋯, history, context, queued message) takes the focus; Esc or Tab out closes it, and Esc gives the focus
+  back to its button. The tabs carry `aria-selected`; focus rings use Zotero's accent colour; the context ring turns
+  Zotero's orange near the limit.
 - Sentence citations: answers cite the paper's sentences as `[#n]`, shown as chips with the page and, on hover,
   the sentence; **Locate ↗** opens the PDF, goes to the sentence and highlights it briefly; a sentence without a
   position in `sentences.json` opens its page.
@@ -47,7 +58,8 @@
 - Scholium section: Claude Code and Codex share a paper's conversations. **New chat** starts one, **History** lists
   them by day to open, rename or delete (with **Undo**; every Codex thread the conversation used is archived at the
   next Codex run once the six seconds end or the plugin stops before then). Switching the agent keeps the conversation
-  shown, and the agent chosen answers the next message: in its own session of the conversation, given the turns it
+  shown, as the settings layer says, and the agent chosen answers the next message: in its own session of the
+  conversation, given the turns it
   has not seen (the text says the user went on asking in Zotero, some of it answered by another agent, each answer
   labelled), or in a new one given the conversation as text, each answer labelled with its agent (Codex as items of
   its new thread when all the answers are its own). Under each answer, the agent, the model and the time. Each
@@ -64,7 +76,8 @@
 ### Changed
 
 - Scholium section: the section fills the side pane's height. The state is one line beside the settings chip.
-  Once the answer is there, the steps of a run fold into "Worked for 24s ›".
+  Once the answer is there, the steps of a run fold into "Worked for 24s ›", a run without steps shows
+  "Worked for 24s".
   The history is a layer of the PDF's conversations by day. ■ stops a run.
 - Scholium section: annotating no longer continues the chat; the Chat tab is for questions.
 - Scholium section: the conversations and the history are those of one PDF, the item's best PDF in the library
@@ -112,10 +125,39 @@
 - A question being edited keeps its box, words and quote when the conversation is drawn again. The queue's deleted
   row is the same **Undo** strip as elsewhere; the history rows' ✎ and 🗑, the quote strip's ✕ and **New chat** ＋ are
   icons.
+- Scholium section: ■ or Esc twice on a paper whose message waits behind another paper's run puts its words back in
+  its box, and an annotation's extra instructions back in that tab's box; an edited question that has not started is
+  undone, and its **Undo** stays while it waits. If the log refuses a run's first line, the words go back to the box
+  and the state line says it failed, with the reason.
+- Scholium section: a usage limit or a service limit pauses only the agent that hit it; the other agent's runs go on
+  for every paper. Only sections whose next run is that agent's show the pause and **Continue now**, which continues
+  that agent. "Queued, N ahead" counts neither held messages nor runs waiting for another limit. Words queued to an
+  annotation session go to that session's agent.
+- Scholium section: while **Annotate again** waits, the Annotations tab shows the coming session, and words typed
+  there run in it after the annotation. An annotation's card counts the turns and tokens of all its parts, also those
+  before a pause for a limit. `/compact` with no session starts none, and with nothing to compact yet says so under
+  the box. Codex threads waiting to be archived stay listed until Codex has archived them.
+- After the update from v0.1.9, a question in progress continues as one turn, and a paper with the logs of both
+  agents opens the chosen agent's.
+- Each run is given `paper.json` in the paper's output folder (the PDF's path, the item and attachment keys, the
+  output folder); prompts name that file instead of the PDF's path, and `extract` and `--list` take it with
+  `--config`. The agent writes its own configuration to another file in the output folder; `paper.json` is the
+  plugin's and read-only.
+- `scholium --apply --allow-missed` exits 0 when the write succeeded. The plugin keeps a write as the paper's
+  configuration (`applied.json`) whenever its output says it was applied, also "partial", whatever the exit code; a
+  write whose configuration is not found (a path through a shell variable, or one that does not exist) or is
+  `paper.json` removes the kept one, and the next conversation is told to list the annotations.
+- Codex runs do not read Codex's configuration. The names of the user's MCP servers come from Codex's
+  `mcpServerStatus/list`, kept in the preference `codexServers`; the first Codex run ever waits at most 10 s for the
+  list, later runs use the kept names and refresh them in the background after the session's first Codex run.
+  The model menu shows *Codex's default* without a model name until a run with it shows which model that is.
+- Editing a question, its **Undo** and saving the profile replace their files atomically. Numbered sentences for
+  citation chips are kept for the 20 papers shown last.
 
 ### Fixed
 
-- The Claude Code and Codex boxes of the settings page showed `undefined`; they show the program found.
+- On Zotero 7 to 9, disabling, updating or uninstalling the plugin leaves the reader listeners of other plugins
+  registered; the plugin does not unregister its own at shutdown.
 
 ### Removed
 

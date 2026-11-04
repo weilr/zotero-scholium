@@ -1,7 +1,10 @@
 # scholium-bridge
 
-The plugin has four functions:
+The plugin has five functions:
 
+- **Questions about the paper** (Zotero 7 and later): the Chat tab of the Scholium section answers questions with
+  Claude Code or Codex, also about a passage selected in the reader (**Ask Scholium**), and cites the paper's
+  sentences.
 - **Reader toggle** (Zotero 7 and later): shows or hides the tool's annotations in the reader with
   one button.
 - **One-click annotation** (Zotero 7 and later): starts Claude Code or Codex in the background to
@@ -59,7 +62,9 @@ Each Codex run:
 - talks to `codex app-server` over JSON-RPC, in a new thread or in the conversation's thread, with `<data dir>/tmp/scholium/` as working directory and the zotero-scholium skill
   attached to the first message of a thread;
 - runs without the user's MCP servers and installed plugins, switched off for the thread only;
-  Codex's `config.toml` is not changed;
+  Codex's `config.toml` is not changed and is not read: the names of the MCP servers come from Codex's
+  `mcpServerStatus/list` (the first Codex run ever waits at most 10 s for the list; later runs use the names kept in
+  the preference `codexServers` and refresh them in the background after the session's first Codex run);
 - runs in Codex's `workspace-write` sandbox: commands may write only inside `<data dir>/tmp/scholium/`,
   `<data dir>/zotero-scholium/` and `%APPDATA%/zotero-scholium/` (`~/.config/zotero-scholium/` on
   macOS and Linux), and may use the network, which the skill needs for Zotero's local server;
@@ -72,12 +77,16 @@ Each Codex run:
 A line that the log file does not take at once (locked a moment by a virus scanner or a backup) is written
 with the next ones; the run goes on.
 
-Both receive the item key, the attachment key, the PDF path, the output directory `<data
-dir>/tmp/scholium/<attachment key>` and the profile's path (or that there is none, so that the defaults apply
-and no profile is created), and are told not to ask questions or start sub-agents. A question is told to read
+Both receive the item key, the attachment key, the output directory `<data
+dir>/tmp/scholium/<attachment key>`, the file `paper.json` in it and the profile's path (or that there is none, so that the defaults apply
+and no profile is created), and are told not to ask questions or start sub-agents. Before each run the plugin writes
+`paper.json` (the PDF's path, the item and attachment keys, the output directory); the prompt names that file, not the
+PDF's path. It is the plugin's and read-only: only `extract` (in place of `--pdf`) and `--list` take it with
+`--config`, and the agent writes its own configuration to another file in the output directory. A question is told to read
 the paper with the skill's `status` and `extract` and to write to Zotero only when it asks for that. A session
 that has not seen the paper's annotations of the tool is told how many there are and, when the plugin saw them
-written, the configuration that wrote them, the agent and the time (kept in `<out dir>/applied.json`); a
+written, the configuration that wrote them, the agent and the time (kept in `<out dir>/applied.json`: a write whose output says it was applied, also "partial", is kept whatever the exit
+code; one whose configuration is not found or is `paper.json` removes the kept file); a
 session that goes on is told when they were rewritten since its last run, in this conversation (by the other
 agent) or another, or that they are gone; an agent whose own rewrite in this conversation was cut away by an
 edit is told they were rewritten since its last turn. A follow-up that changes or adds annotations is told to
@@ -112,12 +121,13 @@ history and the annotation sessions are those of that PDF.
   run of that tab going on or waiting while the other tab is shown.
 - Under the tabs, the settings chip names the model and, smaller and grey, the effort (`Opus 5.5 medium ▾`); its tooltip
   and its layer name the agent. It opens a layer with the three choices; a click outside the layer or Esc closes it:
-  - **Agent**: Claude Code or Codex. The conversation shown stays; the next message goes to the agent chosen.
+  - **Agent**: Claude Code or Codex. The conversation shown stays, as the layer's note says; the next message goes to
+    the agent chosen, and annotation sessions are per agent.
   - **Model**: the models the chosen agent reports, asked once per Zotero session without calling a model:
     Claude Code through the initialize request of its stream-json protocol, Codex through `model/list`
     (hidden models are left out). For Claude Code, the latest Opus (`opus`) is used until another model is
     chosen, and *Claude Code's default* passes no `--model`. For Codex, *Codex's default* is used until
-    another model is chosen; it names the model of Codex's `config.toml`.
+    another model is chosen; it shows no model name until a run with it shows which model that is.
   - **Effort**: the levels the chosen model accepts. It starts at `medium` and keeps the last choice; a model
     that does not accept that level gets `medium` (or its lowest level), and a model without levels gets no
     effort.
@@ -127,7 +137,7 @@ history and the annotation sessions are those of that PDF.
   "step 3/6" (「第 3/6 步」); the tooltip gives the time. A compaction's line keeps its time: "Compacting · 12s"
   (「正在压缩 · 12s」). The line also shows the attempt while the agent's connection is tried again, the place in the
   queue and a pause for the usage limit with **Continue now**. Otherwise, on the Chat tab, the latest outcome of the
-  conversation shown with its time, turns and tokens (the tooltip splits the tokens into input, cache and output); on
+  conversation shown with its turns and tokens (the tooltip splits the tokens into input, cache and output); on
   the Annotations tab the outcome of **Delete annotations** (a finished annotation's is its card). A narrow pane cuts it
   with an ellipsis.
 - ⋯ on the Chat tab holds **Show log** (the conversation's log file), **Personal profile ↗** and **Settings…**;
@@ -150,7 +160,7 @@ history and the annotation sessions are those of that PDF.
 - The user's words are a bubble on the right. While a run goes on, one blue line says "Working for 12s" (「正在处理 12 秒」)
   with a light sweeping across it (the sweep stops when the system asks for reduced motion), and the answer appears as
   it is written; once the answer is there, the steps fold into "Worked for 24s ›" (「已处理 24 秒 ›」), which opens them as
-  Claude Code shows them: each tool call with its command or file, and the first lines of each result (errors in red).
+  Claude Code shows them; a run without steps shows "Worked for 24s" without ›. Every finished run shows it. The steps are: each tool call with its command or file, and the first lines of each result (errors in red).
   A fold opened or closed by hand stays so. Under an answer, a line gives the agent, the model and the time it ended,
   with a copy button (`Claude Code · Opus 5.5 · 12:01`). A failed question ends with its error and ↻ (**Retry**), which
   sends the same words again to the agent chosen. Web addresses and `zotero://` links in a message open on a click or
@@ -174,18 +184,21 @@ history and the annotation sessions are those of that PDF.
 - Sentence citations: a question asks the agent to cite the paper's sentences by their number in
   `sentences.txt`, as `[#123]`. The section reads `sentences.json` in the paper's output directory and shows a
   cited sentence as a chip with its page (`p.4`); on hover, a card gives the page, **Locate ↗** and the sentence.
+  A chip can be focused with Tab, and its card opens on keyboard focus only; Enter or Space locates the sentence.
   The chip or **Locate ↗** opens the PDF in the reader (or switches to it), goes to the sentence and highlights it
   briefly; a sentence without a position in `sentences.json` opens its page. A number that `sentences.json` does
   not have stays as written.
 
 **Annotations tab**
 
-- Before the first annotation, the tab says what an annotation does (and, for annotations the plugin saw written
-  earlier, who wrote them and when); its box takes extra instructions, which may stay empty, and **Annotate**
+- A paper that carries annotations of the tool (from the skill run on its own, the other agent or an earlier
+  version) shows "This paper carries N Scholium annotations" (「这篇已有 N 条 Scholium 批注」), with who wrote them and when
+  where the plugin saw them written, and the button reads **Annotate again**. Before the first annotation, the tab
+  says what an annotation does; its box takes extra instructions, which may stay empty, and **Annotate**
   starts the run.
 - Each **Annotate** starts an annotation session of its own, which the chat does not see and the history does
   not list: a log `annotate-<agent>-<time>.jsonl` in `<out dir>/conversations/`, the latest of each agent in the
-  index's `annotation`. **Annotate** in the context menu of several papers starts a session for each.
+  index's `annotation`.
 - While it runs, the tab shows **Annotate** with the extra instructions, the six steps (loading the skill,
   extracting sentences, reading the paper, writing the annotations, checking (dry run), writing to Zotero), each
   done step with its time, and under them "Working for 12s" (「正在处理 12 秒」) with **Details ›** for the steps.
@@ -195,13 +208,16 @@ history and the annotation sessions are those of that PDF.
   shows its error with ↻ (**Retry**), which annotates again with the same extra instructions.
 - Words typed afterwards continue that annotation session, for example to change some annotations.
   **Annotate again** asks in place, above the box, how many Scholium annotations it replaces (the user's own
-  stay); **Replace** starts a new session.
+  stay); **Replace** starts a new session. While it waits behind another paper, the tab shows the coming session, and
+  words typed there run in it after the annotation.
 
 **The box**
 
 - The box at the bottom of each tab takes the user's words. The round button sends them (↑, grey while the box is
   empty); while a run of the tab goes on and the box is empty, it is ■, which stops the run (and takes a waiting
-  paper out of the queue); a stopped run ends with ⊘ (**cancelled** on hover); a run stopped while it starts ends before its agent's process, and words its
+  paper out of the queue; the words of a message that waited behind another paper's run go back to its box, and an
+  annotation's extra instructions to that tab's box; an edited question that has not started is undone, its **Undo**
+  staying while it waits); a stopped run ends with ⊘ (**cancelled** on hover); a run stopped while it starts ends before its agent's process, and words its
   conversation does not have yet go back to the box (a queued message to its queue). Esc while a run goes on asks
   once ("Press Esc again to stop") and stops on a second press within three seconds on the same run; with a layer
   open, Esc closes the layer first. The line under the box names the send shortcut. Words typed and not sent are
@@ -223,7 +239,8 @@ history and the annotation sessions are those of that PDF.
   when the plugin is updated.
 - Asking about a passage: in the reader, **Ask Scholium** under the colours of the selection popup shows the Chat tab
   of the reader's section, opening the side pane and the section when they are closed, with the passage and its page
-  quoted above the box, and closes the popup as a colour does; the icon ✕ removes the quote. The message tells the
+  quoted above the box, and closes the popup as a colour does, with the cursor in the box; the icon ✕ removes the quote. It appears in PDF
+  readers only, not in EPUB or snapshot readers. The message tells the
   agent that the user quotes that passage of page N, counted in the PDF as in `sentences.txt` and the citation chips,
   with the page's label where it differs; the box and the transcript show the label, the transcript above the user's
   words. The section drawn for another item has no quote.
@@ -233,10 +250,14 @@ history and the annotation sessions are those of that PDF.
   left and the tokens in k. A click opens a layer with the numbers, a bar of input, cache and output, and
   **Compact this conversation's context**; `/compact` in the box, optionally followed by what to keep, does the
   same in the agent chosen's session of the conversation, and stays in the box while the paper runs or the tab shows no
-  conversation ("Cannot compact now"). Claude
+  conversation ("Cannot compact now"); with nothing to compact yet, the box says so. `/compact` with no session starts
+  none. Claude
   Code is sent `/compact` in its session (`claude -p --resume`); Codex compacts its thread with
   `thread/compact/start`. A compaction shows in the transcript as a dashed line, "Compacting context…" and then
   "Context compacted · 850k → 120k"; one the agent made by itself reads "Context compacted automatically".
+- Keyboard: the context ring can be focused, and Enter or Space opens its layer. The settings, ⋯, history, context and
+  queued-message layers take the focus when they are opened from the keyboard; Esc or Tab out closes one, and Esc gives
+  the focus back to its button. The tabs carry `aria-selected`. Focus rings use Zotero's accent colour.
 - **Personal profile ↗** opens the annotation profile `<data dir>/zotero-scholium/profile.md`, which
   every run follows, in an editor over the Zotero window: the Markdown text as it is on the left, and
   on the right a preview that formats it as it is typed and follows its scrolling; colour codes such
@@ -274,12 +295,13 @@ overloaded or failing server) before the agent has used any tool, the paper is t
 30 seconds; it waits at the head of the queue meanwhile, and ■ ends the wait. The transcript
 and the log keep the failed try.
 
-When the agent reports that the usage limit is reached, the queue waits: the interrupted paper
-stays at its head, the state line and a notice give the reset time, and a minute after the reset the
+When the agent reports that the usage limit is reached, only that agent's runs wait; the other agent's runs go on for
+every paper. The interrupted paper stays at its head, the state line and a notice give the reset time, and a minute after the reset the
 paper continues its conversation where it stopped, followed by the rest of the queue. Without a reset
 time the queue tries again after ten minutes. A limit of the service rather than of the account (“not
 your usage limit”) is named as such, and the queue waits as long as its message says. **Continue now** in
-the section ends the wait at once.
+the section ends that agent's wait at once. Only sections whose next run is that agent's show the pause; "Queued, N
+ahead" counts neither held messages nor runs waiting for another limit.
 
 When the plugin is updated while a paper runs, the run ends and its log records the interruption; the
 new version continues that paper's conversation, then runs the papers still waiting, and a pause for a
@@ -291,6 +313,10 @@ again, and a new message continues the conversation.
 
 Papers that already carry the tool's annotations are annotated again only after a confirmation (on the
 Annotations tab, in place above the box); the new run replaces those annotations.
+
+If the log refuses a run's first line, the words go back to the box and the state line says it failed, with the
+reason. After the update from v0.1.9, a question in progress continues as one turn, and a paper with the logs of both
+agents opens the chosen agent's.
 
 | Preference | Default | Meaning |
 |---|---|---|
@@ -310,8 +336,7 @@ Annotations tab, in place above the box); the new run replaces those annotations
 ## Deleting the tool's annotations
 
 **Delete annotations** in the ⋯ menu of the Scholium section's Annotations tab, after a confirmation that
-states the counts, permanently deletes the annotations tagged `zotero-scholium` on every PDF attachment of the
-selected paper, and moves the paper's reading notes tagged `zotero-scholium` to the trash, where they can be
+states the counts, permanently deletes the annotations tagged `zotero-scholium` on the PDF the section shows, and moves the paper's reading notes tagged `zotero-scholium` to the trash, where they can be
 restored. Annotations and notes without that tag are kept; a paper with an attachment being annotated
 or queued is left alone, notes included; messages held after a stop do not count. The outcome shows on the
 Annotations tab's state line.
