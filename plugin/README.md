@@ -209,8 +209,9 @@ history and the annotation sessions are those of that PDF.
 - When it ends, the steps fold and a card gives the outcome: the warnings left, from the agent's closing line;
   the numbers counted on the paper in Zotero (highlights with the core ones, those of the configuration's core
   colour; margin notes; sticky notes; reading notes); the turns and tokens of all its parts (also those before a
-  pause for a limit) and the time. A failed annotation shows its error with ↻ (**Retry**), which annotates again with
-  the same extra instructions.
+  pause for a limit) and the time. A run that left the paper none of the tool's annotations and notes reads "No
+  annotations written" (「没有写入批注」), with the warnings left, in orange. A failed annotation shows its error with ↻
+  (**Retry**), which annotates again with the same extra instructions.
 - Words typed afterwards continue that annotation session, for example to change some annotations.
   **Annotate again** asks in place, above the box, how many Scholium annotations it replaces (the user's own
   stay); **Replace** starts a new session. While it waits behind another paper, the tab shows the coming session, and

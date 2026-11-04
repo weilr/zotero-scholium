@@ -739,6 +739,8 @@ var ScholiumRunner = {
       annotDone: zh ? "✓ 批注完成" : "✓ Annotated",
       annotDoneClean: zh ? "✓ 批注完成，没有剩余警告" : "✓ Annotated, no warnings left",
       annotDoneWarn: w => zh ? `✓ 批注完成，剩余警告：${w}` : `✓ Annotated, warnings left: ${w}`,
+      annotNone: zh ? "没有写入批注" : "No annotations written",
+      annotNoneWarn: w => zh ? `没有写入批注：${w}` : `No annotations written: ${w}`,
       // the words beside the card's numbers
       numHighlights: (n, c) => zh ? `高亮（核心\u00a0${c}）` : `${word(n, "highlight", "highlights")} (${c}\u00a0core)`,
       numMargin: n => zh ? "页边批注" : word(n, "margin note", "margin notes"),
@@ -4632,7 +4634,11 @@ var ScholiumRunner = {
     node.className = "scholium-card";
     const title = doc.createElement("div");
     title.className = "scholium-card-title";
-    title.textContent = e.warnings === "" ? this.text("annotDoneClean") : e.warnings ? this.text("annotDoneWarn", e.warnings) : this.text("annotDone");
+    // a run that left the paper none of the tool's annotations and notes says so, with what it said was left
+    const none = !(e.highlights || e.margin || e.notes || e.readingNotes);
+    if (none) node.className += " none";
+    title.textContent = none ? (e.warnings ? this.text("annotNoneWarn", e.warnings) : this.text("annotNone"))
+      : e.warnings === "" ? this.text("annotDoneClean") : e.warnings ? this.text("annotDoneWarn", e.warnings) : this.text("annotDone");
     const nums = doc.createElement("div");
     nums.className = "scholium-card-nums";
     for (const [n, label] of [[e.highlights, "numHighlights"], [e.margin, "numMargin"], [e.notes, "numNotes"], [e.readingNotes, "numReading"]]) {

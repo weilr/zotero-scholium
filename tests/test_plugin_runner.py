@@ -385,7 +385,7 @@ SCENARIOS = r"""
                        entries: entries.length, markers: lines.filter(l => l.type === 'scholium' && !['run', 'time', 'counts'].includes(l.subtype)).map(l => l.text),
                        inits: lines.filter(l => l.type === 'system' && l.subtype === 'init').length, state: p.view().state,
                        conversations: convs(h).length, times: entries.filter(e => e[0] === 'scholium-meta').length,
-                       cards: entries.filter(e => e[0] === 'scholium-card').length, counts: lines.filter(l => l.subtype === 'counts').length };
+                       cards: entries.filter(e => e[0].startsWith('scholium-card')).length, counts: lines.filter(l => l.subtype === 'counts').length };
   }
   {
     // the agent's answer in a continued conversation is Markdown: set as such, with a button that copies its source
@@ -2730,7 +2730,12 @@ def card(turns="26 轮 · 2,568k tokens", title="✓ 批注完成，没有剩余
     """A finished annotation's card on the annotation tab: its title, the numbers counted in Zotero, its turns and
     tokens and when it ended (through run_time); the harness's run leaves the paper without Scholium annotations."""
     h, core, margin, notes, reading = nums
-    return ["scholium-card", f"{title}{h}高亮（核心\u00a0{core}）{margin}页边批注{notes}便签{reading}阅读笔记{turns} · HH:MM"]
+    cls = "scholium-card"
+    if not any((h, margin, notes, reading)):
+        # a run that left none of the tool's annotations and notes says so
+        cls += " none"
+        title = "没有写入批注" if title in ("✓ 批注完成，没有剩余警告", "✓ 批注完成") else title.replace("✓ 批注完成，剩余警告：", "没有写入批注：")
+    return [cls, f"{title}{h}高亮（核心\u00a0{core}）{margin}页边批注{notes}便签{reading}阅读笔记{turns} · HH:MM"]
 
 
 CARD = card()
@@ -3368,7 +3373,7 @@ def test_no_run_starts_after_the_plugin_stopped(facts):
 def test_a_log_that_refuses_a_write_a_moment_loses_nothing(facts):
     for agent in ("claude", "codex"):
         f = facts["logLocked_" + agent]
-        assert f["locked"] and f["kills"] == 0 and f["outcome"] == "scholium-card", agent
+        assert f["locked"] and f["kills"] == 0 and f["outcome"] == "scholium-card none", agent   # the harness's run writes none
         assert f["same"] and f["lines"] > 3, agent + ": every line, in order"
 
 

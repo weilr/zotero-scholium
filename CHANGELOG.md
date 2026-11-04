@@ -38,7 +38,7 @@
 - Annotation sessions: each **Annotate** starts a session of its own (`annotate-<agent>-<time>.jsonl`, the
   index's `annotation`), shown on the Annotations tab with the six steps and their times, then a card with the
   highlights (core), margin notes, sticky notes and reading notes counted in Zotero, the warnings left, the turns
-  and the tokens. Words typed there continue the session; **Annotate again** asks in place; a failed annotation
+  and the tokens; a run that wrote none reads "No annotations written". Words typed there continue the session; **Annotate again** asks in place; a failed annotation
   offers **Retry**.
 - **Ask Scholium** in the selection popup of a PDF reader (not of an EPUB or snapshot reader) closes the popup, puts
   the passage and its page label above the box of the Chat tab with the cursor in the box, and the next message

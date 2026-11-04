@@ -94,6 +94,7 @@
 .scholium-card.failed { border-color: var(--accent-red); color: var(--accent-red); }
 .scholium-card.failed > .scholium-button { align-self: flex-start; }
 .scholium-card-title { font-weight: 600; }
+.scholium-card.none .scholium-card-title { color: var(--accent-orange); }
 .scholium-card-nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; text-align: center; }
 .scholium-card-nums b { display: block; font-size: 16px; }
 .scholium-card-nums span, .scholium-card-usage { font-size: 10.5px; color: var(--fill-secondary); }

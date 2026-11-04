@@ -1034,15 +1034,15 @@ def test_a_second_try_and_a_continuation_are_the_annotations(facts):
     # a failed try that the annotation goes on from, or waits to go on from, is a line; the card is the end's
     r = facts["annotAgain"]["retried"]
     assert r["waiting"] == {"parts": [["scholium-entry prompt", "scholium-entry final error", "scholium-entry info"]], "retries": 0}
-    assert r["parts"] == [["scholium-entry prompt", "scholium-entry final error", "scholium-entry info"], ["scholium-fold", "scholium-card"]]
-    assert r["cards"] == ["scholium-card"], "one success card, no red card"
+    assert r["parts"] == [["scholium-entry prompt", "scholium-entry final error", "scholium-entry info"], ["scholium-fold", "scholium-card none"]]
+    assert r["cards"] == ["scholium-card none"], "one card of the end (the harness's run writes none), no red card"
     assert r["retries"] == 0 and r["counts"] == 1
     c = facts["annotAgain"]
     assert c["paused"] == {"parts": [["scholium-entry prompt", "scholium-fold", "scholium-entry final error"]], "queued": 1, "retries": 0}, \
         "the paper waits for the limit: no card, no Retry"
     assert c["continued"]["parts"] == [["scholium-entry prompt", "scholium-fold", "scholium-entry final error"],
-                                       ["scholium-entry info", "scholium-fold", "scholium-card"]]
-    assert c["continued"]["cards"] == ["scholium-card"]
+                                       ["scholium-entry info", "scholium-fold", "scholium-card none"]]
+    assert c["continued"]["cards"] == ["scholium-card none"], "the harness's run writes none"
     assert c["continued"]["retries"] == 0 and c["continued"]["counts"] == 1
 
 
