@@ -4,11 +4,13 @@
 
 ### Added
 
-- The run line of the transcript reads "Working for 12s" with a light sweeping across it; the sweep stops when the
-  system asks for reduced motion. The state line beside the settings chip has the step only for an annotation
-  ("step 3/6") and its dot for a question; the time is in its tooltip. A finished run shows "Worked for 24s" with
-  the run, with › to open its steps only when it has steps; a run that was interrupted, or stopped while it waited
-  for a usage limit or a second try, shows no time. The state line of a finished run gives no duration.
+- The run line of the transcript reads "Working for 12s" with a light sweeping across it, and "Compacting context for
+  12s" while the agent compacts its context; the line of a compaction under way reads the same, swept alike. The
+  sweep stops when the system asks for reduced motion. The state line beside the settings chip has the step only for
+  an annotation ("step 3/6") and its dot for a question or a compaction; the time is in its tooltip. A finished run
+  shows "Worked for 24s" with the run, with › to open its steps only when it has steps; a run that was interrupted,
+  or stopped while it waited for a usage limit or a second try, shows no time. The state line of a finished run gives
+  no duration.
 - Saved prompts above the Chat tab's box (preference `savedPrompts`), sent with a click and edited,
   deleted (with **Undo**) and reordered in the row.
 - Editing an earlier question of the Chat tab (✎ on hover) asks it again, with the agent chosen, from the conversation

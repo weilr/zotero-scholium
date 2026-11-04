@@ -770,7 +770,7 @@ var ScholiumRunner = {
       editSend: zh ? "发送" : "Send",
       editCancel: zh ? "取消" : "Cancel",
       replaced: zh ? "已替换" : "Replaced",
-      compactingLine: zh ? "◌ 正在压缩上下文……" : "◌ Compacting context…",
+      compactingFor: d => zh ? `正在压缩上下文 ${d}` : `Compacting context for ${d}`,
       compactedLine: zh ? "上下文已压缩" : "Context compacted",
       compactedAuto: zh ? "上下文已自动压缩" : "Context compacted automatically",
       compactStopped: zh ? "压缩已中断" : "Compaction stopped",
@@ -1442,13 +1442,12 @@ var ScholiumRunner = {
     return step && step !== "starting" ? this.text(step) : this.text("starting", this.agentName(this.job && this.job.agent));
   },
 
-  // the running paper's state line: a question's has only its dot (the run line in the transcript has the time), an
-  // annotation's its step; a compaction's has the time
+  // the running paper's state line: a question's and a compaction's have only their dot (the line in the transcript has
+  // the time), an annotation's its step
   runningState() {
-    if (this.job.source && this.job.source.compact) return this.runningTitle();
     const retry = this.job.retry;
     const re = retry ? this.text("reconnecting", retry.attempt, retry.max) : "";
-    if (this.job.asking) return re;
+    if (this.job.asking || (this.job.source && this.job.source.compact)) return re;
     return this.stepText(this.job.step) + (re ? " · " + re : "");
   },
 
@@ -1610,6 +1609,7 @@ var ScholiumRunner = {
   codexEntries(msg) {
     const item = msg.params && msg.params.item;
     if (!item || typeof item !== "object") return [];
+    if (msg.method === "item/started" && item.type === "contextCompaction") return [{ kind: "compacting" }];
     if (msg.method === "item/completed" && item.type === "contextCompaction") return [{ kind: "compacted", trigger: "auto", pre: 0, post: 0 }];
     if (msg.method === "item/started") {
       return item.type === "commandExecution"
@@ -4547,16 +4547,20 @@ var ScholiumRunner = {
     return node;
   },
 
-  // a compaction: one line, while it runs and then how it ended
+  // a compaction: one line, while it runs (its words swept, with the time) and then how it ended
   compactNode(view, run, live) {
     const doc = view.doc;
     const node = doc.createElement("div");
     node.className = "scholium-compact" + (live ? " live" : "");
+    if (live) {
+      const now = doc.createElement("span");
+      now.append(doc.createTextNode("◌ "), this.workingNode(view, "compactingFor"));
+      node.append(now);
+      return node;
+    }
     const lines = run.lead.concat(run.other);
     const done = lines.filter(e => e.kind === "compacted").pop();
-    node.textContent = live ? this.text("compactingLine")
-      : done ? this.text("compactedLine") + this.compactSizes(done)
-      : this.text("compactStopped");
+    node.textContent = done ? this.text("compactedLine") + this.compactSizes(done) : this.text("compactStopped");
     const failure = lines.find(e => (e.kind === "final" && e.error) || e.kind === "compactFailed");
     if (!live && !done && failure) node.title = failure.text || "";
     return node;
@@ -4670,9 +4674,9 @@ var ScholiumRunner = {
       const more = doc.createElement("span");
       more.className = "scholium-fold-more";
       more.textContent = " " + this.text("details") + (open ? " ⌄" : " ›");
-      head.append(this.workingNode(view), more);
+      head.append(this.workingNode(view, this.compactingNow(run) ? "compactingFor" : "workingFor"), more);
     } else if (live) {
-      head.append(this.workingNode(view));
+      head.append(this.workingNode(view, this.compactingNow(run) ? "compactingFor" : "workingFor"));
       if (open) head.append(doc.createTextNode(" ⌄"));
     } else {
       head.textContent = this.workedText(run) + (open ? " ⌄" : " ›");
@@ -4699,15 +4703,22 @@ var ScholiumRunner = {
     return node;
   },
 
-  // the live line's words: Working for 12s, swept by a light; tick writes the time again without drawing the run
-  workingNode(view) {
+  // the live line's words: Working for 12s (or Compacting context for 12s), swept by a light; tick writes the time again
+  // without drawing the run
+  workingNode(view, key = "workingFor") {
     const span = view.doc.createElement("span");
     span.className = "scholium-working";
     // every redraw of the line starts the sweep at the same phase
     span.style.animationDelay = -(Date.now() % 2000) + "ms";
-    span.textContent = this.text("workingFor", this.durationWords(this.elapsed()));
-    view.liveTime = { node: span };
+    span.textContent = this.text(key, this.durationWords(this.elapsed()));
+    view.liveTime = { node: span, key };
     return span;
+  },
+
+  // whether the agent compacts its context now, in a run under way: its last compaction line is the start of one
+  compactingNow(run) {
+    const last = (run.other || []).filter(e => e.kind === "compacting" || e.kind === "compacted" || e.kind === "compactFailed").pop();
+    return !!last && last.kind === "compacting";
   },
 
   workedText(run) {
@@ -5922,7 +5933,7 @@ var ScholiumRunner = {
     while (this.job === job) {
       await Zotero.Promise.delay(this.TICK_MS);
       if (this.job !== job) break;
-      const time = this.text("workingFor", this.durationWords(this.elapsed(true)));
+      const words = this.durationWords(this.elapsed(true));
       for (const pane of this.panes.values()) {
         if (!pane.keys.includes(job.key)) continue;
         try {
@@ -5933,7 +5944,7 @@ var ScholiumRunner = {
           }
           for (const view of this.paneViews(pane)) {
             const t = view.liveTime;
-            if (t && t.node.isConnected) t.node.textContent = time;
+            if (t && t.node.isConnected) t.node.textContent = this.text(t.key || "workingFor", words);
           }
           this.paintRing(pane);
         } catch (e) {}

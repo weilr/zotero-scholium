@@ -135,13 +135,12 @@ history and the annotation sessions are those of that PDF.
     effort.
 
   The choices apply to the runs started afterwards, are saved for each agent, and are shared by all panes.
-- Beside the chip, one line of state for the tab shown: while a question runs, only its dot; while an annotation runs,
-  "step 3/6" (「第 3/6 步」); the tooltip gives the time. A compaction's line keeps its time: "Compacting · 12s"
-  (「正在压缩 · 12s」). The line also shows the attempt while the agent's connection is tried again, the place in the
-  queue and a pause for the usage limit with **Continue now**. Otherwise, on the Chat tab, the latest outcome of the
-  conversation shown with its turns and tokens (the tooltip splits the tokens into input, cache and output); on
-  the Annotations tab the outcome of **Delete annotations** (a finished annotation's is its card). A narrow pane cuts it
-  with an ellipsis.
+- Beside the chip, one line of state for the tab shown: while a question or a compaction runs, only its dot; while an
+  annotation runs, "step 3/6" (「第 3/6 步」); the tooltip gives the time. The line also shows the attempt while the
+  agent's connection is tried again, the place in the queue and a pause for the usage limit with **Continue now**.
+  Otherwise, on the Chat tab, the latest outcome of the conversation shown with its turns and tokens (the tooltip
+  splits the tokens into input, cache and output); on the Annotations tab the outcome of **Delete annotations** (a
+  finished annotation's is its card). A narrow pane cuts it with an ellipsis.
 - ⋯ on the Chat tab holds **Show log** (the conversation's log file), **Personal profile ↗** and **Settings…**;
   on the Annotations tab **Personal profile ↗**, **Show log**, **Delete annotations** and **Settings…**.
   **Settings…** opens the Scholium page of Zotero's settings.
@@ -259,8 +258,10 @@ history and the annotation sessions are those of that PDF.
   conversation ("Cannot compact now"); with nothing to compact yet, the box says so. `/compact` with no session starts
   none. Claude
   Code is sent `/compact` in its session (`claude -p --resume`); Codex compacts its thread with
-  `thread/compact/start`. A compaction shows in the transcript as a dashed line, "Compacting context…" and then
-  "Context compacted · 850k → 120k"; one the agent made by itself reads "Context compacted automatically".
+  `thread/compact/start`. A compaction shows in the transcript as a dashed line, "Compacting context for 12s"
+  (「正在压缩上下文 12 秒」, swept by a light as the run line is) and then "Context compacted · 850k → 120k"; while the
+  agent compacts by itself during a run, the run's line reads "Compacting context for 43s" and then "Working for" again,
+  and the transcript keeps "Context compacted automatically".
 - Keyboard: the context ring can be focused, and Enter or Space opens its layer. The settings, ⋯, history, context and
   queued-message layers take the focus when they are opened from the keyboard; Esc or Tab out closes one, and Esc gives
   the focus back to its button. The tabs carry `aria-selected`. Focus rings use Zotero's accent colour.

@@ -1494,8 +1494,8 @@ def test_the_compact_button_is_greyed_by_a_run_of_the_other_tab(facts):
 def test_claude_compaction(facts):
     c = facts["compactClaude"]
     assert c["during"]["stdin"] == "/compact 侧重方法部分" and c["during"]["resumed"] == "S1"
-    assert c["during"]["marker"] == "◌ 正在压缩上下文……"
-    assert re.fullmatch(r"正在压缩 · \d+s", c["during"]["state"]) and c["during"]["round"] == "■"
+    assert re.fullmatch(r"◌ 正在压缩上下文 \d+ 秒", c["during"]["marker"])
+    assert c["during"]["state"] == "" and c["during"]["round"] == "■"
     assert c["after"] == "上下文已压缩 · 850k → 120k" and c["runs"] == 2
     assert c["hidden"] is True
     assert "120k / 1,000k tokens" in c["ring"]
@@ -1565,13 +1565,14 @@ def test_the_live_line_and_the_tooltip_give_one_time(facts):
 
 def test_the_live_line_is_swept_by_a_light_and_stops_for_reduced_motion():
     rules = css_rules()
-    live = rules[".scholium-fold-head.live .scholium-working"]
+    live = rules[".scholium-fold-head.live .scholium-working, .scholium-compact.live .scholium-working"]
     assert "animation: scholium-shimmer 2s linear infinite" in live and "background-clip: text" in live and "color: transparent" in live
     assert "background-size: 300% 100%" in live and "--scholium-sweep: color-mix(in srgb, var(--accent-blue) 45%, white)" in live
     assert "var(--accent-blue) 45%, var(--scholium-sweep) 50%, var(--accent-blue) 55%" in live
     text = (PLUGIN / "content" / "scholium.css").read_text(encoding="utf8")
     assert re.search(r"@keyframes scholium-shimmer \{ from \{ background-position: 100% 0; \} to \{ background-position: 0% 0; \} \}", text)
-    reduced = re.search(r"@media \(prefers-reduced-motion: reduce\) \{\s*\.scholium-fold-head\.live \.scholium-working \{([^}]*)\}", text)
+    reduced = re.search(r"@media \(prefers-reduced-motion: reduce\) \{\s*\.scholium-fold-head\.live \.scholium-working,\s*"
+                        r"\.scholium-compact\.live \.scholium-working \{([^}]*)\}", text)
     assert reduced and "animation: none" in reduced.group(1)
 
 
