@@ -6,8 +6,9 @@
 
 - The run line of the transcript reads "Working for 12s" with a light sweeping across it; the sweep stops when the
   system asks for reduced motion. The state line beside the settings chip has the step only for an annotation
-  ("step 3/6") and its dot for a question; the time is in its tooltip. Every finished run shows "Worked for 24s"
-  with the run, with › to open its steps only when it has steps; the state line of a finished run gives no duration.
+  ("step 3/6") and its dot for a question; the time is in its tooltip. A finished run shows "Worked for 24s" with
+  the run, with › to open its steps only when it has steps; a run that was interrupted, or stopped while it waited
+  for a usage limit or a second try, shows no time. The state line of a finished run gives no duration.
 - Saved prompts above the Chat tab's box (preference `savedPrompts`), sent with a click and edited,
   deleted (with **Undo**) and reordered in the row.
 - Editing an earlier question of the Chat tab (✎ on hover) asks it again, with the agent chosen, from the conversation
@@ -40,8 +41,9 @@
 - **Ask Scholium** in the selection popup of a PDF reader (not of an EPUB or snapshot reader) closes the popup, puts
   the passage and its page label above the box of the Chat tab with the cursor in the box, and the next message
   quotes it to the agent with its page in the PDF and, where it differs, the label.
-- The Annotations tab says how many of the tool's annotations the paper carries ("This paper carries 12 Scholium
-  annotations", with who wrote them and when, where that is known), and its button reads **Annotate again**.
+- Before its first session, the Annotations tab says how many of the tool's annotations the paper carries ("This
+  paper carries 12 Scholium annotations", with who wrote them and when, where that is known), and its button reads
+  **Annotate again**.
   **Delete annotations** deletes the tool's annotations of the PDF the section shows and trashes the paper's reading
   notes; its texts say "this PDF".
 - Keyboard: the context ring and the citation chips take the focus; Enter or Space opens the ring's layer or locates
@@ -127,12 +129,14 @@
   icons.
 - Scholium section: ■ or Esc twice on a paper whose message waits behind another paper's run puts its words back in
   its box, and an annotation's extra instructions back in that tab's box; an edited question that has not started is
-  undone, and its **Undo** stays while it waits. If the log refuses a run's first line, the words go back to the box
-  and the state line says it failed, with the reason.
-- Scholium section: a usage limit or a service limit pauses only the agent that hit it; the other agent's runs go on
-  for every paper. Only sections whose next run is that agent's show the pause and **Continue now**, which continues
-  that agent. "Queued, N ahead" counts neither held messages nor runs waiting for another limit. Words queued to an
-  annotation session go to that session's agent.
+  undone, and its **Undo** stays while it waits. If the log refuses the first line of a Chat run, its words go back to
+  the box (a queued message's to its row, marked, with **Retry**) and the state line says it failed, with the reason;
+  an annotation's extra instructions go back to the Annotations tab's box.
+- Scholium section: a usage limit or a service limit pauses only the runs of the agent that hit it (and a message
+  queued behind such a run on the same tab of that paper); the other agent's runs go on. Only sections whose next run
+  waits for that limit show the pause, naming the agent, and **Continue now**, which continues that agent. "Queued,
+  N ahead" counts neither held messages nor runs waiting for another limit. Words queued to an annotation session go
+  to that session's agent.
 - Scholium section: while **Annotate again** waits, the Annotations tab shows the coming session, and words typed
   there run in it after the annotation. An annotation's card counts the turns and tokens of all its parts, also those
   before a pause for a limit. `/compact` with no session starts none, and with nothing to compact yet says so under
@@ -148,8 +152,10 @@
   write whose configuration is not found (a path through a shell variable, or one that does not exist) or is
   `paper.json` removes the kept one, and the next conversation is told to list the annotations.
 - Codex runs do not read Codex's configuration. The names of the user's MCP servers come from Codex's
-  `mcpServerStatus/list`, kept in the preference `codexServers`; the first Codex run ever waits at most 10 s for the
-  list, later runs use the kept names and refresh them in the background after the session's first Codex run.
+  `mcpServerStatus/list` (Codex starts each server to list it), kept in the preference `codexServers`. A Codex run
+  while no names are kept (the first one) waits at most 10 s for the list; if none comes, it and the session's next
+  Codex runs have the user's MCP servers until a list made in the background after it names them. Later runs use the
+  kept names and list them again in the background after the session's first Codex run.
   The model menu shows *Codex's default* without a model name until a run with it shows which model that is.
 - Editing a question, its **Undo** and saving the profile replace their files atomically. Numbered sentences for
   citation chips are kept for the 20 papers shown last.
@@ -158,6 +164,8 @@
 
 - On Zotero 7 to 9, disabling, updating or uninstalling the plugin leaves the reader listeners of other plugins
   registered; the plugin does not unregister its own at shutdown.
+- On Zotero 7, the Scholium section's text boxes no longer take the native Windows look, and drawing the section no
+  longer logs a JSON.parse error.
 
 ### Removed
 

@@ -1573,8 +1573,8 @@ var ScholiumRunner = {
       out.push({ kind: "counts", highlights: n("highlights"), core: n("core"), margin: n("margin"), notes: n("notes"), readingNotes: n("readingNotes"),
                  warnings: typeof event.warnings === "string" ? event.warnings : null, turns: n("turns"), tokens: n("tokens"), at: n("at") });
     }
-    // when a run ended, under what it showed
-    if (event.type === "scholium" && event.subtype === "time" && event.at > 0) out.push({ kind: "time", text: this.clock(event.at), at: event.at });
+    // when a run ended, under what it showed; or when its wait (for a limit, a second try) was stopped
+    if (event.type === "scholium" && event.subtype === "time" && event.at > 0) out.push(Object.assign({ kind: "time", text: this.clock(event.at), at: event.at }, event.waited ? { waited: true } : {}));
     // a successful result repeats Claude's last message; only a failed run's result is shown, with Claude Code's errors
     // when it has no text, and not when they only say the session is gone (a new one goes on, or the end says why)
     if (event.type === "result" && (event.is_error || (event.subtype && event.subtype !== "success"))) {
@@ -1653,10 +1653,11 @@ var ScholiumRunner = {
   registerPane(pluginID) {
     const manager = Zotero.ItemPaneManager;
     if (!manager || typeof manager.registerSection !== "function") return;
+    // l10nArgs: Zotero 7 writes "undefined" as the arguments without them
     this.paneID = manager.registerSection({
       paneID: "scholium", pluginID,
-      header: { l10nID: "scholium-section", icon: this.chrome + "icon16.svg" },
-      sidenav: { l10nID: "scholium-sidenav", icon: this.chrome + "icon20.svg" },
+      header: { l10nID: "scholium-section", l10nArgs: "{}", icon: this.chrome + "icon16.svg" },
+      sidenav: { l10nID: "scholium-sidenav", l10nArgs: "{}", icon: this.chrome + "icon20.svg" },
       onItemChange: ({ item, setEnabled }) => { setEnabled(this.paneKeys(item).length > 0); },
       onRender: ({ doc, body, item }) => { this.renderPane(doc, body, item); },
       onAsyncRender: ({ body }) => this.loadHistory(body),
@@ -1688,12 +1689,14 @@ var ScholiumRunner = {
       const ir = reader._internalReader;
       for (const view of [ir && ir._primaryView, ir && ir._secondaryView]) {
         if (!view) continue;
-        if (typeof view.clearSelection === "function") { view.clearSelection(); continue; }
-        if (typeof view._setSelectionRanges === "function") {
-          view._setSelectionRanges();
-          if (typeof view._render === "function") view._render();
-        }
-        try { view._iframeWindow.getSelection().removeAllRanges(); } catch (e) {}
+        try {   // a view that throws leaves the other to be cleared
+          if (typeof view.clearSelection === "function") { view.clearSelection(); continue; }
+          if (typeof view._setSelectionRanges === "function") {
+            view._setSelectionRanges();
+            if (typeof view._render === "function") view._render();
+          }
+          try { view._iframeWindow.getSelection().removeAllRanges(); } catch (e) {}
+        } catch (e) {}
       }
     } catch (e) {}
     const quote = this.quoteOf({ text: String(a.text).replace(/\s+/g, " ").trim(), page: this.pageOf(a), label: a.pageLabel });
@@ -2448,8 +2451,9 @@ var ScholiumRunner = {
     pane.input.className = "scholium-input";
     pane.input.setAttribute("rows", "1");
     // without Zotero's look for text boxes (a line under the text on focus, a grey ground on hover): the
-    // box around it shows the focus
+    // box around it shows the focus. no-native on Zotero 8 and later, no-windows-native on Zotero 7
     pane.input.setAttribute("no-native", "true");
+    pane.input.setAttribute("no-windows-native", "true");
     pane.input.value = this.unsent.get(this.unsentKey(pane)) || "";   // what was typed here before and not sent
     pane.input.addEventListener("input", () => {
       this.keepUnsent(pane);
@@ -4045,12 +4049,14 @@ var ScholiumRunner = {
     const label = doc.createElement("input");
     label.className = "scholium-saved-label";
     label.setAttribute("no-native", "true");
+    label.setAttribute("no-windows-native", "true");
     label.placeholder = this.text("savedLabel");
     label.value = was ? was.label : "";
     const words = doc.createElement("textarea");
     words.className = "scholium-saved-prompt";
     words.setAttribute("rows", "2");
     words.setAttribute("no-native", "true");
+    words.setAttribute("no-windows-native", "true");
     words.placeholder = this.text("savedPrompt");
     words.value = was ? was.prompt : "";
     const close = () => { pane.savedEdit = null; pane.savedSig = null; this.paintSaved(pane); };
@@ -4476,7 +4482,7 @@ var ScholiumRunner = {
       else if (e.kind === "tool" || e.kind === "result") { run.steps.push(...run.answer, e); run.answer = []; }
       else if (e.kind === "text") run.answer.push(e);
       else if (e.kind === "info" && e.model) run.model = e.text;
-      else if (e.kind === "time") run.end = e.at;
+      else if (e.kind === "time") { if (e.waited) run.stopped = e.at; else run.end = e.at; }   // a stopped wait is no work of the run
       else if (e.kind === "compacting" || e.kind === "compacted" || e.kind === "compactFailed") run.other.push(e);
       else (run.steps.length || run.answer.length ? run.other : run.lead).push(e);
     }
@@ -4739,7 +4745,8 @@ var ScholiumRunner = {
     const node = doc.createElement("div");
     node.className = "scholium-meta";
     const left = doc.createElement("span");
-    left.textContent = [run.model ? this.answeredBy(run.model) : "", run.end ? this.clock(run.end) : ""].filter(Boolean).join(" · ");
+    const at = run.end || run.stopped;
+    left.textContent = [run.model ? this.answeredBy(run.model) : "", at ? this.clock(at) : ""].filter(Boolean).join(" · ");
     node.append(left, this.copyButton(doc, run.answer.map(e => e.text).join("\n\n")));
     return node;
   },
@@ -4987,7 +4994,7 @@ var ScholiumRunner = {
       // again beside the send button; while its run goes or waits, ■
       if (tab === "annotate") {
         const has = !!pane.annot.shownConv;
-        pane.input.placeholder = this.text(has ? "annotFollowUpHint" : "annotExtraHint");
+        pane.input.placeholder = this.text(has || pane.busy ? "annotFollowUpHint" : "annotExtraHint");
         // again over the paper's Scholium annotations, of a session here or not
         pane.annotGo.textContent = this.text(has || pane.annot.own > 0 ? "redoTitle" : "annotateThis");
         this.show(pane.annotGo, !pane.busy);
@@ -5194,6 +5201,7 @@ var ScholiumRunner = {
     input.className = "scholium-edit-input";
     input.setAttribute("rows", "2");
     input.setAttribute("no-native", "true");
+    input.setAttribute("no-windows-native", "true");
     input.value = prompt.text;
     // while the paper runs, the box and its words stay until it is free
     const busy = () => !!view.pane && this.busy(view.shownKey);
@@ -5657,12 +5665,39 @@ var ScholiumRunner = {
     }
   },
 
-  // an annotation that did not start: its tab shows the paper's session again, its extra wishes and the words queued for
-  // its session to come back in the tab's box, in one piece
+  // an annotation that did not start: its tab shows the paper's session again, its extra wishes, the words queued for
+  // its session to come and those typed to it meanwhile back in the tab's box, in one piece
   async annotationBack(job, queued = []) {
-    const words = [job.extra].concat(queued.map(j => j.say)).filter(Boolean).join("\n\n");
+    const words = [job.extra].concat(queued.map(j => j.say), job.typed || []).filter(Boolean).join("\n\n");
     if (words) this.giveBack(Object.assign({}, job, { say: words, conv: await this.annotationConv(job.att.key, job.agent) }));
     for (const pane of [...this.panes.values()]) if (pane.keys.includes(job.att.key)) await this.showAnnotation(pane);
+  },
+
+  // an annotation's new session whose log refused its first line: its empty log goes, the agent's session before it is
+  // the paper's again, and the messages queued for it wait for a session to come again
+  async unmakeConv(key, agent, made) {
+    for (const q of this.queue) {
+      if (!q.qid || q.conv !== made.conv || q.att.key !== key) continue;
+      const was = this.queueKey(q);
+      q.conv = null;
+      if (this.heldQueues.delete(was)) this.heldQueues.add(this.queueKey(q));
+    }
+    // words typed to it meanwhile (livePanes moved them to it) come back with the annotation's wishes
+    made.typed = [];
+    for (const [k, text] of [...this.unsent]) {
+      if (!k.endsWith("/" + made.conv)) continue;
+      this.unsent.delete(k);
+      if (!made.typed.includes(text)) made.typed.push(text);
+    }
+    const index = await this.index(key);
+    if (index.annotation[agent] === made.conv) {
+      if (made.before) index.annotation[agent] = made.before;
+      else delete index.annotation[agent];
+    }
+    delete index.titles[made.conv];
+    await this.saveIndex(key);
+    const path = this.convPath(key, made.conv);
+    if ((await IOUtils.stat(path)).size === 0) await IOUtils.remove(path);
   },
 
   // whether a queued paper's conversation has its run already: one waiting for its second try, for a limit to reset,
@@ -5678,7 +5713,7 @@ var ScholiumRunner = {
     else this.notes.delete(`${key}/annotate`);
     if (job.conv) {
       const path = this.convPath(key, job.conv);
-      const marks = [await this.logEnd(path, "cancelled", this.text("cancelled")), { type: "scholium", subtype: "time", at: Date.now() }];
+      const marks = [await this.logEnd(path, "cancelled", this.text("cancelled")), { type: "scholium", subtype: "time", at: Date.now(), waited: true }];
       try { await IOUtils.writeUTF8(path, JSON.stringify(marks[1]) + "\n", { mode: "append" }); }
       catch (e) { this.log("end time not logged: " + e); }
       if (this.transcriptPath === path) this.appendEntries(marks.flatMap(m => this.entries(m)));
@@ -5713,16 +5748,21 @@ var ScholiumRunner = {
           const message = String(e && e.message || e).slice(0, 300);
           this.current = null;
           this.dropDraft();
-          // nothing of a run that failed before its first line reached the log: its words go back; a chat's sections show
-          // the conversation as its log has it (no run to retry there), its state line the failure
-          const unlogged = !job.logPath && (job.kind || "chat") === "chat";
-          if (!job.logPath) this.giveBack(job);
+          // nothing of a run that failed before its first line reached the log: its words go back, an annotation's wishes
+          // with the words queued for its session to come; the paper's sections show its conversations as their logs have
+          // them (no run to retry there), a chat's state line the failure
+          const unlogged = !job.logPath;
           if (unlogged) {
+            if (job.annotate) {
+              const queued = job.conv ? [] : this.queue.filter(j => j.qid && (j.kind || "chat") === "annotate" && !j.conv && j.att.key === job.att.key);
+              this.queue = this.queue.filter(j => !queued.includes(j));
+              this.annotationBack(job, queued).catch(err => this.log("annotation not given back: " + err));
+            } else this.giveBack(job);
             if (this.transcriptKey === job.att.key) this.transcriptPath = null;
-            for (const pane of this.panes.values()) if (pane.keys.includes(job.att.key)) pane.live = false;
-          } else this.appendEntries(job.logPath ? this.entries(await this.logEnd(job.logPath, "failed", message)) : [{ kind: "final", text: message, error: true }]);
+            for (const pane of this.panes.values()) if (pane.keys.includes(job.att.key)) { pane.live = false; pane.annot.live = false; }
+          } else this.appendEntries(this.entries(await this.logEnd(job.logPath, "failed", message)));
           this.notice(job, `${this.text("failed")} · ${message}`, true);
-          this.finish(job, false, message, unlogged ? `${this.text("failed")} · ${message}` : undefined);
+          this.finish(job, false, message, unlogged && (job.kind || "chat") === "chat" ? `${this.text("failed")} · ${message}` : undefined);
           if (unlogged) for (const pane of [...this.panes.values()]) if (pane.keys.includes(job.att.key)) await this.showConversation(pane);
           this.log("run failed: " + e);
           if (!job.logPath) outcome = { ok: false, delivered: false };   // its words reached nothing
@@ -6003,8 +6043,11 @@ var ScholiumRunner = {
     const paper = this.paperPath(key);
     await IOUtils.writeUTF8(paper, JSON.stringify({ pdf: job.path, item_key: job.parentKey, attachment_key: key, out_dir: this.outDir(key) }, null, 1) + "\n",
                             { tmpPath: paper + ".tmp" });
+    let made = null;   // an annotation's new session, and the agent's session before it
     if (!job.conv) {
+      if (job.annotate) made = { before: (await this.index(key)).annotation[agent] || null };
       job.conv = await this.newConv(key, agent, job.say || this.text("annotateThis"), job.kind || "chat");
+      if (made) made.conv = job.conv;
       // the messages queued meanwhile go on with this conversation, held still when they were
       for (const q of this.queue) {
         if (!q.qid || q.conv || q.att.key !== key || (q.kind || "chat") !== (job.kind || "chat")) continue;
@@ -6033,6 +6076,11 @@ var ScholiumRunner = {
     } catch (e) {
       job.logPath = running.log = null;
       running.logged = false;
+      if (made) {
+        await this.unmakeConv(key, agent, made).catch(err => this.log("session not undone: " + err));
+        job.conv = null;
+        job.typed = made.typed || [];
+      }
       throw e;
     }
     if (!job.resume || job.annotate) job.profile = (await this.exists(this.profilePath())) ? this.profilePath() : null;

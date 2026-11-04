@@ -2741,8 +2741,8 @@ RUN = [ANNOTATE] + TRANSCRIPT + [CARD]   # an annotation on its tab: the closing
 def test_section_is_registered_and_removed_without_menus_or_toolbar_status(facts):
     assert facts["section"] == {
         "paneID": "scholium",
-        "header": {"l10nID": "scholium-section", "icon": "chrome://scholium-bridge/content/icon16.svg"},
-        "sidenav": {"l10nID": "scholium-sidenav", "icon": "chrome://scholium-bridge/content/icon20.svg"},
+        "header": {"l10nID": "scholium-section", "l10nArgs": "{}", "icon": "chrome://scholium-bridge/content/icon16.svg"},
+        "sidenav": {"l10nID": "scholium-sidenav", "l10nArgs": "{}", "icon": "chrome://scholium-bridge/content/icon20.svg"},
         "ftl": ["scholium-bridge.ftl"],
         "styles": [["link", "scholium-bridge-style", "stylesheet", "chrome://scholium-bridge/content/scholium.css"]],
     }
@@ -3786,8 +3786,7 @@ def test_a_question_starts_a_conversation_that_answers_without_annotating(facts)
 
 
 def test_annotate_after_a_question_opens_a_session_of_its_own(facts):
-    extra = "附加要求（可不填），例如：只批注第 3–5 页"   # the annotation tab's box until it shows a session
-    follow = "接着这次批注修改，例如：第 5 页那条译文改短"   # then words to that session
+    follow = "接着这次批注修改，例如：第 5 页那条译文改短"   # the annotation tab's box while its run goes, then words to its session
     n = facts["ask"]["annotated"]
     assert n["resume"] is None and n["cleared"] == "", "a new annotation session is not given the chat"
     assert n["prompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注：")
@@ -3803,7 +3802,7 @@ def test_annotate_after_a_question_opens_a_session_of_its_own(facts):
     assert facts["ask"]["restarted"] == {"resumed": False, "prompt": n["prompt"].split("\n")[0], "profile": "- 画像：/data/zotero-scholium/profile.md"}
     assert facts["ask"]["later"] == {"placeholder": ASK, "session": "Q1"}, "the question's conversation stays a question's"
     assert facts["askOrder"] == ["ATT3", "ATT4", "ATT2"], "questions go before the papers still waiting, in their order"
-    assert run_time(facts["askBox"]) == {"asking": ASK, "annotating": extra, "state": "启动 Claude Code", "queued": []}, \
+    assert run_time(facts["askBox"]) == {"asking": ASK, "annotating": follow, "state": "启动 Claude Code", "queued": []}, \
         "an annotation that starts shows on its own tab"
     c = facts["askThenCodex"]
     assert c["claudeCalls"] == 1 and c["threads"] == ["thread/start"] and c["conversations"] == 2, "Codex starts a conversation of its own"

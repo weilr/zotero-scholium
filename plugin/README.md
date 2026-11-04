@@ -9,8 +9,8 @@ The plugin has five functions:
   one button.
 - **One-click annotation** (Zotero 7 and later): starts Claude Code or Codex in the background to
   annotate the selected paper.
-- **Deleting the tool's annotations** (Zotero 7 and later): removes them and the tool's reading notes
-  from the selected paper.
+- **Deleting the tool's annotations** (Zotero 7 and later): removes them from the PDF the Scholium section
+  shows, and moves the paper's reading notes of the tool to the trash.
 - **Write endpoints**: `scholium` writes through them when the plugin is installed, the annotations of
   a run in one transaction; on Zotero 7, 8 and 9, whose local API is read-only, they are its only write
   channel.
@@ -61,10 +61,12 @@ Each Codex run:
 
 - talks to `codex app-server` over JSON-RPC, in a new thread or in the conversation's thread, with `<data dir>/tmp/scholium/` as working directory and the zotero-scholium skill
   attached to the first message of a thread;
-- runs without the user's MCP servers and installed plugins, switched off for the thread only;
-  Codex's `config.toml` is not changed and is not read: the names of the MCP servers come from Codex's
-  `mcpServerStatus/list` (the first Codex run ever waits at most 10 s for the list; later runs use the names kept in
-  the preference `codexServers` and refresh them in the background after the session's first Codex run);
+- runs with the user's MCP servers and installed plugins switched off for the thread only; Codex's `config.toml` is
+  neither changed nor read: the servers' names come from Codex's `mcpServerStatus/list`, which starts each server to
+  list it. A run while no names are kept (the first Codex run) waits at most 10 s for the list; if none comes, it and
+  the session's next Codex runs have the user's MCP servers until a list made in a separate Codex process after it
+  names them. Later runs use the names kept in the preference `codexServers` and list them again in a separate Codex
+  process after the session's first Codex run;
 - runs in Codex's `workspace-write` sandbox: commands may write only inside `<data dir>/tmp/scholium/`,
   `<data dir>/zotero-scholium/` and `%APPDATA%/zotero-scholium/` (`~/.config/zotero-scholium/` on
   macOS and Linux), and may use the network, which the skill needs for Zotero's local server;
@@ -160,7 +162,10 @@ history and the annotation sessions are those of that PDF.
 - The user's words are a bubble on the right. While a run goes on, one blue line says "Working for 12s" (「正在处理 12 秒」)
   with a light sweeping across it (the sweep stops when the system asks for reduced motion), and the answer appears as
   it is written; once the answer is there, the steps fold into "Worked for 24s ›" (「已处理 24 秒 ›」), which opens them as
-  Claude Code shows them; a run without steps shows "Worked for 24s" without ›. Every finished run shows it. The steps are: each tool call with its command or file, and the first lines of each result (errors in red).
+  Claude Code shows them; a run without steps shows "Worked for 24s" without ›. Every finished run shows it, except one
+  that was interrupted or stopped while it waited for a usage limit or a second try, which shows "Worked ›"
+  (「已处理 ›」) when it has steps and nothing otherwise. The steps are: each tool call with its command or file, and the
+  first lines of each result (errors in red).
   A fold opened or closed by hand stays so. Under an answer, a line gives the agent, the model and the time it ended,
   with a copy button (`Claude Code · Opus 5.5 · 12:01`). A failed question ends with its error and ↻ (**Retry**), which
   sends the same words again to the agent chosen. Web addresses and `zotero://` links in a message open on a click or
@@ -204,8 +209,9 @@ history and the annotation sessions are those of that PDF.
   done step with its time, and under them "Working for 12s" (「正在处理 12 秒」) with **Details ›** for the steps.
 - When it ends, the steps fold and a card gives the outcome: the warnings left, from the agent's closing line;
   the numbers counted on the paper in Zotero (highlights with the core ones, those of the configuration's core
-  colour; margin notes; sticky notes; reading notes); the turns, the tokens and the time. A failed annotation
-  shows its error with ↻ (**Retry**), which annotates again with the same extra instructions.
+  colour; margin notes; sticky notes; reading notes); the turns and tokens of all its parts (also those before a
+  pause for a limit) and the time. A failed annotation shows its error with ↻ (**Retry**), which annotates again with
+  the same extra instructions.
 - Words typed afterwards continue that annotation session, for example to change some annotations.
   **Annotate again** asks in place, above the box, how many Scholium annotations it replaces (the user's own
   stay); **Replace** starts a new session. While it waits behind another paper, the tab shows the coming session, and
@@ -295,12 +301,13 @@ overloaded or failing server) before the agent has used any tool, the paper is t
 30 seconds; it waits at the head of the queue meanwhile, and ■ ends the wait. The transcript
 and the log keep the failed try.
 
-When the agent reports that the usage limit is reached, only that agent's runs wait; the other agent's runs go on for
-every paper. The interrupted paper stays at its head, the state line and a notice give the reset time, and a minute after the reset the
-paper continues its conversation where it stopped, followed by the rest of the queue. Without a reset
-time the queue tries again after ten minutes. A limit of the service rather than of the account (“not
-your usage limit”) is named as such, and the queue waits as long as its message says. **Continue now** in
-the section ends that agent's wait at once. Only sections whose next run is that agent's show the pause; "Queued, N
+When the agent reports that the usage limit is reached, that agent's runs wait, and with them a message queued
+behind the interrupted run on the same tab of that paper; the other agent's runs go on. The interrupted paper stays
+at the head of the queue, the state line (naming the agent) and a notice give the reset time, and a minute after the
+reset the paper continues its conversation where it stopped, followed by that agent's other waiting runs. Without a
+reset time that agent's runs try again after ten minutes. A limit of the service rather than of the account (“not
+your usage limit”) is named as such, and that agent's runs wait as long as its message says. **Continue now** in the
+section ends that agent's wait at once. Only sections whose next run waits for that limit show the pause; "Queued, N
 ahead" counts neither held messages nor runs waiting for another limit.
 
 When the plugin is updated while a paper runs, the run ends and its log records the interruption; the
@@ -314,9 +321,10 @@ again, and a new message continues the conversation.
 Papers that already carry the tool's annotations are annotated again only after a confirmation (on the
 Annotations tab, in place above the box); the new run replaces those annotations.
 
-If the log refuses a run's first line, the words go back to the box and the state line says it failed, with the
-reason. After the update from v0.1.9, a question in progress continues as one turn, and a paper with the logs of both
-agents opens the chosen agent's.
+If the log refuses the first line of a Chat run, its words go back to the box (a queued message's to its row, marked,
+with **Retry**) and the state line says it failed, with the reason; an annotation's extra instructions go back to the
+Annotations tab's box. After the update from v0.1.9, a question in progress continues as one turn, and a paper with
+the logs of both agents opens the chosen agent's.
 
 | Preference | Default | Meaning |
 |---|---|---|
@@ -328,6 +336,8 @@ agents opens the chosen agent's.
 | `extensions.scholium-bridge.codexPath` | the newest copy found | path of the `codex` executable; set on the settings page |
 | `extensions.scholium-bridge.codexModel` | empty (Codex's default) | Codex model; set in the Scholium section |
 | `extensions.scholium-bridge.codexEffort` | `medium` | Codex reasoning effort; set in the Scholium section |
+| `extensions.scholium-bridge.codexServers` | empty (listed at the first Codex run) | the names of the user's Codex MCP servers, switched off in each Codex thread, as `mcpServerStatus/list` gave them; renewed after the first Codex run of each Zotero session |
+| `extensions.scholium-bridge.codexDefault` | empty | the model a new Codex thread ran with when none was chosen (*Codex's default*), which the model menu names |
 | `extensions.scholium-bridge.sendShortcut` | `cmdAlways` | `enter`, `cmdIfMultiline` or `cmdAlways`; set on the settings page |
 | `extensions.scholium-bridge.followUpMode` | `queue` | `queue` or `steer`; set on the settings page |
 | `extensions.scholium-bridge.contextRing` | `true` | whether the context ring shows; set on the settings page |
