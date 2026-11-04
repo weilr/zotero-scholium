@@ -1025,7 +1025,8 @@ SCENARIOS = r"""
     h.runner.dequeue(['ATT1', 'ATT2']); h.log.release(); await settle(300);
   }
   // words to the annotation tab while its annotation waits behind another paper: after that annotation, Steer greyed
-  // with nothing to steer yet; ■ takes the annotation out of the queue and holds the words
+  // with nothing to steer yet; ■ takes the annotation out of the queue, and the words queued for its session with it,
+  // back to the box
   {
     const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex' },
                         codex: { scripts: [[note('turn/started', { threadId: 'T1', turn: { id: 'TURN' } }), 'WAIT']] } });
@@ -1041,7 +1042,8 @@ SCENARIOS = r"""
     const tip = row ? [!!row.children[2].disabled, row.children[2].title] : null;
     pane.send.click(); await settle(50);                                      // ■
     facts.queueWaiting = { order, tip, after: h.runner.queue.map(j => (j.qid ? 'Q:' : '') + j.att.key), held: [...h.runner.heldQueues],
-                           line: pane.queueBox.children.length ? pane.queueBox.children[0].className : null, round: pane.send.textContent };
+                           line: pane.queueBox.children.length ? pane.queueBox.children[0].className : null, round: pane.send.textContent,
+                           box: pane.input.value };
     h.runner.dequeue(['ATT1']); h.runner.cancel(); await settle(200);
   }
   // ---- review fix round 1 ----
@@ -1819,8 +1821,8 @@ def test_where_a_follow_up_joins_the_queue(facts):
     w = facts["queueWaiting"]
     assert w["order"] == ["ATT1/annotate", "Q:ATT1/annotate"]
     assert w["tip"] == [True, "现在没有可引导的回答"]
-    assert w["after"] == ["Q:ATT1"] and w["held"] == ["ATT1/annotate/"], "no session yet"
-    assert w["line"] == "scholium-queue-held" and w["round"] == "↑"
+    assert w["after"] == [] and w["held"] == [] and w["box"] == "只看第 3 页", "no session yet: the words go back to the box"
+    assert w["line"] is None and w["round"] == "↑"
 
 
 def test_send_message_goes_ahead_of_the_held_queue_while_another_run_goes(facts):

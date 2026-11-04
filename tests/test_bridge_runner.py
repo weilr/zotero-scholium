@@ -581,7 +581,7 @@ SCENARIOS = r"""
     await h.runner.annotate([h.item1, h.item2]);
     await settle(300);
     p1.pane().tabAnnotate.click(); p2.pane().tabAnnotate.click();
-    facts.limit = { clock: h.runner.paused && h.runner.clock(h.runner.paused.until), calls: h.log.calls.length,
+    facts.limit = { clock: h.runner.paused && h.runner.clock(h.runner.paused.claude.until), calls: h.log.calls.length,
                     queue: h.runner.queue.map(j => [j.att.key, j.resume || null, j.say === undefined ? null : j.say]), waits: h.live(),
                     state1: p1.view().state, kind1: p1.view().stateKind, state2: p2.view().state, title1: p1.view().stateTitle, title2: p2.view().stateTitle, resumeShown: !p1.view().resumeHidden, stopShown: p1.view().round[0] === '■',
                     notices: h.log.notices.map(notice), notifications: h.log.notifications.slice(),
@@ -608,7 +608,7 @@ SCENARIOS = r"""
     await h.runner.annotate([h.item1, h.item2]);
     await settle(300);
     p1.pane().tabAnnotate.click(); p2.pane().tabAnnotate.click();
-    facts.retry = { clock: h.runner.paused && h.runner.clock(h.runner.paused.until), waits: h.live(), state1: p1.view().state };
+    facts.retry = { clock: h.runner.paused && h.runner.clock(h.runner.paused.claude.until), waits: h.live(), state1: p1.view().state };
     p2.pane().send.click();                       // the waiting paper leaves the queue
     facts.retry.queue = h.runner.queue.map(j => j.att.key);
     p1.pane().resume.click();                       // continue now
@@ -1317,8 +1317,8 @@ SCENARIOS = r"""
     const p1 = await h.pane(h.item1);
     await h.runner.annotate([h.item1, h.item2]);
     await settle(400);
-    facts.codexLimit = { clock: h.runner.paused && h.runner.clock(h.runner.paused.until), expected: h.runner.clock(CODEX_RESET * 1000 + 60000),
-                         known: h.runner.paused && h.runner.paused.known,
+    facts.codexLimit = { clock: h.runner.paused && h.runner.clock(h.runner.paused.codex.until), expected: h.runner.clock(CODEX_RESET * 1000 + 60000),
+                         known: h.runner.paused && h.runner.paused.codex.known,
                          queue: h.runner.queue.map(j => [j.att.key, j.agent, j.resume || null]), notifications: h.log.notifications.map(n => n.title),
                          last: p1.view('annotate').flat.filter(untimed).at(-1), state: p1.view('annotate').state };
     h.fire();
@@ -1442,8 +1442,8 @@ SCENARIOS = r"""
       .map(([m, i]) => h.runner.transient(m, i));
   }
 
-  // the logs of an earlier version, one per agent, are conversations of the paper: the newer one is shown whichever agent
-  // is chosen, and each is its agent's
+  // the logs of an earlier version, one per agent, are conversations of the paper: the chosen agent's is shown, also when
+  // the other one is newer, and each is its agent's
   {
     const codexLog = [CODEX_INIT].concat(CODEX_SCRIPT.filter(l => l.includes('item/')), [CODEX_RESULT]).join('');
     const claudeLog = SCRIPT.slice(0, 4).concat([LAST, RESULT]).join('');
@@ -1451,8 +1451,8 @@ SCENARIOS = r"""
     for (const agent of ['codex', 'claude']) {
       const other = agent === 'codex' ? 'claude' : 'codex';
       const h = harness({ logs: { '/data/tmp/scholium/ATT1/claude-run.jsonl': claudeLog, '/data/tmp/scholium/ATT1/codex-run.jsonl': codexLog },
-                          logTimes: { [`/data/tmp/scholium/ATT1/${agent}-run.jsonl`]: 2000, [`/data/tmp/scholium/ATT1/${other}-run.jsonl`]: 1000 },
-                          prefs: { 'extensions.scholium-bridge.agent': other } });
+                          logTimes: { [`/data/tmp/scholium/ATT1/${agent}-run.jsonl`]: 1000, [`/data/tmp/scholium/ATT1/${other}-run.jsonl`]: 2000 },
+                          prefs: { 'extensions.scholium-bridge.agent': agent } });
       h.runner.start('x');
       const p = await h.pane(h.item1);
       logFrom(p.pane());
@@ -1489,7 +1489,7 @@ SCENARIOS = r"""
     h.runner.start('x');
     await h.runner.annotate([h.item1, h.item2]);
     await settle(300);
-    const until = h.runner.paused && h.runner.paused.until;
+    const until = h.runner.paused && h.runner.paused.claude.until;
     h.runner.stop(true);
     const carried = h.store.get('extensions.scholium-bridge.carryOver');
     const h2 = harness({ prefs: { 'extensions.scholium-bridge.carryOver': carried } });
@@ -1504,7 +1504,7 @@ SCENARIOS = r"""
     await n.runner.annotate([n.item1], { extra: '只标方法部分' }); await settle(100);
     n.runner.stop(true);
     const handed = JSON.parse(n.store.get('extensions.scholium-bridge.carryOver')).jobs[0];
-    facts.carriedPause = { paused: h2.runner.paused && { until: h2.runner.paused.until, known: h2.runner.paused.known }, until, calls: h2.log.calls.length,
+    facts.carriedPause = { paused: h2.runner.paused && { until: h2.runner.paused.claude.until, known: h2.runner.paused.claude.known }, until, calls: h2.log.calls.length,
                            queue: h2.runner.queue.map(j => [j.att.key, j.resume || null]), waits: h2.live(),
                            retry: { calls: r.log.calls.length, queued: r.runner.queue.map(j => [j.att.key, !!j.retried, j.retryAt > Date.now()]) },
                            undelivered: [handed.resume, handed.extra, !!handed.updated] };
@@ -1617,7 +1617,7 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     const started = Date.now();
     await h.runner.annotate([h.item1]); await settle(300);
-    const paused = h.runner.paused;
+    const paused = h.runner.paused && h.runner.paused.claude;
     facts.throttle = { throttled: paused && paused.throttled, known: paused && paused.known, wait: paused && paused.until - started,
                        waits: h.live(), state: p.view('annotate').state, clock: paused && h.runner.clock(paused.until), notices: h.log.notices.at(-1).descriptions };
     h.fire(); await settle(400);
@@ -3407,7 +3407,7 @@ def test_a_paper_outside_the_queue_shows_nothing_of_a_pause(facts):
 
 def test_usage_limit_pauses_the_queue_and_continues_after_the_reset(facts):
     m = facts["limit"]
-    waiting = f"额度已用完，{m['clock']} 重置后自动继续"
+    waiting = f"Claude Code 额度已用完，{m['clock']} 重置后自动继续"
     assert m["calls"] == 1 and m["queue"] == [["ATT1", "S1", ""], ["ATT2", None, None]]
     assert len(m["waits"]) == 1 and 7_190_000 < m["waits"][0] <= 7_260_000
     assert m["state1"] == waiting and m["kind1"] == "scholium-state paused"
@@ -3428,7 +3428,7 @@ def test_usage_limit_pauses_the_queue_and_continues_after_the_reset(facts):
     assert r["state1"] is None and r["paused"] is None and r["waits"] == []
     assert r["notifications"] == []
     t = facts["retry"]
-    assert t["waits"] == [600000] and t["state1"] == f"额度已用完，{t['clock']} 自动重试"
+    assert t["waits"] == [600000] and t["state1"] == f"Claude Code 额度已用完，{t['clock']} 自动重试"
     assert t["queue"] == ["ATT1"]
     a = t["after"]
     assert a["calls"] == 2 and a["resume"] == "S1" and a["waits"] == [] and a["paused"] is None
@@ -3727,7 +3727,7 @@ def test_a_cancelled_run_keeps_its_end_in_the_log(facts):
 def test_the_services_limit_waits_as_long_as_it_says(facts):
     t = facts["throttle"]
     assert t["throttled"] is True and t["known"] is True and 1_490_000 < t["wait"] <= 1_510_000
-    assert t["state"] == f"服务暂时限流，{t['clock']} 自动继续" and t["notices"] == [t["state"]]
+    assert t["state"] == f"Claude Code 服务暂时限流，{t['clock']} 自动继续" and t["notices"] == [t["state"]]
     a = t["after"]
     assert a["prompt"] == "服务已恢复。请从中断的地方继续完成上面的任务，规则不变。" and a["paused"] is None
     assert "限流已解除，接着中断的地方继续" in a["entries"]

@@ -511,7 +511,8 @@ var ScholiumRunner = {
                             // sent; the agent only for an annotation session
   katexLib: undefined,      // KaTeX once loaded (null when it cannot be), for the formulas in messages
   mathCache: new Map(),     // "D"/"I" + TeX -> its MathML, or null when KaTeX cannot read it
-  paused: null,             // { until, known, throttled, timer } while the usage limit or the service's limit holds the queue
+  paused: null,             // { <agent>: { agent, until, known, throttled, timer } } while an agent's usage limit or its
+                            // service's limit holds that agent's runs; null while none does
   restoreTimer: null,
   RETRY_MS: 10 * 60000,     // the wait when the agent names no reset time
   NET_RETRY_MS: 30000,      // the wait before the second try of a run whose connection failed
@@ -679,6 +680,7 @@ var ScholiumRunner = {
       queueTip: zh ? "排队" : "Queue",
       steerTip: zh ? "引导" : "Steer",
       compactNotNow: zh ? "现在不能压缩" : "Cannot compact now",
+      nothingToCompact: zh ? "还没有可压缩的内容" : "Nothing to compact yet",
       escAgain: zh ? "再按一次 Esc 停止" : "Press Esc again to stop",
       // the queued messages above the message box, in Codex's words
       queueHeld: zh ? "由于你中断了当前响应，队列已暂停" : "Queue paused because you interrupted",
@@ -792,9 +794,9 @@ var ScholiumRunner = {
       resumeNow: zh ? "现在继续" : "Continue now",
       limitTitle: name => zh ? `${name} 额度已用完` : `${name} usage limit reached`,
       throttleTitle: name => zh ? `${name} 服务暂时限流` : `${name} is limiting requests for now`,
-      pausedState: time => zh ? `额度已用完，${time} 重置后自动继续` : `Usage limit reached; continues by itself after ${time}`,
-      pausedRetry: time => zh ? `额度已用完，${time} 自动重试` : `Usage limit reached; retries by itself at ${time}`,
-      throttledState: time => zh ? `服务暂时限流，${time} 自动继续` : `The service is limiting requests; continues by itself at ${time}`,
+      pausedState: (time, name) => zh ? `${name} 额度已用完，${time} 重置后自动继续` : `${name} usage limit reached; continues by itself after ${time}`,
+      pausedRetry: (time, name) => zh ? `${name} 额度已用完，${time} 自动重试` : `${name} usage limit reached; retries by itself at ${time}`,
+      throttledState: (time, name) => zh ? `${name} 服务暂时限流，${time} 自动继续` : `${name} is limiting requests; continues by itself at ${time}`,
       lastRun: zh ? "上次：" : "Last run: ",
       turns: n => zh ? `${n} 轮` : plural(n, "turn", "turns"),
       codexExited: tail => zh ? `Codex app-server 已退出${tail ? "：" + tail : ""}` : `codex app-server exited${tail ? ": " + tail : ""}`,
@@ -826,6 +828,7 @@ var ScholiumRunner = {
   contextRingOn() { return this.getPref("contextRing") !== false; },
 
   ESC_MS: 3000,   // the second Esc stops within this time
+  SAID_MS: 3000,  // a word under the message box shows this long
 
   // what Enter does in a message box under the send shortcut: "send", "invert" (the other way than the follow-up
   // behaviour, for this message only), or null (a new line). As in Codex: with Enter sending, Ctrl+Enter inverts; else
@@ -1880,10 +1883,18 @@ var ScholiumRunner = {
 
   paintHint(pane) {
     const armed = this.escArmed(pane);
+    const said = pane.said && Date.now() - pane.said.at < this.SAID_MS ? pane.said.text : "";
     const mod = Services.appinfo && Services.appinfo.OS === "Darwin" ? "⌘" : "Ctrl";
     const shortcut = this.sendShortcut();
-    pane.hint.textContent = armed ? this.text("escAgain")
-      : shortcut === "enter" ? this.text("sendHintEnter") : shortcut === "cmdIfMultiline" ? this.text("sendHintMultiline", mod) : this.text("sendHint", mod);
+    pane.hint.textContent = armed ? this.text("escAgain") : said
+      || (shortcut === "enter" ? this.text("sendHintEnter") : shortcut === "cmdIfMultiline" ? this.text("sendHintMultiline", mod) : this.text("sendHint", mod));
+  },
+
+  // a word under the message box in place of the hint, for a moment
+  sayUnderBox(pane, text) {
+    const said = pane.said = { text, at: Date.now() };
+    this.paintHint(pane);
+    setTimeout(() => { if (pane.said === said) pane.said = null; this.paintHint(pane); }, this.SAID_MS);
   },
 
   // the context ring: an arc of the window's share the shown conversation's session takes up; its tooltip in Codex's words
@@ -2400,7 +2411,12 @@ var ScholiumRunner = {
     box.addEventListener("keydown", e => { if (e.key === "Escape" && this.escape(pane)) { e.preventDefault(); e.stopPropagation(); } });
     const line = div("scholium-line");
     pane.state = div("scholium-state");          // one line of small text at the right
-    pane.resume = this.paneButton(doc, this.text("resumeNow"), () => { this.resumeQueue(); }, "quiet small");
+    // Continue now: the runs of the agent whose limit the tab's next run waits for
+    pane.resume = this.paneButton(doc, this.text("resumeNow"), () => {
+      const next = this.queue.find(j => pane.keys.includes(j.att.key) && (j.kind || "chat") === pane.tab && !this.isHeld(j));
+      const hold = next && this.heldByLimit(next);
+      if (hold) this.resumeQueue(hold.agent);
+    }, "quiet small");
     line.append(pane.chip, pane.state, pane.resume);
     // the chat view: the earlier conversations and the transcript; the annotation view: its own transcript
     pane.chatView = div("scholium-view chat");
@@ -3131,7 +3147,13 @@ var ScholiumRunner = {
     // /compact compacts the conversation shown, on whichever tab; it is no wish for an annotation
     const compact = typed ? /^\/compact(?:\s+([\s\S]*))?$/.exec(String(pane.input.value || "").trim()) : null;
     if (compact && pane.item) {
-      this.compactFromPane(pane, (compact[1] || "").trim()).then(ok => { if (ok) this.clearInput(pane); }).catch(e => this.log("compact failed: " + e));
+      const view = this.viewOf(pane, pane.tab);
+      this.compactFromPane(pane, (compact[1] || "").trim()).then(ok => {
+        if (ok) this.clearInput(pane);
+        // nothing the agent could compact yet (no session of it there), while the paper is free: a word under the box says
+        // so, the words stay
+        else if (!(view.shownKey && this.busy(view.shownKey))) this.sayUnderBox(pane, this.text("nothingToCompact"));
+      }).catch(e => this.log("compact failed: " + e));
       return;
     }
     // the annotation tab without a session: the words go with a new annotation
@@ -3451,13 +3473,15 @@ var ScholiumRunner = {
   },
 
   // the conversation the paper's messages go to: the one chosen last, none after New chat, else the newest. An index of an
-  // earlier version names one per agent: the chosen agent's, kept as the paper's at once; a paper without any keeps none
+  // earlier version names one per agent: the chosen agent's, kept as the paper's at once; a paper without any keeps none.
+  // Without an index (v0.1.9), the chosen agent's log of that version, while it holds something
   async currentConv(key) {
     const index = await this.index(key);
     const chosen = () => Object.prototype.hasOwnProperty.call(index, "chat");
     if (!chosen()) {
       const was = index.current[this.agent()];
-      const id = was && (await this.exists(this.convPath(key, was))) ? was : ((await this.conversations(key))[0] || {}).id || null;
+      const all = was && (await this.exists(this.convPath(key, was))) ? null : await this.conversations(key);
+      const id = !all ? was : ((all.find(c => c.id === this.LEGACY[this.agent()]) || all[0]) || {}).id || null;
       if (id && !chosen()) { index.chat = id; await this.saveIndex(key); }   // unless chosen meanwhile
       return chosen() ? index.chat : null;
     }
@@ -3877,13 +3901,14 @@ var ScholiumRunner = {
     await this.showAnnotation(pane);
   },
 
-  // what the annotation tab shows: the paper's annotation session as it runs, else the chosen agent's latest one, else
-  // an introduction
+  // what the annotation tab shows: the paper's annotation session as it runs, else the session of an annotation waiting to
+  // start (none yet: the words typed go to it), else the chosen agent's latest one, else an introduction
   async showAnnotation(pane) {
     const view = pane.annot, seq = view.showing = (view.showing || 0) + 1;
     const key = pane.keys[0] || null;
     const agent = this.agent();
-    const id = key ? await this.annotationConv(key, agent) : null;
+    const coming = this.queue.some(j => j.att.key === key && j.annotate && !j.conv && !this.started(j));
+    const id = key && !coming ? await this.annotationConv(key, agent) : null;
     const log = id ? await this.readLog(key, id) : null;
     const own = key && pane.item ? this.ownCount(pane.item.libraryID, key) : 0;
     const intro = log && log.entries.length ? null : await this.annotIntroNode(pane, key, own);
@@ -4897,8 +4922,10 @@ var ScholiumRunner = {
       const note = tab === "annotate" ? latest(pane.keys.map(k => this.notes.get(`${k}/annotate`)))
         : latest(pane.keys.map(k => [k, this.notes.get(`${k}/chat`)]).filter(([k, n]) => n && (!n.conv || (k === pane.shownKey && n.conv === pane.shownConv)))
           .map(([, n]) => n)) || pane.past;
-      const paused = this.paused ? this.text(this.paused.throttled ? "throttledState" : this.paused.known ? "pausedState" : "pausedRetry",
-                                             this.clock(this.paused.until)) : null;
+      // the limit the tab's next run waits for, named by the agent that hit it
+      const hold = queuedAt >= 0 ? this.heldByLimit(this.queue[queuedAt]) : null;
+      const paused = hold ? this.text(hold.throttled ? "throttledState" : hold.known ? "pausedState" : "pausedRetry", this.clock(hold.until),
+                                      this.agentName(hold.agent)) : null;
       const foreign = !!pane.item && pane.item.libraryID !== Zotero.Libraries.userLibraryID;
       const lines = [];
       let kind = "info", title = "";
@@ -4909,7 +4936,9 @@ var ScholiumRunner = {
         lines.push(this.text("retryWait"));
         kind = "paused";
       } else if (queuedAt >= 0) {
-        if (!(paused && queuedAt === 0)) lines.push(this.text("queuedThis", queuedAt + (this.job ? 1 : 0)));
+        // ahead of it, what runs first: not a held message, nor a run that waits for another limit
+        const ahead = this.queue.slice(0, queuedAt).filter(j => !this.isHeld(j) && [null, hold].includes(this.heldByLimit(j))).length;
+        if (!(paused && ahead === 0)) lines.push(this.text("queuedThis", ahead + (this.job ? 1 : 0)));
         if (paused) { lines.push(paused); kind = "paused"; }
       } else if (foreign) {
         lines.push(this.text("myLibraryOnly"));
@@ -4942,7 +4971,7 @@ var ScholiumRunner = {
       this.show(pane.historyButton, tab === "chat");
       // an annotation waits behind the paper's chat; not behind another annotation
       pane.annotGo.disabled = this.busyKind(pane, "annotate") || foreign;
-      this.show(pane.resume, !!this.paused && queuedAt >= 0);
+      this.show(pane.resume, !!hold);
       // the conversations of the tab stay as they are while its run goes or waits; the agent while any run of the paper does
       pane.agent.disabled = any || foreign;
       pane.newChat.disabled = busy || foreign || !pane.shownConv;
@@ -5062,6 +5091,11 @@ var ScholiumRunner = {
     const ready = jobs.filter(j => !this.busy(j.att.key, "annotate"));
     if (!ready.length) { this.refresh(); return 0; }
     this.enqueue(ready);
+    // a paper's tab that shows an earlier session shows the session to come while its annotation waits
+    const waiting = ready.filter(j => this.queue.includes(j));
+    for (const pane of [...this.panes.values()]) {
+      if (pane.annot.shownConv && waiting.some(j => pane.keys.includes(j.att.key))) this.showAnnotation(pane).catch(e => this.log("section not shown: " + e));
+    }
     return ready.length;
   },
 
@@ -5072,6 +5106,7 @@ var ScholiumRunner = {
     // the agent's own session of the conversation
     const mine = log => (log && log.agents[job.agent === "codex" ? "codex" : "claude"]) || null;
     if ((job.retry || job.compact || job.qid) && job.conv) {
+      if (job.kind === "annotate") job.agent = this.convAgent(job.conv);   // an annotation session is its agent's own
       const log = await this.readLog(job.att.key, job.conv), a = mine(log);
       job.resume = (a && a.session) || null;
       job.rewind = job.resume ? (a && a.rewind) || null : null;
@@ -5265,7 +5300,7 @@ var ScholiumRunner = {
       if (r.retitled) { index.titles[conv] = r.title; await this.saveIndex(key); }
       return false;
     }
-    r.timer = setTimeout(() => this.endReplaced(id), this.UNDO_MS);
+    r.timer = setTimeout(() => this.undoTimeUp(id), this.UNDO_MS);
     this.replaced.set(id, r);
     await this.chooseConv(key, conv);
     const att = Zotero.Items.getByLibraryAndKey(pane.item.libraryID, key);
@@ -5327,6 +5362,15 @@ var ScholiumRunner = {
     }
   },
 
+  // the Undo seconds of an edit are up: its old conversation goes, unless the edited question still waits to start (behind
+  // another paper's run), until when Undo, or ■, brings it back
+  undoTimeUp(id) {
+    const r = this.replaced.get(id);
+    if (!r) return;
+    if (this.queue.some(j => j.edited && `${j.att.key}/${j.conv}` === id && !this.started(j))) r.timer = setTimeout(() => this.undoTimeUp(id), this.UNDO_MS);
+    else this.endReplaced(id);
+  },
+
   // the old conversation of an edit can no longer come back: its Undo goes
   endReplaced(id) {
     const r = this.replaced.get(id);
@@ -5380,6 +5424,7 @@ var ScholiumRunner = {
     // the paper is busy: the words wait in the queue of the conversation, as Codex queues a follow-up
     if (busy) {
       Object.assign(job, { qid: String(++this.qseq), conv: opts.conv || null });
+      if (kind === "annotate" && job.conv) job.agent = this.convAgent(job.conv);   // an annotation session's, from now on
       this.queue.splice(this.followUpAt(job), 0, job);
       this.refresh();   // the queue drains already: the run it waits for goes on, or waits in it
       return true;
@@ -5589,17 +5634,35 @@ var ScholiumRunner = {
   },
 
   // take papers out of the queue, their runs of one kind only when given, and their queued messages unless `rows` is
-  // false; when nothing but held messages is left, a pause ends
+  // false; an agent's pause ends once nothing but held messages is left of its runs. A message that had not started
+  // goes back to its box, an annotation's wishes too, with the messages queued for its session to come (which leave the
+  // queue with it); an edited question that had not started is undone
   dequeue(keys, kind = null, { rows = true } = {}) {
     const ours = j => keys.includes(j.att.key) && (!kind || (j.kind || "chat") === kind) && (rows || !j.qid);
-    const started = this.queue.filter(j => ours(j) && this.started(j));
-    this.queue = this.queue.filter(j => !ours(j));
-    if (!this.queue.some(j => !this.isHeld(j)) && this.paused) {
-      clearTimeout(this.paused.timer);
-      this.paused = null;
+    const removed = this.queue.filter(ours);
+    const coming = j => removed.some(a => a.annotate && !a.conv && !this.started(a) && a.att.key === j.att.key);
+    const toCome = this.queue.filter(j => j.qid && (j.kind || "chat") === "annotate" && !j.conv && coming(j));
+    this.queue = this.queue.filter(j => !ours(j) && !toCome.includes(j));
+    for (const agent of Object.keys(this.paused || {})) {
+      if (!this.queue.some(j => !this.isHeld(j) && this.agentOf(j) === agent)) this.endPause(agent);
     }
     this.refresh();
-    for (const job of started) this.endWaiting(job).catch(e => this.log("cancel not logged: " + e));
+    for (const job of removed) {
+      if (this.started(job)) this.endWaiting(job).catch(e => this.log("cancel not logged: " + e));
+      else if (job.edited && job.conv) this.undoReplace(`${job.att.key}/${job.conv}`).catch(e => this.log("edit not undone: " + e));
+      else if (job.annotate) {
+        const queued = job.conv ? [] : toCome.filter(j => j.att.key === job.att.key);
+        this.annotationBack(job, queued).catch(e => this.log("annotation not given back: " + e));
+      } else this.giveBack(job);
+    }
+  },
+
+  // an annotation that did not start: its tab shows the paper's session again, its extra wishes and the words queued for
+  // its session to come back in the tab's box, in one piece
+  async annotationBack(job, queued = []) {
+    const words = [job.extra].concat(queued.map(j => j.say)).filter(Boolean).join("\n\n");
+    if (words) this.giveBack(Object.assign({}, job, { say: words, conv: await this.annotationConv(job.att.key, job.agent) }));
+    for (const pane of [...this.panes.values()]) if (pane.keys.includes(job.att.key)) await this.showAnnotation(pane);
   },
 
   // whether a queued paper's conversation has its run already: one waiting for its second try, for a limit to reset,
@@ -5624,14 +5687,15 @@ var ScholiumRunner = {
     for (const pane of [...this.panes.values()]) if (pane.keys.includes(key)) await this.showConversation(pane);
   },
 
-  // one paper at a time; `draining` also covers the moments before a process exists. The usage limit
-  // pauses the queue.
+  // one paper at a time; `draining` also covers the moments before a process exists. An agent's usage limit
+  // pauses that agent's runs.
   async drain() {
     this.draining = true;
     try {
-      while (this.queue.length && !this.paused) {
-        // a held queued message waits for Resume, and those behind a failed one for it
-        const i = this.queue.findIndex(j => !this.isHeld(j));
+      while (this.queue.length) {
+        // a held queued message waits for Resume, and those behind a failed one for it; a run of an agent whose limit
+        // holds waits for its reset, and what follows it of its paper's tab with it
+        const i = this.queue.findIndex(j => !this.isHeld(j) && !this.heldByLimit(j));
         if (i < 0) break;
         // a paper whose connection failed waits for its second try at the head of the queue
         const wait = (this.queue[i].retryAt || 0) - Date.now();
@@ -5649,10 +5713,17 @@ var ScholiumRunner = {
           const message = String(e && e.message || e).slice(0, 300);
           this.current = null;
           this.dropDraft();
+          // nothing of a run that failed before its first line reached the log: its words go back; a chat's sections show
+          // the conversation as its log has it (no run to retry there), its state line the failure
+          const unlogged = !job.logPath && (job.kind || "chat") === "chat";
           if (!job.logPath) this.giveBack(job);
-          this.appendEntries(job.logPath ? this.entries(await this.logEnd(job.logPath, "failed", message)) : [{ kind: "final", text: message, error: true }]);
+          if (unlogged) {
+            if (this.transcriptKey === job.att.key) this.transcriptPath = null;
+            for (const pane of this.panes.values()) if (pane.keys.includes(job.att.key)) pane.live = false;
+          } else this.appendEntries(job.logPath ? this.entries(await this.logEnd(job.logPath, "failed", message)) : [{ kind: "final", text: message, error: true }]);
           this.notice(job, `${this.text("failed")} · ${message}`, true);
-          this.finish(job, false, message);
+          this.finish(job, false, message, unlogged ? `${this.text("failed")} · ${message}` : undefined);
+          if (unlogged) for (const pane of [...this.panes.values()]) if (pane.keys.includes(job.att.key)) await this.showConversation(pane);
           this.log("run failed: " + e);
           if (!job.logPath) outcome = { ok: false, delivered: false };   // its words reached nothing
         }
@@ -5683,7 +5754,7 @@ var ScholiumRunner = {
   },
 
   // the usage limit, or a limit of the service: the interrupted paper waits at the head of the queue and continues
-  // its conversation when the limit resets; nothing else starts meanwhile
+  // its conversation when the limit resets; no other run of its agent starts meanwhile, the other agent's go on
   pause(job, { until, session, throttled }) {
     if (this.job && this.job.key === job.att.key) this.job = null;
     // a question stays one when its conversation continues; an annotation that continued a question's conversation
@@ -5696,9 +5767,11 @@ var ScholiumRunner = {
                                              : { interrupted: true, logged: true }));
     this.settleRun();   // the paper waits: no retry
     const wait = until ? Math.max(until - Date.now(), 0) + 60000 : this.RETRY_MS;
-    if (this.paused) clearTimeout(this.paused.timer);
-    this.paused = { until: Date.now() + wait, known: !!until, throttled: !!throttled, timer: setTimeout(() => { this.resumeQueue(); }, wait) };
-    const line = this.text(throttled ? "throttledState" : until ? "pausedState" : "pausedRetry", this.clock(this.paused.until));
+    const agent = this.agentOf(job);
+    this.endPause(agent);
+    const held = { agent, until: Date.now() + wait, known: !!until, throttled: !!throttled, timer: setTimeout(() => { this.resumeQueue(agent); }, wait) };
+    this.paused = Object.assign(this.paused || {}, { [agent]: held });
+    const line = this.text(throttled ? "throttledState" : until ? "pausedState" : "pausedRetry", this.clock(held.until), this.agentName(agent));
     this.notice(job, line, true);
     if (!this.focused()) this.notify(this.text(throttled ? "throttleTitle" : "limitTitle", this.agentName(job.agent, true)), line);
     this.refresh();
@@ -5715,12 +5788,38 @@ var ScholiumRunner = {
     return ms > 0 && ms <= 6 * 3600000 ? Date.now() + ms : null;
   },
 
-  resumeQueue() {
+  // an agent's runs go on (Continue now, or its reset came); every agent's without one named
+  resumeQueue(agent = null) {
     if (!this.paused) return;
-    clearTimeout(this.paused.timer);
-    this.paused = null;
+    for (const a of agent ? [agent] : Object.keys(this.paused)) this.endPause(a);
     this.refresh();
     if (!this.draining && this.queue.length) this.drain();
+  },
+
+  agentOf(job) { return job && job.agent === "codex" ? "codex" : "claude"; },
+
+  // the pause of an agent's runs while its limit holds, or null
+  pauseOf(agent) { return (this.paused && this.paused[agent]) || null; },
+
+  endPause(agent) {
+    const p = this.pauseOf(agent);
+    if (!p) return;
+    clearTimeout(p.timer);
+    delete this.paused[agent];
+    if (!Object.keys(this.paused).length) this.paused = null;
+  },
+
+  // the pause a queued run waits for: its agent's, or that of a run of its paper's tab ahead of it, which goes first
+  heldByLimit(job) {
+    if (!this.paused) return null;
+    const own = this.pauseOf(this.agentOf(job));
+    if (own) return own;
+    const kind = job.kind || "chat";
+    for (const j of this.queue) {
+      if (j === job) break;
+      if (j.att.key === job.att.key && (j.kind || "chat") === kind && !this.isHeld(j) && this.pauseOf(this.agentOf(j))) return this.pauseOf(this.agentOf(j));
+    }
+    return null;
   },
 
   // whether a Zotero main window has the focus: a corner notice is for then, the system notification for the rest
@@ -5927,8 +6026,15 @@ var ScholiumRunner = {
     const user = job.compact || again || continuation ? null : this.turnWords(job);
     running.logged = true;
     if (user !== null) job.turnAt = log ? log.turns.length : 0;   // the turn these words start
-    await IOUtils.writeUTF8(logPath, JSON.stringify(Object.assign({ type: "scholium", subtype: "run", agent, user, at: started },
-      job.compact ? { compact: true } : {}, job.rewind && job.resume ? { rewind: job.rewind } : {})) + "\n", { mode: "appendOrCreate" });
+    // a log that refuses this line (locked a moment) has nothing of the run: its words go back, no end is logged (drain)
+    try {
+      await IOUtils.writeUTF8(logPath, JSON.stringify(Object.assign({ type: "scholium", subtype: "run", agent, user, at: started },
+        job.compact ? { compact: true } : {}, job.rewind && job.resume ? { rewind: job.rewind } : {})) + "\n", { mode: "appendOrCreate" });
+    } catch (e) {
+      job.logPath = running.log = null;
+      running.logged = false;
+      throw e;
+    }
     if (!job.resume || job.annotate) job.profile = (await this.exists(this.profilePath())) ? this.profilePath() : null;
     // the user's words, an annotation, or an automatic continuation, go into the log as the plugin's own lines; a second
     // try has them already. A question's line marks its conversation as one.
@@ -5981,11 +6087,12 @@ var ScholiumRunner = {
       message = job.compact ? (ctx.compacted ? this.compactSizes(ctx.compacted).replace(/^ · /, "") : "") : summary;
       this.notice(job, job.compact ? this.text("compactedNotice")
         : [`${this.text("done")} · ${this.duration(Date.now() - started)}`, answered ? summary : this.brief(summary)].filter(Boolean).join("\n"));
-      // an annotation's end, also of its second try or of its continuation after a pause: the numbers counted in Zotero
+      // an annotation's end, also of its second try or of its continuation after a pause: the numbers counted in Zotero,
+      // the turns and tokens of all of its runs
       if (running.annotation) {
-        const tokens = this.tokenCounts(result).reduce((n, [, c]) => n + c, 0);
+        const spent = (await this.spentOn(key, job.conv)) || { turns: result.num_turns || 0, tokens: this.tokenCounts(result).reduce((n, [, c]) => n + c, 0) };
         const counts = Object.assign({ type: "scholium", subtype: "counts" }, await this.countOwn(job.att),
-                                     { warnings: this.warningsOf(text), turns: result.num_turns || 0, tokens, at: Date.now() });
+                                     { warnings: this.warningsOf(text), turns: spent.turns, tokens: spent.tokens, at: Date.now() });
         try { await IOUtils.writeUTF8(logPath, JSON.stringify(counts) + "\n", { mode: "append" }); }
         catch (e) { this.log("counts not logged: " + e); }
         this.appendEntries(this.entries(counts));
@@ -6030,6 +6137,26 @@ var ScholiumRunner = {
     this.appendEntries(this.entries(time));
     this.finish(job, ok, message, this.outcome(result, current.cancelled), this.tokenDetail(result), answered);
     return { exitCode, result, ok, delivered: !!running.delivered, cancelled: !!current.cancelled };
+  },
+
+  // the turns and tokens of a conversation's last turn over all of its runs (a part before a pause, a second try); null
+  // when its log cannot be read
+  async spentOn(key, conv) {
+    const log = await this.readLog(key, conv);
+    const turn = log && log.turns[log.turns.length - 1];
+    if (!turn) return null;
+    let text;
+    try { text = await IOUtils.readUTF8(log.path); } catch (e) { return null; }
+    let turns = 0, tokens = 0, compacting = false;
+    for (const line of text.slice(turn.start).split("\n")) {
+      let event;
+      try { event = JSON.parse(line); } catch (e) { continue; }
+      if (event.type === "scholium" && event.subtype === "run") compacting = !!event.compact;
+      if (event.type !== "result" || compacting) continue;
+      turns += Number(event.num_turns) || 0;
+      tokens += this.tokenCounts(event).reduce((n, [, c]) => n + c, 0);
+    }
+    return { turns, tokens };
   },
 
   // lines of a run for its log; those the file did not take (locked a moment by a virus scanner or a backup) go with
@@ -6081,9 +6208,9 @@ var ScholiumRunner = {
   },
 
   // the job for a new session of the agent when the one it was to continue is gone: the user's words or the annotation,
-  // with the whole conversation; null for a continuation after a limit or an update
+  // with the whole conversation; null for a continuation after a limit or an update, and for a compaction
   fresh(job) {
-    if (!job.say && !job.annotate) return null;
+    if (job.compact || (!job.say && !job.annotate)) return null;
     return Object.assign({}, job, { resume: null, rewind: null, asked: false, updated: false, throttled: false, retried: false, retryAt: 0,
                                     interrupted: false, fresh: true, qid: null });
   },
@@ -6362,13 +6489,22 @@ var ScholiumRunner = {
     try { Zotero.Prefs.set(this.pref + "codexArchive", JSON.stringify(ids.slice(-50)), true); } catch (e) { this.log("preference not saved: " + e); }
   },
 
+  // each thread leaves the list once Codex archived it or refused it (one it no longer has); once the server does not
+  // answer, the rest stay for the next run
   async archiveThreads(rpc) {
     let ids = [];
     try { ids = JSON.parse(this.getPref("codexArchive") || "[]"); } catch (e) {}
     if (!Array.isArray(ids) || !ids.length) return;
-    try { Zotero.Prefs.set(this.pref + "codexArchive", "", true); } catch (e) {}
     for (const threadId of ids) {
-      try { await rpc.request("thread/archive", { threadId }); } catch (e) { this.log("thread not archived: " + e); }
+      try { await rpc.request("thread/archive", { threadId }); }
+      catch (e) {
+        this.log("thread not archived: " + e);
+        if (!e || !e.refused) break;
+      }
+      let left = [];
+      try { left = JSON.parse(this.getPref("codexArchive") || "[]"); } catch (e) {}
+      left = Array.isArray(left) ? left.filter(id => id !== threadId) : [];
+      try { Zotero.Prefs.set(this.pref + "codexArchive", left.length ? JSON.stringify(left) : "", true); } catch (e) {}
     }
   },
 
@@ -6901,7 +7037,8 @@ var ScholiumRunner = {
         : Object.assign(plain(j), { logged: !!(j.logged || running.logged) }));
     }
     for (const j of this.queue) jobs.push(plain(j));
-    const paused = this.paused ? { until: this.paused.until, known: this.paused.known, throttled: !!this.paused.throttled } : null;
+    // each agent's pause: { <agent>: { until, known, throttled } }
+    const paused = this.paused ? Object.fromEntries(Object.entries(this.paused).map(([a, p]) => [a, { until: p.until, known: p.known, throttled: !!p.throttled }])) : null;
     try { if (jobs.length) Zotero.Prefs.set(this.pref + "carryOver", JSON.stringify({ jobs, paused, held: [...this.heldQueues] }), true); }
     catch (e) { this.log("queue not kept: " + e); }
   },
@@ -6934,12 +7071,19 @@ var ScholiumRunner = {
       // first: a paper interrupted there has its turn in that log; an annotation not begun starts a session of its own
       if (!("conv" in s)) {
         if (!job.say && !job.resume) job.annotate = true;
-        if (job.resume || job.interrupted || job.retried) job.conv = this.LEGACY[agent];
+        // a question that goes on is the conversation's already; words whose run had begun are the last turn of its log,
+        // asked again there
+        if (job.resume) job.question = false;
+        const legacy = job.say ? await this.readLog(job.att.key, this.LEGACY[agent]) : null;
+        const last = legacy && legacy.turns[legacy.turns.length - 1];
+        const begun = !!last && !last.done && last.user === job.say;
+        if (job.resume || job.interrupted || job.retried || begun) job.conv = this.LEGACY[agent];
         else {
           if (job.annotate) job.kind = "annotate";
           await this.place(job);
         }
-        if (job.interrupted) job.logged = true;
+        if (job.interrupted || begun) job.logged = true;
+        if (begun) job.turnAt = legacy.turns.length - 1;
         // that copy kept neither of these for a follow-up
         job.own = job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length;
         const log = await this.readLog(job.att.key, job.conv);
@@ -6949,10 +7093,17 @@ var ScholiumRunner = {
     }
     if (!jobs.length) return;
     for (const k of (Array.isArray(saved.held) && saved.held) || []) if (typeof k === "string") this.heldQueues.add(k);
-    const p = saved.paused;
-    if (p && p.until > Date.now() && !this.paused) {   // the limit still holds: the queue waits for it, as before the update
-      this.paused = { until: p.until, known: !!p.known, throttled: !!p.throttled,
-                      timer: setTimeout(() => { this.resumeQueue(); }, p.until - Date.now()) };
+    // a limit that still holds: its agent's runs wait for it, as before the update. An earlier copy's one pause held the
+    // queue behind the paper the limit interrupted, at its head: it is that paper's agent's (should another paper's run be
+    // at the head, its agent waits for that reset instead, as the whole queue did before)
+    const p = saved.paused && typeof saved.paused === "object" ? saved.paused : {};
+    const head = (Array.isArray(saved.jobs) && saved.jobs[0]) || {};
+    const pauses = "until" in p ? { [this.agentOf(head)]: p } : p;
+    for (const agent of this.AGENTS) {
+      const q = pauses[agent];
+      if (!q || !(q.until > Date.now()) || this.pauseOf(agent)) continue;
+      this.paused = Object.assign(this.paused || {}, { [agent]: { agent, until: q.until, known: !!q.known, throttled: !!q.throttled,
+                                                                  timer: setTimeout(() => { this.resumeQueue(agent); }, q.until - Date.now()) } });
     }
     this.enqueue(jobs);
   },
@@ -6971,7 +7122,7 @@ var ScholiumRunner = {
     if (update) this.carryOver(running);
     clearTimeout(this.restoreTimer);
     if (this.editor) this.closeProfile(this.editor, false);
-    if (this.paused) clearTimeout(this.paused.timer);
+    for (const agent of this.AGENTS) this.endPause(agent);
     this.paused = null;
     this.queue = [];
     for (const r of this.removedQueued.values()) clearTimeout(r.timer);
