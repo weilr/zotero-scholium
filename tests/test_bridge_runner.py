@@ -2691,7 +2691,7 @@ HISTORY_HEAD = "下面是这段对话之前的内容（Zotero 里保存的记录
 HISTORY_END = "——以上是之前的对话，新消息如下——"
 CLOSING = "改了批注时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。"   # the end of a follow-up's prompt
 DONE_NOTICE = ["完成 · Ns"] + BRIEF.split("\n")   # a harness run's own time, read through run_time
-DONE_STATE = "完成 · 6m 17s · 26 轮 · 2,568k tokens"
+DONE_STATE = "完成 · 26 轮 · 2,568k tokens"   # the time is on the run's folded steps
 
 
 def run_time(value):
@@ -2844,7 +2844,7 @@ def test_section_is_styled_by_its_stylesheet(facts):
     for kind, colour in (("running", "blue"), ("ok", "green"), ("error", "red"), ("paused", "orange")):
         assert f"var(--accent-{colour})" in rules[f".scholium-state.{kind}::before"], kind
     assert "animation: scholium-pulse" in rules[".scholium-state.running::before"]
-    assert "#e8890c" in rules[".scholium-ring.warn"] and "conic-gradient" in rules[".scholium-ring"] and "inset: 3px" in rules[".scholium-ring::after"] and "var(--fill-primary)" in rules[".scholium-round.stop"] and "var(--accent-blue)" in rules[".scholium-round"]
+    assert "var(--accent-orange)" in rules[".scholium-ring.warn"] and "conic-gradient" in rules[".scholium-ring"] and "inset: 3px" in rules[".scholium-ring::after"] and "var(--fill-primary)" in rules[".scholium-round.stop"] and "var(--accent-blue)" in rules[".scholium-round"]
     # a run: its steps folded into a line, blue with a ring while it runs; the model and the time under the answer
     assert "flex-direction: column" in rules[".scholium-run"] and "var(--accent-blue)" in rules[".scholium-fold-head.live"]
     assert "background: transparent" in rules[".scholium-fold-head"] and "var(--fill-secondary)" in rules[".scholium-fold-head"]
@@ -3021,14 +3021,14 @@ def test_delete_removes_only_the_tools_annotations_and_notes_after_a_confirmatio
     assert d["remaining"] == ["E2", "E3", "E4"]
     # the tool's notes go to the trash; the user's stay
     assert d["trashed"] == ["N0", "N3"] and d["notesLeft"] == ["N1", "N2"]
-    assert d["confirms"] == ["将删除这篇论文上带 zotero-scholium 标签的 2 条批注和 2 篇阅读笔记。"
+    assert d["confirms"] == ["将删除带 zotero-scholium 标签的这个 PDF 上的 2 条批注和这篇论文的 2 篇阅读笔记。"
                              "批注永久删除，不能撤销；笔记移到回收站，可以恢复。你自己的批注和笔记都保留。删除会同步。继续吗？"]
     assert d["notice"] == {"closeOnClick": True, "errors": 0, "descriptions": ["已删除 2 条 Scholium 批注，2 篇笔记已移到回收站。"],
                            "closeTimer": 6000, "shown": True}
-    assert facts["deleteNothingLeft"] == {"removed": 0, "alerts": ["这篇论文没有 Scholium 批注或笔记。"]}
+    assert facts["deleteNothingLeft"] == {"removed": 0, "alerts": ["这个 PDF 没有 Scholium 批注，这篇论文也没有 Scholium 阅读笔记。"]}
     n = facts["deleteNoteOnly"]
     assert n["removed"] == 1 and n["trashed"] == ["N0"] and n["erased"] == []
-    assert n["confirms"] == ["This deletes 1 reading note tagged zotero-scholium on this paper. The notes go to the trash, where they "
+    assert n["confirms"] == ["This deletes 1 reading note of the paper, tagged zotero-scholium. The notes go to the trash, where they "
                              "can be restored. Your own annotations and notes are kept. The deletion syncs. Continue?"]
     assert n["notice"] == ["1 note moved to the trash."]
     assert facts["deleteRefused"] == {"removed": 0, "erased": [], "remaining": 1}
@@ -3041,7 +3041,7 @@ def test_delete_removes_only_the_tools_annotations_and_notes_after_a_confirmatio
 def test_delete_skips_a_paper_being_annotated(facts):
     r = facts["deleteWhileRunning"]
     assert r["removed"] == 0 and r["erased"] == [] and r["trashed"] == []
-    assert r["alerts"] == ["这篇论文没有 Scholium 批注或笔记。\n\n正在批注或排队的 PDF 不会删除。"]
+    assert r["alerts"] == ["这个 PDF 没有 Scholium 批注，这篇论文也没有 Scholium 阅读笔记。\n\n正在批注或排队的 PDF 不会删除。"]
     assert r["paneButtons"] == {"annotate": True, "remove": True}
 
 
@@ -3529,7 +3529,7 @@ def test_codex_transcript_state_and_log_read_like_claude_codes(facts):
     assert r["sendShown"] is True and re.fullmatch(r"/data/tmp/scholium/ATT1/conversations/annotate-codex-\d{8}-\d{6}\.jsonl", r["revealed"][0])
     latest = facts["latestLog"]
     assert latest["codex"] == {"first": CODEX_TRANSCRIPT[0], "count": len(CODEX_TRANSCRIPT) + 1,
-                               "state": "上次：完成 · 6m 17s · 3 轮 · 2,647k tokens", "shownConv": "codex-run", "session": "T1",
+                               "state": "上次：完成 · 3 轮 · 2,647k tokens", "shownConv": "codex-run", "session": "T1",
                                "revealed": "/data/tmp/scholium/ATT1/codex-run.jsonl", "title": "批注这篇"}, "an earlier version's log is its agent's"
     assert latest["claude"]["first"] == TRANSCRIPT[0]
     assert latest["claude"]["session"] == "S1" and latest["claude"]["shownConv"] == "claude-run"
@@ -3557,7 +3557,7 @@ def test_the_agents_share_the_papers_conversations(facts):
     assert f["effort"] == "high"
     # only this run's calls and tokens: the thread's totals include the earlier turn (kept by the plugin; a follow-up on
     # the annotation tab shows its model and time)
-    assert f["state"] == "完成 · 1m 05s · 1 轮 · 403k tokens"
+    assert f["state"] == "完成 · 1 轮 · 403k tokens"
     assert run_time(f["entries"]) == [["scholium-entry text", "Done.\n" + SUMMARY], CODEX_CARD, ["scholium-entry prompt", "第 5 页那条译文改短"],
                                       ["scholium-entry text", "改好了：第 5 页的译文已缩短。"], CODEX_ENDED]
     assert f["results"] == 2 and f["markers"] == ["批注这篇", "第 5 页那条译文改短"]
@@ -4035,7 +4035,7 @@ def test_a_stop_before_the_run_line_logs_nothing(facts):
 def test_a_question_and_its_annotation_go_on_after_a_limit_and_an_update(facts):
     lim = facts["askLimit"]
     assert lim["paused"] == {"stop": ["■", "停止"], "queued": [["S1", False, ""]]}
-    assert run_time(lim["answered"]) == {"prompt": "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。", "session": "Q1", "state": "完成 · Ns"}
+    assert run_time(lim["answered"]) == {"prompt": "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。", "session": "Q1", "state": "完成"}
     assert lim["annotating"] == {"stop": ["■", "停止"], "queued": [["S1", False]]}
     assert lim["annotatePrompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注")
     assert lim["continued"] == "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。", "the task is not sent twice"

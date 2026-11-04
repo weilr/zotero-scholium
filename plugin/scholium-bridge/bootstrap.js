@@ -417,7 +417,9 @@ var ScholiumToggle = {
     R.scholiumToggle = this;
     this.shown = this.readPref();
     this.active = true;
-    this.handler = event => {
+    // a handler left registered (see unregisterReaderListener) does nothing once this copy stopped
+    const handler = this.handler = event => {
+      if (this.handler !== handler) return;
       try { this.onRenderToolbar(event); } catch (e) { this.log("toolbar: " + e); }
     };
     R.registerEventListener("renderToolbar", this.handler, pluginID);
@@ -433,7 +435,8 @@ var ScholiumToggle = {
     const readers = Array.from(R._readers || []);
     const hidden = !this.shown;
     this.active = false;   // the wrapper passes everything through from here on
-    try { R.unregisterEventListener("renderToolbar", this.handler); } catch (e) {}
+    unregisterReaderListener("renderToolbar", this.handler);
+    this.handler = null;
     this.unhook();
     if (this.proto && this.proto._getAnnotation === this.wrapper) this.proto._getAnnotation = this.original;
     this.proto = this.original = this.wrapper = null;   // a later start patches again
@@ -586,7 +589,8 @@ var ScholiumRunner = {
       paneAgent: zh ? "智能体" : "Agent",
       paneModel: zh ? "模型" : "Model",
       paneEffort: zh ? "推理强度" : "Effort",
-      agentSwitchNote: zh ? "换智能体会开一段新对话。" : "Switching agent starts a new conversation.",
+      agentSwitchNote: zh ? "对话不变，下一条消息由所选智能体回答；批注会话按智能体分开。"
+                          : "The conversation shown stays; the agent chosen answers the next message. Annotation sessions are each agent's own.",
       moreTitle: zh ? "更多" : "More",
       paneNoEffort: zh ? "不适用" : "n/a",
       paneClaudeDefault: zh ? "Claude Code 默认" : "Claude Code's default",
@@ -622,16 +626,19 @@ var ScholiumRunner = {
       queuedThis: n => zh ? `排队中，前面还有 ${n} 篇` : `Queued, ${n} ahead`,
       deleteTitle: zh ? "删除 Scholium 批注和笔记" : "Delete Scholium annotations and notes",
       deleteConfirm: (n, notes) => zh
-        ? `将删除这篇论文上带 zotero-scholium 标签的${[n ? ` ${n} 条批注` : "", notes ? ` ${notes} 篇阅读笔记` : ""].filter(Boolean).join("和")}。`
+        ? `将删除带 zotero-scholium 标签的${[n ? `这个 PDF 上的 ${n} 条批注` : "", notes ? `这篇论文的 ${notes} 篇阅读笔记` : ""].filter(Boolean).join("和")}。`
           + [n ? "批注永久删除，不能撤销" : "", notes ? "笔记移到回收站，可以恢复" : ""].filter(Boolean).join("；")
           + "。你自己的批注和笔记都保留。删除会同步。继续吗？"
-        : `This deletes ${[n ? plural(n, "annotation", "annotations") : "", notes ? plural(notes, "reading note", "reading notes") : ""]
-            .filter(Boolean).join(" and ")} tagged zotero-scholium on this paper. `
+        : `This deletes ${[n ? plural(n, "annotation", "annotations") + " on this PDF" : "", notes ? plural(notes, "reading note", "reading notes") + " of the paper" : ""]
+            .filter(Boolean).join(" and ")}, tagged zotero-scholium. `
           + [n ? "The annotations are deleted for good" : "", notes ? (n ? "the" : "The") + " notes go to the trash, where they can be restored" : ""]
             .filter(Boolean).join("; ")
           + ". Your own annotations and notes are kept. The deletion syncs. Continue?",
       deleteSkipped: zh ? "正在批注或排队的 PDF 不会删除。" : "A PDF being annotated or queued is skipped.",
-      deleteNone: zh ? "这篇论文没有 Scholium 批注或笔记。" : "This paper carries no Scholium annotations or notes.",
+      deleteNone: zh ? "这个 PDF 没有 Scholium 批注，这篇论文也没有 Scholium 阅读笔记。"
+                     : "This PDF carries no Scholium annotations, and the paper no Scholium reading notes.",
+      deleteElsewhere: n => zh ? `这篇论文的另一个 PDF 上还有 ${n} 条 Scholium 批注：打开那个 PDF 即可删除。`
+                               : `Another PDF of this paper carries ${plural(n, "Scholium annotation", "Scholium annotations")}: open that PDF to delete ${n === 1 ? "it" : "them"}.`,
       deleteDone: (n, notes) => zh
         ? [n || !notes ? `已删除 ${n} 条 Scholium 批注` : "", notes ? `${notes} 篇笔记已移到回收站` : ""].filter(Boolean).join("，") + "。"
         : [n || !notes ? `Deleted ${plural(n, "Scholium annotation", "Scholium annotations")}` : "",
@@ -709,6 +716,7 @@ var ScholiumRunner = {
       askScholium: zh ? "问 Scholium" : "Ask Scholium",
       quoteRemove: zh ? "不引用这段" : "Remove the quote",
       annotEmptyTitle: zh ? "还没有批注这篇" : "Not annotated yet",
+      annotOwnTitle: n => zh ? `这篇已有 ${n} 条 Scholium 批注` : `This paper carries ${plural(n, "Scholium annotation", "Scholium annotations")}`,
       annotEmptyBody: zh ? "高亮重点句并附译文，加页边批注和阅读笔记。"
                          : "Highlights key sentences with translations, adds margin notes and a reading note.",
       annotExtraHint: zh ? "附加要求（可不填），例如：只批注第 3–5 页" : "Extra instructions (optional), e.g. only pages 3–5",
@@ -1653,10 +1661,13 @@ var ScholiumRunner = {
     }) || null;
   },
 
-  // Ask Scholium under the colours of the reader's selection popup
+  // Ask Scholium under the colours of the reader's selection popup, in a PDF's reader: an EPUB or a snapshot has no
+  // Scholium section
   selectionButton({ reader, doc, params, append }) {
     const a = params && params.annotation;
     if (!a || !String(a.text || "").trim()) return;
+    const att = reader && Zotero.Items.get(reader.itemID);
+    if (!att || att.attachmentContentType !== "application/pdf") return;
     const b = doc.createElement("button");
     b.className = "toolbar-button wide-button scholium-ask";
     b.textContent = this.text("askScholium");
@@ -1668,10 +1679,19 @@ var ScholiumRunner = {
   async askAboutSelection(reader, a) {
     const att = Zotero.Items.get(reader.itemID);
     if (!att) return;
-    // the popup closes, as after a colour: the views' selection is cleared
+    // the popup closes, as after a colour: the views' selection is cleared (Zotero 7–9's PDF view has no clearSelection:
+    // what Zotero 10's does there, drawn again as 7–9 do when an annotation is selected)
     try {
       const ir = reader._internalReader;
-      for (const view of [ir && ir._primaryView, ir && ir._secondaryView]) if (view && typeof view.clearSelection === "function") view.clearSelection();
+      for (const view of [ir && ir._primaryView, ir && ir._secondaryView]) {
+        if (!view) continue;
+        if (typeof view.clearSelection === "function") { view.clearSelection(); continue; }
+        if (typeof view._setSelectionRanges === "function") {
+          view._setSelectionRanges();
+          if (typeof view._render === "function") view._render();
+        }
+        try { view._iframeWindow.getSelection().removeAllRanges(); } catch (e) {}
+      }
     } catch (e) {}
     const quote = this.quoteOf({ text: String(a.text).replace(/\s+/g, " ").trim(), page: this.pageOf(a), label: a.pageLabel });
     const pane = this.paneFor(reader._window, att.key, reader.tabID || null);
@@ -1735,15 +1755,27 @@ var ScholiumRunner = {
 
   // a small layer over the item pane, one at a time: the settings, the history, the context, a menu, a quoted sentence.
   // It is fixed in the window's document, since the pane's scroller would clip it; so it closes when the scroller scrolls
-  // or the window resizes, and a click outside it or Esc closes it
-  openPopover(pane, name, anchor, build) {
+  // or the window resizes, and a click outside it or Esc closes it; so does Tab out of it. Opened from the keyboard it takes
+  // the focus (`focus`: its first control, or "layer" for the layer itself), which goes back to its button when it closes
+  // with the focus in it; opened with the mouse it leaves the focus where it was
+  openPopover(pane, name, anchor, build, { focus = false } = {}) {
     this.closePopover(pane);
-    const node = pane.doc.createElement("div");
+    const doc = pane.doc;
+    const node = doc.createElement("div");
     node.className = "scholium-popover " + name;
     node.addEventListener("keydown", e => { if (e.key === "Escape" && this.escape(pane)) { e.preventDefault(); e.stopPropagation(); } });
+    // the focus on an element outside the layer and its button, once it moved; not nowhere (a control drawn again)
+    node.addEventListener("focusout", () => {
+      setTimeout(() => {
+        const a = doc.activeElement;
+        if (!pane.popover || pane.popover.node !== node || !a || a === doc.documentElement || a === doc.body
+            || node.contains(a) || (anchor && anchor.contains(a))) return;
+        this.closePopover(pane);
+      }, 0);
+    });
     build(node);
-    pane.doc.documentElement.append(node);
-    const win = pane.doc.defaultView;
+    doc.documentElement.append(node);
+    const win = doc.defaultView;
     const close = () => { this.closePopover(pane); };
     const scroller = this.paneScroller(pane);
     try { scroller.addEventListener("scroll", close); } catch (e) {}
@@ -1752,17 +1784,42 @@ var ScholiumRunner = {
       try { scroller.removeEventListener("scroll", close); } catch (e) {}
       try { win.removeEventListener("resize", close); } catch (e) {}
     };
-    pane.popover = { name, node, anchor, off };
+    pane.popover = { name, node, anchor, off, took: false };
     this.placePopover(pane);
+    if (focus === "layer") node.setAttribute("tabindex", "-1");
+    this.focusLayer(pane, focus === "layer" ? node : focus ? this.firstControl(node) : null);
     return node;
+  },
+
+  // the focus into the open layer, which gives it back to its button when it closes
+  focusLayer(pane, target) {
+    if (!target || !pane.popover) return;
+    try { target.focus({ preventScroll: true }); pane.popover.took = true; } catch (e) {}
+  },
+
+  // a click from the keyboard (Enter or Space on a button), not from the mouse
+  byKeyboard(e) { return !!e && e.detail === 0; },
+
+  // the first control of a layer that takes the focus
+  firstControl(node) {
+    for (const c of node.children || []) {
+      if (!c || !c.localName || c.hidden || c.disabled) continue;
+      if (["button", "select", "input", "textarea"].includes(c.localName) || c.getAttribute("tabindex") === "0") return c;
+      const inner = this.firstControl(c);
+      if (inner) return inner;
+    }
+    return null;
   },
 
   closePopover(pane, name = null) {
     const p = pane.popover;
     if (!p || (name && p.name !== name)) return false;
+    let inside = false;
+    try { inside = p.node.contains(pane.doc.activeElement); } catch (e) {}
     try { p.off(); } catch (e) {}
     try { p.node.remove(); } catch (e) {}
     pane.popover = null;
+    if (inside && p.took && p.anchor) { try { p.anchor.focus({ preventScroll: true }); } catch (e) {} }
     return true;
   },
 
@@ -1845,7 +1902,7 @@ var ScholiumRunner = {
   },
 
   // the context layer: the numbers, a bar of input, cache and output, and the compaction of the conversation
-  openContextLayer(pane) {
+  openContextLayer(pane, focus = false) {
     if (this.closePopover(pane, "context")) return;
     const view = this.viewOf(pane, pane.tab);
     const c = (view.live && this.showsRun(view) ? this.job.context : view.context) || {};
@@ -1882,7 +1939,7 @@ var ScholiumRunner = {
       note.textContent = this.text("compactNote");
       box.append(go, note);
       node.append(box);
-    });
+    }, { focus: focus ? "layer" : false });   // not onto Compact, which compacts at once
   },
 
   chipLabel() {
@@ -1924,7 +1981,7 @@ var ScholiumRunner = {
     return label;
   },
 
-  openSettingsLayer(pane) {
+  openSettingsLayer(pane, focus = false) {
     const doc = pane.doc;
     this.openPopover(pane, "settings", pane.chip, node => {
       const note = doc.createElement("div");
@@ -1932,11 +1989,11 @@ var ScholiumRunner = {
       note.textContent = this.text("agentSwitchNote");
       node.append(this.paneField(doc, this.text("paneAgent"), pane.agent), note, this.paneField(doc, this.text("paneModel"), pane.model),
                   this.paneField(doc, this.text("paneEffort"), pane.effort));
-    });
+    }, { focus });
   },
 
   // the ⋯ menu; each item closes the layer first
-  openMoreMenu(pane) {
+  openMoreMenu(pane, focus = false) {
     const doc = pane.doc;
     this.openPopover(pane, "menu", pane.more, node => {
       const item = (label, run, disabled = false) => {
@@ -1952,15 +2009,18 @@ var ScholiumRunner = {
       if (pane.tab === "annotate") {
         node.append(item(this.text("profileOpen"), () => { this.openProfile(doc); }),
                     item(this.text("logButton"), () => { this.revealLog(pane.annot.shownPath); }, !pane.annot.shownPath),
-                    item(this.text("deleteThis"), () => { this.removeAnnotations([pane.item]).catch(e => this.log("delete failed: " + e)); },
-                         pane.keys.some(k => this.busy(k))),
+                    // the PDF the section shows, as its conversations
+                    item(this.text("deleteThis"), () => {
+                      const att = pane.item && Zotero.Items.getByLibraryAndKey(pane.item.libraryID, pane.annot.shownKey || pane.keys[0]);
+                      this.removeAnnotations(att ? [att] : []).catch(e => this.log("delete failed: " + e));
+                    }, pane.keys.some(k => this.busy(k))),
                     sep, item(this.text("settingsOpen"), () => { this.openSettings(); }));
         return;
       }
       node.append(item(this.text("logButton"), () => { this.revealLog(pane.shownPath); }, !pane.shownPath),
                   item(this.text("profileOpen"), () => { this.openProfile(doc); }), sep,
                   item(this.text("settingsOpen"), () => { this.openSettings(); }));
-    });
+    }, { focus });
   },
 
   // the models the agent offers, with the effort levels of each, asked once per session
@@ -2154,6 +2214,17 @@ var ScholiumRunner = {
     return button;
   },
 
+  // an element that is not a button made one for the keyboard: it takes the focus, Enter and Space press it
+  keyButton(node, onPress) {
+    node.setAttribute("tabindex", "0");
+    node.setAttribute("role", "button");
+    node.addEventListener("keydown", e => {
+      if (e.isComposing || (e.key !== "Enter" && e.key !== " ")) return;
+      e.preventDefault();
+      onPress();
+    });
+  },
+
   // the real scroller of the item pane (the library's and the reader's alike), or null
   scrollParent(pane) {
     try { return pane.body.closest("item-details")?._paneParent || null; } catch (e) { return null; }
@@ -2288,6 +2359,7 @@ var ScholiumRunner = {
     // the tabs with the conversation tools and the ⋯ menu, then the settings chip with the state line; the selects live in
     // the chip's layer
     const head = div("scholium-tabs");
+    head.setAttribute("role", "tablist");
     const tab = (kind, label) => {
       const b = doc.createElement("button");
       b.className = "scholium-tab";
@@ -2301,20 +2373,21 @@ var ScholiumRunner = {
     [pane.tabChat, pane.tabChatDot] = tab("chat", this.text("tabChat"));
     [pane.tabAnnotate, pane.tabAnnotateDot] = tab("annotate", this.text("tabAnnotate"));
     pane.newChat = this.iconButton(doc, "add", this.text("newChat"), () => { this.newChat(pane).catch(e => this.log("new chat failed: " + e)); });
-    pane.historyButton = this.paneButton(doc, "🕘", () => { this.toggleHistory(pane).catch(e => this.log("history failed: " + e)); }, "quiet icon");
+    pane.historyButton = this.paneButton(doc, "🕘", e => { this.toggleHistory(pane, this.byKeyboard(e)).catch(err => this.log("history failed: " + err)); }, "quiet icon");
     pane.historyButton.title = this.text("historyButton");
+    pane.historyButton.setAttribute("aria-label", this.text("historyButton"));
     pane.chip = doc.createElement("button");
     pane.chip.className = "scholium-chip";
     this.paintChip(pane);
-    pane.chip.addEventListener("click", () => {
-      if (!this.closePopover(pane, "settings")) this.openSettingsLayer(pane);
+    pane.chip.addEventListener("click", e => {
+      if (!this.closePopover(pane, "settings")) this.openSettingsLayer(pane, this.byKeyboard(e));
     });
     pane.more = doc.createElement("button");
     pane.more.className = "scholium-icon";
     pane.more.textContent = "⋯";
     pane.more.title = this.text("moreTitle");
-    pane.more.addEventListener("click", () => {
-      if (!this.closePopover(pane, "menu")) this.openMoreMenu(pane);
+    pane.more.addEventListener("click", e => {
+      if (!this.closePopover(pane, "menu")) this.openMoreMenu(pane, this.byKeyboard(e));
     });
     head.append(pane.tabChat, pane.tabAnnotate, div("scholium-spacer"), pane.newChat, pane.historyButton, pane.more);
     // a select's dropdown is the window's #ContentSelectDropdown: a choice there is inside the layer
@@ -2339,7 +2412,8 @@ var ScholiumRunner = {
                    history: false, turns: 0, question: false, context: null, draft: null, foldOpen: new Map(), pane };
     this.followLinks(pane.annot.list, win);
     // the introduction is the list's content until a session or a run is drawn there
-    pane.annotIntro = this.introNode(doc);
+    pane.annot.own = keys.length === 1 ? this.ownCount(item.libraryID, keys[0]) : 0;
+    pane.annotIntro = this.introNode(doc, null, pane.annot.own);
     pane.annot.list.append(pane.annotIntro);
     pane.annotView.append(pane.annot.list);
     pane.kind = "chat";
@@ -2385,6 +2459,9 @@ var ScholiumRunner = {
     pane.ring = doc.createElement("span");
     pane.ring.className = "scholium-ring";
     pane.ring.addEventListener("click", () => { this.openContextLayer(pane); });
+    // a click leaves the focus where it was (the message box keeps its caret); Tab reaches the ring, Enter or Space opens it
+    pane.ring.addEventListener("mousedown", e => { e.preventDefault(); });
+    this.keyButton(pane.ring, () => { this.openContextLayer(pane, true); });
     pane.send = doc.createElement("button");
     pane.send.className = "scholium-round send";
     pane.send.addEventListener("click", () => {
@@ -2403,6 +2480,8 @@ var ScholiumRunner = {
     // the running paper's transcript at once; another conversation once its log is read (loadHistory)
     if (this.job && keys.includes(this.job.key)) this.showLive(pane, this.job.key, this.job.source.kind || "chat");
     this.paintPane(pane);
+    // a passage asked about before the section was drawn: the words to it go in the box
+    if (pending) { try { pane.input.focus(); } catch (e) {} }
     this.loadModels().catch(() => {});
   },
 
@@ -2947,6 +3026,15 @@ var ScholiumRunner = {
     chip.addEventListener("mouseenter", () => this.openCiteCard(chip, key, s));
     chip.addEventListener("mouseleave", () => { const pane = this.paneOf(chip); if (pane) this.citeAway(pane); });
     chip.addEventListener("click", () => { this.locate(key, s).catch(e => this.log("locate failed: " + e)); });
+    // from the keyboard: the card while the chip has the focus (not a click's focus, nor the window's coming back to it),
+    // Enter or Space locates
+    chip.addEventListener("focus", () => {
+      let keyboard = false;
+      try { keyboard = chip.matches(":focus-visible"); } catch (e) {}
+      if (keyboard) this.openCiteCard(chip, key, s);
+    });
+    chip.addEventListener("blur", () => { const pane = this.paneOf(chip); if (pane) this.citeAway(pane); });
+    this.keyButton(chip, () => { this.locate(key, s).catch(e => this.log("locate failed: " + e)); });
     return chip;
   },
 
@@ -3195,7 +3283,7 @@ var ScholiumRunner = {
     const mine = j => this.shownQueued(pane, j);
     const jobs = this.queue.filter(mine);
     const held = jobs.length > 0 && this.heldQueues.has(this.queueKey(jobs[0]));
-    const nodes = [];
+    const nodes = [], qids = [];
     if (held) {
       const line = doc.createElement("div");
       line.className = "scholium-queue-held";
@@ -3205,13 +3293,25 @@ var ScholiumRunner = {
       nodes.push(line);
     }
     const sending = this.job && mine(this.job.source) && !this.job.delivered ? this.job.source : null;
-    if (sending) nodes.push(this.queuedRow(pane, sending, { sending: true }));
-    for (const j of jobs) nodes.push(this.queuedRow(pane, j, { held }));
+    if (sending) { nodes.push(this.queuedRow(pane, sending, { sending: true })); qids.push("sending " + sending.qid); }
+    for (const j of jobs) { nodes.push(this.queuedRow(pane, j, { held })); qids.push(j.qid); }
     for (const [qid, r] of this.removedQueued) {
-      if (mine(r.job)) nodes.push(this.undoStrip(doc, this.text("queuedRemoved"), () => this.undoRemoveQueued(qid)));
+      if (mine(r.job)) { nodes.push(this.undoStrip(doc, this.text("queuedRemoved"), () => this.undoRemoveQueued(qid))); qids.push("removed " + qid); }
     }
-    pane.queueBox.replaceChildren(...nodes);
+    // drawn again only when what it shows changes (a redraw at each event of the run would take the focus from its buttons)
+    const sig = JSON.stringify([qids, nodes.map(n => this.nodeSig(n))]);
+    if (pane.queueSig !== sig) {
+      pane.queueSig = sig;
+      pane.queueBox.replaceChildren(...nodes);
+    }
     this.show(pane.queueBox, nodes.length > 0);
+  },
+
+  // what a node drawn shows: its tags, classes, words, tooltips and states
+  nodeSig(n) {
+    if (!n || !n.localName) return n ? String(n.textContent || "") : "";
+    return [n.localName, n.className, n.title || "", !!n.disabled, n.getAttribute("aria-label") || "", n.textContent,
+            [...(n.children || [])].map(c => this.nodeSig(c))];
   },
 
   // a queued message: ⠿ to drag it, its words on one line (all of them once clicked), and Steer, ✕ and ⋯; Send instead of
@@ -3259,13 +3359,13 @@ var ScholiumRunner = {
       first.title = can ? this.text("steerRowTip") : !this.canSteer(job.agent) ? this.text("noSteer", this.agentName(job.agent)) : this.text("steerNotNow");
     }
     const remove = this.iconButton(doc, "trash", this.text("queuedRemove"), () => this.removeQueued(pane, job.qid));
-    const more = this.paneButton(doc, "⋯", () => this.queuedMenu(pane, job, more), "quiet");
+    const more = this.paneButton(doc, "⋯", e => this.queuedMenu(pane, job, more, this.byKeyboard(e)), "quiet");
     row.append(first, remove, more);
     return row;
   },
 
   // a queued message's ⋯: back to the box to edit, or no queueing from now on (Steer instead, where the agent takes it)
-  queuedMenu(pane, job, anchor) {
+  queuedMenu(pane, job, anchor, focus = false) {
     this.openPopover(pane, "queued", anchor, node => {
       const item = (label, run, disabled = false) => {
         const b = pane.doc.createElement("button");
@@ -3278,7 +3378,7 @@ var ScholiumRunner = {
       item(this.text("queuedEdit"), () => this.editQueued(pane, job.qid));
       item(this.text("queueOff"), () => { Zotero.Prefs.set(this.pref + "followUpMode", "steer", true); this.refresh(); },
            !this.canSteer(job.agent) || this.followUpMode() === "steer");
-    });
+    }, { focus });
   },
 
   // a paper's chat conversations: a log each, shared by the agents, <out dir>/conversations/chat-<time>.jsonl, with an
@@ -3785,7 +3885,8 @@ var ScholiumRunner = {
     const agent = this.agent();
     const id = key ? await this.annotationConv(key, agent) : null;
     const log = id ? await this.readLog(key, id) : null;
-    const intro = log && log.entries.length ? null : await this.annotIntroNode(pane, key);
+    const own = key && pane.item ? this.ownCount(pane.item.libraryID, key) : 0;
+    const intro = log && log.entries.length ? null : await this.annotIntroNode(pane, key, own);
     if (id) await this.loadCitations(key);
     if (view.showing !== seq) return;   // shown anew meanwhile
     // the paper's annotation runs, or started meanwhile
@@ -3795,25 +3896,33 @@ var ScholiumRunner = {
     if (view.shownPath !== path) view.foldOpen = new Map();   // the steps a reader opened are of the session shown
     Object.assign(view, { shownKey: key, shownConv: log ? id : null, shownAgent: agent, shownPath: path, live: false,
                           history: !!log, turns: log ? log.turns.length : 0, question: false, context: log ? log.agents[agent].context : null,
-                          entries: log ? log.entries : [], draft: null });
+                          entries: log ? log.entries : [], draft: null, own });
     if (intro) { view.list.replaceChildren(pane.annotIntro = intro); view.runCount = 0; }
     else this.renderTranscript(view, log.entries, false);
     this.swapUnsent(pane, before);
     this.paintPane(pane);
   },
 
-  // the annotation tab before its first session: what an annotation does; and, when an earlier version wrote the
-  // paper's annotations, by which agent and when
-  async annotIntroNode(pane, key) {
-    return this.introNode(pane.doc, key ? await this.readApplied(key) : null);
+  // the annotation tab before its first session: what an annotation does; and, when an earlier version, the skill on its
+  // own or the other agent wrote the paper's annotations, how many it carries, and by which agent and when where known
+  async annotIntroNode(pane, key, own = 0) {
+    return this.introNode(pane.doc, key ? await this.readApplied(key) : null, own);
   },
 
-  introNode(doc, applied = null) {
+  // the Scholium annotations on the PDF with this key, whoever wrote them
+  ownCount(libraryID, key) {
+    try {
+      const att = key ? Zotero.Items.getByLibraryAndKey(libraryID, key) : null;
+      return att ? att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length : 0;
+    } catch (e) { return 0; }
+  },
+
+  introNode(doc, applied = null, own = 0) {
     const node = doc.createElement("div");
     node.className = "scholium-annot-intro";
     const title = doc.createElement("div");
     title.className = "scholium-annot-intro-title";
-    title.textContent = this.text("annotEmptyTitle");
+    title.textContent = own > 0 ? this.text("annotOwnTitle", own) : this.text("annotEmptyTitle");
     const body = doc.createElement("div");
     body.textContent = this.text("annotEmptyBody");
     node.append(title, body);
@@ -4039,10 +4148,14 @@ var ScholiumRunner = {
     for (const p of [...this.panes.values()]) if (p.keys.some(k => pane.keys.includes(k))) await this.showConversation(p);
   },
 
-  async toggleHistory(pane) {
+  async toggleHistory(pane, focus = false) {
     if (this.closePopover(pane, "history")) return;
-    this.openPopover(pane, "history", pane.historyButton, () => {});
+    const node = this.openPopover(pane, "history", pane.historyButton, () => {});
     await this.renderHistory(pane);
+    // opened from the keyboard, the focus goes to the first row once the rows are there, unless it went elsewhere meanwhile
+    const doc = pane.doc, a = doc.activeElement;
+    const first = focus && pane.popover && pane.popover.node === node ? this.firstControl(node) : null;
+    if (first && (!a || a === pane.historyButton || a === doc.documentElement || a === doc.body)) this.focusLayer(pane, first);
   },
 
   // today, yesterday, the previous 7 or 30 days, or older
@@ -4145,6 +4258,7 @@ var ScholiumRunner = {
       await this.renderHistory(pane);
     };
     input.addEventListener("keydown", e => {
+      if (e.isComposing) return;   // the keys of an input method's word are its own
       if (e.key === "Enter") { e.preventDefault(); finish(true).catch(() => {}); }
       else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(false).catch(() => {}); }
     });
@@ -4384,6 +4498,7 @@ var ScholiumRunner = {
     };
     for (const e of run.lead) node.append(line(e));
     if (run.steps.length || live) node.append(this.foldNode(view, run, index, live));
+    else if (run.start > 0 && run.end >= run.start) node.append(this.workedNode(view, run));
     for (const e of run.answer) node.append(this.entryNode(doc, e));
     for (const e of run.other) {
       // the agent's own compaction in this run: a line with the sizes; its start has none
@@ -4539,6 +4654,17 @@ var ScholiumRunner = {
       for (const e of run.steps) body.append(this.entryNode(doc, e));
       node.append(body);
     }
+    return node;
+  },
+
+  // a finished run without steps: how long it worked, with nothing to open
+  workedNode(view, run) {
+    const node = view.doc.createElement("div");
+    node.className = "scholium-fold";
+    const head = view.doc.createElement("div");
+    head.className = "scholium-fold-head plain";
+    head.textContent = this.workedText(run);
+    node.append(head);
     return node;
   },
 
@@ -4728,13 +4854,10 @@ var ScholiumRunner = {
     return !!result && !result.is_error && (!result.subtype || result.subtype === "success");
   },
 
-  // 完成 · 6m 17s · 29 轮 · 2,568k tokens
-  outcome(result, cancelled = false, started = 0) {
+  // 完成 · 29 轮 · 2,568k tokens; the run's time is on its folded steps ("Worked for 6m 17s")
+  outcome(result, cancelled = false) {
     const ended = result && ["cancelled", "interrupted"].includes(result.subtype) ? result.subtype : null;
     const parts = [this.text(cancelled ? "cancelled" : ended || (this.succeeded(result) ? "done" : "failed"))];
-    const timed = !!result && typeof result.duration_ms === "number" && result.duration_ms >= 0;
-    const ms = timed ? result.duration_ms : started ? Date.now() - started : 0;
-    if (timed || started) parts.push(this.duration(ms));
     if (result && result.num_turns > 0) parts.push(this.text("turns", result.num_turns));
     const tokens = this.tokenCounts(result).reduce((n, [, count]) => n + count, 0);
     if (tokens) parts.push(this.text("tokens", this.kTokens(tokens)));
@@ -4811,6 +4934,8 @@ var ScholiumRunner = {
       this.show(pane.annotView, tab === "annotate");
       pane.tabChat.className = "scholium-tab" + (tab === "chat" ? " on" : "");
       pane.tabAnnotate.className = "scholium-tab" + (tab === "annotate" ? " on" : "");
+      pane.tabChat.setAttribute("aria-selected", String(tab === "chat"));
+      pane.tabAnnotate.setAttribute("aria-selected", String(tab === "annotate"));
       this.show(pane.tabChatDot, tab !== "chat" && this.busyKind(pane, "chat"));
       this.show(pane.tabAnnotateDot, tab !== "annotate" && this.busyKind(pane, "annotate"));
       this.show(pane.newChat, tab === "chat");
@@ -4834,7 +4959,8 @@ var ScholiumRunner = {
       if (tab === "annotate") {
         const has = !!pane.annot.shownConv;
         pane.input.placeholder = this.text(has ? "annotFollowUpHint" : "annotExtraHint");
-        pane.annotGo.textContent = this.text(has ? "redoTitle" : "annotateThis");
+        // again over the paper's Scholium annotations, of a session here or not
+        pane.annotGo.textContent = this.text(has || pane.annot.own > 0 ? "redoTitle" : "annotateThis");
         this.show(pane.annotGo, !pane.busy);
         this.show(pane.send, has || pane.busy);
       } else {
@@ -4854,7 +4980,10 @@ var ScholiumRunner = {
   paintQuote(pane) {
     const q = pane.tab === "chat" ? pane.quote : null;
     this.show(pane.quoteBox, !!q);
-    if (!q) return;
+    // drawn again only when the passage changes, so that ✕ keeps the focus
+    const sig = q ? this.quoteLabel(q) : null;
+    if (!q || pane.quoteSig === sig) { pane.quoteSig = sig; return; }
+    pane.quoteSig = sig;
     const text = pane.doc.createElement("span");
     text.className = "scholium-quote-text";
     text.textContent = this.quoteLabel(q);
@@ -5684,7 +5813,7 @@ var ScholiumRunner = {
     } else if (!job.undone) this.giveBack(job);
     this.appendEntries([{ kind: "final", text: message, error: true, cancelled: true }]);
     if (!job.undone) this.notice(job, message, true);
-    this.finish(job, false, message, this.outcome(null, true, running.started));
+    this.finish(job, false, message, this.outcome(null, true));
     return { ok: false, delivered: false, cancelled: true };
   },
 
@@ -5899,7 +6028,7 @@ var ScholiumRunner = {
     try { await IOUtils.writeUTF8(logPath, JSON.stringify(time) + "\n", { mode: "append" }); }
     catch (e) { this.log("end time not logged: " + e); }
     this.appendEntries(this.entries(time));
-    this.finish(job, ok, message, this.outcome(result, current.cancelled, started), this.tokenDetail(result), answered);
+    this.finish(job, ok, message, this.outcome(result, current.cancelled), this.tokenDetail(result), answered);
     return { exitCode, result, ok, delivered: !!running.delivered, cancelled: !!current.cancelled };
   },
 
@@ -6679,7 +6808,16 @@ var ScholiumRunner = {
     const total = targets.reduce((n, t) => n + t.own.length, 0);
     const notes = targets.reduce((n, t) => n + t.notes.length, 0);
     const skippedText = skipped ? "\n\n" + this.text("deleteSkipped") : "";
-    if (!total && !notes) { Services.prompt.alert(win, this.text("deleteTitle"), this.text("deleteNone") + skippedText); return 0; }
+    if (!total && !notes) {
+      // the paper's other PDFs, which their own sections delete
+      const shown = new Set(atts.map(a => a.key));
+      const parents = atts.map(a => a.parentID && Zotero.Items.get(a.parentID)).filter(Boolean);
+      const elsewhere = this.pdfAttachments(parents).filter(a => !shown.has(a.key))
+        .reduce((n, a) => n + a.getAnnotations().filter(x => ScholiumToggle.isOwn(x)).length, 0);
+      Services.prompt.alert(win, this.text("deleteTitle"), this.text("deleteNone")
+        + (elsewhere ? "\n\n" + this.text("deleteElsewhere", elsewhere) : "") + skippedText);
+      return 0;
+    }
     if (!Services.prompt.confirm(win, this.text("deleteTitle"), this.text("deleteConfirm", total, notes) + skippedText)) return 0;
     let removed = 0, trashed = 0, current = null;
     try {
@@ -6701,6 +6839,11 @@ var ScholiumRunner = {
       this.notice({ att, title: this.text("deleteTitle"), kind: "annotate" }, message, true);
     }
     this.refresh();
+    // the annotation tabs of these PDFs count their Scholium annotations again
+    const keys = targets.map(t => t.att.key);
+    for (const pane of [...this.panes.values()]) {
+      if (pane.keys.some(k => keys.includes(k))) this.showAnnotation(pane).catch(e => this.log("section not shown: " + e));
+    }
     return removed + trashed;
   },
 
@@ -6710,7 +6853,8 @@ var ScholiumRunner = {
     this.pluginID = pluginID;
     this.registerPane(pluginID);
     try {
-      this.selectionHandler = event => this.selectionButton(event);
+      // a handler left registered (see unregisterReaderListener) does nothing once this copy stopped
+      const handler = this.selectionHandler = event => { if (this.selectionHandler === handler) this.selectionButton(event); };
       Zotero.Reader.registerEventListener("renderTextSelectionPopup", this.selectionHandler, pluginID);
     } catch (e) { this.log("selection popup not registered: " + e); }
     // the Scholium page of Zotero's settings; Zotero removes it when the plugin stops
@@ -6854,7 +6998,7 @@ var ScholiumRunner = {
     for (const win of this.windows()) this.removeFromWindow(win);
     try { if (this.paneID) Zotero.ItemPaneManager.unregisterSection(this.paneID); } catch (e) {}
     this.paneID = null;
-    try { Zotero.Reader.unregisterEventListener("renderTextSelectionPopup", this.selectionHandler); } catch (e) {}
+    unregisterReaderListener("renderTextSelectionPopup", this.selectionHandler);
     this.selectionHandler = null;
     this.pendingQuotes.clear();
     this.prefPaneID = null;
@@ -6871,6 +7015,16 @@ var chromeHandle = null;   // chrome://scholium-bridge-<version>/content/ -> the
 // a chrome package per version, e.g. scholium-bridge-0-1-3
 function chromePackage(version) {
   return "scholium-bridge-" + String(version || "0").replace(/[^0-9a-z]+/gi, "-").toLowerCase();
+}
+
+// a reader listener of the plugin let go of. Zotero 7–9's unregisterEventListener keeps the one listener it is given
+// and drops every other, those of other plugins too; there the listener stays, doing nothing (its handler checks that it
+// is still the plugin's), until Zotero removes the listeners registered with the plugin's id as the plugin stops
+function unregisterReaderListener(type, handler) {
+  let major = NaN;
+  try { major = parseInt(String(Zotero.version || ""), 10); } catch (e) {}
+  if (!(major >= 10) || !handler) return;
+  try { Zotero.Reader.unregisterEventListener(type, handler); } catch (e) {}
 }
 
 function install() {}

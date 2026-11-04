@@ -69,6 +69,7 @@ SCENARIOS = r"""
   // the popup's listener is registered with the plugin and let go of with it
   {
     const h = harness({});
+    h.zotero.version = '10.0.7';   // Zotero 7-9 keep it (test_release_f3)
     h.runner.start('x');
     const had = h.log.listeners.some(l => l.type === 'renderTextSelectionPopup');
     h.runner.stop();

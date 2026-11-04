@@ -61,7 +61,7 @@ SCENARIOS = r"""
     const chip = pane.chip.textContent;
     pane.chip.click();
     const open = { name: pane.popover && pane.popover.name, selects: [pane.agent, pane.model, pane.effort].every(s => pane.popover.node.contains(s)),
-                   note: pane.popover.node.textContent.includes('换智能体会开一段新对话') };
+                   note: pane.popover.node.textContent.includes('对话不变，下一条消息由所选智能体回答') };
     // a choice in a select's dropdown, which Zotero puts in the window's #ContentSelectDropdown outside the layer
     const menulist = new h.El('menulist'); menulist.id = 'ContentSelectDropdown';
     const option = new h.El('menuitem'); menulist.append(option);

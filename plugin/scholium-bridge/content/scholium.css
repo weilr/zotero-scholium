@@ -224,7 +224,7 @@
 }
 
 .scholium-select:focus-visible {
-  outline: 2px solid var(--color-focus-border, var(--accent-blue));
+  outline: 2px solid var(--color-accent, var(--accent-blue));
   outline-offset: 1px;
 }
 
@@ -261,7 +261,7 @@
 }
 
 .scholium-button:focus-visible {
-  outline: 2px solid var(--color-focus-border, var(--accent-blue));
+  outline: 2px solid var(--color-accent, var(--accent-blue));
   outline-offset: 1px;
 }
 
@@ -407,7 +407,7 @@
 }
 
 .scholium-history-open:focus-visible {
-  outline: 2px solid var(--color-focus-border, var(--accent-blue));
+  outline: 2px solid var(--color-accent, var(--accent-blue));
   outline-offset: -2px;
   border-radius: 6px;
 }
@@ -513,7 +513,7 @@
 }
 
 .scholium-copy:focus-visible {
-  outline: 2px solid var(--color-focus-border, var(--accent-blue));
+  outline: 2px solid var(--color-accent, var(--accent-blue));
   outline-offset: 1px;
 }
 
@@ -583,6 +583,8 @@
 .scholium-fold-head { appearance: none; align-self: flex-start; border: 0; background: transparent; padding: 0; font-size: 11px;
   color: var(--fill-secondary); cursor: pointer; }
 .scholium-fold-head.live { color: var(--accent-blue); }
+/* a finished run without steps: its time, with nothing to open */
+.scholium-fold-head.plain { cursor: default; }
 .scholium-fold-head.live::before { content: "◌ "; }
 /* the live line's words, swept by a light as Codex's Working; the lit colour is --scholium-sweep */
 .scholium-fold-head.live .scholium-working {
@@ -707,7 +709,14 @@
 }
 
 .scholium-ring.warn {
-  background: conic-gradient(#e8890c var(--share), var(--fill-quinary) 0);
+  background: conic-gradient(var(--accent-orange) var(--share), var(--fill-quinary) 0);
+}
+
+/* the ring and the citation chips take the focus from the keyboard */
+.scholium-ring:focus-visible,
+.scholium-cite:focus-visible {
+  outline: 2px solid var(--color-accent, var(--accent-blue));
+  outline-offset: 1px;
 }
 
 .scholium-ring::after {
@@ -1047,7 +1056,7 @@
 
 .scholium-log .scholium-link[data-href]:focus-visible,
 .scholium-preview .scholium-link[data-href]:focus-visible {
-  outline: 2px solid var(--color-focus-border, var(--accent-blue));
+  outline: 2px solid var(--color-accent, var(--accent-blue));
   outline-offset: 1px;
   border-radius: 2px;
 }

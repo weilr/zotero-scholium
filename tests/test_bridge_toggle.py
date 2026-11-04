@@ -156,7 +156,7 @@ function boot(locale, prefs = {}, Reader = new ReaderManager()) {
   const store = new Map(Object.entries(prefs));
   const full = name => { if (!name.startsWith('extensions.scholium-bridge.')) throw Error('unexpected preference ' + name); };
   const context = vm.createContext({ Zotero: {
-    debug() {}, locale, Reader, Items: { get: id => attachments.get(id) || null },
+    debug() {}, locale, version: '10.0.7', Reader, Items: { get: id => attachments.get(id) || null },
     Prefs: {
       get(name, global) { if (!global) throw Error('expected a full preference name'); full(name); return store.get(name); },
       set(name, value, global) { if (!global) throw Error('expected a full preference name'); full(name); store.set(name, value); },
