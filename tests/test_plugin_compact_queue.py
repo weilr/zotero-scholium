@@ -1542,7 +1542,7 @@ def test_the_run_after_a_compaction_is_a_turn_of_its_own(facts):
 
 def test_the_state_line_is_painted_on_the_tab_of_the_run(facts):
     a = facts["tickAnnotation"]
-    assert a["running"] == "第 6/6 步" and a["back"] == "第 6/6 步", "an annotation's line has no time"
+    assert a["running"] == "" and a["back"] == "", "an annotation's line is its dot, as a question's"
     assert a["chat"] == "", "the chat tab has nothing to say while the annotation runs"
     c = facts["tickChat"]
     assert c["chatRunning"] == "" and c["annot"] == "", "a question's line is its dot"

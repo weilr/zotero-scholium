@@ -525,16 +525,10 @@ SCENARIOS = r"""
     await settle(20);
     pane.state.title = 'stale'; await new Promise(r => setTimeout(r, 40));   // the line's ticks keep its tooltip
     const run = () => pane.annot.list.children.at(-1);
-    const steps = run().children.find(c => c.className === 'scholium-steps');
-    const during = { steps: steps.children.map(s => [s.className, s.children[0].textContent]), go: pane.annotGo.hidden,
+    const during = { parts: run().children.map(c => c.className), go: pane.annotGo.hidden,
                      round: pane.send.textContent, sendShown: !pane.send.hidden,
                      live: run().children.find(c => c.className === 'scholium-fold').children[0].textContent,
-                     reached: h.runner.job.steps.map(s => s.step), state: p.view().state, stateTitle: p.view().stateTitle };
-    // a step done shows how long it took, up to the start of the next one
-    h.runner.job.steps = [['skill', 0], ['extract', 5000], ['reading', 65000], ['writing', 3725000], ['dryRun', 3730000], ['applying', 3790000]]
-      .map(([step, at]) => ({ step, at }));
-    h.runner.refreshRun(pane.annot, pane.annot.runCount - 1);
-    during.times = run().children.find(c => c.className === 'scholium-steps').children.map(s => s.children[1].textContent);
+                     step: h.runner.job.step, state: p.view().state, stateTitle: p.view().stateTitle };
     h.att1.getAnnotations = () => [h.ann('A1', 'highlight', '#ff6666'), h.ann('A2', 'highlight', '#ffd400'), h.ann('A3', 'underline', '#ff6666'),
                                    h.ann('A4', 'text', '#2ea8e5'), h.ann('A5', 'note', '#ffd400'), h.ann('U1', 'highlight', '#ff6666', [])];
     h.log.release(); await settle(400);
@@ -555,7 +549,7 @@ SCENARIOS = r"""
     facts.annotPage = { intro, during, after, ask, cancelled, again: h.runner.job && h.runner.job.source.extra, dialogsAfter: h.log.confirms.length };
     h.runner.cancel(); h.log.release(); await settle(200);         // the second run held as the first
   }
-  // the step the agent reached shows at once, not with its next line
+  // the step the agent reached is in the state line's tooltip at once, not with its next line
   {
     const h = harness({ script: SCRIPT.slice(0, 11).concat(['HOLD'], SCRIPT.slice(11), [LAST, RESULT]) });
     h.runner.start('x');
@@ -563,8 +557,7 @@ SCENARIOS = r"""
     p.annotate();
     for (let i = 0; i < 3000 && !h.log.release; i++) await tick();
     await settle(20);
-    const steps = p.pane().annot.list.children.at(-1).children.find(c => c.className === 'scholium-steps');
-    facts.stepAtOnce = steps.children.map(s => s.className);
+    facts.stepAtOnce = { step: h.runner.job.step, title: p.view().stateTitle };
     h.log.release(); await settle(300);
   }
   // a failed annotation: a red card with the reason and Retry, which starts it again with the same wishes
@@ -783,7 +776,8 @@ SCENARIOS = r"""
     pane.input.type('第 5 页那条译文改短'); pane.send.click();
     for (let i = 0; i < 3000 && !h.log.release; i++) await tick();
     await settle(20);
-    facts.wordsState = { state: p.view().state, steps: pane.annot.list.children.at(-1).children.some(c => c.className === 'scholium-steps') };
+    facts.wordsState = { state: p.view().state, title: p.view().stateTitle,
+                         parts: pane.annot.list.children.at(-1).children.map(c => c.className) };
     h.runner.cancel(); h.log.release(); await settle(200);
   }
   // the card of an annotation that ended stays while something else of the paper waits: words to its session paused by
@@ -977,14 +971,12 @@ def test_the_annotation_tab(facts):
     assert a["intro"]["go"] == "批注这篇" and a["intro"]["sendShown"] is False
     assert a["intro"]["placeholder"] == "附加要求（可不填），例如：只批注第 3–5 页" and a["intro"]["confirmHidden"] is True
     d = a["during"]
-    assert [s[1] for s in d["steps"]] == ["加载技能", "提取句子", "通读论文", "撰写批注", "预演检查", "写入 Zotero"]
-    assert [s[0] for s in d["steps"]] == ["scholium-step done"] * 5 + ["scholium-step now"]
+    assert d["parts"] == ["scholium-entry prompt", "scholium-fold"], "no list of steps: the wishes, then what it does now"
     assert d["go"] is True and d["round"] == "■" and re.fullmatch(r"正在处理 \d+ 秒 详情 ›", d["live"])
     assert d["sendShown"] is True, "■ stops the annotation"
-    assert d["reached"] == ["skill", "extract", "reading", "writing", "dryRun", "applying"]
-    assert d["state"] == "第 6/6 步", "the step's name is in the list of steps, not on the state line; the time is on the live line"
-    assert re.fullmatch(r"第 6/6 步 · 已用 \d+s", d["stateTitle"]), "the tooltip has the time"
-    assert d["times"] == ["5 秒", "1 分 0 秒", "1 小时 1 分", "5 秒", "1 分 0 秒", ""]
+    assert d["step"] == "applying"
+    assert d["state"] == "", "the state line has only its dot, as a question's"
+    assert re.fullmatch(r"第 6/6 步 写入 Zotero · 已用 \d+s", d["stateTitle"]), "the tooltip has the step and the time"
     f = a["after"]
     assert f["parts"] == ["scholium-entry prompt", "scholium-fold", "scholium-card"], "the closing words go into the folded steps"
     assert f["closing"] == "Done.\n高亮 28 条（核心 12 条），页边批注 9 条，笔记《Deep latent》，无剩余警告。"
@@ -1000,7 +992,8 @@ def test_the_annotation_tab(facts):
 
 
 def test_the_step_reached_shows_at_once(facts):
-    assert facts["stepAtOnce"] == ["scholium-step done"] * 5 + ["scholium-step now"]
+    f = facts["stepAtOnce"]
+    assert f["step"] == "applying" and f["title"].startswith("第 6/6 步 写入 Zotero · 已用 ")
 
 
 def test_a_failed_annotation(facts):
@@ -1073,7 +1066,7 @@ def test_a_long_annotation_is_counted(facts):
 
 def test_a_failure_while_the_run_goes_is_a_line_until_it_ended(facts):
     f = facts["failureWhileLive"]
-    assert f["live"] == ["scholium-entry prompt", "scholium-entry final error", "scholium-steps", "scholium-fold"]
+    assert f["live"] == ["scholium-entry prompt", "scholium-entry final error", "scholium-fold"]
     assert f["ended"] == ["scholium-entry prompt", "scholium-card failed"]
 
 
@@ -1096,7 +1089,8 @@ def test_a_run_without_a_log_line_is_no_attempt_of_the_turn_before(facts):
 
 def test_words_to_the_annotation_session_name_their_step(facts):
     f = facts["wordsState"]
-    assert f["state"] == "第 6/6 步 写入 Zotero" and f["steps"] is False
+    assert f["state"] == "" and f["title"].startswith("第 6/6 步 写入 Zotero · 已用 ")
+    assert "scholium-steps" not in f["parts"]
 
 
 def test_the_card_of_an_ended_annotation_stays_while_something_else_waits(facts):

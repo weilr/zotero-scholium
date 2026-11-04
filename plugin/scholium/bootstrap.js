@@ -676,7 +676,6 @@ var ScholiumRunner = {
                         : "The zotero-scholium skill is switched off in Codex: switch it on there.",
       unfinished: zh ? "（这条回复没有写完）" : "(this message was not finished)",
       stepOf: (i, n, label) => zh ? `第 ${i}/${n} 步 ${label}` : `step ${i}/${n} ${label}`,
-      stepCount: (i, n) => zh ? `第 ${i}/${n} 步` : `step ${i}/${n}`,
       running: (step, time) => zh ? `${step} · 已用 ${time}` : `${step} · ${time} so far`,
       reconnecting: (n, max) => zh ? `连接中断，正在重试${n && max ? `（${n}/${max}）` : ""}` : `connection lost, retrying${n && max ? ` (${n}/${max})` : ""}`,
       compactedTitle: title => zh ? `上下文已压缩：${title}` : `Context compacted: ${title}`,
@@ -1445,21 +1444,15 @@ var ScholiumRunner = {
 
   stepText(step) {
     const i = this.STEPS.indexOf(step);
-    // an annotation's list of steps names them, so its line has the count only
-    if (i >= 0) {
-      return this.job && this.job.annotation ? this.text("stepCount", i + 1, this.STEPS.length)
-        : this.text("stepOf", i + 1, this.STEPS.length, this.text(step));
-    }
+    if (i >= 0) return this.text("stepOf", i + 1, this.STEPS.length, this.text(step));
     return step && step !== "starting" ? this.text(step) : this.text("starting", this.agentName(this.job && this.job.agent));
   },
 
-  // the running paper's state line: a question's and a compaction's have only their dot (the line in the transcript has
-  // the time), an annotation's its step
+  // the running paper's state line: its dot, with the attempt while the connection is tried again; the step and the
+  // time are in the tooltip, the time also on the run's line in the transcript
   runningState() {
     const retry = this.job.retry;
-    const re = retry ? this.text("reconnecting", retry.attempt, retry.max) : "";
-    if (this.job.asking || (this.job.source && this.job.source.compact)) return re;
-    return this.stepText(this.job.step) + (re ? " · " + re : "");
+    return retry ? this.text("reconnecting", retry.attempt, retry.max) : "";
   },
 
   // the same with the time so far, for the line's tooltip
@@ -4579,8 +4572,8 @@ var ScholiumRunner = {
 
   compactSizes(e) { return e.pre > 0 && e.post > 0 ? ` · ${this.kTokens(e.pre)} → ${this.kTokens(e.post)}` : ""; },
 
-  // an annotation in the annotation tab: the wishes; while it runs the steps and what it does now (the raw steps on a
-  // click); then its steps folded with the closing words among them, and a card of the numbers or of the failure. The
+  // an annotation in the annotation tab: the wishes; while it runs what it does now (its raw steps on a click); then
+  // its steps folded with the closing words among them, and a card of the numbers or of the failure. The
   // lines after the card's in the log follow the card. A try that the annotation went on from, or waits to go on from (a
   // second try, a continuation after a pause), shows its failure as a line: the card is the annotation's end
   renderAnnotationRun(view, run, index, live) {
@@ -4596,35 +4589,11 @@ var ScholiumRunner = {
     const card = counts || failure;
     const lead = card && run.lead.includes(card) ? run.lead.slice(0, run.lead.indexOf(card)) : run.lead;
     for (const e of lead) node.append(this.entryNode(doc, e));
-    if (live) node.append(this.stepsNode(view, this.job));
     const steps = run.steps.concat(run.answer);
     if (steps.length || live) node.append(this.foldNode(view, Object.assign({}, run, { steps, answer: [] }), index, live));
     if (counts) node.append(this.countsNode(doc, counts));
     else if (failure) node.append(this.failedCard(view, run, failure, index));
     for (const e of lines.slice(lead.length)) if (e !== card) node.append(this.entryNode(doc, e));
-    return node;
-  },
-
-  // an annotation's six steps while it runs: the ones done ticked with their time, the current one marked
-  stepsNode(view, running) {
-    const doc = view.doc;
-    const node = doc.createElement("div");
-    node.className = "scholium-steps";
-    const seen = (running && running.steps) || [];
-    const now = running ? this.STEPS.indexOf(running.step) : -1;
-    this.STEPS.forEach((step, i) => {
-      const row = doc.createElement("div");
-      row.className = "scholium-step" + (i < now ? " done" : i === now ? " now" : "");
-      const label = doc.createElement("span");
-      const name = this.text(step);
-      label.textContent = this.zh() ? name : name.charAt(0).toUpperCase() + name.slice(1);
-      const time = doc.createElement("span");
-      time.className = "scholium-step-time";
-      const at = seen.find(s => s.step === step), next = seen.find(s => this.STEPS.indexOf(s.step) > i);
-      time.textContent = i < now && at && next ? this.durationWords(next.at - at.at) : "";
-      row.append(label, time);
-      node.append(row);
-    });
     return node;
   },
 
@@ -6305,10 +6274,7 @@ var ScholiumRunner = {
     if (i <= ctx.lastStep) return;
     ctx.lastStep = i;
     ctx.running.step = step;
-    (ctx.running.steps = ctx.running.steps || []).push({ step, at: Date.now() });
     this.refresh();
-    // the annotation tab's steps show the step reached at once, not with the agent's next line
-    if (this.transcriptKind === "annotate") this.settleRun();
   },
 
   // the agent has the prompt: a queued message's row no longer says it is being sent

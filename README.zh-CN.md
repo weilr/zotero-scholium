@@ -17,7 +17,7 @@
 
 </div>
 
-<img src="docs/images/hero.webp" alt="在 Zotero 里一键批注：在 Scholium 区块的批注页输入附加要求，点批注，经过六个步骤，结果卡片给出在 Zotero 里数出的数目，随后论文上出现黄色和红色（核心）高亮、蓝色页边批注，侧栏里是译文" width="100%">
+<img src="docs/images/hero.webp" alt="在 Zotero 里一键批注：在 Scholium 区块的批注页输入附加要求，点批注，结果卡片给出在 Zotero 里数出的数目，随后论文上出现黄色和红色（核心）高亮、蓝色页边批注，侧栏里是译文" width="100%">
 
 <sub>用 Claude Code 对 <i>Direct Preference Optimization</i>（CC BY 4.0）运行一次，所用个人配置见下表；动图经过加速，实际用时三分钟。本页所有示例都来自这次运行。</sub>
 
@@ -49,7 +49,7 @@
 <td><img src="docs/images/f-note.webp" alt="Zotero 笔记编辑器中的阅读笔记，从概述一路滚动到方法、结果和待解问题，公式已渲染"></td>
 </tr>
 <tr>
-<td><b>在 Zotero 里一键批注</b><br>Scholium 区块对选中的论文运行 Claude Code 或 Codex。<b>批注</b>页分六步批注这篇论文，完成后给出数目；之后在那里写的话接着修改，比如「把第 5 页的译文改短」。<b>对话</b>页回答关于论文的问题，也可以在阅读器里选中一段后点「问 Scholium」，回答里引用的原句带页码，点一下就在 PDF 里找到；之前的对话都留在「历史」里。</td>
+<td><b>在 Zotero 里一键批注</b><br>Scholium 区块对选中的论文运行 Claude Code 或 Codex。<b>批注</b>页批注这篇论文，完成后给出数目；之后在那里写的话接着修改，比如「把第 5 页的译文改短」。<b>对话</b>页回答关于论文的问题，也可以在阅读器里选中一段后点「问 Scholium」，回答里引用的原句带页码，点一下就在 PDF 里找到；之前的对话都留在「历史」里。</td>
 <td><img src="docs/images/f-pane.webp" alt="对第 2 页的一段点「问 Scholium」：这段引文出现在对话页输入框上方，问题发出后，回答以页码芯片引用原句，芯片的卡片带「定位」，点后在第 4 页找到该句"></td>
 </tr>
 <tr>

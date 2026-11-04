@@ -1241,7 +1241,7 @@ SCENARIOS = r"""
     await h.runner.annotate([h.item1]);
     await settle(300);
     p.pane().tabAnnotate.click();
-    const during = p.view().state;
+    const during = [p.view().state, p.view().stateTitle.split(' · ')[0]];
     p.pane().send.click();
     await settle(300);
     const proc = h.log.codexProcs.at(-1);
@@ -1257,7 +1257,7 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]);
     await settle(300);
-    facts.codexCancel.begun = p.view('annotate').state;
+    facts.codexCancel.begun = [p.view('annotate').state, p.view('annotate').stateTitle.split(' · ')[0]];
     h.runner.stop();
     facts.codexCancel.shutdown = h.log.codexProcs.at(-1).killed;
     await settle(100);
@@ -2739,7 +2739,6 @@ def card(turns="26 轮 · 2,568k tokens", title="✓ 批注完成，没有剩余
 
 
 CARD = card()
-STEPS = ["scholium-steps", "加载技能提取句子通读论文撰写批注预演检查写入 Zotero"]   # an annotation's steps while it runs, none done
 RUN = [ANNOTATE] + TRANSCRIPT + [CARD]   # an annotation on its tab: the closing words among the steps, then its card
 
 
@@ -2822,8 +2821,8 @@ def test_section_is_styled_by_its_stylesheet(facts):
                 "scholium-markdown", "scholium-saved", "scholium-saved-item", "scholium-saved-go", "scholium-undo", "scholium-history-group", "scholium-history-row",
                 "scholium-history-open", "scholium-history-title", "scholium-history-time", "scholium-history-rename",
                 "scholium-history-empty", "scholium-round", "scholium-ring", "scholium-context-head", "scholium-context-bar", "scholium-context-legend",
-                "scholium-run", "scholium-fold-head", "scholium-fold-body", "scholium-meta", "scholium-annot-intro-title", "scholium-steps",
-                "scholium-step", "scholium-fold-more", "scholium-card", "scholium-card-title", "scholium-card-nums", "scholium-card-usage",
+                "scholium-run", "scholium-fold-head", "scholium-fold-body", "scholium-meta", "scholium-annot-intro-title",
+                "scholium-fold-more", "scholium-card", "scholium-card-title", "scholium-card-nums", "scholium-card-usage",
                 "scholium-confirm", "scholium-confirm-text"]:
         assert any(re.search(r"\." + re.escape(cls) + r"(?![\w-])", sel) for sel in rules), cls
     log = rules[".scholium-log"]
@@ -2855,12 +2854,9 @@ def test_section_is_styled_by_its_stylesheet(facts):
     assert "background: transparent" in rules[".scholium-fold-head"] and "var(--fill-secondary)" in rules[".scholium-fold-head"]
     assert 'content: "◌ "' in rules[".scholium-fold-head.live::before"] and "var(--fill-quinary)" in rules[".scholium-fold-body"]
     assert "space-between" in rules[".scholium-meta"] and "var(--fill-tertiary)" in rules[".scholium-meta"]
-    # the annotation tab: the steps (done ticked in green, the current one in blue), the card (red when it failed, four
-    # numbers in a row), the question in place on a red tint, its Replace in red
-    assert 'content: "✓"' in rules[".scholium-step.done::before"] and "var(--accent-green)" in rules[".scholium-step.done::before"]
-    assert "var(--accent-blue)" in rules[".scholium-step.now"] and 'content: "◉"' in rules[".scholium-step.now::before"]
-    assert 'content: "○"' in rules[".scholium-step::before"] and "flex: 1" in rules[".scholium-step > span:first-child"]
-    assert "space-between" in rules[".scholium-step"] and "var(--fill-tertiary)" in rules[".scholium-step"], "a step's time at the right; a step to come in grey"
+    # the annotation tab: the card (red when it failed, four numbers in a row), the question in place on a red tint, its
+    # Replace in red
+    assert not any("scholium-step" in sel for sel in rules), "no list of steps"
     assert "border-color: var(--accent-red)" in rules[".scholium-card.failed"] and "border: var(--material-border-quarternary)" in rules[".scholium-card"]
     assert "repeat(4, 1fr)" in rules[".scholium-card-nums"] and "font-size: 16px" in rules[".scholium-card-nums b"]
     assert "var(--accent-red)" in rules[".scholium-confirm"] and "flex: 1" in rules[".scholium-confirm-text"]
@@ -2964,14 +2960,14 @@ def test_a_section_on_screen_replaces_the_notices(facts):
 
 def test_section_shows_running_and_finished_state(facts):
     q = facts["queueWhileFirstRuns"]
-    assert q["pane1"]["state"] == "第 6/6 步", "the papers waiting are shown in their own sections"
+    assert q["pane1"]["state"] == "", "the papers waiting are shown in their own sections"
     assert q["pane1"]["stateKind"] == "scholium-state running"
     assert q["pane1"]["round"] == ["■", "停止"], "the running paper has the stop button"
     assert q["pane2"]["state"] == "排队中，前面还有 1 篇" and q["pane2"]["annotateDisabled"] is True
     w = facts["whileRunning"]["view"]
-    assert w["state"] == "第 1/6 步" and w["stateKind"] == "scholium-state running"
+    assert w["state"] == "" and w["stateKind"] == "scholium-state running"
     assert (w["annotateDisabled"], w["removeDisabled"]) == (True, True) and w["round"] == ["■", "停止"]
-    assert w["flat"] == [ANNOTATE, STEPS] + TRANSCRIPT[:2], "the six steps, the first one going on, above what it does now"
+    assert w["flat"] == [ANNOTATE] + TRANSCRIPT[:2], "the wishes, then what it does now; no list of steps"
     assert facts["otherRunning"] == {"state": None, "kind": "scholium-state info"}, "another paper's run is not shown here"
     assert facts["finished"]["notifications"] == [], "Zotero is in front: the corner notice tells"
 
@@ -3595,11 +3591,11 @@ def test_the_agents_share_the_papers_conversations(facts):
 
 def test_codex_steps_and_cancel(facts):
     c = facts["codexCancel"]
-    assert c["during"] == "第 2/6 步"
+    assert c["during"] == ["", "第 2/6 步 提取句子"], "the state line is its dot; the step is in its tooltip"
     assert c["interrupt"] == {"threadId": "T1", "turnId": "U1"} and c["killed"] is True
     assert c["last"] == ["scholium-card failed", "已取消重试"] and c["state"] is None
     assert c["results"] == 0 and c["waits"] == [] and c["current"] is None and c["shutdown"] is True
-    assert c["begun"] == "第 1/6 步"
+    assert c["begun"] == ["", "第 1/6 步 加载技能"]
     s = facts["codexSkillFound"]
     assert s["/data/tmp/scholium"]["methods"] == ["skills/list"]
     assert s["/data/tmp/scholium"]["input"] == [{"type": "skill", "name": "zotero-scholium", "path": "/home/u/.codex/skills/zotero-scholium/SKILL.md"}]
@@ -3612,8 +3608,8 @@ def test_codex_steps_and_cancel(facts):
 
 def test_a_lost_connection_shows_on_the_state_line_until_the_agent_answers_again(facts):
     r = facts["reconnecting"]
-    assert r["codex"]["state"] == "第 1/6 步 · 连接中断，正在重试（2/5）"
-    assert r["codexBack"]["state"] == "第 1/6 步"
+    assert r["codex"]["state"] == "连接中断，正在重试（2/5）"
+    assert r["codexBack"]["state"] == ""
     assert not any("连接" in str(e) or "Reconnecting" in str(e) for e in r["codex"]["entries"]), "the transcript gets no line of its own"
     assert "连接中断，正在重试（1/10）" in r["claude"]["state"]
     assert "连接中断" not in r["claudeBack"]["state"]
@@ -3811,8 +3807,8 @@ def test_annotate_after_a_question_opens_a_session_of_its_own(facts):
     assert facts["ask"]["restarted"] == {"resumed": False, "prompt": n["prompt"].split("\n")[0], "profile": "- 画像：/data/zotero-scholium/profile.md"}
     assert facts["ask"]["later"] == {"placeholder": ASK, "session": "Q1"}, "the question's conversation stays a question's"
     assert facts["askOrder"] == ["ATT3", "ATT4", "ATT2"], "questions go before the papers still waiting, in their order"
-    assert run_time(facts["askBox"]) == {"asking": ASK, "annotating": follow, "state": "启动 Claude Code", "queued": []}, \
-        "an annotation that starts shows on its own tab"
+    assert run_time(facts["askBox"]) == {"asking": ASK, "annotating": follow, "state": "", "queued": []}, \
+        "an annotation that starts shows on its own tab, its dot on the state line"
     c = facts["askThenCodex"]
     assert c["claudeCalls"] == 1 and c["threads"] == ["thread/start"] and c["conversations"] == 2, "Codex starts a conversation of its own"
     assert c["text"] == "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论、页边批注、阅读笔记，按画像和默认值。"

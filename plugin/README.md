@@ -135,8 +135,8 @@ history and the annotation sessions are those of that PDF.
     effort.
 
   The choices apply to the runs started afterwards, are saved for each agent, and are shared by all panes.
-- Beside the chip, one line of state for the tab shown: while a question or a compaction runs, only its dot; while an
-  annotation runs, "step 3/6" (「第 3/6 步」); the tooltip gives the time. The line also shows the attempt while the
+- Beside the chip, one line of state for the tab shown: while a run goes on, only its dot; the tooltip gives the step
+  ("step 3/6 reading the paper", 「第 3/6 步 通读论文」) and the time. The line also shows the attempt while the
   agent's connection is tried again, the place in the queue and a pause for the usage limit with **Continue now**.
   Otherwise, on the Chat tab, the latest outcome of the conversation shown with its turns and tokens (the tooltip
   splits the tokens into input, cache and output); on the Annotations tab the outcome of **Delete annotations** (a
@@ -203,9 +203,8 @@ history and the annotation sessions are those of that PDF.
 - Each **Annotate** starts an annotation session of its own, which the chat does not see and the history does
   not list: a log `annotate-<agent>-<time>.jsonl` in `<out dir>/conversations/`, the latest of each agent in the
   index's `annotation`.
-- While it runs, the tab shows **Annotate** with the extra instructions, the six steps (loading the skill,
-  extracting sentences, reading the paper, writing the annotations, checking (dry run), writing to Zotero), each
-  done step with its time, and under them "Working for 12s" (「正在处理 12 秒」) with **Details ›** for the steps.
+- While it runs, the tab shows **Annotate** with the extra instructions and under them "Working for 12s"
+  (「正在处理 12 秒」) with **Details ›** for the steps.
 - When it ends, the steps fold and a card gives the outcome: the warnings left, from the agent's closing line;
   the numbers counted on the paper in Zotero (highlights with the core ones, those of the configuration's core
   colour; margin notes; sticky notes; reading notes); the turns and tokens of all its parts (also those before a
