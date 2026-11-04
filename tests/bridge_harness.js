@@ -372,12 +372,21 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       if (co.fail === msg.method) return this.emit([ev({ id: msg.id, error: { code: -32600, message: co.failMessage } })]);
       if (co.refuse && msg.method in co.refuse) return this.emit([ev({ id: msg.id, error: { code: -32600, message: co.refuse[msg.method] } })]);
       if (co.exitOn === msg.method) { this.killed = true; if (this.wake) { const w = this.wake; this.wake = null; w(); } return; }
+      // co.answers: a test's own answer to a request ({ result } or { error }), 'HOLD' for none, or nothing for the usual one
+      const custom = co.answers && co.answers[msg.method] && co.answers[msg.method](p);
+      if (custom === 'HOLD') return;
+      if (custom) return this.emit([ev(Object.assign({ id: msg.id }, custom))]);
       // a notification ahead of the answer: the request is still waiting while it is handled
       if (co.noticeBefore === msg.method) this.emit([ev({ method: 'thread/started', params: { thread: { id: 'T1' } } })]);
       switch (msg.method) {
         case 'initialize': return answer({ userAgent: 'scholium-bridge/0.160.0', codexHome: '/home/u/.codex' });
         case 'model/list': return answer({ data: CODEX_MODELS, nextCursor: null });
         case 'config/read': return answer({ config: { model: 'gpt-6-astra', mcp_servers: { s: { env: { TOKEN: 'secret-token' } } } } });
+        // the user's server s, Codex's own apps server and a plugin's server, as Codex 0.166 lists them
+        case 'mcpServerStatus/list': return answer({ data: [
+          { name: 'codex_apps', pluginId: null, httpOrigin: 'https://chatgpt.com', authStatus: 'bearerToken', tools: {}, resources: [], resourceTemplates: [] },
+          { name: 'cua_repl', pluginId: 'unified-computer-use@openai-bundled', authStatus: 'unsupported', tools: {}, resources: [], resourceTemplates: [] },
+          { name: 's', pluginId: null, httpOrigin: null, authStatus: 'unsupported', tools: {}, resources: [], resourceTemplates: [] }], nextCursor: null });
         case 'skills/list': return answer({ data: p.cwds.map(cwd => ({ cwd, errors: co.skillErrors || [], skills: [{ name: 'other', path: '/x/other/SKILL.md', enabled: true }]
           .concat(co.skillAt === cwd ? [{ name: 'zotero-scholium', path: cwd === '/data' ? '/data/.agents/skills/zotero-scholium/SKILL.md'
                                                                                       : '/home/u/.codex/skills/zotero-scholium/SKILL.md', enabled: !co.skillOff }] : []) })) });

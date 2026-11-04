@@ -2757,7 +2757,8 @@ def main(argv=None):
         if key in report:
             report[key] = report.pop(key)
     print(json.dumps(report, ensure_ascii=False, indent=1))
-    if missed or (args.apply and report.get("applied") is not True):
+    # a write whose misses were allowed with --allow-missed succeeded
+    if (missed and not (args.apply and args.allow_missed)) or (args.apply and report.get("applied") is not True):
         sys.exit(2)
 
 

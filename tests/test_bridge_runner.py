@@ -29,7 +29,7 @@ SCENARIOS = r"""
 
   // registration, the item pane before, during and after a run, notices, shutdown
   {
-    const h = harness();
+    const h = harness({ logs: { '/data/c.json': '{}' } });   // the configuration SCRIPT applies
     const { runner, log, item1, item2, note } = h;
     runner.start('scholium-bridge@zotero-scholium');
     const sec = log.sections[0];
@@ -1142,7 +1142,8 @@ SCENARIOS = r"""
   // one, given nothing of Codex's annotation session; Codex chosen again shows it, and its session goes on in its thread
   {
     const h = harness({ prefs: { 'extensions.scholium-bridge.agent': 'codex', 'extensions.scholium-bridge.codexModel': 'gpt-6-luna',
-                                 'extensions.scholium-bridge.codexEffort': 'high' }, codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW, CODEX_FOLLOW] } });
+                                 'extensions.scholium-bridge.codexEffort': 'high' }, codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW, CODEX_FOLLOW] },
+                        logs: { '/data/tmp/scholium/c.json': '{}' } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
@@ -1911,7 +1912,8 @@ SCENARIOS = r"""
   {
     const answered = [SCRIPT[0], said('讲的是方法。'), ev({ type: 'result', subtype: 'success', is_error: false, result: '讲的是方法。', session_id: 'S1' })];
     const h = harness({ existing: [['zotero-scholium'], ['zotero-scholium']], prefs: { 'extensions.scholium-bridge.agent': 'codex' },
-                        codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW, CODEX_FOLLOW, CODEX_FOLLOW, CODEX_FOLLOW] }, scripts: [answered] });
+                        codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW, CODEX_FOLLOW, CODEX_FOLLOW, CODEX_FOLLOW] }, scripts: [answered],
+                        logs: { '/data/tmp/scholium/c.json': '{}' } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
@@ -2493,7 +2495,7 @@ SCENARIOS = r"""
   }
   // a relative configuration of a command that ran in a Windows folder is a Windows path
   {
-    const h = harness({ logs: { 'D:\\Zotero\\tmp\\scholium\\sub\\config.json': '{}' } });
+    const h = harness({ logs: { 'D:\\Zotero\\tmp\\scholium\\sub\\config.json': '{}', 'D:\\Zotero\\tmp\\scholium\\other.json': '{}' } });
     h.runner.start('x');
     const applied = () => JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']).config;
     await h.runner.noteApplied('ATT1', 'sub/config.json', 'codex', 'c', 'D:\\Zotero\\tmp\\scholium');
@@ -2891,7 +2893,7 @@ def test_claude_is_started_headless_in_the_data_directory(facts):
 
 def test_prompt_names_the_paper_and_the_unattended_rules(facts):
     prompt = facts["prompt"]
-    for part in ("zotero-scholium", "条目 key：ITEM1", "附件 key：ATT1", "PDF：D:/Zotero/storage/ATT1/paper.pdf",
+    for part in ("zotero-scholium", "条目 key：ITEM1", "附件 key：ATT1", "论文：/data/tmp/scholium/ATT1/paper.json",
                  "输出目录：/data/tmp/scholium/ATT1", "不要向用户提问", "不要启动子代理", "目前没有本工具的注释"):
         assert part in prompt, part
     assert facts["confirmsWithoutExisting"] == 0
@@ -3436,7 +3438,6 @@ def test_usage_limit_pauses_the_queue_and_continues_after_the_reset(facts):
 
 CODEX_APP = "/localappdata/OpenAI/Codex/bin/h1/codex.exe"
 CODEX_NPM = "/appdata/npm/node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe"
-CODEX_LEVELS = ["low", "medium", "high", "xhigh", "max", "ultra"]
 CODEX_TRANSCRIPT = [
     ["scholium-entry text", "先提取句子。"],
     ["scholium-entry tool", "⏺ Shell(python C:/skills/scholium.py extract --pdf x.pdf --sentences s.json)"],
@@ -3471,11 +3472,11 @@ def test_codex_models_come_from_its_app_server(facts):
     assert m["agent"] == "codex" and m["shown"] == "codex" and m["otherShown"] == "codex"
     assert m["agents"] == [["claude", "Claude Code"], ["codex", "Codex"]]
     assert m["call"] == {"command": CODEX_APP, "args": ["app-server"], "workdir": "/data"}
-    assert m["sent"] == ["initialize", "initialized", "model/list", "config/read"] and m["killed"] is True
+    assert m["sent"] == ["initialize", "initialized", "model/list"] and m["killed"] is True
     assert m["hello"]["clientInfo"]["name"] == "scholium-bridge" and m["secretKept"] is False and m["calls"] == 1
     assert m["models"] == ["", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna", "gpt-5.5"] and m["model"] == ""
-    assert m["labels"] == ["Codex 默认（GPT-6-Astra）", "GPT-6.1-Sol", "GPT-6-Astra", "GPT-6-Luna", "GPT-5.5"]
-    assert m["efforts"] == CODEX_LEVELS and m["effort"] == "medium"
+    assert m["labels"] == ["Codex 默认", "GPT-6.1-Sol", "GPT-6-Astra", "GPT-6-Luna", "GPT-5.5"], "no model named before a thread ran it"
+    assert m["efforts"] == LEVELS and m["effort"] == "medium"
     assert m["legacy"] == {"efforts": ["low", "medium", "high", "xhigh"], "effort": "medium"}
     assert m["chosen"] == {"model": "gpt-6-luna", "effort": "high", "claudeModel": None, "claudeEffort": None, "otherModel": "gpt-6-luna"}
     assert m["back"] == {"model": "opus", "effort": "medium", "labels": ["Claude Code 默认（Fable 5.1）", "Opus 5.5"]}
@@ -3486,7 +3487,7 @@ def test_codex_runs_the_skill_in_a_sandbox_through_its_app_server(facts):
     r = facts["codexRun"]
     assert r["call"] == {"command": CODEX_APP, "args": ["app-server"], "workdir": "/data/tmp/scholium",
                          "env": {"PYTHONIOENCODING": "utf-8"}, "append": True}
-    assert r["methods"] == ["initialize", "initialized", "config/read", "plugin/installed", "skills/list", "skills/list",
+    assert r["methods"] == ["initialize", "initialized", "mcpServerStatus/list", "plugin/installed", "skills/list", "skills/list",
                             "skills/extraRoots/set", "thread/start", "turn/start"]
     assert r["skillLists"] == [["/data/tmp/scholium"], ["/data"]] and r["roots"] == ["/data/.agents/skills"]
     # the user's MCP servers and installed plugins stay out of the thread
@@ -3547,7 +3548,7 @@ def test_an_unchanged_log_is_parsed_once(facts):
 def test_the_agents_share_the_papers_conversations(facts):
     f = facts["codexFollowUp"]
     assert f["claudeCalls"] == 0
-    assert f["methods"] == ["initialize", "initialized", "config/read", "plugin/installed", "thread/resume", "turn/start"]
+    assert f["methods"] == ["initialize", "initialized", "plugin/installed", "thread/resume", "turn/start"], "the servers listed once"
     assert f["resume"] == {"threadId": "T1", "excludeTurns": True, "cwd": "/data/tmp/scholium", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
                            "sandbox": "workspace-write", "serviceName": "scholium-bridge", "model": "gpt-6-luna",
                            "config": {"mcp_servers": {"s": {"enabled": False}}}}
@@ -3758,13 +3759,17 @@ def test_a_question_starts_a_conversation_that_answers_without_annotating(facts)
         "",
         "- 条目 key：ITEM1",
         "- 附件 key：ATT1",
-        "- PDF：D:/Zotero/storage/ATT1/paper.pdf",
+        "- 论文：/data/tmp/scholium/ATT1/paper.json（PDF 的路径、两个 key 和输出目录）",
         "- 输出目录：/data/tmp/scholium/ATT1",
         "- 画像：没有；不要生成或修改画像",
         "",
         "这是从 Zotero 里发来的无人值守任务：不要向用户提问，不要启动子代理。只回答，不写批注和笔记；用户在问题里明确要求时，才按技能的流程写入 Zotero。",
+        "/data/tmp/scholium/ATT1/paper.json 是插件的文件，只读，不要修改：只有 extract（代替 --pdf）和 --list 用 --config "
+        "/data/tmp/scholium/ATT1/paper.json。你的配置另写一个文件，放在输出目录里（如 /data/tmp/scholium/ATT1/config.json），"
+        "从 /data/tmp/scholium/ATT1/paper.json 的四个键写起，试运行和 --apply 都用它。不要把 PDF 路径、论文标题或其他题录写进命令行。",
         "这篇论文目前没有本工具的批注。",
-        "引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --sentences /data/tmp/scholium/ATT1/sentences.json --out /data/tmp/scholium/ATT1/sentences.txt（已有就直接读 sentences.txt）。",
+        "引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --config /data/tmp/scholium/ATT1/paper.json "
+        "--sentences /data/tmp/scholium/ATT1/sentences.json --out /data/tmp/scholium/ATT1/sentences.txt（已有就直接读 sentences.txt）。",
         "",
         "用户的问题：",
         "这篇怎么估计后验？",
@@ -3809,8 +3814,8 @@ def test_annotate_after_a_question_opens_a_session_of_its_own(facts):
 
 def test_a_questions_follow_ups_failures_and_races(facts):
     e = facts["askEdges"]
-    assert e["owned"] == ("这篇论文已有 1 条本工具的批注；问到它们的内容时，写一份只含 pdf、item_key、attachment_key、out_dir 的配置，"
-                          "用 --config <配置> --list --full 列出。要改批注或补几条时，编辑输出目录里写入它们的那份配置（它是这篇论文的全部批注），"
+    assert e["owned"] == ("这篇论文已有 1 条本工具的批注；问到它们的内容时，用 --config /data/tmp/scholium/ATT1/paper.json --list --full 列出。"
+                          "要改批注或补几条时，编辑输出目录里写入它们的那份配置（它是这篇论文的全部批注），"
                           "设 cleanup: true 整份重写（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置。")
     assert e["followUp"] == ("下面是用户在 Zotero 里针对这篇论文发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
                              "只是提问就直接回答；用户明确要求写批注或笔记时，才按技能的流程写入 Zotero。\n\n那它的损失函数呢？\n\n"

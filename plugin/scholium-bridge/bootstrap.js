@@ -453,7 +453,8 @@ var ScholiumToggle = {
 
 /* One-click annotation (Claude Code or Codex): the Scholium section in the item pane (library and
  * reader side pane) starts the user's own, unmodified agent CLI in the background, signed in with the
- * user's own account; no credentials are read. It runs the zotero-scholium skill on one paper at a
+ * user's own account; no credentials are read, nor the agent's configuration (of Codex's setup only its MCP servers'
+ * names, as Codex lists them, are kept). It runs the zotero-scholium skill on one paper at a
  * time. Claude Code runs as `claude -p` with the Zotero data directory as working directory. Codex
  * runs as `codex app-server`, spoken to in JSON-RPC as llm-for-zotero does; its working directory
  * is <data dir>/tmp/scholium, and its sandbox lets it write there, to the profile folder and to the
@@ -532,7 +533,13 @@ var ScholiumRunner = {
   DRAFT_MS: 80,             // the draft is set again at most this often
   MAX_ENTRIES: 3000,
   paneID: null,
-  citations: new Map(),     // attachment key -> { at, size, map } the paper's numbered sentences, as sentences.json has them
+  citations: new Map(),     // attachment key -> { at, size, map } the paper's numbered sentences, as sentences.json has them;
+                            // the 20 papers shown last
+  codexMcp: null,           // the names of the user's MCP servers to switch off in a Codex thread (codexServerNames)
+  codexListed: false,       // whether Codex listed them in this session, or the list after a run was tried
+  codexRefresh: null,       // the Codex server listing them after a run
+  codexRefused: new Set(),  // the names a thread refused as servers of config.toml, in this session
+  CODEX_LIST_MS: 10000,     // the longest a run waits for the servers' list, when Codex never listed them
   cites: null,              // { key, map } the sentences of the paper whose transcript is being drawn
   bridgeApi: null,          // { found(agent) } on Zotero.ScholiumBridge, for the settings page
   panes: new Map(),         // item pane section body -> { doc, keys, list, state, buttons, the conversation shown, seen }
@@ -1037,10 +1044,11 @@ var ScholiumRunner = {
                    + "edit it and set cleanup: true, so that the whole set replaces them (and note_replace: true when the reading note changes); "
                    + "do not write a separate configuration with just new entries."];
     }
-    return [zh ? `这篇论文已有 ${own} 条本工具的批注；问到它们的内容时，写一份只含 pdf、item_key、attachment_key、out_dir 的配置，用 --config <配置> --list --full 列出。`
+    const paper = this.paperPath(job.att.key);
+    return [zh ? `这篇论文已有 ${own} 条本工具的批注；问到它们的内容时，用 --config ${paper} --list --full 列出。`
                  + "要改批注或补几条时，编辑输出目录里写入它们的那份配置（它是这篇论文的全部批注），设 cleanup: true 整份重写"
                  + "（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置。"
-               : `The paper carries ${own} annotations of this tool; when the question is about their content, list them with --config <a configuration with only pdf, item_key, attachment_key and out_dir> --list --full. `
+               : `The paper carries ${own} annotations of this tool; when the question is about their content, list them with --config ${paper} --list --full. `
                  + "To change annotations or add a few, edit the configuration in the output directory they were written from (it holds the paper's "
                  + "whole set) and set cleanup: true (and note_replace: true when the reading note changes); do not write a separate configuration "
                  + "with just new entries."];
@@ -1068,6 +1076,18 @@ var ScholiumRunner = {
                  + `about this paper (${when}); read that configuration before changing annotations, not the version you remember.`];
   },
 
+  // how a session's commands name the paper: through paper.json, which is the plugin's, never with the PDF's path or the
+  // paper's metadata; the agent's configuration is a file of its own
+  paperRule(key) {
+    const paper = this.paperPath(key), own = PathUtils.join(this.outDir(key), "config.json");
+    return this.zh() ? `${paper} 是插件的文件，只读，不要修改：只有 extract（代替 --pdf）和 --list 用 --config ${paper}。`
+                       + `你的配置另写一个文件，放在输出目录里（如 ${own}），从 ${paper} 的四个键写起，试运行和 --apply 都用它。`
+                       + "不要把 PDF 路径、论文标题或其他题录写进命令行。"
+                     : `${paper} is the plugin's and read-only; do not edit it. Only extract (in place of --pdf) and --list take --config ${paper}. `
+                       + `Write your configuration to a file of your own in the output directory (e.g. ${own}), starting from the four keys of ${paper}, `
+                       + "and give that one to the dry run and to --apply. Never put the PDF's path, the paper's title or other metadata on a command line.";
+  },
+
   // the message itself: a follow-up in the agent's own session, a question (or a follow-up in a session the agent
   // starts), or the annotation task
   taskPrompt(job, own) {
@@ -1081,11 +1101,12 @@ var ScholiumRunner = {
         "",
         `- 条目 key：${job.parentKey}`,
         `- 附件 key：${job.att.key}`,
-        `- PDF：${job.path}`,
+        `- 论文：${this.paperPath(job.att.key)}（PDF 的路径、两个 key 和输出目录）`,
         `- 输出目录：${outDir}`,
         job.profile ? `- 画像：${job.profile}` : "- 画像：没有；按默认值标注，不要生成或修改画像",
         "",
         "这是从 Zotero 里一键启动的无人值守任务：不要向用户提问，不要启动子代理，由你独立完成第 1–3 步并写入 Zotero。",
+        this.paperRule(job.att.key),
         own ? `这篇论文已有 ${own} 条本工具的注释，用户已确认整篇重做（配置里设 cleanup: true）。` : "这篇论文目前没有本工具的注释。",
         ...(job.extra ? ["", "用户的附加要求：", job.extra] : []),
         "",
@@ -1097,11 +1118,12 @@ var ScholiumRunner = {
       "",
       `- Item key: ${job.parentKey}`,
       `- Attachment key: ${job.att.key}`,
-      `- PDF: ${job.path}`,
+      `- Paper: ${this.paperPath(job.att.key)} (the PDF's path, the two keys and the output directory)`,
       `- Output directory: ${outDir}`,
       job.profile ? `- Profile: ${job.profile}` : "- Profile: none; annotate with the defaults and do not create or change a profile",
       "",
       "This is an unattended task started from Zotero with one click: do not ask the user anything and do not start sub-agents; complete steps 1-3 yourself and write to Zotero.",
+      this.paperRule(job.att.key),
       own ? `The paper already carries ${own} annotations of this tool; the user confirmed a complete redo (cleanup: true in the configuration).` : "The paper carries no annotations of this tool yet.",
       ...(job.extra ? ["", "The user's extra instructions:", job.extra] : []),
       "",
@@ -1113,19 +1135,21 @@ var ScholiumRunner = {
   // next one of a conversation whose session is gone
   questionPrompt(job, own) {
     const outDir = this.outDir(job.att.key);
+    const paper = this.paperPath(job.att.key);
     const later = !!(job.history && job.history.length);   // a message of a conversation that a new session goes on with
     return (this.zh() ? [
       "使用 zotero-scholium 技能读下面这篇论文（status 给出题录，extract 给出正文），回答用户在 Zotero 里提的问题。",
       "",
       `- 条目 key：${job.parentKey}`,
       `- 附件 key：${job.att.key}`,
-      `- PDF：${job.path}`,
+      `- 论文：${paper}（PDF 的路径、两个 key 和输出目录）`,
       `- 输出目录：${outDir}`,
       job.profile ? `- 画像：${job.profile}` : "- 画像：没有；不要生成或修改画像",
       "",
       "这是从 Zotero 里发来的无人值守任务：不要向用户提问，不要启动子代理。只回答，不写批注和笔记；用户在问题里明确要求时，才按技能的流程写入 Zotero。",
+      this.paperRule(job.att.key),
       ...this.annotationLines(job, own),
-      `引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt（已有就直接读 sentences.txt）。`,
+      `引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt（已有就直接读 sentences.txt）。`,
       "",
       later ? "用户的新消息：" : "用户的问题：",
       this.said(job),
@@ -1136,14 +1160,15 @@ var ScholiumRunner = {
       "",
       `- Item key: ${job.parentKey}`,
       `- Attachment key: ${job.att.key}`,
-      `- PDF: ${job.path}`,
+      `- Paper: ${paper} (the PDF's path, the two keys and the output directory)`,
       `- Output directory: ${outDir}`,
       job.profile ? `- Profile: ${job.profile}` : "- Profile: none; do not create or change a profile",
       "",
       "This is an unattended task sent from Zotero: do not ask the user anything and do not start sub-agents. Only answer; write no annotations "
         + "and no note unless the question asks for them, and then write to Zotero as the skill describes.",
+      this.paperRule(job.att.key),
       ...this.annotationLines(job, own),
-      `When you quote a sentence of the paper, put its sentence number after it as [#123] (several: [#12][#15]); the numbers come from extract --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt (read sentences.txt when it is there).`,
+      `When you quote a sentence of the paper, put its sentence number after it as [#123] (several: [#12][#15]); the numbers come from extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt (read sentences.txt when it is there).`,
       "",
       later ? "The user's new message:" : "The user's question:",
       this.said(job),
@@ -1313,19 +1338,44 @@ var ScholiumRunner = {
   // what the plugin saw write the paper's annotations last: { config, agent, conv, at }; null when it saw none
   appliedPath(key) { return PathUtils.join(this.outDir(key), "applied.json"); },
 
+  // the paper as the agent's commands name it (--config): the PDF's path, the keys and the output folder, so that the
+  // path, whose file name a shell would expand ($, a backtick), stays off command lines
+  paperPath(key) { return PathUtils.join(this.outDir(key), "paper.json"); },
+
+  // whether a command of the tool wrote to Zotero: its output's outcome ("applied": true, or "partial" when the earlier
+  // items stayed), whatever the exit code; without one in sight, whether the command succeeded
+  wrote(output, succeeded) {
+    const text = typeof output === "string" ? output
+      : Array.isArray(output) ? output.map(c => (c && c.type === "text" ? c.text : "")).join("\n") : "";
+    const outcome = [...text.matchAll(/"applied":\s*(true|false|"partial")/g)].pop();
+    return outcome ? outcome[1] !== "false" : !!succeeded;
+  },
+
   // a write to Zotero that succeeded, kept whatever the run's end: a relative configuration is the one of the folders
-  // it may have run in (the first given, then the output folder) that has it
+  // it may have run in (the first given, then the output folder) that has it; a Git Bash path (/d/…) is also tried as
+  // the Windows one. A write whose configuration is not found (a path the shell expands, as $o\config.json or
+  // %o%\config.json, or one that is not there), or is the plugin's paper.json, leaves no configuration kept: a new
+  // session is then told to list the annotations, not to rewrite them from an older configuration
   async noteApplied(key, config, agent, conv, base) {
-    let path = config;
-    if (!/^(?:[A-Za-z]:)?[\\/]/.test(config)) {
-      const rel = config.replace(/^\.[\\/]/, "");
+    const file = this.appliedPath(key);
+    let path = null;
+    if (!/\$[A-Za-z_{(]|%[^%\\\/]+%/.test(config) && !/(?:^|[\\\/])paper\.json$/i.test(config)) {
       // a Windows path takes no "/", which Gecko refuses
-      const join = dir => (/^[A-Za-z]:|\\/.test(dir) ? (dir.replace(/[\\/]+$/, "") + "\\" + rel).replace(/\//g, "\\") : dir.replace(/[\\/]+$/, "") + "/" + rel);
-      const candidates = [base, this.outDir(key)].filter(Boolean).map(join);
-      path = candidates[0];
+      const win = p => (/^[A-Za-z]:/.test(p) ? p.replace(/\//g, "\\") : p);
+      let candidates = [win(config)];
+      const bash = /^\/([A-Za-z])\/(.+)$/.exec(config);
+      if (bash) candidates.push(bash[1].toUpperCase() + ":\\" + bash[2].replace(/\//g, "\\"));
+      if (!/^(?:[A-Za-z]:)?[\\/]/.test(config)) {
+        const rel = config.replace(/^\.[\\/]/, "");
+        const join = dir => (/^[A-Za-z]:|\\/.test(dir) ? (dir.replace(/[\\/]+$/, "") + "\\" + rel).replace(/\//g, "\\") : dir.replace(/[\\/]+$/, "") + "/" + rel);
+        candidates = [base, this.outDir(key)].filter(Boolean).map(join);
+      }
       for (const c of candidates) if (await this.exists(c)) { path = c; break; }
     }
-    try { await IOUtils.writeUTF8(this.appliedPath(key), JSON.stringify({ config: path, agent, conv, at: Date.now() })); }
+    try {
+      if (path) await IOUtils.writeUTF8(file, JSON.stringify({ config: path, agent, conv, at: Date.now() }), { tmpPath: file + ".tmp" });
+      else await IOUtils.remove(file, { ignoreAbsent: true });
+    }
     catch (e) { this.log("applied configuration not kept: " + e); }
   },
 
@@ -1987,8 +2037,8 @@ var ScholiumRunner = {
     return out;
   },
 
-  // Codex's models and their effort levels (model/list), and the model its config.toml names
-  // (config/read; nothing else of the configuration is kept); no model is called
+  // Codex's models and their effort levels (model/list); its configuration is not read, so the model it runs by default
+  // is the one a new thread last named (codexDefault), else unnamed; no model is called
   async askCodexModels() {
     const codex = await this.findCodex();
     if (!codex) return null;
@@ -1997,20 +2047,26 @@ var ScholiumRunner = {
     try {
       await this.codexHello(rpc);
       const list = await rpc.request("model/list", {});
-      let configured = "";
-      try {
-        const read = await rpc.request("config/read", {});
-        configured = String((read && read.config && read.config.model) || "");
-      } catch (e) {}
-      return this.codexModelOptions(list && list.data, configured);
+      return this.codexModelOptions(list && list.data, String(this.getPref("codexDefault") || ""));
     } finally {
       clearTimeout(timer);
       rpc.close();
     }
   },
 
-  // Codex's model list as options; the empty value runs Codex's own default: the model of its
-  // config.toml, else the one it marks as default. Hidden models are left out.
+  // the model a new Codex thread ran with none chosen, which is Codex's own default: kept, and named by the default option
+  noteCodexDefault(name) {
+    if (!name || this.getPref("codexDefault") === name) return;
+    try { Zotero.Prefs.set(this.pref + "codexDefault", name, true); } catch (e) { this.log("preference not saved: " + e); }
+    const options = this.models.codex, first = options && options[0];
+    if (!first || first.value !== "") return;
+    const twin = options.find(o => o.value === name);
+    Object.assign(first, { label: this.text("paneCodexDefaultModel", twin ? twin.label : name), efforts: twin ? twin.efforts : this.EFFORTS });
+    for (const pane of this.panes.values()) this.fillSelects(pane);
+  },
+
+  // Codex's model list as options; the empty value runs Codex's own default: the model of its config.toml as a new
+  // thread named it, named by the option once known, with that model's levels. Hidden models are left out.
   codexModelOptions(list, configured = "") {
     if (!Array.isArray(list)) return null;
     const out = [];
@@ -2022,7 +2078,7 @@ var ScholiumRunner = {
       out.push({ value: m.model, label: String(m.displayName || m.model), title: String(m.description || ""), efforts });
     }
     if (!out.length) return null;
-    const name = configured || (list.find(m => m && m.isDefault) || {}).model || "";
+    const name = configured;
     const twin = out.find(o => o.value === name);
     out.unshift({ value: "", label: name ? this.text("paneCodexDefaultModel", twin ? twin.label : name) : this.text("paneCodexDefault"),
                   title: "", efforts: twin ? twin.efforts : this.EFFORTS });
@@ -2465,7 +2521,7 @@ var ScholiumRunner = {
       }
       const text = String(ed.input.value).replace(/\r\n/g, "\n").replace(/\n/g, ed.eol);
       await IOUtils.makeDirectory(PathUtils.join(Zotero.DataDirectory.dir, "zotero-scholium"), { createAncestors: true, ignoreExisting: true });
-      await IOUtils.writeUTF8(ed.path, text);
+      await IOUtils.writeUTF8(ed.path, text, { tmpPath: ed.path + ".tmp" });
       Object.assign(ed, { disk: text, dirty: false, message: { text: this.text("profileSaved", this.clock(Date.now())), error: false } });
       this.paintEditor(ed);
       return true;
@@ -2841,14 +2897,19 @@ var ScholiumRunner = {
     if (at < text.length) parent.append(doc.createTextNode(text.slice(at)));
   },
 
-  // the paper's numbered sentences, for the citations in answers: read again when the file changed
+  // the paper's numbered sentences, for the citations in answers: read again when the file changed; those of the 20
+  // papers shown last are kept
   async loadCitations(key) {
     if (!key) return;
     const path = PathUtils.join(this.outDir(key), "sentences.json");
     let stat = null;
     try { stat = await IOUtils.stat(path); } catch (e) { this.citations.delete(key); return; }
     const had = this.citations.get(key);
-    if (had && had.at === stat.lastModified && had.size === stat.size) return;
+    if (had && had.at === stat.lastModified && had.size === stat.size) {
+      this.citations.delete(key);
+      this.citations.set(key, had);   // the latest shown
+      return;
+    }
     let raw;
     try { raw = await IOUtils.readUTF8(path); } catch (e) { this.log("sentences not read: " + e); return; }   // tried again at the next draw
     const map = new Map();
@@ -2858,7 +2919,9 @@ var ScholiumRunner = {
         if (x && Number.isInteger(x.id) && x.page > 0) map.set(x.id, { page: x.page, text: String(x.text || ""), rects: this.positionRects(x.rects) });
       }
     } catch (e) { map.clear(); this.log("sentences not parsed: " + e); }
+    this.citations.delete(key);
     this.citations.set(key, { at: stat.lastModified, size: stat.size, map });
+    if (this.citations.size > 20) this.citations.delete(this.citations.keys().next().value);   // the one shown longest ago
   },
 
   // a sentence's position in sentences.json: its rectangles of four finite numbers, or null when it has none
@@ -5067,7 +5130,7 @@ var ScholiumRunner = {
       }
     }
     const marker = at === 0 ? "" : JSON.stringify({ type: "scholium", subtype: "rewind", points }) + "\n";
-    try { await IOUtils.writeUTF8(path, kept.reverse().join("\n") + marker); }
+    try { await IOUtils.writeUTF8(path, kept.reverse().join("\n") + marker, { tmpPath: path + ".tmp" }); }
     catch (e) {
       this.log("conversation not cut: " + e);
       if (r.retitled) { index.titles[conv] = r.title; await this.saveIndex(key); }
@@ -5112,7 +5175,7 @@ var ScholiumRunner = {
     try { now = await IOUtils.readUTF8(r.path); } catch (e) {}
     const kept = this.codexThreads(r.text);
     const gone = [...this.codexThreads(now)].filter(thread => !kept.has(thread));
-    try { await IOUtils.writeUTF8(r.path, r.text); }
+    try { await IOUtils.writeUTF8(r.path, r.text, { tmpPath: r.path + ".tmp" }); }
     catch (e) { this.log("conversation not restored: " + e); return; }
     for (const thread of gone) this.queueArchive(thread);
     if (r.retitled) {
@@ -5709,6 +5772,9 @@ var ScholiumRunner = {
     }
     await IOUtils.makeDirectory(this.outDir(key), { createAncestors: true, ignoreExisting: true });
     if (this.job !== running || running.stopAsked) return this.halted(job, running);   // the plugin stopped, or ■, while the folder was prepared
+    const paper = this.paperPath(key);
+    await IOUtils.writeUTF8(paper, JSON.stringify({ pdf: job.path, item_key: job.parentKey, attachment_key: key, out_dir: this.outDir(key) }, null, 1) + "\n",
+                            { tmpPath: paper + ".tmp" });
     if (!job.conv) {
       job.conv = await this.newConv(key, agent, job.say || this.text("annotateThis"), job.kind || "chat");
       // the messages queued meanwhile go on with this conversation, held still when they were
@@ -5996,12 +6062,12 @@ var ScholiumRunner = {
           kept.push(event.type === "user" ? this.slim(event, raw) : raw);
           if (typeof event.session_id === "string" && event.session_id) ctx.session = ctx.running.session = event.session_id;
           ctx.running.context = this.contextAfter(event, ctx.running.context);
-          // a write to Zotero, kept with its configuration once its command succeeded
+          // a write to Zotero, kept with its configuration once its command wrote
           for (const c of (event.message && event.message.content) || []) {
             const config = event.type === "assistant" && c && c.type === "tool_use" && this.appliedConfig(String((c.input || {}).command || ""));
             if (config && c.id) ctx.applies[c.id] = config;
-            const applied = event.type === "user" && c && c.type === "tool_result" && !c.is_error && ctx.applies[c.tool_use_id];
-            if (applied) await this.noteApplied(key, applied, "claude", job.conv, Zotero.DataDirectory.dir);
+            const applied = event.type === "user" && c && c.type === "tool_result" && ctx.applies[c.tool_use_id];
+            if (applied && this.wrote(c.content, !c.is_error)) await this.noteApplied(key, applied, "claude", job.conv, Zotero.DataDirectory.dir);
           }
           // the skills Claude Code loaded: without this one the run would only look for it
           if (event.type === "system" && event.subtype === "init" && Array.isArray(event.skills)
@@ -6213,15 +6279,25 @@ var ScholiumRunner = {
   },
 
   // what keeps the user's own Codex setup out of a run: their MCP servers, switched off for the thread,
-  // and their installed plugins, disabled for its turns; config.toml is not changed, and of the
-  // configuration only the servers' names are kept
+  // and their installed plugins, disabled for its turns; config.toml is neither read nor changed. The servers'
+  // names are those Codex listed last (codexServers); only when it never listed them are they listed in the run,
+  // for at most CODEX_LIST_MS, else the run goes on with them
   async codexQuiet(rpc) {
     const quiet = { config: null, plugins: [] };
-    try {
-      const read = await rpc.request("config/read", {});
-      const names = Object.keys((read && read.config && read.config.mcp_servers) || {});
-      if (names.length) quiet.config = { mcp_servers: Object.fromEntries(names.map(name => [name, { enabled: false }])) };
-    } catch (e) { this.log("config/read failed: " + e); }
+    let names = this.codexServerNames();
+    if (!names) {
+      try {
+        names = await this.within(this.listCodexServers(rpc), this.CODEX_LIST_MS);
+        this.keepCodexServers(names);
+        this.codexListed = true;
+      }
+      catch (e) {
+        this.log("mcpServerStatus/list failed: " + e);
+        this.codexMcp = [];   // for this session; the list after the run may name them
+      }
+    }
+    quiet.listAfter = !this.codexListed;
+    if (names && names.length) quiet.config = { mcp_servers: Object.fromEntries(names.map(name => [name, { enabled: false }])) };
     try {
       const installed = await rpc.request("plugin/installed", {});
       for (const market of (installed && installed.marketplaces) || []) {
@@ -6231,6 +6307,89 @@ var ScholiumRunner = {
       }
     } catch (e) { this.log("plugin/installed failed: " + e); }
     return quiet;
+  },
+
+  // the names of the user's MCP servers to switch off: as Codex listed them last (kept as names only), null when it
+  // never did
+  codexServerNames() {
+    if (!this.codexMcp) {
+      try {
+        const saved = JSON.parse(this.getPref("codexServers") || "null");
+        if (Array.isArray(saved)) this.codexMcp = saved.filter(n => typeof n === "string" && n);
+      } catch (e) {}
+    }
+    return this.codexMcp;
+  },
+
+  // the user's MCP servers as mcpServerStatus/list names them (it starts each to list its tools): those of config.toml,
+  // without Codex's own apps server, the plugins' servers and those a thread refused, which a thread does not take by name
+  async listCodexServers(rpc) {
+    const names = [];
+    let cursor = null;
+    for (let page = 0; page < 20; page++) {
+      const listed = await rpc.request("mcpServerStatus/list", Object.assign({ detail: "toolsAndAuthOnly" }, cursor ? { cursor } : {}));
+      for (const s of (listed && listed.data) || []) {
+        if (s && typeof s.name === "string" && s.name && !s.pluginId && s.name !== "codex_apps" && !this.codexRefused.has(s.name)) names.push(s.name);
+      }
+      cursor = listed && listed.nextCursor;
+      if (!cursor) break;
+    }
+    return names;
+  },
+
+  keepCodexServers(names) {
+    this.codexMcp = names;
+    try { Zotero.Prefs.set(this.pref + "codexServers", JSON.stringify(names), true); } catch (e) { this.log("preference not saved: " + e); }
+  },
+
+  // the servers listed again once a Zotero session, after a Codex run, by a server of its own: no run waits for it
+  async refreshCodexServers(codex) {
+    if (this.codexListed || this.codexRefresh) return;
+    this.codexListed = true;   // once, whatever its end
+    let rpc = null, timer = null;
+    try {
+      rpc = this.codexRefresh = await this.codexServer(codex, this.codexRoots()[0]);
+      timer = setTimeout(() => rpc.close(), 60000);
+      await this.codexHello(rpc);
+      this.keepCodexServers(await this.listCodexServers(rpc));
+    } catch (e) { this.log("MCP servers not listed: " + e); }
+    finally {
+      clearTimeout(timer);
+      if (rpc) rpc.close();
+      this.codexRefresh = null;
+    }
+  },
+
+  // a promise given up after ms
+  within(promise, ms) {
+    let timer = null;
+    const late = new Promise((resolve, reject) => { timer = setTimeout(() => reject(new Error("no answer in " + ms + " ms")), ms); });
+    return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+  },
+
+  // a thread opened with the user's MCP servers switched off; a name Codex refuses as a server of config.toml (one of its
+  // own, or one gone from the file since it was listed) fails the thread's configuration: that server is left out, here
+  // and from then on, and the thread opens with the others switched off (with none when the refusal names no server)
+  async codexOpen(rpc, method, params) {
+    for (;;) {
+      try { return await rpc.request(method, params); }
+      catch (e) {
+        const servers = params.config && params.config.mcp_servers;
+        if (!servers || !(e && e.refused) || !/mcp_servers/.test(String(e.message || ""))) throw e;
+        this.log("MCP servers not switched off: " + e);
+        const named = /mcp_servers\.([^\s`'"]+)/.exec(String(e.message));
+        const rest = Object.assign({}, servers);
+        if (named && named[1] in rest) {
+          delete rest[named[1]];
+          this.codexRefused.add(named[1]);
+          const names = this.codexServerNames();
+          if (names) this.keepCodexServers(names.filter(n => n !== named[1]));
+        }
+        params = Object.assign({}, params);
+        if (named && named[1] in servers && Object.keys(rest).length) params.config = Object.assign({}, params.config, { mcp_servers: rest });
+        else delete params.config;
+      }
+    }
   },
 
   // where a Codex turn may write: the output folders, the profile folder, and the folder of the local
@@ -6285,10 +6444,12 @@ var ScholiumRunner = {
         }
         if (msg.method === "account/rateLimits/updated" && p.rateLimits) state.limits = p.rateLimits;
         ctx.running.context = this.contextAfter(msg, ctx.running.context);
-        // a write to Zotero, kept with its configuration once its command succeeded, in the folder it ran in
-        if (msg.method === "item/completed" && item.type === "commandExecution" && item.exitCode === 0 && item.status !== "failed") {
+        // a write to Zotero, kept with its configuration once its command wrote, in the folder it ran in
+        if (msg.method === "item/completed" && item.type === "commandExecution") {
           const config = this.appliedConfig(this.shellCommand(item.command));
-          if (config) await this.noteApplied(key, config, "codex", job.conv, item.cwd || cwd);
+          if (config && this.wrote(item.aggregatedOutput, item.exitCode === 0 && item.status !== "failed")) {
+            await this.noteApplied(key, config, "codex", job.conv, item.cwd || cwd);
+          }
         }
         if (msg.method === "turn/completed" && p.turn && (!state.turn || p.turn.id === state.turn)) { state.done = p.turn; delete ctx.current.steer; ended(); }
         // "Reconnecting... 2/5"
@@ -6327,6 +6488,7 @@ var ScholiumRunner = {
                          serviceName: "scholium-bridge" };
       if (model) settings.model = model;
       const quiet = await this.codexQuiet(rpc);
+      state.listAfter = quiet.listAfter;
       if (quiet.config) settings.config = quiet.config;
       const skill = job.resume ? null : await this.codexSkill(rpc, cwd);
       if (!job.resume && !skill) throw new Error(this.text("noSkill", "codex"));
@@ -6337,11 +6499,14 @@ var ScholiumRunner = {
         // the turns stay with the server: a long conversation is not sent back whole
         const fork = job.rewind && job.rewind.turnId;
         try {
-          opened = fork ? await rpc.request("thread/fork", Object.assign({ threadId: job.resume, lastTurnId: fork, excludeTurns: true }, settings))
-                        : await rpc.request("thread/resume", Object.assign({ threadId: job.resume, excludeTurns: true }, settings));
+          opened = fork ? await this.codexOpen(rpc, "thread/fork", Object.assign({ threadId: job.resume, lastTurnId: fork, excludeTurns: true }, settings))
+                        : await this.codexOpen(rpc, "thread/resume", Object.assign({ threadId: job.resume, excludeTurns: true }, settings));
         }
         catch (e) { ctx.gone = !!(e && e.refused); throw e; }
-      } else opened = await rpc.request("thread/start", settings);
+      } else {
+        opened = await this.codexOpen(rpc, "thread/start", settings);
+        if (!model && opened) this.noteCodexDefault(String(opened.model || ""));
+      }
       const thread = opened && opened.thread && opened.thread.id;
       if (!thread) throw new Error(this.text("noThread"));
       state.thread = ctx.session = ctx.running.session = thread;
@@ -6395,6 +6560,8 @@ var ScholiumRunner = {
       clearTimeout(state.timer);
       rpc.close();
       await rpc.done.catch(() => {});
+      // the servers named from an earlier session, or not at all: listed again now, off the run's path
+      if (state.listAfter && this.job === ctx.running) this.refreshCodexServers(codex).catch(e => this.log("MCP servers not listed: " + e));
     }
     const turn = state.done;
     if (!turn || ctx.current.cancelled) {
@@ -6681,6 +6848,8 @@ var ScholiumRunner = {
     this.draft = this.draftTimer = null;
     this.katexLib = undefined;
     this.mathCache.clear();
+    this.citations.clear();
+    try { if (this.codexRefresh) this.codexRefresh.close(); } catch (e) {}
     this.unsent.clear();
     for (const win of this.windows()) this.removeFromWindow(win);
     try { if (this.paneID) Zotero.ItemPaneManager.unregisterSection(this.paneID); } catch (e) {}
