@@ -302,7 +302,7 @@ SCENARIOS = r"""
     f.chatTab = { entries: pane.list.children.length, state: p.view().state, annotDot: pane.tabAnnotateDot.hidden === false,
                   chatDot: pane.tabChatDot.hidden === false };
     pane.tabAnnotate.click(); await settle(10);
-    f.annotTab = { entries: pane.annot.list.children.length, live: pane.annot.live, running: !!p.view().state, intro: pane.annot.list.children.includes(pane.annotIntro),
+    f.annotTab = { entries: pane.annot.list.children.length, live: pane.annot.live, running: p.view().state !== null && p.view().stateKind === 'scholium-state running', intro: pane.annot.list.children.includes(pane.annotIntro),
                    annotDot: pane.tabAnnotateDot.hidden === false, chatDot: pane.tabChatDot.hidden === false, newChat: pane.newChat.hidden,
                    history: pane.historyButton.hidden };
     f.chatAfter = pane.list.children.length;

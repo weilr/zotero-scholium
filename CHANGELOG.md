@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- While an annotation runs, the Annotations tab no longer lists the six steps, and the state line shows only its dot,
+  as for a question; the step and the time are in its tooltip.
+
+### Fixed
+
+- The settings layer is as wide as its longest option needs, so the model dropdown is no wider than its options;
+  layers no longer reach past the pane's edge.
+
 ## 0.2.0 (2026-11-04)
 
 ### Added
