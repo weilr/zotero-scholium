@@ -242,10 +242,10 @@ history and the annotation sessions are those of that PDF.
   while a stopped answer ends, follow-ups queue. A follow-up joins the queue after the messages and runs waiting for
   its own conversation. The queue is kept in memory for each conversation and is handed over with the running paper
   when the plugin is updated.
-- Asking about a passage: in the reader, **Ask Scholium** under the colours of the selection popup shows the Chat tab
-  of the reader's section, opening the side pane and the section when they are closed, with the passage and its page
-  quoted above the box, and closes the popup as a colour does, with the cursor in the box; the icon ✕ removes the quote. It appears in PDF
-  readers only, not in EPUB or snapshot readers. The message tells the
+- Asking about a passage: in the reader, a right click on selected text offers **Ask Scholium** at the end of the
+  context menu. It shows the Chat tab of the reader's section, opening the side pane and the section when they are
+  closed, with the passage and its page quoted above the box, and clears the selection, with the cursor in the box; the
+  icon ✕ removes the quote. It appears in PDF readers only, not in EPUB or snapshot readers. The message tells the
   agent that the user quotes that passage of page N, counted in the PDF as in `sentences.txt` and the citation chips,
   with the page's label where it differs; the box and the transcript show the label, the transcript above the user's
   words. The section drawn for another item has no quote.

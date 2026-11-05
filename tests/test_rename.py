@@ -172,7 +172,7 @@ def test_scholium_bridge_is_uninstalled_before_anything_registers(facts):
     o = t["order"]
     assert min(o["read"], o["section"], o["listener"], o["endpoint"]) > o["uninstalled"] >= 0, o
     # its shutdown dropped every reader listener of its types: Scholium's came after
-    assert t["registered"] == {"sections": 1, "listeners": ["renderTextSelectionPopup", "renderToolbar"], "endpoints": ALL_PATHS, "own": 6}
+    assert t["registered"] == {"sections": 1, "listeners": ["createViewContextMenu", "renderToolbar"], "endpoints": ALL_PATHS, "own": 6}
     assert t["said"], "the removal is logged"
 
 
@@ -205,7 +205,7 @@ def test_a_later_start_has_nothing_to_take_over(facts):
 def test_the_start_goes_on_when_addonmanager_fails(facts, how):
     f = facts[how]
     assert f["registered"]["sections"] == 1 and f["registered"]["own"] == 6
-    assert f["registered"]["listeners"] == ["renderTextSelectionPopup", "renderToolbar"]
+    assert f["registered"]["listeners"] == ["createViewContextMenu", "renderToolbar"]
     assert f["said"], "the failure is logged"
     assert 10000 not in f["timers"], "the wait for AddonManager ended"
 

@@ -703,14 +703,17 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
            chromePackage: context.chromePackage, replacing: context.replacing, takingOver: context.takingOver,
            startup: context.startup, shutdown: context.shutdown, endpoints: context.ScholiumEndpoints, toggle: context.ScholiumToggle,
            live: () => timers.filter(t => t.live).map(t => t.ms), toolbarItems: () => mainDoc.bar.children.length,
-           // a text selection in the reader's popup: the nodes its listener appends
+           // a right click on a text selection in the reader: the items its listener appends to the context menu, as
+           // { textContent: label, click: command }; the reader keeps the selection as its selection popup's annotation
            selection: (text, pageIndex, pageLabel, tabID = undefined) => {
-             const l = log.listeners.find(x => x.type === 'renderTextSelectionPopup');
+             const l = log.listeners.find(x => x.type === 'createViewContextMenu');
              const appended = [];
-             const doc = { createElement: tag => new El(tag), createElementNS: (ns, tag) => new El(tag) };
-             l.handler({ reader: { itemID: 'ATT1', _window: paneWin, tabID, _internalReader: { _primaryView: { clearSelection() { log.selectionsCleared = (log.selectionsCleared || 0) + 1; } } } }, doc, params: { annotation: { text, pageLabel, position: { pageIndex, rects: [] } } },
-                         append: (...nodes) => appended.push(...nodes) });
-             return appended;
+             const annotation = { text, pageLabel, position: { pageIndex, rects: [] } };
+             const view = { clearSelection() { log.selectionsCleared = (log.selectionsCleared || 0) + 1; } };
+             l.handler({ reader: { itemID: 'ATT1', _window: paneWin, tabID,
+                                   _internalReader: { _primaryView: view, _lastViewPrimary: true, _state: { primaryViewSelectionPopup: { annotation } } } },
+                         doc: {}, params: { x: 10, y: 10 }, append: (...items) => appended.push(...items) });
+             return appended.map(i => ({ textContent: i.label, click: () => i.onCommand() }));
            } };
 }
 // a view's transcript as nodes with every run's steps opened: each run's parts in order, its folded line as its steps

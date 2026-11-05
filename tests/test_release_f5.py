@@ -131,17 +131,17 @@ const refused = (p, t) => /"subtype":"run"/.test(t);
   {
     const h = harness({ locale: 'en-US' });
     h.runner.start('x');
-    const l = h.log.listeners.find(x => x.type === 'renderTextSelectionPopup');
-    const doc = { createElement: tag => new El(tag) };
+    const l = h.log.listeners.find(x => x.type === 'createViewContextMenu');
     const seen = { primary: 0, ranges: [], rendered: 0, removed: 0 };
     const primary = { _setSelectionRanges() { seen.primary++; throw new Error('not drawn'); } };
     const secondary = { _setSelectionRanges(r) { seen.ranges.push(r === undefined ? 'none' : r); }, _render() { seen.rendered++; },
                         _iframeWindow: { getSelection: () => ({ removeAllRanges() { seen.removed++; } }) } };
     const appended = [];
-    l.handler({ reader: { itemID: 'ATT1', _window: h.paneWin, tabID: 'tab-r', _internalReader: { _primaryView: primary, _secondaryView: secondary } },
-                doc, params: { annotation: { text: 'A passage.', pageLabel: '3', position: { pageIndex: 2, rects: [] } } },
-                append: (...n) => appended.push(...n) });
-    appended[0].click(); await settle(30);
+    l.handler({ reader: { itemID: 'ATT1', _window: h.paneWin, tabID: 'tab-r',
+                          _internalReader: { _primaryView: primary, _secondaryView: secondary, _lastViewPrimary: true,
+                                             _state: { primaryViewSelectionPopup: { annotation: { text: 'A passage.', pageLabel: '3', position: { pageIndex: 2, rects: [] } } } } } },
+                doc: {}, params: { x: 1, y: 1 }, append: (...n) => appended.push(...n) });
+    appended[0].onCommand(); await settle(30);
     facts.popupTwoViews = { seen, pending: [...h.runner.pendingQuotes.keys()] };
     h.runner.stop();
   }
