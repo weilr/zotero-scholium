@@ -72,12 +72,13 @@ const L = o => JSON.stringify(o) + '\n';
   // end to end: --config "$o\config.json" in a PowerShell command that wrote; a new conversation is then told to list
   // the annotations, not to rewrite them from the configuration kept before
   {
-    const h = harness({ existing: [['zotero-scholium']], logs: { [APPLIED]: keptA, [A]: '{}' },
+    const h = harness({ logs: { [APPLIED]: keptA, [A]: '{}' },
                         scripts: [[SCRIPT[0], tool('PowerShell', { command: '$o="D:\\Zotero\\tmp\\scholium\\ATT1"; python C:/s/scholium.py --config "$o\\config.json" --apply' }, 't1'),
                                    answer('{"applied": true}', false, 't1'), LAST, RESULT],
                                   [SCRIPT[0], said('答。'), ev({ type: 'result', subtype: 'success', is_error: false, result: '答。', session_id: 'S2' })]] });
     h.runner.start('x');
     await h.runner.annotate([h.item1]); await settle(400);
+    h.att1.getAnnotations = () => [h.ann('E0', 'highlight', '#ffd400')];   // what it wrote
     const applied = parsed(h.log.writes[APPLIED]);
     await h.runner.send(h.item1, '第 3 节的批注对吗？'); await settle(400);
     const asked = h.log.stdin.at(-1);

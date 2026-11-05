@@ -212,8 +212,8 @@ history and the annotation sessions are those of that PDF.
   annotations written" (「没有写入批注」), with the warnings left, in orange. A failed annotation shows its error with ↻
   (**Retry**), which annotates again with the same extra instructions.
 - Words typed afterwards continue that annotation session, for example to change some annotations.
-  **Annotate again** asks in place, above the box, how many Scholium annotations it replaces (the user's own
-  stay); **Replace** starts a new session. While it waits behind another paper, the tab shows the coming session, and
+  **Annotate again** asks in place, above the box, how many Scholium annotations it deletes and how many reading
+  notes it moves to the trash (the user's own stay); **Replace** deletes them at once and starts a new session. While it waits behind another paper, the tab shows the coming session, and
   words typed there run in it after the annotation.
 
 **The box**
@@ -320,7 +320,9 @@ over: the paper's history shows the run as interrupted; ↻ (**Retry**) on a run
 again, and a new message continues the conversation.
 
 Papers that already carry the tool's annotations are annotated again only after a confirmation (on the
-Annotations tab, in place above the box); the new run replaces those annotations.
+Annotations tab, in place above the box). The confirmation deletes those annotations at once and moves the tool's
+reading notes of the paper to the trash; then the new run starts. When the run fails or is stopped, the paper has none
+of the tool's annotations.
 
 If the log refuses the first line of a Chat run, its words go back to the box (a queued message's to its row, marked,
 with **Retry**) and the state line says it failed, with the reason; an annotation's extra instructions go back to the

@@ -543,10 +543,12 @@ SCENARIOS = r"""
     pane.input.type('只批注第 3 页'); pane.annotGo.click(); await settle(20);
     const ask = { shown: !pane.confirmRow.hidden, text: pane.confirmRow.children.map(c => c.textContent), dialogs: h.log.confirms.length };
     pane.confirmRow.children[1].click(); await settle(20);          // 取消
-    const cancelled = { hidden: pane.confirmRow.hidden, queued: h.runner.queue.length, kept: pane.input.value };
+    const cancelled = { hidden: pane.confirmRow.hidden, queued: h.runner.queue.length, kept: pane.input.value, erased: h.log.erased.length };
     pane.annotGo.click(); await settle(20);
     pane.confirmRow.children[2].click(); await settle(100);         // 替换
-    facts.annotPage = { intro, during, after, ask, cancelled, again: h.runner.job && h.runner.job.source.extra, dialogsAfter: h.log.confirms.length };
+    const replaced = { erased: h.log.erased.slice(), trashed: h.log.trashed.slice(), left: h.att1.getAnnotations().map(a => a.key),
+                       none: h.log.stdin.at(-1).includes('这篇论文目前没有本工具的注释。') };
+    facts.annotPage = { intro, during, after, ask, cancelled, replaced, again: h.runner.job && h.runner.job.source.extra, dialogsAfter: h.log.confirms.length };
     h.runner.cancel(); h.log.release(); await settle(200);         // the second run held as the first
   }
   // the step the agent reached is in the state line's tooltip at once, not with its next line
@@ -986,8 +988,13 @@ def test_the_annotation_tab(facts):
     assert f["go"] == "重新批注" and f["placeholder"] == "接着这次批注修改，例如：第 5 页那条译文改短"
     assert f["sendShown"] is True and f["state"] is None, "the card has the outcome; the state line is for runs going on or waiting"
     assert f["counts"] == [{"highlights": 3, "core": 2, "margin": 1, "notes": 1, "readingNotes": 1, "warnings": "", "turns": 26, "tokens": 2568179}]
-    assert a["ask"] == {"shown": True, "text": ["重新批注会替换这篇的 5 条 Scholium 批注（你自己的不动）。", "取消", "替换"], "dialogs": 0}
-    assert a["cancelled"] == {"hidden": True, "queued": 0, "kept": "只批注第 3 页"}
+    assert a["ask"] == {"shown": True, "text": ["重新批注会先删除这篇的 5 条 Scholium 批注，1 篇阅读笔记移到回收站（你自己的不动）。", "取消", "替换"],
+                        "dialogs": 0}
+    assert a["cancelled"] == {"hidden": True, "queued": 0, "kept": "只批注第 3 页", "erased": 0}, "Cancel deletes nothing"
+    r = a["replaced"]
+    assert r["erased"] == ["A1", "A2", "A3", "A4", "A5"] and r["trashed"] == ["N0"] and r["left"] == ["U1"], \
+        "Replace deletes the Scholium annotations and moves the Scholium note to the trash at once; the user's stay"
+    assert r["none"] is True, "the new run is told the paper carries none of the tool's annotations"
     assert a["again"] == "只批注第 3 页" and a["dialogsAfter"] == 0, "the question in place was the confirmation"
 
 

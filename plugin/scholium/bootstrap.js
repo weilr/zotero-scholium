@@ -592,8 +592,10 @@ var ScholiumRunner = {
         : (zh ? "Claude Code 找不到 zotero-scholium 技能：请把它放进 ~/.claude/skills/（见 README）。"
               : "Claude Code does not find the zotero-scholium skill: put it in ~/.claude/skills/ (see the README)."),
       redoTitle: zh ? "重新批注" : "Annotate again",
-      redo: n => zh ? `这篇论文已有 ${n} 条 Scholium 批注。重新批注会替换它们，你自己的批注不受影响。继续吗？`
-                    : `This paper already carries ${plural(n, "Scholium annotation", "Scholium annotations")}. Annotating again replaces them; your own annotations are not affected. Continue?`,
+      redo: (n, notes) => zh
+        ? `这篇论文已有 ${n} 条 Scholium 批注。重新批注会先删除它们${notes ? `，并把 ${notes} 篇阅读笔记移到回收站` : ""}，你自己的批注和笔记不受影响。继续吗？`
+        : `This paper already carries ${plural(n, "Scholium annotation", "Scholium annotations")}. Annotating again first deletes ${n === 1 ? "it" : "them"}`
+          + (notes ? ` and moves ${plural(notes, "reading note", "reading notes")} to the trash` : "") + "; your own annotations and notes are not affected. Continue?",
       typical: zh ? "已在后台开始，通常需要 10–20 分钟。过程和进度见条目侧栏的 Scholium 区块。"
                   : "Started in the background; this usually takes 10–20 minutes. The Scholium section of the item pane shows the process and the progress.",
       paneAgent: zh ? "智能体" : "Agent",
@@ -731,7 +733,9 @@ var ScholiumRunner = {
                          : "Highlights key sentences with translations, adds margin notes and a reading note.",
       annotExtraHint: zh ? "附加要求（可不填），例如：只批注第 3–5 页" : "Extra instructions (optional), e.g. only pages 3–5",
       annotFollowUpHint: zh ? "接着这次批注修改，例如：第 5 页那条译文改短" : "Continue this annotation, e.g. shorten the translation on page 5",
-      redoInline: n => zh ? `重新批注会替换这篇的 ${n} 条 Scholium 批注（你自己的不动）。` : `Annotating again replaces this paper's ${n} Scholium annotations (yours stay).`,
+      redoInline: (n, notes) => zh ? `重新批注会先删除这篇的 ${n} 条 Scholium 批注${notes ? `，${notes} 篇阅读笔记移到回收站` : ""}（你自己的不动）。`
+        : `Annotating again first deletes this paper's ${plural(n, "Scholium annotation", "Scholium annotations")}`
+          + (notes ? ` and moves ${plural(notes, "reading note", "reading notes")} to the trash` : "") + " (yours stay).",
       replace: zh ? "替换" : "Replace",
       cancelButton: zh ? "取消" : "Cancel",
       details: zh ? "详情" : "Details",
@@ -3223,17 +3227,18 @@ var ScholiumRunner = {
   },
 
   // the annotation tab's button: the tab's paper annotated anew, with the words in the box as extra wishes; over its
-  // Scholium annotations it first asks in place
+  // Scholium annotations it first asks in place, and Replace deletes them at once
   annotateFromPane(pane, { extra = String(pane.input.value || "").trim() } = {}) {
     const key = pane.annot.shownKey || pane.keys[0];
     const att = key && pane.item && Zotero.Items.getByLibraryAndKey(pane.item.libraryID, key);
     if (!att) return;
-    const go = () => this.annotate([att], { extra, confirmed: true })
+    const go = (replace = false) => this.annotate([att], { extra, confirmed: true, replace })
       .then(n => { if (n && String(pane.input.value || "").trim() === extra) this.clearInput(pane); })
       .catch(e => this.log("annotate failed: " + e));
     const own = att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length;
     if (!own) { go(); return; }
-    this.askInPlace(pane, this.text("redoInline", own), [[this.text("cancelButton"), "quiet small", () => {}], [this.text("replace"), "small danger", go]]);
+    this.askInPlace(pane, this.text("redoInline", own, this.ownNotesOf([att]).length),
+                    [[this.text("cancelButton"), "quiet small", () => {}], [this.text("replace"), "small danger", () => go(true)]]);
   },
 
   // a question above the box in place of a dialog: its line and its buttons, each of which closes it first
@@ -5063,8 +5068,9 @@ var ScholiumRunner = {
   },
 
   // queue the selected papers, each for a new annotation session of the chosen agent, behind a chat of the paper that
-  // runs or waits; returns how many were queued. confirmed: the user agreed to replace the paper's Scholium annotations
-  async annotate(items, { extra = "", confirmed = false } = {}) {
+  // runs or waits; returns how many were queued. confirmed: asked already, no dialog; replace: the user agreed to replace
+  // the paper's Scholium annotations (also by the dialog), which are deleted before the run
+  async annotate(items, { extra = "", confirmed = false, replace = false } = {}) {
     const jobs = [];
     let found = 0, foreign = false;
     for (const item of items || []) {
@@ -5084,14 +5090,27 @@ var ScholiumRunner = {
     if (!jobs.length) { this.refresh(); return 0; }   // every paper is already queued or running
     const own = jobs.map(j => j.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length);
     const total = own.reduce((a, b) => a + b, 0);
-    if (total && !confirmed && !Services.prompt.confirm(win, this.text("redoTitle"), this.text("redo", total))) return 0;
+    const replaced = jobs.filter((j, i) => own[i] > 0).map(j => j.att);
+    if (total && !confirmed) {
+      if (!Services.prompt.confirm(win, this.text("redoTitle"), this.text("redo", total, this.ownNotesOf(replaced).length))) return 0;
+      replace = true;
+    }
     for (const [i, j] of jobs.entries()) {
       Object.assign(j, { own: own[i], extra, agent: this.agent(), annotate: true, asking: false, kind: "annotate" });
       await this.place(j);
     }
     // another annotation may have been queued for a paper meanwhile
-    const ready = jobs.filter(j => !this.busy(j.att.key, "annotate"));
+    let ready = jobs.filter(j => !this.busy(j.att.key, "annotate"));
     if (!ready.length) { this.refresh(); return 0; }
+    // the user agreed to replace them: the papers' Scholium annotations are deleted now and their Scholium notes moved
+    // to the trash, before the runs start
+    const redone = replace ? ready.filter(j => j.own > 0) : [];
+    if (redone.length) {
+      try { await this.clearOwn(redone.map(j => j.att)); } catch (e) { this.log("delete failed: " + e); }
+      for (const j of redone) j.own = j.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length;
+      ready = ready.filter(j => !this.busy(j.att.key, "annotate"));
+      if (!ready.length) { this.refresh(); return 0; }
+    }
     this.enqueue(ready);
     // a paper's tab that shows an earlier session shows the session to come while its annotation waits
     const waiting = ready.filter(j => this.queue.includes(j));
@@ -6929,6 +6948,21 @@ var ScholiumRunner = {
   ownNotes(parent) {
     try { return Zotero.Items.get(parent.getNotes()).filter(n => n.isNote() && n.getTags().some(t => t.tag === ScholiumToggle.tag)); }
     catch (e) { return []; }
+  },
+
+  // the tool's reading notes of the papers of these PDFs, each paper once
+  ownNotesOf(atts) {
+    const parents = [...new Set(atts.map(a => a.parentID).filter(Boolean))];
+    return parents.flatMap(id => { const p = Zotero.Items.get(id); return p ? this.ownNotes(p) : []; });
+  },
+
+  // an annotation that replaces the tool's annotations: those of these PDFs deleted, the reading notes of their papers
+  // moved to the trash; the user's stay
+  async clearOwn(atts) {
+    const own = atts.flatMap(att => att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)));
+    const notes = this.ownNotesOf(atts);
+    if (own.length) await Zotero.Items.erase(own.map(a => a.id));
+    if (notes.length) await Zotero.Items.trashTx(notes.map(n => n.id));
   },
 
   // the paper's Scholium annotations and reading notes as the annotation card counts them
