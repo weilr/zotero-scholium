@@ -28,14 +28,15 @@ let existing = input.existing.map(a => ({
   async eraseTx() { existing = existing.filter(item => item.key !== this.key); },
   async erase() { existing = existing.filter(item => item.key !== this.key); },
 }));
-const attachment = { id: 1, key: 'ATTACH01', getAnnotations: () => existing };
+const parent = { id: 2, key: 'PARENT01' };
+const attachment = { id: 1, key: 'ATTACH01', parentID: 2, getAnnotations: () => existing };
 const context = vm.createContext({ Zotero: {
   Libraries: { userLibraryID: 1 },
   Items: { getByLibraryAndKey: (libraryID, key) => {
-    if (libraryID === 1 && key === 'PARENT01') return { id: 2 };
+    if (libraryID === 1 && key === 'PARENT01') return parent;
     if (libraryID !== 1 || key !== attachment.key) throw Error('unexpected attachment');
     return attachment;
-  } },
+  }, get: id => (id === 2 ? parent : null) },
   DB: { executeTransaction: async callback => callback() },
   Item: class {
     constructor(type) {
@@ -233,7 +234,7 @@ const context = vm.createContext({ Zotero: {
     setNote(html) { this.html = html; }
     setTags(tags) { this.tags = tags; }
     async saveTx() { created.push(this.html); this.key = 'NOTE' + created.length; }
-    async save() {}
+    async save() { if (this.type === 'note') { created.push(this.html); this.key = 'NOTE' + created.length; } }
   },
 } });
 let applied;

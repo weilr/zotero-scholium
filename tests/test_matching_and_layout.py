@@ -210,6 +210,9 @@ class _FakeApi:
     def children(self, key, item_type=None):
         return []
 
+    def item(self, key):
+        return {"key": key, "data": {"itemType": "attachment", "parentItem": "I"}}
+
     def delete(self, keys):
         return len(keys)
 
@@ -1200,3 +1203,118 @@ def test_a_rewrite_that_would_undo_the_users_change_is_reported(pdf_path, tmp_pa
     assert "user_edit" not in kinds(listing("补丁抖动：用户改过的译文")), "written by the tool and never changed: replaced quietly"
     assert "user_edit" not in kinds(listing("补丁抖动，一种稳定化方法", modified="2026-10-21 09:00:00")), "the configuration keeps the change"
     assert "user_edit" not in kinds(edited, dict(cfg, cleanup=False)), "without cleanup nothing is replaced"
+
+
+def test_a_summary_that_is_not_an_object_is_reported_missed(pdf_path, tmp_path):
+    cfg = _cfg(pdf=pdf_path, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+               summaries=["just a string", {"page": "x", "text": "t"}])
+    out, missed = cli.build(cfg)
+    assert out == []
+    assert missed[0] == {"kind": "summary", "page": None, "anchor": None, "reason": "a summary must be an object"}
+    assert missed[1]["reason"] == "a summary needs a 1-based page number"
+    with pytest.raises(ValueError) as e:
+        cli.normalise_summary({"page": "x", "text": "t"}, {}, [(612, 792)])
+    assert e.value.__cause__ is None and e.value.__suppress_context__
+
+
+@pytest.mark.parametrize("x0", [31.0, 33.0, 36.0, 50.0])
+def test_sticky_notes_hug_a_narrow_left_column(tmp_path, x0):
+    pdf = _page_pdf(tmp_path / "narrow.pdf",
+                    lambda pg: pg.insert_textbox(pymupdf.Rect(x0, 72, 612 - x0 - 30, 700), LEFT * 3, fontsize=10, fontname="helv"))
+    cfg = _cfg(pdf=pdf, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+               summaries=[{"page": 1, "anchor": "Foundation models have transformed", "text": "n", "kind": "note", "side": "left"},
+                          {"page": 1, "anchor": "comparable impact", "text": "n", "kind": "note", "side": "right"}])
+    out, missed = cli.build(cfg)
+    assert missed == [] and len(out) == 2
+    pi = cli.PageIndex(pymupdf.open(pdf)[0])
+    lx0, _, lx1, _ = out[0]["position"]["rects"][0]
+    rx0, _, rx1, _ = out[1]["position"]["rects"][0]
+    assert lx1 == pytest.approx(max(4 + cli.NOTE_ICON, pi.body_x0 - 4)) and lx0 >= 4 - 0.01
+    assert rx0 == pytest.approx(min(pi.W - 4 - cli.NOTE_ICON, pi.body_x1 + 4)) and rx1 <= pi.W - 4 + 0.01
+
+
+def test_positions_that_are_not_numbers_are_skipped():
+    bad = [{"annotationType": "text", "annotationPosition": json.dumps({"pageIndex": 0, "rects": [["a", 1, 2, 3]], "fontSize": "big"})},
+           {"annotationType": "text", "annotationPosition": json.dumps({"pageIndex": 0, "rects": 5})},
+           {"annotationType": "note", "annotationPosition": json.dumps([1, 2, 3])},
+           {"annotationType": "text", "annotationPosition": json.dumps({"pageIndex": 0, "rects": [[520, 400, 600, 440]], "fontSize": "x"})}]
+    lay = cli.layout_habits(bad)
+    assert lay == {"page_top_notes": 0.0, "margin_side": "mixed", "text_font_size_median": None}
+    listing = {"annotations": [
+        {"type": "ink", "position": {"pageIndex": 0, "paths": [[1, "y", 3, 4]], "rects": None}},
+        {"type": "ink", "position": {"pageIndex": 0, "paths": 7}},
+        {"type": "image", "position": {"pageIndex": 1, "rects": [[1, 2, 3, None], [10, 20, 30, 40]]}}]}
+    assert cli.existing_obstacles(listing) == {1: [[10.0, 20.0, 30.0, 40.0]]}
+    assert cli._existing_rects(listing) == {1: [(None, [[10.0, 20.0, 30.0, 40.0]])]}
+
+
+@pytest.mark.parametrize("lefts, side", [(1, "right"), (2, "mixed"), (3, "left")])
+def test_margin_side_at_the_quarter_boundaries(lefts, side):
+    own = [_ann("text", [20, 100 * k, 60, 100 * k + 40], 8) for k in range(lefts)]
+    own += [_ann("text", [520, 100 * k, 600, 100 * k + 40], 8) for k in range(4 - lefts)]
+    assert cli.layout_habits(own)["margin_side"] == side
+
+
+def test_colours_are_written_in_lower_case(pdf_path, tmp_path):
+    cfg = _cfg(pdf=pdf_path, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+               core_color="#FF6666", other_color="#FFD400", text_color="#1A73E8", levels={"claim": "#AA00FF"}, core_range=[1, 1],
+               highlights=[{"page": 1, "text": "Foundation models have transformed", "core": True},
+                           {"page": 1, "text": "patch jittering", "level": "claim"},
+                           {"page": 1, "text": "harmonic analysis", "color": "#00AAFF"},
+                           {"page": 1, "text": "topology-aware sampling"}],
+               summaries=[{"page": 1, "anchor": "Our work contributes", "text": "a"},
+                          {"page": 1, "anchor": "Data heterogeneity and unstable", "text": "b", "color": "#ABCDEF"}])
+    out, missed = cli.build(cfg)
+    assert missed == [] and len(out) == 6
+    assert [a["color"] for a in out[:4]] == ["#ff6666", "#aa00ff", "#00aaff", "#ffd400"]
+    assert sorted(a["color"] for a in out[4:]) == ["#1a73e8", "#abcdef"]
+    assert not [w for w in cli.check_style(out, cfg) if w["kind"] == "core_count"], "the core highlight is counted in either case"
+    assert cli.config_problems({"pdf": "p", "item_key": "I", "attachment_key": "A", "out_dir": "o", "core_color": "#FF6666"}) == []
+
+
+def test_the_page_label_is_the_pdfs_own(tmp_path):
+    path = tmp_path / "labels.pdf"
+    doc = pymupdf.open()
+    for _ in range(3):
+        doc.new_page(width=612, height=792).insert_textbox(pymupdf.Rect(55, 72, 543, 700), LEFT, fontsize=10, fontname="helv")
+    doc.set_page_labels([{"startpage": 0, "prefix": "", "style": "r", "firstpagenum": 1},
+                         {"startpage": 2, "prefix": "", "style": "D", "firstpagenum": 1}])
+    doc.save(str(path)); doc.close()
+    hl = lambda page: {"page": page, "text": "Foundation models have transformed", "comment": ""}
+    cfg = _cfg(pdf=str(path), item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+               highlights=[hl(2), hl(3), hl(3)], summaries=[{"page": 2, "anchor": "Data heterogeneity and unstable", "text": "s"}])
+    out, missed = cli.build(cfg)
+    assert missed == [] and [a["pageLabel"] for a in out] == ["ii", "1", "1", "ii"]
+    assert [a["position"]["pageIndex"] for a in out] == [1, 2, 2, 1]
+    # warnings give the page as the configuration numbers it
+    assert [(w["kind"], w["page"]) for w in cli.check_style(out, cfg)] == [("duplicate", "3")]
+    assert [cli.page_number(a) for a in out] == ["2", "3", "3", "2"]
+    plain = _page_pdf(tmp_path / "plain.pdf", lambda pg: pg.insert_textbox(pymupdf.Rect(55, 72, 543, 700), LEFT, fontsize=10, fontname="helv"))
+    out, _ = cli.build(dict(cfg, pdf=plain, highlights=[hl(1)], summaries=[]))
+    assert out[0]["pageLabel"] == "1", "without labels the 1-based page number"
+
+
+def test_the_sort_index_follows_the_reading_order_across_columns(pdf_path, tmp_path):
+    """Zotero sorts by "page|offset|top": a highlight low in the left column comes before one at the top of the right."""
+    low_left, right_top = "inhibit learning from sufficiently diverse dynamics", "Our work contributes"
+    cfg = _cfg(pdf=pdf_path, item_key="I", attachment_key="A", out_dir=str(tmp_path), preview_pages=[],
+               highlights=[{"page": 1, "text": right_top}, {"page": 1, "text": low_left}],
+               summaries=[{"page": 1, "anchor": "Data heterogeneity and unstable", "text": "left"},
+                          {"page": 1, "anchor": right_top, "text": "note", "kind": "note"},
+                          {"page": 1, "place": "top", "text": "A short summary of the paper."}])
+    out, missed = cli.build(cfg)
+    assert missed == [] and len(out) == 5
+    assert all(re.fullmatch(r"00000\|\d{6}\|\d{5}", a["sortIndex"]) for a in out)
+    pi = cli.PageIndex(pymupdf.open(pdf_path)[0])
+    field = lambda a, i: int(a["sortIndex"].split("|")[i])
+    right, left = out[0], out[1]
+    assert field(right, 2) < field(left, 2) and left["sortIndex"] < right["sortIndex"]
+    assert field(left, 1) == pi.text.find(cli.norm_str(low_left)) and field(right, 1) == pi.text.find(cli.norm_str(right_top))
+    summaries = {a["comment"]: a for a in out[2:]}
+    assert field(summaries["left"], 1) == pi.text.find(cli.norm_str("Data heterogeneity and unstable")), "a margin box: its anchor"
+    assert field(summaries["note"], 1) == field(right, 1), "a sticky note: its anchor"
+    band = summaries["A short summary of the paper."]
+    assert band["sortIndex"] == min(a["sortIndex"] for a in out), "a band above the text: the word closest to it"
+    w = pi.words[0]
+    pi.starts[tuple(w[5:8])] = 1234567
+    assert pi.offset(w) == 999999, "six digits at most"

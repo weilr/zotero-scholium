@@ -1,10 +1,14 @@
 """Write outcomes and annotation ownership, with an in-memory Zotero API."""
 import json
+import shutil
+import subprocess
 
 import pymupdf
 import pytest
 
 from zotero_scholium import cli
+
+NODE = shutil.which("node")
 
 
 HIGHLIGHT = {
@@ -25,12 +29,16 @@ def annotation(key, tags=(), text="User result.", comment=""):
 
 
 class MemoryApi:
-    def __init__(self, rows=(), fail_type=None, hide_created=False, readback_error=False):
+    def __init__(self, rows=(), fail_type=None, hide_created=False, readback_error=False, parent="ITEM"):
         self.rows = {row["key"]: row for row in rows}
         self.fail_type = fail_type
         self.hide_created = hide_created
         self.readback_error = readback_error
+        self.parent = parent   # the attachment ATT's parent item
         self.created_keys = []
+
+    def item(self, key):
+        return {"key": key, "data": {"itemType": "attachment", "parentItem": self.parent}}
 
     def children(self, key, item_type=None):
         if self.created_keys and self.readback_error:
@@ -96,6 +104,63 @@ def test_failed_creation_reports_failure_and_preserves_previous_annotations(tmp_
     assert result["noteCreated"] is (fail_type != "note")
 
 
+def test_an_item_that_is_not_the_attachments_parent_is_refused_before_writing(tmp_path, monkeypatch):
+    note = tmp_path / "note.html"
+    note.write_text("<h1>Paper</h1><p>A reading note.</p>", encoding="utf8")
+    api = MemoryApi([annotation("OWN", ["zotero-scholium"])], parent="OTHER")
+    options = dict(cleanup=True, note_html=str(note), note_replace=True)
+    with pytest.raises(RuntimeError, match="^item ITEM is not the parent of attachment ATT$"):
+        cli.api_apply(config(**options), [HIGHLIGHT], api)
+    assert set(api.rows) == {"OWN"} and api.created_keys == []
+    assert cli.api_apply(dict(config(**options), item_key="ATT"), [], MemoryApi(parent="OTHER"))["ok"], "the attachment's own key passes"
+    # the local API: the attachment's parentItem is read, and nothing is written
+    sent = []
+
+    def http(method, path, body=None, headers=None, timeout=60):
+        sent.append((method, path))
+        return 200, {}, json.dumps({"key": "ATT", "data": {"itemType": "attachment", "parentItem": "OTHER"}})
+    monkeypatch.setattr(cli, "http", http)
+    with pytest.raises(RuntimeError, match="is not the parent"):
+        cli.api_apply(config(**options), [HIGHLIGHT], cli.LocalApi("SID"))
+    assert sent == [("GET", "/api/users/0/items/ATT")]
+
+
+RUN_JS = r"""
+const vm = require('node:vm');
+const script = require('node:fs').readFileSync(0, 'utf8');
+const saved = [];
+const items = { PARENT: { id: 2, key: 'PARENT', getNotes: () => [] }, OTHER: { id: 3, key: 'OTHER', getNotes: () => [] },
+                ATT: { id: 1, key: 'ATT', parentID: 2, getAnnotations: () => [] } };
+const context = vm.createContext({ Zotero: {
+  Libraries: { userLibraryID: 1 },
+  Items: { getByLibraryAndKey: (lib, key) => items[key] || null, get: ids => [], trashTx: async () => {} },
+  DB: { executeTransaction: async callback => callback() },
+  Item: class {
+    constructor(type) { this.type = type; }
+    setNote(html) {}
+    setTags(tags) {}
+    async save() { saved.push(this.type); }
+    async saveTx() { saved.push(this.type); }
+  },
+} });
+vm.runInContext('(async function () {\n' + script + '\n})()', context)
+  .then(result => process.stdout.write(JSON.stringify({ result, saved })),
+        error => process.stdout.write(JSON.stringify({ error: error.message, saved })));
+"""
+
+
+@pytest.mark.skipif(NODE is None, reason="Node.js is required to run the generated JavaScript")
+@pytest.mark.parametrize("item_key, error", [("PARENT", None), ("OTHER", "item OTHER is not the parent of attachment ATT")])
+def test_the_generated_javascript_refuses_an_item_that_is_not_the_parent(tmp_path, item_key, error):
+    note = tmp_path / "note.html"
+    note.write_text("<h1>Paper</h1><p>A reading note.</p>", encoding="utf8")
+    script = cli.render_js(dict(config(cleanup=True, note_html=str(note), note_replace=True), item_key=item_key), [HIGHLIGHT])
+    out = json.loads(subprocess.run([NODE, "-e", RUN_JS], input=script, encoding="utf8", capture_output=True, check=True,
+                                    timeout=15).stdout)
+    assert out.get("error") == error
+    assert out["saved"] == ([] if error else ["note", "annotation"])
+
+
 def run_main(tmp_path, monkeypatch, capsys, api, with_note=False, args=("--ignore-existing",), **options):
     """A run of `scholium --apply`; with `api` None the backend is picked as usual."""
     pdf = tmp_path / "paper.pdf"
@@ -159,6 +224,13 @@ def test_a_failed_removal_after_writing_is_reported_as_partial(tmp_path, monkeyp
     assert "run --list" in report["apply_error"] and report["verification"]["missing_annotations"] == []
     assert json.load(open(report["result"]["keys"], encoding="utf8"))["createdKeys"] == ["NEW1"]
     assert set(api.rows) == {"OWN", "NEW1"}
+
+
+def test_a_run_names_an_item_that_is_not_the_parent(tmp_path, monkeypatch, capsys):
+    api = MemoryApi(parent="OTHER")
+    code, report = run_main(tmp_path, monkeypatch, capsys, api, with_note=True)
+    assert code == 2 and report["applied"] is False and report["apply_error"] == "item ITEM is not the parent of attachment ATT"
+    assert api.created_keys == []
 
 
 def test_main_reports_verified_annotation_and_note(tmp_path, monkeypatch, capsys):

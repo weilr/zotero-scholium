@@ -31,6 +31,9 @@ class Api:
     def children(self, key, item_type=None):
         return [r for r in self.rows.values() if r["data"]["parentItem"] == key and (not item_type or r["data"]["itemType"] == item_type)]
 
+    def item(self, key):   # the attachment ATT under ITEM
+        return {"key": key, "data": {"itemType": "attachment", "parentItem": "ITEM"}}
+
     def create(self, items):
         keys = []
         for item in items:
@@ -201,10 +204,56 @@ def test_accept_lets_a_deliberate_exception_through_and_core_count_only_informs(
     ({"highlights": [{"id": 5, "color": "red"}]}, "highlights[0]: color must be a #rrggbb colour"),
     ({"core_color": "red"}, "core_color must be a #rrggbb colour"),
     ({"levels": {"claim": "#f00"}}, "levels: 'claim' must be a #rrggbb colour"),
+    ({"cleanup": "false"}, "cleanup must be true or false"),
+    ({"cleanup_external": 0}, "cleanup_external must be true or false"),
+    ({"note_replace": "yes"}, "note_replace must be true or false"),
+    ({"snap": 1}, "snap must be true or false"),
+    ({"highlights": [{"page": 1, "text": SENTENCE, "core": "false"}]}, "highlights[0]: core must be true or false"),
+    ({"font_size": "big"}, "font_size must be a number between 4 and 36"),
 ])
 def test_configuration_mistakes_are_refused(paper, monkeypatch, capsys, config, fragment):
     code, out = run(paper, monkeypatch, capsys, config)
     assert fragment in str(code), "the run ends with the reason"
+
+
+def test_cleanup_given_as_text_deletes_nothing(paper, monkeypatch, capsys):
+    api = Api([ann_row("OWN1", ["zotero-scholium"], text="Another sentence.")])
+    hl = [{"page": 1, "text": SENTENCE, "comment": "该方法提升了结果。"}]
+    code, out = run(paper, monkeypatch, capsys, {"highlights": hl, "cleanup": "false"}, "--apply", api=api)
+    assert "config error: cleanup must be true or false" in str(code)
+    assert api.n == 0 and api.deleted == [] and "OWN1" in api.rows
+
+
+def test_null_for_an_optional_key_stands_for_its_default(paper, monkeypatch, capsys):
+    hl = [{"page": 1, "text": SENTENCE, "comment": "该方法提升了结果。", "core": None}]
+    band = [{"page": 1, "place": "top", "text": "A short summary of the paper."}]
+    config = dict({k: None for k in cli.DEFAULTS}, highlights=hl, summaries=band, snap=None, data_dir=None)
+    code, report = run(paper, monkeypatch, capsys, config, "--ignore-existing")
+    assert code == 0 and report["highlights"] == 1 and report["margin_texts"] == 1 and report["missed"] == []
+    assert report["colors"] == {cli.DEFAULTS["other_color"]: 1} and "previews" not in report
+    code, report = run(paper, monkeypatch, capsys, {"highlights": None, "summaries": None, "levels": None}, "--ignore-existing")
+    assert code == 0 and report["highlights"] == report["margin_texts"] == 0
+
+
+def test_a_local_api_that_is_turned_off_is_no_write_channel(monkeypatch, capsys):
+    """Zotero answers 403 with its version and server ID when the local API is off: `auto` passes on to the next channel."""
+    def http(method, path, body=None, headers=None, timeout=60):
+        if path.startswith("/api/"):
+            return 403, {"X-Zotero-Version": "10.0.6", "Zotero-Server-ID": "SID"}, "Local API is not enabled"
+        return 404, {}, "No endpoint found"
+    monkeypatch.setattr(cli, "http", http)
+    assert cli.zotero_version() == ("10.0.6", None)
+    assert cli.pick_backend("api", {}) == (None, None, cli.LOCAL_API_OFF)
+    name, _, why = cli.pick_backend("auto", {})
+    assert name == "js" and cli.LOCAL_API_OFF in why and "HTTP 404" in why
+    assert "Allow other applications on this computer to communicate with Zotero" in cli.LOCAL_API_OFF
+    with pytest.raises(RuntimeError, match=r"failed to read children \(HTTP 403\): Zotero's local API is turned off"):
+        cli.LocalApi("SID").children("ATT", "annotation")
+    assert cli.status_main(["I1"]) == 1
+    assert json.loads(capsys.readouterr().out)["error"] == "GET /items/I1: HTTP 403: " + cli.LOCAL_API_OFF
+    # an older plugin is the write channel then
+    monkeypatch.setattr(cli, "plugin_connect", lambda cfg: ("TOKEN", {"ok": True, "version": "0.1.8", "annotations": [], "notes": []}, "/scholium"))
+    assert cli.pick_backend("auto", {})[:2] == ("plugin", "TOKEN")
 
 
 def test_a_configuration_written_with_a_byte_order_mark_is_read(paper, monkeypatch, capsys):
