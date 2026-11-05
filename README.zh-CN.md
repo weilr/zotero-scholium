@@ -94,25 +94,25 @@
 
 ## 快速上手
 
-需要 Zotero 7 及以上并打开本地 API（设置 → 高级 →「允许此计算机上的其他应用程序与 Zotero 通讯」），以及 Python 3.9+ 和 PyMuPDF（`pip install pymupdf`）。
+需要 Zotero 7 及以上，以及 Python 3.9+ 和 PyMuPDF（`pip install pymupdf`）。
 
 ### 在 Zotero 里一键批注
 
 1. 安装 [Claude Code](https://claude.com/claude-code) 或 [Codex](https://github.com/openai/codex) 并登录。
-2. 为它安装技能：
-   ```bash
-   npx skills add weilr/zotero-scholium -g -y
-   ```
-   `npx` 随 Node.js 安装。没有 Node.js 时，可以在 Claude Code 里用 `/plugin` 安装技能（见下方“其他安装方式”），
-   也可以交给插件：代理找不到技能时，Scholium 区块会给出 **安装技能并重试**。
-3. 下载 [`scholium.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium.xpi)，在 Zotero 中安装：工具 → 插件 → ⚙ → 从文件安装插件。
-4. 选中一篇论文，打开 **Scholium** 区块，在 **批注** 页点 **批注这篇**。想提问时，在 **对话** 页写问题发送。
+2. 下载 [`scholium.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium.xpi)，在 Zotero 中安装：工具 → 插件 → ⚙ → 从文件安装插件。
+3. 选中一篇论文，打开 **Scholium** 区块，在 **批注** 页点 **批注这篇**。想提问时，在 **对话** 页写问题发送。
 
-缺了什么，Zotero 设置 → Scholium → **环境检查** 会列出来，并给出解决办法。
+第一次运行时，插件会询问是否打开 Zotero 的本地 API；代理没有技能时，会给出 **安装技能并重试**。缺了什么，Zotero 设置 → Scholium → **环境检查** 会列出来，并给出解决办法。
 
 ### 在代理对话里使用
 
-按上面的方式装好技能，然后直接说：
+先安装技能：
+
+```bash
+npx skills add weilr/zotero-scholium -g -y
+```
+
+`npx` 随 Node.js 安装；Claude Code 也可以用 `/plugin` 安装（见下方）。再打开 Zotero 的本地 API（设置 → 高级 →「允许此计算机上的其他应用程序与 Zotero 通讯」），然后直接说：
 
 ```
 给我 Zotero 里的《Direct Preference Optimization》做标注
@@ -136,7 +136,7 @@
 
 **更新：** `npx skills update zotero-scholium`，或 `/plugin update zotero-scholium@zotero-scholium`。插件通过 Zotero 的插件更新机制自动更新。
 
-**从 Scholium Bridge（0.1.9 及更早）升级：** Scholium Bridge 不会自行更新到 Scholium。按第 3 步安装 Scholium：它会移除 Scholium Bridge，并保留原有的设置和对话；Scholium Bridge 里正在进行的任务会停下，排队的消息不保留。
+**从 Scholium Bridge（0.1.9 及更早）升级：** Scholium Bridge 不会自行更新到 Scholium。按第 2 步安装 Scholium：它会移除 Scholium Bridge，并保留原有的设置和对话；Scholium Bridge 里正在进行的任务会停下，排队的消息不保留。
 
 </details>
 
