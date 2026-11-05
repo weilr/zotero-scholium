@@ -969,7 +969,7 @@ def test_an_update_hands_over_the_kind(facts):
 
 def test_the_annotation_tab(facts):
     a = facts["annotPage"]
-    assert "高亮重点句并附译文" in a["intro"]["text"] and "阅读笔记" in a["intro"]["text"]
+    assert "高亮重点句（外文论文附译文）" in a["intro"]["text"] and "阅读笔记" in a["intro"]["text"]
     assert a["intro"]["go"] == "批注这篇" and a["intro"]["sendShown"] is False
     assert a["intro"]["placeholder"] == "附加要求（可不填），例如：只批注第 3–5 页" and a["intro"]["confirmHidden"] is True
     d = a["during"]

@@ -1211,8 +1211,8 @@ def test_the_release_workflow_zips_every_top_level_entry_of_the_plugin():
 
 
 def test_the_annotation_tab_introduction_is_one_line(facts):
-    assert facts["intro"]["zh-CN"] == ["还没有批注这篇", "高亮重点句并附译文，加页边批注和阅读笔记。"]
-    assert facts["intro"]["en-US"][1] == "Highlights key sentences with translations, adds margin notes and a reading note."
+    assert facts["intro"]["zh-CN"] == ["还没有批注这篇", "高亮重点句（外文论文附译文），加页边批注和阅读笔记。"]
+    assert facts["intro"]["en-US"][1] == "Highlights key sentences (translated when the paper is in another language), adds margin notes and a reading note."
 
 
 def test_the_chip_shows_the_default_label_when_no_model_is_saved(facts):

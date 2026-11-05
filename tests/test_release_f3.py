@@ -437,20 +437,20 @@ def test_the_first_ask_of_a_reader_tab_focuses_the_message_box(facts):
 
 def test_the_annotations_tab_counts_the_papers_scholium_annotations(facts):
     zh, en = facts["annotated_zh-CN"], facts["annotated_en-US"]
-    assert zh["intro"] == ["这篇已有 3 条 Scholium 批注", "高亮重点句并附译文，加页边批注和阅读笔记。"]
+    assert zh["intro"] == ["这篇已有 3 条 Scholium 批注", "高亮重点句（外文论文附译文），加页边批注和阅读笔记。"]
     assert en["intro"] == ["This paper carries 3 Scholium annotations",
-                           "Highlights key sentences with translations, adds margin notes and a reading note."]
+                           "Highlights key sentences (translated when the paper is in another language), adds margin notes and a reading note."]
     assert zh["button"] == "重新批注" and en["button"] == "Annotate again"
     assert zh["sendShown"] is False, "no session to send words to"
     assert zh["asked"] == "重新批注会先删除这篇的 3 条 Scholium 批注（你自己的不动）。"
     # deleted: the introduction counts again
-    assert zh["afterDelete"] == {"intro": ["还没有批注这篇", "高亮重点句并附译文，加页边批注和阅读笔记。"], "button": "批注这篇",
+    assert zh["afterDelete"] == {"intro": ["还没有批注这篇", "高亮重点句（外文论文附译文），加页边批注和阅读笔记。"], "button": "批注这篇",
                                  "erased": ["E0", "E1", "E2"]}
     assert en["afterDelete"]["intro"][0] == "Not annotated yet" and en["afterDelete"]["button"] == "Annotate"
 
 
 def test_the_annotations_tab_names_the_other_agent_that_wrote_them(facts):
-    assert facts["otherAgent"] == {"intro": ["这篇已有 2 条 Scholium 批注", "高亮重点句并附译文，加页边批注和阅读笔记。",
+    assert facts["otherAgent"] == {"intro": ["这篇已有 2 条 Scholium 批注", "高亮重点句（外文论文附译文），加页边批注和阅读笔记。",
                                              "上次由 Claude Code 在 11月4日 写入"], "button": "重新批注"}
 
 

@@ -2696,6 +2696,9 @@ def config_problems(raw):
     for i, s in enumerate(raw.get("summaries") or []):
         if isinstance(s, dict):
             unknown(s, SUMMARY_KEYS, f" in summaries[{i}]")
+    note = raw.get("note_html")
+    if note is not None and not (isinstance(note, str) and "<" not in note and os.path.isfile(note)):
+        problems.append("note_html must be the path of an existing HTML file, not the HTML itself")
     return problems
 
 
