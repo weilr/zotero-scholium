@@ -1,5 +1,6 @@
 # build / packaging
 build/
+plugin/scholium/content/skill/
 dist/
 *.egg-info/
 __pycache__/

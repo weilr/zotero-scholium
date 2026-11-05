@@ -110,7 +110,8 @@ You need Zotero 7 or later with its local API turned on (Settings → Advanced �
    ```bash
    npx skills add weilr/zotero-scholium -g -y
    ```
-   `npx` comes with Node.js. Without it, install the skill from inside Claude Code with `/plugin` (see *Other ways* below).
+   `npx` comes with Node.js. Without it, install the skill from inside Claude Code with `/plugin` (see *Other ways* below),
+   or let the plugin do it: when the agent does not find the skill, the Scholium section offers **Install the skill and retry**.
 3. Download [`scholium.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium.xpi) and install it in Zotero: Tools → Plugins → ⚙ → Install Plugin From File.
 4. Select a paper, open the **Scholium** section and press **Annotate** on its **Annotations** tab. To ask about the paper, type the question on its **Chat** tab and send it.
 
