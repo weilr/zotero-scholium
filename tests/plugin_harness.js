@@ -479,7 +479,8 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                          isPDFAttachment: () => false, getAnnotations: () => { throw Error('not a file attachment with annotations'); } });
   [item1, item2, att1, att2, attachment('ATT3', 'ITEM1', []), html('HTML_ITEM1'), html('HTML_ITEM2'), ...childNotes.ITEM1]
     .forEach(i => items.set(i.id, i));
-  const store = new Map(Object.entries(prefs));
+  // Zotero's local API is on unless a test turns it off
+  const store = new Map(Object.entries(Object.assign({ 'httpServer.localAPI.enabled': true }, prefs)));
   const mainDoc = {
     bar: new El('hbox'),
     documentElement: new El('window'),

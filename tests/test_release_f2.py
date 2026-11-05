@@ -405,7 +405,7 @@ def test_extract_and_list_take_the_paper_from_paper_json(tmp_path, monkeypatch, 
 def test_codex_mcp_servers_are_named_without_reading_its_configuration(facts):
     q = facts["codexQuiet"]
     assert "config/read" not in q["first"] + q["second"]
-    assert q["first"][:4] == ["initialize", "initialized", "mcpServerStatus/list", "plugin/installed"]
+    assert q["first"][:5] == ["initialize", "initialized", "account/read", "mcpServerStatus/list", "plugin/installed"]
     assert q["listed"] == {"detail": "toolsAndAuthOnly"}
     assert q["config"] == q["again"] == {"mcp_servers": {"s": {"enabled": False}}}, "not Codex's own server nor a plugin's"
     assert "mcpServerStatus/list" not in q["second"], "listed once while Zotero runs"
