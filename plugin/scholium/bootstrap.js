@@ -558,8 +558,9 @@ var ScholiumRunner = {
   codexRefresh: null,       // the Codex server listing them after a run
   codexRefused: new Set(),  // the names a thread refused as servers of config.toml, in this session
   CODEX_LIST_MS: 10000,     // the longest a run waits for the servers' list, when Codex never listed them
+  CHECK_MS: 10000,          // the longest the setup check waits for a program's answer
   cites: null,              // { key, map } the sentences of the paper whose transcript is being drawn
-  settingsApi: null,          // { found(agent) } on Zotero.Scholium, for the settings page
+  settingsApi: null,          // { found(agent), setupCheck(onLine), fix(action) } on Zotero.Scholium, for the settings page
   panes: new Map(),         // item pane section body -> { doc, keys, list, state, buttons, the conversation shown, seen }
   AGENTS: ["claude", "codex"],
   models: {},               // agent -> [{ value, label, title, efforts }] as the agent reports them; none until it answered
@@ -608,6 +609,36 @@ var ScholiumRunner = {
       pymupdfMissing: zh ? "缺少 PyMuPDF，在终端运行 pip install -U pymupdf 后再试。" : "PyMuPDF is missing; run pip install -U pymupdf in a terminal, then try again.",
       noPython: zh ? "找不到 Python，安装 Python 3.9 或更高版本并运行 pip install -U pymupdf 后再试。"
                    : "Python was not found; install Python 3.9 or later and run pip install -U pymupdf, then try again.",
+      // the setup check of the settings page: each line's name, its sentence, and its button
+      checkLabel: id => ({ localApi: zh ? "本地 API" : "Local API", claude: "Claude Code", claudeSkill: zh ? "Claude Code 的技能" : "Claude Code's skill",
+                           codex: "Codex", codexSkill: zh ? "Codex 的技能" : "Codex's skill", python: "Python", pymupdf: "PyMuPDF" })[id] || id,
+      checkApiOn: zh ? "已打开，Scholium 通过它读取论文。" : "On; Scholium reads papers through it.",
+      checkApiOff: zh ? "已关闭，Scholium 读不到论文：点“打开”，或在 设置 → 高级 里勾选“允许此计算机上的其他应用程序与 Zotero 通讯”。"
+                      : "Off, so Scholium cannot read papers: press Turn on, or tick “Allow other applications on this computer to communicate with Zotero” in Settings → Advanced.",
+      checkTurnOn: zh ? "打开" : "Turn on",
+      checkInstall: zh ? "安装" : "Install",
+      checkNoProgram: agent => zh ? `未找到：安装 ${this.agentName(agent)}，或在上方指定它的程序。` : `Not found: install ${this.agentName(agent)}, or set its program above.`,
+      checkProgramGone: zh ? "上方指定的程序不存在。" : "The program set above does not exist.",
+      checkSignedIn: zh ? "已登录。" : "Signed in.",
+      checkSignedOut: agent => agent === "codex"
+        ? (zh ? "还没有登录：在终端运行 codex login。" : "Not signed in: run codex login in a terminal.")
+        : (zh ? "还没有登录：在终端运行 claude，按提示登录。" : "Not signed in: run claude in a terminal and sign in."),
+      checkSignInUnknown: why => zh ? `登录状态未知（${why}）。` : `Sign-in unknown (${why}).`,
+      checkAuthSilent: zh ? "claude auth status 没有回答" : "claude auth status gave no answer",
+      checkCodexFailed: msg => zh ? `出错：${msg}` : `Failed: ${msg}`,
+      checkNoAnswer: s => zh ? `${s} 秒内没有回答` : `no answer in ${s} s`,
+      checkSkillAt: dir => zh ? `已找到：${dir}` : `Found: ${dir}`,
+      checkSkillMissing: zh ? "未找到：点“安装”，或在终端运行 npx skills add weilr/zotero-scholium -g -y。"
+                            : "Not found: press Install, or run npx skills add weilr/zotero-scholium -g -y in a terminal.",
+      checkOnPath: zh ? "Zotero 的 PATH 上找到的这一个，智能体的终端可能用另一个" : "the one on Zotero's PATH; an agent's shell may use another",
+      checkPython: (v, path) => zh ? `${v}：${path}（${this.text("checkOnPath")}）` : `${v} at ${path} (${this.text("checkOnPath")})`,
+      checkPythonOld: (v, path) => zh ? `${v} 太旧，需要 3.9 或更高版本：${path}（${this.text("checkOnPath")}）`
+                                      : `${v} is too old; 3.9 or later is needed: ${path} (${this.text("checkOnPath")})`,
+      checkPythonSilent: path => zh ? `${path} 没有报出版本（${this.text("checkOnPath")}）` : `${path} did not give its version (${this.text("checkOnPath")})`,
+      checkNoPython: zh ? "Zotero 的 PATH 上找不到 Python：安装 Python 3.9 或更高版本，再运行 pip install -U pymupdf（智能体的终端可能有另一个 Python）。"
+                        : "No Python on Zotero's PATH: install Python 3.9 or later, then run pip install -U pymupdf (an agent's shell may have another Python).",
+      checkPymupdf: v => zh ? `已安装 ${v}` : `Installed: ${v}`,
+      checkPymupdfMissing: zh ? "未安装：在终端运行 pip install -U pymupdf。" : "Not installed: run pip install -U pymupdf in a terminal.",
       redoTitle: zh ? "重新批注" : "Annotate again",
       redo: (n, notes) => zh
         ? `这篇论文已有 ${n} 条 Scholium 批注。重新批注会先删除它们${notes ? `，并把 ${notes} 篇阅读笔记移到回收站` : ""}，你自己的批注和笔记不受影响。继续吗？`
@@ -1070,6 +1101,178 @@ var ScholiumRunner = {
 
   // the program of an agent the plugin finds by itself, whatever the settings page names: its grey text there
   foundProgram(agent) { return agent === "codex" ? this.autoCodex() : this.autoClaude(); },
+
+  // the setup check of the settings page: a line to onLine as each check ends, { id, state: "ok" | "bad" | "unknown",
+  // label, text, action? }, where an action ({ kind: "localApi" } or { kind: "skill", agent }, with its button's label)
+  // goes to setupFix. Returns the lines
+  async setupCheck(onLine) {
+    const lines = [];
+    const say = (id, state, text, action = null) => {
+      const line = { id, state, label: this.text("checkLabel", id), text };
+      if (action) line.action = Object.assign({ label: this.text(action.kind === "localApi" ? "checkTurnOn" : "checkInstall") }, action);
+      lines.push(line);
+      try { if (onLine) onLine(line); } catch (e) { this.log("setup check line not shown: " + e); }
+    };
+    if (Zotero.Prefs.get("httpServer.localAPI.enabled")) say("localApi", "ok", this.text("checkApiOn"));
+    else say("localApi", "bad", this.text("checkApiOff"), { kind: "localApi" });
+    for (const check of [() => this.checkClaude(say), () => this.checkCodex(say), () => this.checkPython(say)]) {
+      try { await check(); } catch (e) { this.log("setup check failed: " + e); }
+    }
+    return lines;
+  },
+
+  // a setup check's action: Zotero's local API turned on, or the skill the plugin carries installed (installSkill); the
+  // words of what kept it from being done, or null once it is done
+  async setupFix(action) {
+    if (action && action.kind === "localApi") {
+      Zotero.Prefs.set("httpServer.localAPI.enabled", true);
+      return null;
+    }
+    if (action && action.kind === "skill") {
+      let outcome;
+      try { outcome = await this.installSkill(action.agent === "codex" ? "codex" : "claude"); }
+      catch (e) {
+        this.log("skill not installed: " + e);
+        return this.text("skillFailed", String((e && e.message) || e));
+      }
+      return outcome === "skillInstalled" || outcome === "skillThere" ? null : this.text(outcome);
+    }
+    return null;
+  },
+
+  // a short command's standard output; null when it did not start, failed, or gave no answer in CHECK_MS, after which it is
+  // killed
+  async checkOutput(command, args) {
+    let proc;
+    try { proc = await this.subprocess().call({ command, arguments: args, workdir: Zotero.DataDirectory.dir }); }
+    catch (e) {
+      this.log("setup check: not started: " + e);
+      return null;
+    }
+    let late = false;
+    const timer = setTimeout(() => { late = true; try { proc.kill(); } catch (e) {} }, this.CHECK_MS);
+    let out = "";
+    try {
+      try { await proc.stdin.close(); } catch (e) {}
+      for (;;) { const s = await proc.stdout.readString(); if (!s) break; out += s; }
+      await proc.wait();
+    } catch (e) {
+      this.log("setup check: no answer: " + e);
+      return null;
+    } finally { clearTimeout(timer); }
+    return late ? null : out;
+  },
+
+  // Claude Code: the program a run uses and whether it is signed in (only loggedIn of `claude auth status` is read), then
+  // its skill
+  async checkClaude(say) {
+    const claude = await this.findClaude();
+    if (!claude) return say("claude", "bad", this.text(this.getPref("claudePath") ? "checkProgramGone" : "checkNoProgram", "claude"));
+    const out = await this.checkOutput(claude, ["auth", "status"]);
+    let signedIn = null;
+    try {
+      const v = JSON.parse(/\{[\s\S]*\}/.exec(String(out || ""))[0]).loggedIn;
+      if (typeof v === "boolean") signedIn = v;
+    } catch (e) {}
+    if (signedIn === null) say("claude", "unknown", this.text("checkSignInUnknown", this.text("checkAuthSilent")));
+    else if (signedIn) say("claude", "ok", this.text("checkSignedIn"));
+    else say("claude", "bad", this.text("checkSignedOut", "claude"));
+    const dir = await this.claudeSkillDir();
+    if (dir) say("claudeSkill", "ok", this.text("checkSkillAt", dir));
+    else say("claudeSkill", "bad", this.text("checkSkillMissing"), { kind: "skill", agent: "claude" });
+  },
+
+  // the folder of the zotero-scholium skill Claude Code finds: in its skills folder, in the data directory's project skills
+  // (a run's working directory), or in a plugin of its cache (plugins/cache/<marketplace>/<plugin>/<version>/skills); null
+  // when there is none
+  async claudeSkillDir() {
+    const user = this.skillsDir("claude");
+    const dirs = (user ? [PathUtils.join(user, "zotero-scholium")] : [])
+      .concat([PathUtils.join(Zotero.DataDirectory.dir, ".claude", "skills", "zotero-scholium")]);
+    for (const dir of dirs) if (await this.exists(PathUtils.join(dir, "SKILL.md"))) return dir;
+    if (!user) return null;
+    let level = [PathUtils.join(PathUtils.parent(user), "plugins", "cache")];
+    for (let depth = 0; depth < 3 && level.length; depth++) {
+      const next = [];
+      for (const dir of level) { try { next.push(...await IOUtils.getChildren(dir)); } catch (e) {} }
+      level = next;
+    }
+    for (const dir of level) {
+      const skill = PathUtils.join(dir, "skills", "zotero-scholium");
+      if (await this.exists(PathUtils.join(skill, "SKILL.md"))) return skill;
+    }
+    return null;
+  },
+
+  // Codex: the program a run uses, through `codex app-server` started as a run starts it: whether it is signed in
+  // (account/read, by codexNoAccount) and whether it finds the skill (codexSkill); each answer is waited for CHECK_MS, and
+  // the server is closed
+  async checkCodex(say) {
+    const codex = await this.findCodex();
+    if (!codex) return say("codex", "bad", this.text(this.getPref("codexPath") ? "checkProgramGone" : "checkNoProgram", "codex"));
+    const late = this.text("checkNoAnswer", Math.round(this.CHECK_MS / 1000));
+    const first = e => String((e && e.message) || e).trim().split("\n")[0];
+    const cwd = this.codexRoots()[0];
+    let rpc = null, said = false;
+    try {
+      await IOUtils.makeDirectory(cwd, { createAncestors: true, ignoreExisting: true });
+      rpc = await this.codexServer(codex, cwd);
+      rpc.done.catch(() => {});
+      await this.within(this.codexHello(rpc), this.CHECK_MS, late);
+      let account = null, why = "";
+      try { account = await this.within(rpc.request("account/read", {}), this.CHECK_MS, late); }
+      catch (e) {
+        if (!e || !e.refused) throw e;
+        why = first(e);
+      }
+      said = true;
+      if (why) say("codex", "unknown", this.text("checkSignInUnknown", why));
+      else if (this.codexNoAccount(account)) say("codex", "bad", this.text("checkSignedOut", "codex"));
+      else say("codex", "ok", this.text("checkSignedIn"));
+      const skill = await this.within(this.codexSkill(rpc, cwd), this.CHECK_MS, late);
+      if (skill) say("codexSkill", "ok", this.text("checkSkillAt", PathUtils.parent(skill.path)));
+      else say("codexSkill", "bad", this.text("checkSkillMissing"), { kind: "skill", agent: "codex" });
+    } catch (e) {
+      this.log("setup check of Codex: " + e);
+      // a server that ended: the first line it wrote to stderr (a config.toml error, say), else the error's first line
+      const wrote = rpc && !(e && e.refused) && first(e) !== late ? rpc.stderr.trim().split("\n")[0].trim() : "";
+      if (said) say("codexSkill", "bad", first(e));
+      else say("codex", "bad", this.text("checkCodexFailed", wrote ? this.text("codexExited", wrote) : first(e)));
+    } finally {
+      if (rpc) rpc.close();
+    }
+  },
+
+  // Python as Zotero's PATH finds it: python.exe on Windows, else python3 or python; a WindowsApps folder (the Microsoft
+  // Store's alias) is passed over. null when there is none
+  async pathPython() {
+    const win = Services.appinfo.OS === "WINNT";
+    const dirs = this.env("PATH").split(win ? ";" : ":").map(d => d.trim().replace(/^"(.*)"$/, "$1"))
+      .filter(d => d && !/[\\/]WindowsApps[\\/]?$/i.test(d));
+    for (const name of win ? ["python.exe"] : ["python3", "python"]) {
+      for (const dir of dirs) {
+        let path;
+        try { path = PathUtils.join(dir, name); } catch (e) { continue; }   // a relative folder
+        if (await this.exists(path)) return path;
+      }
+    }
+    return null;
+  },
+
+  // that Python's version, and for 3.9 or later its PyMuPDF (imported as fitz before PyMuPDF 1.24)
+  async checkPython(say) {
+    const python = await this.pathPython();
+    if (!python) return say("python", "bad", this.text("checkNoPython"));
+    const out = await this.checkOutput(python, ["-c", "import sys; print(sys.version.split()[0]); import importlib.util as u; "
+      + "m = __import__('pymupdf' if u.find_spec('pymupdf') else 'fitz'); print(m.VersionBind)"]);
+    const [version, pymupdf] = String(out || "").split(/\r?\n/).map(s => s.trim());
+    const v = /^(\d+)\.(\d+)/.exec(version || "");
+    if (!v) return say("python", "unknown", this.text("checkPythonSilent", python));
+    if (Number(v[1]) < 3 || (Number(v[1]) === 3 && Number(v[2]) < 9)) return say("python", "bad", this.text("checkPythonOld", version, python));
+    say("python", "ok", this.text("checkPython", version, python));
+    if (/^\d+\.\d+/.test(pymupdf || "")) say("pymupdf", "ok", this.text("checkPymupdf", pymupdf));
+    else say("pymupdf", "bad", this.text("checkPymupdfMissing"));
+  },
 
   // "codex-cli 0.160.0" -> [0, 160, 0, ""]; null when it does not start or answer
   async codexVersion(path) {
@@ -6901,10 +7104,10 @@ var ScholiumRunner = {
     }
   },
 
-  // a promise given up after ms
-  within(promise, ms) {
+  // a promise given up after ms, with the message given or its own
+  within(promise, ms, message = "") {
     let timer = null;
-    const late = new Promise((resolve, reject) => { timer = setTimeout(() => reject(new Error("no answer in " + ms + " ms")), ms); });
+    const late = new Promise((resolve, reject) => { timer = setTimeout(() => reject(new Error(message || "no answer in " + ms + " ms")), ms); });
     return Promise.race([promise, late]).finally(() => clearTimeout(timer));
   },
 
@@ -7143,10 +7346,12 @@ var ScholiumRunner = {
   // Codex has no account although its provider needs one; a server that cannot say counts as signed in. Only whether
   // there is an account is looked at
   async codexSignedOut(rpc) {
-    try {
-      const r = await rpc.request("account/read", {});
-      return !!r && r.account === null && r.requiresOpenaiAuth === true;
-    } catch (e) { return false; }
+    try { return this.codexNoAccount(await rpc.request("account/read", {})); } catch (e) { return false; }
+  },
+
+  // account/read's answer: no account although the provider needs one
+  codexNoAccount(r) {
+    return !!r && r.account === null && r.requiresOpenaiAuth === true;
   },
 
   // stops the run under way; one still starting, before its agent's process, stops at its next step (run)
@@ -7314,8 +7519,8 @@ var ScholiumRunner = {
                                         image: this.chrome + "icon20.svg", scripts: [this.rootURI + "settings.js"] })
         .then(id => { this.prefPaneID = id; }, e => this.log("settings page not registered: " + e));
     }
-    // the settings page asks what the plugin finds by itself, for the grey text of the program boxes
-    this.settingsApi = { found: agent => this.foundProgram(agent) };
+    // the settings page asks what the plugin finds by itself, for the grey text of the program boxes, and runs the setup check
+    this.settingsApi = { found: agent => this.foundProgram(agent), setupCheck: onLine => this.setupCheck(onLine), fix: action => this.setupFix(action) };
     Zotero.Scholium = this.settingsApi;
     for (const win of this.windows()) this.addToWindow(win);
     if (!update) {

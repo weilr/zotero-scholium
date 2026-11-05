@@ -26,3 +26,7 @@ scholium-settings-program-desc = Leave empty to find it automatically
 scholium-settings-not-found = Not found
 scholium-settings-browse =
     .label = Browse…
+scholium-check = Setup check
+scholium-check-desc = Checks what Scholium needs: Zotero's local API, Claude Code and Codex with the skill, Python and PyMuPDF
+scholium-check-run =
+    .label = Check

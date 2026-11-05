@@ -108,6 +108,8 @@
 3. 下载 [`scholium.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium.xpi)，在 Zotero 中安装：工具 → 插件 → ⚙ → 从文件安装插件。
 4. 选中一篇论文，打开 **Scholium** 区块，在 **批注** 页点 **批注这篇**。想提问时，在 **对话** 页写问题发送。
 
+缺了什么，Zotero 设置 → Scholium → **环境检查** 会列出来，并给出解决办法。
+
 ### 在代理对话里使用
 
 按上面的方式装好技能，然后直接说：
