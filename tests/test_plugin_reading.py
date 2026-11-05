@@ -55,7 +55,7 @@ SCENARIOS = r"""
     h.runner.start('x');
     const [button] = h.selection(PASSAGE, 3, '4');
     button.click(); await settle(20);
-    const waiting = h.runner.pendingQuotes.get('ATT1') || null;
+    const waiting = (h.runner.pendingQuotes.get('ATT1') || {}).quote || null;
     const p = await h.pane(h.item1);
     await settle(40);
     const pane = p.pane();
@@ -203,7 +203,7 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1); await settle(40);
     const pane = p.pane();
     pane.tabAnnotate.click(); await settle(10);
-    h.runner.pendingQuotes.set('ATT1', { text: 'T', page: '9' });
+    h.runner.pendingQuotes.set('ATT1', { quote: { text: 'T', page: '9' }, at: Date.now() });
     h.log.sections[0].onRender({ doc: h.paneDoc, body: p.body, item: h.item1 }); await settle(10);
     facts.pendingTab = [p.pane().tab, p.pane().quote];
   }
@@ -254,7 +254,7 @@ SCENARIOS = r"""
                        scrollToPane: async id => { steps.push([id, section.open]); } };
     h.paneDoc.getElementById = id => (id === 'TAB2-context' ? details2 : null);
     h.selection('Another passage.', 0, '1', 'TAB2')[0].click(); await settle(30);
-    const waits = [lib.pane().quote, h.runner.pendingQuotes.get('ATT1') && h.runner.pendingQuotes.get('ATT1').page];
+    const waits = [lib.pane().quote, h.runner.pendingQuotes.get('ATT1') && h.runner.pendingQuotes.get('ATT1').quote.page];
     const rd2 = await h.pane(h.item1, { closest: inReader('TAB2') }); await settle(20);
     facts.readerPane = { own, waits, steps, drawn: rd2.pane().quote && rd2.pane().quote.page, library: lib.pane().quote };
   }

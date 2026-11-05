@@ -3046,7 +3046,7 @@ def test_delete_removes_only_the_tools_annotations_and_notes_after_a_confirmatio
     assert facts["deleteNothingLeft"] == {"removed": 0, "alerts": ["这个 PDF 没有 Scholium 批注，这篇论文也没有 Scholium 阅读笔记。"]}
     n = facts["deleteNoteOnly"]
     assert n["removed"] == 1 and n["trashed"] == ["N0"] and n["erased"] == []
-    assert n["confirms"] == ["This deletes 1 reading note of the paper, tagged zotero-scholium. The notes go to the trash, where they "
+    assert n["confirms"] == ["This deletes 1 reading note of the paper, tagged zotero-scholium. The note goes to the trash, where it "
                              "can be restored. Your own annotations and notes are kept. The deletion syncs. Continue?"]
     assert n["notice"] == ["1 note moved to the trash."]
     assert facts["deleteRefused"] == {"removed": 0, "erased": [], "remaining": 1}
@@ -3503,7 +3503,7 @@ def test_codex_models_come_from_its_app_server(facts):
     assert m["hello"]["clientInfo"]["name"] == "scholium" and m["secretKept"] is False and m["calls"] == 1
     assert m["models"] == ["", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna", "gpt-5.5"] and m["model"] == ""
     assert m["labels"] == ["Codex 默认", "GPT-6.1-Sol", "GPT-6-Astra", "GPT-6-Luna", "GPT-5.5"], "no model named before a thread ran it"
-    assert m["efforts"] == LEVELS and m["effort"] == "medium"
+    assert m["efforts"] == ["low", "medium", "high", "xhigh"] and m["effort"] == "medium", "Codex has no max"
     assert m["legacy"] == {"efforts": ["low", "medium", "high", "xhigh"], "effort": "medium"}
     assert m["chosen"] == {"model": "gpt-6-luna", "effort": "high", "claudeModel": None, "claudeEffort": None, "otherModel": "gpt-6-luna"}
     assert m["back"] == {"model": "opus", "effort": "medium", "labels": ["Claude Code 默认（Fable 5.1）", "Opus 5.5"]}
