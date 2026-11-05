@@ -6,6 +6,8 @@
 
 - While an annotation runs, the Annotations tab no longer lists the six steps, and the state line shows only its dot,
   as for a question; the step and the time are in its tooltip.
+- **Annotate again** deletes the paper's Scholium annotations and moves its Scholium reading notes to the trash as soon
+  as it is confirmed, before the run starts; the confirmation says so.
 
 ### Fixed
 

@@ -422,7 +422,7 @@ def test_the_annotations_tab_counts_the_papers_scholium_annotations(facts):
                            "Highlights key sentences with translations, adds margin notes and a reading note."]
     assert zh["button"] == "重新批注" and en["button"] == "Annotate again"
     assert zh["sendShown"] is False, "no session to send words to"
-    assert zh["asked"] == "重新批注会替换这篇的 3 条 Scholium 批注（你自己的不动）。"
+    assert zh["asked"] == "重新批注会先删除这篇的 3 条 Scholium 批注（你自己的不动）。"
     # deleted: the introduction counts again
     assert zh["afterDelete"] == {"intro": ["还没有批注这篇", "高亮重点句并附译文，加页边批注和阅读笔记。"], "button": "批注这篇",
                                  "erased": ["E0", "E1", "E2"]}

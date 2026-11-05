@@ -918,7 +918,7 @@ SCENARIOS = r"""
   {
     const { runner, log, item1 } = harness({ existing: [['zotero-scholium'], ['mine']], confirm: true, locale: 'en-US' });
     await runner.annotate([item1]); await settle(300);
-    facts.redo = { calls: log.calls.length, prompt: log.stdin[0] };
+    facts.redo = { calls: log.calls.length, prompt: log.stdin[0], erased: log.erased.slice(), confirms: log.confirms };
   }
 
   // failure: is_error result, non-zero exit
@@ -1021,7 +1021,10 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await h.runner.annotate([h.item1]);
     await settle(60);
-    facts.deleteWhileRunning = { removed: await h.runner.removeAnnotations([h.item1]), erased: h.log.erased, trashed: h.log.trashed, alerts: h.log.alerts,
+    h.att1.getAnnotations = () => [h.ann('W0', 'highlight', '#ffd400')];   // written by the run
+    const before = [h.log.erased.length, h.log.trashed.length];
+    facts.deleteWhileRunning = { removed: await h.runner.removeAnnotations([h.item1]), erased: h.log.erased.slice(before[0]),
+                                 trashed: h.log.trashed.slice(before[1]), alerts: h.log.alerts,
                                  paneButtons: { annotate: p.view().annotateDisabled, remove: p.view().removeDisabled } };
     h.log.calls[0].proc.kill();
     await settle(200);
@@ -1911,13 +1914,14 @@ SCENARIOS = r"""
   // is told when another conversation rewrote them since, or that they are gone
   {
     const answered = [SCRIPT[0], said('讲的是方法。'), ev({ type: 'result', subtype: 'success', is_error: false, result: '讲的是方法。', session_id: 'S1' })];
-    const h = harness({ existing: [['zotero-scholium'], ['zotero-scholium']], prefs: { 'extensions.scholium.agent': 'codex' },
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' },
                         codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW, CODEX_FOLLOW, CODEX_FOLLOW, CODEX_FOLLOW] }, scripts: [answered],
                         logs: { '/data/tmp/scholium/c.json': '{}' } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
     await h.runner.annotate([h.item1]); await settle(500);   // Codex, conversation A
+    h.att1.getAnnotations = () => [h.ann('E0', 'highlight', '#ffd400'), h.ann('E1', 'highlight', '#ffd400')];   // what it wrote
     p.pane().agent.change('claude');
     await settle(100);
     await h.runner.send(h.att1, '第 3 页那条讲了什么？'); await settle(400);   // Claude Code, conversation B
@@ -2991,8 +2995,12 @@ def test_notices_put_each_part_of_the_last_line_on_its_own_line(facts):
 def test_existing_annotations_need_confirmation(facts):
     assert facts["refused"]["calls"] == 0
     assert facts["refused"]["confirms"][0].startswith("这篇论文已有 2 条 Scholium 批注。")
-    assert facts["redo"]["calls"] == 1
-    assert "already carries 1 annotations of this tool; the user confirmed a complete redo (cleanup: true in the configuration)" in facts["redo"]["prompt"]
+    r = facts["redo"]
+    assert r["calls"] == 1
+    assert r["confirms"] == ["This paper already carries 1 Scholium annotation. Annotating again first deletes it; your own annotations and "
+                             "notes are not affected. Continue?"]
+    assert r["erased"] == ["E0"], "the confirmed redo deletes the Scholium annotation before the run, not the user's"
+    assert "The paper carries no annotations of this tool yet." in r["prompt"]
 
 
 def test_failure_and_cancel_are_reported(facts):
