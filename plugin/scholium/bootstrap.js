@@ -1661,11 +1661,11 @@ var ScholiumRunner = {
   registerPane(pluginID) {
     const manager = Zotero.ItemPaneManager;
     if (!manager || typeof manager.registerSection !== "function") return;
-    // l10nArgs: Zotero 7 writes "undefined" as the arguments without them
+    // l10nArgs: Zotero 7 writes "undefined" as the arguments without them; the icons have a lighter violet on a dark theme
     this.paneID = manager.registerSection({
       paneID: "scholium", pluginID,
-      header: { l10nID: "scholium-section", l10nArgs: "{}", icon: this.chrome + "icon16.svg" },
-      sidenav: { l10nID: "scholium-sidenav", l10nArgs: "{}", icon: this.chrome + "icon20.svg" },
+      header: { l10nID: "scholium-section", l10nArgs: "{}", icon: this.chrome + "icon16.svg", darkIcon: this.chrome + "icon16-dark.svg" },
+      sidenav: { l10nID: "scholium-sidenav", l10nArgs: "{}", icon: this.chrome + "icon20.svg", darkIcon: this.chrome + "icon20-dark.svg" },
       onItemChange: ({ item, setEnabled }) => { setEnabled(this.paneKeys(item).length > 0); },
       onRender: ({ doc, body, item }) => { this.renderPane(doc, body, item); },
       onAsyncRender: ({ body }) => this.loadHistory(body),

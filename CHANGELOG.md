@@ -4,6 +4,9 @@
 
 ### Changed
 
+- A new icon: a page with a note over its corner, drawn for 16 and 20 px in the style of Zotero's item-pane icons, in a
+  lighter violet on a dark theme; it shows in the Scholium section's header, the side navigation and the settings, and
+  in colour in Zotero's Plugins list, which showed the default icon before.
 - While an annotation runs, the Annotations tab no longer lists the six steps, and the state line shows only its dot,
   as for a question; the step and the time are in its tooltip.
 - **Annotate again** deletes the paper's Scholium annotations and moves its Scholium reading notes to the trash as soon
