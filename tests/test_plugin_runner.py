@@ -2875,6 +2875,10 @@ def test_section_is_styled_by_its_stylesheet(facts):
     assert "padding: 0 4px" in rules[".scholium-queue .scholium-undo"] and "padding: 2px 4px" in rules[".scholium-queued"], \
         "the queue's Undo strip starts where its rows do"
     assert "text-overflow: ellipsis" in rules[".scholium-history-title"] and "overflow: auto" in rules[".scholium-popover.history"]
+    assert "box-sizing: border-box" in rules[".scholium-popover"], "a layer's max-width (the pane's) includes its padding"
+    assert "min-width: 240px" in rules[".scholium-popover.settings"]
+    note = rules[".scholium-popover.settings .scholium-note"]
+    assert "width: 0" in note and "min-width: 100%" in note, "the note does not widen the settings layer and its selects"
 
 
 def test_transcript_box_has_its_own_look_and_no_drag(facts):
