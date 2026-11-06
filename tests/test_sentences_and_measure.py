@@ -314,15 +314,82 @@ def test_a_lone_number_or_letter_inside_the_text_is_kept(tmp_path):
     assert "005" not in text and "020" not in text, "a column of line numbers is dropped"
 
 
-def test_extract_stops_on_a_pdf_without_text(tmp_path):
+def _stopped(capsys, argv):
+    """extract's exit code and its JSON output."""
+    with pytest.raises(SystemExit) as stop:
+        cli.extract_main(argv)
+    return stop.value.code, json.loads(capsys.readouterr().out)
+
+
+def test_extract_stops_on_a_pdf_without_text(tmp_path, capsys):
     fp = str(tmp_path / "scan.pdf")
     doc = pymupdf.open()
     page = doc.new_page(width=612, height=792)
     page.draw_rect(pymupdf.Rect(72, 72, 540, 700), fill=(0.9, 0.9, 0.9))
     doc.save(fp); doc.close()
     js = tmp_path / "sentences.json"
-    with pytest.raises(SystemExit) as stop:
-        cli.extract_main(["--pdf", fp, "--sentences", str(js), "--out", str(tmp_path / "sentences.txt")])
-    assert "no text layer" in str(stop.value) and not js.exists()
-    with pytest.raises(SystemExit):
-        cli.extract_main(["--pdf", fp])
+    code, out = _stopped(capsys, ["--pdf", fp, "--sentences", str(js), "--out", str(tmp_path / "sentences.txt")])
+    assert code == cli.NO_TEXT_EXIT == 3 and out["error"] == cli.NO_TEXT_LAYER and not js.exists()
+    assert _stopped(capsys, ["--pdf", fp])[0] == 3
+
+
+def _scan(path, pages, text_pages=(), footer=None, figure=False):
+    """A PDF of page images made here (a grey pixmap over the page), with pages of text where text_pages says, an
+    optional footer line on the image pages, or one page with a figure in place of the scans."""
+    doc = pymupdf.open()
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 120, 160), False)
+    pix.clear_with(220)
+    body = ("We study permutation invariance in learned set functions and show that a simple pooling layer suffices. "
+            "The model is trained for twelve epochs on three datasets and compared with two baselines. ") * 3
+    for p in range(pages):
+        page = doc.new_page(width=612, height=792)
+        if p in text_pages or (figure and p != 1):
+            page.insert_textbox(pymupdf.Rect(72, 72, 540, 700), body, fontsize=10)
+            continue
+        if figure:
+            page.insert_image(pymupdf.Rect(72, 72, 540, 600), pixmap=pix)
+            page.insert_text((72, 640), "Figure 2: Results.", fontsize=9)
+            continue
+        page.insert_image(page.rect, pixmap=pix)
+        if footer:
+            page.insert_text((72, 780), footer, fontsize=7)
+    doc.save(path); doc.close()
+
+
+def test_extract_stops_on_a_scan_without_ocr(tmp_path, capsys):
+    fp = str(tmp_path / "scan.pdf")
+    _scan(fp, 4)
+    js = tmp_path / "sentences.json"
+    code, out = _stopped(capsys, ["--pdf", fp, "--sentences", str(js), "--out", str(tmp_path / "sentences.txt")])
+    assert code == 3 and out == {"error": cli.NO_TEXT_LAYER, "pages": 4, "scanned_pages": 4} and not js.exists()
+    assert "run OCR first (e.g. ocrmypdf, or Acrobat's Recognize Text), then annotate again" in out["error"]
+    assert _stopped(capsys, ["--pdf", fp])[0] == 3, "the plain text too"
+    assert _stopped(capsys, ["--pdf", fp, "--pages", "1"])[0] == 3, "whatever the pages asked for"
+
+
+def test_a_scan_with_a_cover_page_or_a_footer_is_a_scan(tmp_path, capsys):
+    cover = str(tmp_path / "cover.pdf")
+    _scan(cover, 4, text_pages=(0,))
+    assert _stopped(capsys, ["--pdf", cover])[1]["scanned_pages"] == 3
+    footer = str(tmp_path / "footer.pdf")
+    _scan(footer, 3, footer="Downloaded from https://example.org on 12 March 2023")
+    assert _stopped(capsys, ["--pdf", footer])[1]["scanned_pages"] == 3
+
+
+def test_a_paper_with_a_figure_page_is_no_scan(tmp_path, capsys):
+    fp = str(tmp_path / "figure.pdf")
+    _scan(fp, 3, figure=True)
+    js = tmp_path / "sentences.json"
+    assert cli.extract_main(["--pdf", fp, "--sentences", str(js), "--out", str(tmp_path / "sentences.txt")]) == 0
+    assert js.exists() and cli.scanned_pages(fp) == (3, 0)
+    half = str(tmp_path / "half.pdf")
+    _scan(half, 2, text_pages=(0,))
+    assert cli.scanned_pages(half) == (2, 1)
+    assert cli.extract_main(["--pdf", half, "--out", str(tmp_path / "half.txt")]) == 0, "half the pages scanned: not most"
+    ocr = str(tmp_path / "ocr.pdf")   # a scan with OCR's invisible text over its page images
+    _scan(ocr, 2)
+    doc = pymupdf.open(ocr)
+    for page in doc:
+        page.insert_textbox(pymupdf.Rect(72, 72, 540, 700), "Recognized text of the scanned page, as OCR leaves it. " * 6, fontsize=10, render_mode=3)
+    doc.saveIncr(); doc.close()
+    assert cli.scanned_pages(ocr) == (2, 0)

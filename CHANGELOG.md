@@ -16,6 +16,9 @@
   fault.
 - **Copy** in the setup check puts its lines on the clipboard as plain text, with the versions of Scholium and Zotero
   and the operating system, for a bug report.
+- `extract` stops on a scanned PDF without a text layer (most pages an image with almost no text) with exit code 3 and
+  a JSON `error` that says to run OCR first; the skill stops there and passes the message on, and an annotation that
+  wrote nothing says so on its card.
 
 ### Changed
 

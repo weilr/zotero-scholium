@@ -45,6 +45,7 @@ scholium.py status <ITEM_KEY>                # the paper's current state
 scholium.py extract --pdf <pdf> --sentences <out_dir>/sentences.json --out <out_dir>/sentences.txt
 ```
 When a launching prompt names the paper as a JSON file (`paper.json`), pass that file as `--config <file>` in place of `--pdf <pdf>`, and do not edit it: write your configuration to a file of its own.
+If `extract` exits with code 3 (a scan without text), stop and give the user its `error` message.
 For a whole-paper task, read `sentences.txt` in full, appendices included; for a selected scope, read that scope with enough context. It contains page markers, headings and numbered sentences grouped by paragraph; headers, footers, bibliography and paper checklist are removed. The command prints the file's length; when one read cannot hold it, issue reads of consecutive line ranges together in one response. Do not also read the PDF or full-text cache.
 
 Extraction creates output directories and binds `sentences.json` to the PDF's SHA-256. Re-extract old caches without a fingerprint, or after replacing the PDF. If an id is reported as ambiguous, check the page's matching passages and set `occurrence` explicitly; do not guess a position.

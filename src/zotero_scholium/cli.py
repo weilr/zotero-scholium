@@ -40,6 +40,9 @@ except ImportError:   # PyMuPDF before 1.24 is imported as fitz
         pymupdf = None
 
 PYMUPDF_MISSING = "PyMuPDF is not installed; run the script with uv run, or run: pip install -U pymupdf"
+# extract's error and exit code for a PDF without a text layer (scanned_pages)
+NO_TEXT_LAYER = "the PDF has no text layer (a scanned document); run OCR first (e.g. ocrmypdf, or Acrobat's Recognize Text), then annotate again"
+NO_TEXT_EXIT = 3
 
 __version__ = "0.2.1"
 
@@ -1598,6 +1601,33 @@ def _unmatched_ids(pg, ids, recs):
     return f"the text of sentence {ids[0]} is not found on the page as extracted; use page and text"
 
 
+SCAN_TEXT_CHARS = 100   # a page with fewer characters of text than this under an image over half of it is a scanned page
+
+
+def scanned_pages(pdf_path):
+    """(pages, scanned): the PDF's number of pages and how many of them are scanned: an image over at least half of the
+    page with fewer than SCAN_TEXT_CHARS characters of text."""
+    doc = pymupdf.open(pdf_path)
+    try:
+        scanned = 0
+        for page in doc:
+            if len("".join(page.get_text("text").split())) >= SCAN_TEXT_CHARS:
+                continue
+            area = abs(page.rect) or 1
+            covered = max((abs(pymupdf.Rect(i["bbox"]) & page.rect) for i in page.get_image_info()), default=0)
+            if covered >= area / 2:
+                scanned += 1
+        return len(doc), scanned
+    finally:
+        doc.close()
+
+
+def no_text_layer(pages, scanned):
+    """Stop extract on a PDF without a text layer: the error as JSON, exit code NO_TEXT_EXIT."""
+    print(json.dumps({"error": NO_TEXT_LAYER, "pages": pages, "scanned_pages": scanned}, ensure_ascii=False, indent=1))
+    sys.exit(NO_TEXT_EXIT)
+
+
 def extract_main(argv):
     ap = argparse.ArgumentParser(prog="scholium extract",
                                  description="Print the PDF's text with page markers, de-hyphenated, without running headers, footers, page numbers, "
@@ -1620,8 +1650,10 @@ def extract_main(argv):
         if not m:
             sys.exit("extract: --pages takes N or N-M")
         pages = list(range(int(m.group(1)), int(m.group(2) or m.group(1)) + 1))
-    no_text = ("extract: the PDF has no text layer (a scanned document); it cannot be annotated until OCR has added one, "
-               "so stop and tell the user")
+    # most pages scanned: no text to annotate until OCR has added it; a PDF with no text at all stops after its extraction
+    total, scanned = scanned_pages(pdf)
+    if scanned * 2 > total:
+        no_text_layer(total, scanned)
     if args.sentences:
         pdf_hash = _sha256(pdf)
         # ids count over the whole document
@@ -1630,7 +1662,7 @@ def extract_main(argv):
         if _sha256(pdf) != pdf_hash:
             sys.exit("extract: PDF changed during extraction; run again")
         if not any("id" in it or "heading" in it for it in items):
-            sys.exit(no_text)
+            no_text_layer(total, scanned)
         os.makedirs(os.path.dirname(os.path.abspath(args.sentences)), exist_ok=True)
         json.dump({"pdf": pdf, "pdf_sha256": pdf_hash, "sentences": [it for it in items if "id" in it],
                    "headings": [it for it in items if "id" not in it]}, open(args.sentences, "w", encoding="utf8"), ensure_ascii=False, indent=0)
@@ -1639,7 +1671,7 @@ def extract_main(argv):
     else:
         text = extract_text(pdf, pages=pages, keep_references=args.keep_references)
         if not pages and not re.sub(r"--- p\.\d+.*? ---|\s", "", text):
-            sys.exit(no_text)
+            no_text_layer(total, scanned)
         summary = f"{text.count(chr(10))} lines, {len(text)} characters"
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
