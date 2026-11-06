@@ -643,16 +643,16 @@ var ScholiumRunner = {
       checkNoUv: zh ? `未找到。推荐安装：uv 会自行提供 Python 和 PyMuPDF。在终端运行 ${uvInstall} 安装${os === "Darwin" ? "（或 brew install uv）" : ""}。`
                     : `Not found. Recommended: uv provides Python and PyMuPDF by itself; install it with ${uvInstall} in a terminal`
                       + `${os === "Darwin" ? " (or brew install uv)" : ""}.`,
-      checkNoPythonUv: zh ? "Zotero 的 PATH 上找不到 Python；uv 会代为提供 Python 和 PyMuPDF。" : "No Python on Zotero's PATH; uv provides Python and PyMuPDF instead.",
+      checkNoPythonUv: zh ? "Scholium 找不到 Python；uv 会代为提供 Python 和 PyMuPDF。" : "Scholium finds no Python; uv provides Python and PyMuPDF instead.",
       checkPythonOldUv: (v, path) => zh ? `${v} 太旧：${path}；uv 会代为提供 Python 和 PyMuPDF。` : `${v} at ${path} is too old; uv provides Python and PyMuPDF instead.`,
       checkPymupdfUv: zh ? "未安装；uv 会代为提供 PyMuPDF。" : "Not installed; uv provides PyMuPDF instead.",
-      checkOnPath: zh ? "Zotero 的 PATH 上找到的这一个，智能体的终端可能用另一个" : "the one on Zotero's PATH; an agent's shell may use another",
+      checkOnPath: zh ? "Scholium 找到的 Python，智能体的终端可能用另一个" : "the Python Scholium finds; an agent's shell may use another",
       checkPython: (v, path) => zh ? `${v}：${path}（${this.text("checkOnPath")}）` : `${v} at ${path} (${this.text("checkOnPath")})`,
       checkPythonOld: (v, path) => zh ? `${v} 太旧，需要 3.9 或更高版本：${path}（${this.text("checkOnPath")}）`
                                       : `${v} is too old; 3.9 or later is needed: ${path} (${this.text("checkOnPath")})`,
       checkPythonSilent: path => zh ? `${path} 没有报出版本（${this.text("checkOnPath")}）` : `${path} did not give its version (${this.text("checkOnPath")})`,
-      checkNoPython: zh ? "Zotero 的 PATH 上找不到 Python：安装 Python 3.9 或更高版本，再运行 pip install -U pymupdf（智能体的终端可能有另一个 Python）。"
-                        : "No Python on Zotero's PATH: install Python 3.9 or later, then run pip install -U pymupdf (an agent's shell may have another Python).",
+      checkNoPython: zh ? "Scholium 找不到 Python：安装 Python 3.9 或更高版本，再运行 pip install -U pymupdf（智能体的终端可能有另一个 Python）。"
+                        : "Scholium finds no Python: install Python 3.9 or later, then run pip install -U pymupdf (an agent's shell may have another Python).",
       checkPymupdf: v => zh ? `已安装 ${v}` : `Installed: ${v}`,
       checkPymupdfMissing: zh ? "未安装：在终端运行 pip install -U pymupdf。" : "Not installed: run pip install -U pymupdf in a terminal.",
       redoTitle: zh ? "重新批注" : "Annotate again",
@@ -1314,11 +1314,17 @@ var ScholiumRunner = {
   },
 
   // the options of Subprocess.call for an agent's process, or a program of the setup check: Zotero's environment with
-  // Python's output in UTF-8 and the agent's PATH (agentPath) when it is not Zotero's own
-  async agentEnv() {
+  // Python's output in UTF-8 and the agent's PATH (agentPath) when it is not Zotero's own. Codex's: uv's cache and the
+  // Pythons uv installs in <data dir>/tmp/scholium/uv, which its sandbox may write, unless the user set where they go
+  async agentEnv(codex = false) {
     const environment = { PYTHONIOENCODING: "utf-8" };
     const path = await this.agentPath();
     if (path !== this.env("PATH")) environment[this.pathName()] = path;
+    if (codex) {
+      const uv = PathUtils.join(this.codexRoots()[0], "uv");
+      if (!this.env("UV_CACHE_DIR")) environment.UV_CACHE_DIR = PathUtils.join(uv, "cache");
+      if (!this.env("UV_PYTHON_INSTALL_DIR")) environment.UV_PYTHON_INSTALL_DIR = PathUtils.join(uv, "python");
+    }
     return { environment, environmentAppend: true };
   },
 
@@ -6980,7 +6986,7 @@ var ScholiumRunner = {
   async codexServer(codex, workdir, onMessage = null) {
     const proc = await this.subprocess().call(Object.assign({
       command: codex, arguments: ["app-server"], workdir, stderr: "pipe",
-    }, await this.agentEnv()));
+    }, await this.agentEnv(true)));
     const rpc = { proc, next: 1, pending: new Map(), stderr: "" };
     const send = msg => proc.stdin.write(JSON.stringify(msg) + "\n");
     rpc.request = (method, params) => new Promise((resolve, reject) => {

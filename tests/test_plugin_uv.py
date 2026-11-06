@@ -44,6 +44,15 @@ SCENARIOS = r"""
     facts.macCodex = { shells: h.log.shellCalls.length, env: h.log.codexCalls.map(o => o.environment), append: h.log.codexCalls.map(o => o.environmentAppend) };
     h.runner.stop();
   }
+  // Codex's process: uv's cache and Pythons inside its sandbox's writable root, unless the user set where they go; Claude
+  // Code's keeps uv's defaults
+  for (const [name, env] of [['codexUv', { PATH: '/w/bin' }], ['codexUvSet', { PATH: '/w/bin', UV_CACHE_DIR: 'D:/mine/uv' }]]) {
+    const h = harness({ env, prefs: { 'extensions.scholium.agent': 'codex' } });
+    h.runner.start('x');
+    await h.runner.annotate([h.item1]); await settle(600);
+    facts[name] = { codex: h.log.codexCalls.map(o => o.environment), claude: (await h.runner.agentEnv()).environment, root: h.runner.codexRoots()[0] };
+    h.runner.stop();
+  }
   // which shell: $SHELL, else /bin/zsh; none there, nothing started
   for (const [name, env, present] of [['noShellVar', { PATH: ZOTERO_PATH }, ['/bin/zsh']],
                                       ['relativeShell', { SHELL: 'zsh', PATH: ZOTERO_PATH }, ['/bin/zsh']],
@@ -227,7 +236,19 @@ def test_the_login_shells_path_goes_before_zoteros_in_each_run_and_is_read_once(
     assert r["envs"] == [env, env], "each folder once; ~/.local/bin there and added, ~/.cargo/bin not there and left out"
     assert r["append"] == [True, True]
     c = facts["macCodex"]
-    assert c["shells"] == 1 and c["env"] == [dict(PLAIN, PATH=MERGED)] and c["append"] == [True]
+    assert c["shells"] == 1 and c["env"] == [dict(PLAIN, PATH=MERGED, **CODEX_UV)] and c["append"] == [True]
+
+
+CODEX_UV = {"UV_CACHE_DIR": "/data/tmp/scholium/uv/cache", "UV_PYTHON_INSTALL_DIR": "/data/tmp/scholium/uv/python"}
+
+
+def test_codex_gets_uvs_folders_inside_its_sandbox_unless_set(facts):
+    u = facts["codexUv"]
+    assert u["root"] == "/data/tmp/scholium" and all(v.startswith(u["root"] + "/") for v in CODEX_UV.values())
+    assert u["codex"] and all(e == dict(PLAIN, **CODEX_UV) for e in u["codex"]), "each Codex process"
+    assert u["claude"] == PLAIN, "Claude Code keeps uv's defaults"
+    s = facts["codexUvSet"]
+    assert s["codex"] and all(e == dict(PLAIN, UV_PYTHON_INSTALL_DIR="/data/tmp/scholium/uv/python") for e in s["codex"]), "the user's own is kept"
 
 
 def test_the_shell_is_shell_else_zsh(facts):
@@ -273,7 +294,7 @@ def test_the_uv_line_comes_before_python_with_the_installer_of_each_system(facts
     m = facts["check_macMissing"]
     assert m["ids"][-3:] == ["uv", "python", "pymupdf"]
     assert m["lines"][0] == ["uv", "unknown", "uv", f"未找到。推荐安装：uv 会自行提供 Python 和 PyMuPDF。在终端运行 {UV_UNIX} 安装（或 brew install uv）。"]
-    assert m["lines"][1:] == [["python", "ok", "Python", "3.12.1：/opt/homebrew/bin/python3（Zotero 的 PATH 上找到的这一个，智能体的终端可能用另一个）"],
+    assert m["lines"][1:] == [["python", "ok", "Python", "3.12.1：/opt/homebrew/bin/python3（Scholium 找到的 Python，智能体的终端可能用另一个）"],
                               ["pymupdf", "ok", "PyMuPDF", "已安装 1.24.10"]], "without uv, Python and PyMuPDF are checked as before"
     assert facts["check_macMissingEnglish"]["lines"][0][3] == (
         f"Not found. Recommended: uv provides Python and PyMuPDF by itself; install it with {UV_UNIX} in a terminal (or brew install uv).")
@@ -287,14 +308,14 @@ def test_uv_found_and_its_version(facts):
     f = facts["check_macFound"]
     assert f["lines"][0] == ["uv", "ok", "uv", "0.13.7：/home/u/.local/bin/uv"]
     assert f["uvCalls"] == [["/home/u/.local/bin/uv", ["--version"], MERGED + ":/home/u/.local/bin"]], "run with the agent's PATH"
-    assert f["lines"][1:] == [["python", "ok", "Python", "3.12.1：/opt/homebrew/bin/python3（Zotero 的 PATH 上找到的这一个，智能体的终端可能用另一个）"],
+    assert f["lines"][1:] == [["python", "ok", "Python", "3.12.1：/opt/homebrew/bin/python3（Scholium 找到的 Python，智能体的终端可能用另一个）"],
                               ["pymupdf", "ok", "PyMuPDF", "已安装 1.24.10"]]
     assert facts["check_windowsLocalBin"]["lines"][0] == ["uv", "ok", "uv", "0.13.7：/home/u/.local/bin/uv.exe"], "found in the folder added"
 
 
 def test_with_uv_a_missing_or_old_python_or_pymupdf_is_no_fault(facts):
-    assert facts["check_uvNoPython"]["lines"][1:] == [["python", "unknown", "Python", "Zotero 的 PATH 上找不到 Python；uv 会代为提供 Python 和 PyMuPDF。"]]
-    assert facts["check_uvNoPythonEnglish"]["lines"][1:] == [["python", "unknown", "Python", "No Python on Zotero's PATH; uv provides Python and PyMuPDF instead."]]
+    assert facts["check_uvNoPython"]["lines"][1:] == [["python", "unknown", "Python", "Scholium 找不到 Python；uv 会代为提供 Python 和 PyMuPDF。"]]
+    assert facts["check_uvNoPythonEnglish"]["lines"][1:] == [["python", "unknown", "Python", "Scholium finds no Python; uv provides Python and PyMuPDF instead."]]
     assert facts["check_uvOldPython"]["lines"][1:] == [["python", "unknown", "Python", "3.8.10 太旧：/usr/bin/python3；uv 会代为提供 Python 和 PyMuPDF。"]]
     n = facts["check_uvNoPymupdf"]["lines"]
     assert n[0] == ["uv", "ok", "uv", "0.13.7：/w/bin/uv.exe"]

@@ -1,5 +1,5 @@
 """The setup check of the settings page: Zotero's local API, Claude Code and Codex (signed in or not, and their skill),
-and the Python on Zotero's PATH with its PyMuPDF, a line each as its check ends; a button fixes what the plugin can fix
+and the Python Scholium finds with its PyMuPDF, a line each as its check ends; a button fixes what the plugin can fix
 and checks again."""
 import re
 from pathlib import Path
@@ -225,7 +225,7 @@ def facts(tmp_path_factory):
 CLAUDE = "/appdata/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 CODEX = "/localappdata/OpenAI/Codex/bin/h1/codex.exe"
 PY = "/py/new/python.exe"
-ON_PATH = "Zotero 的 PATH 上找到的这一个，智能体的终端可能用另一个"
+ON_PATH = "Scholium 找到的 Python，智能体的终端可能用另一个"
 API_ON = "已打开，Scholium 通过它读取论文。"
 API_OFF = "已关闭，Scholium 读不到论文：点“打开”，或在 设置 → 高级 里勾选“允许此计算机上的其他应用程序与 Zotero 通讯”。"
 SKILL_MISSING = "未找到：点“安装”，或在终端运行 npx skills add weilr/zotero-scholium -g -y。"
@@ -267,7 +267,7 @@ def test_only_loggedin_of_claudes_answer_is_read(facts):
 
 
 def test_english(facts):
-    on_path = "the one on Zotero's PATH; an agent's shell may use another"
+    on_path = "the Python Scholium finds; an agent's shell may use another"
     assert facts["english"] == [
         ["localApi", "ok", "Local API", "On; Scholium reads papers through it."],
         ["claude", "ok", "Claude Code", "Signed in."],
@@ -365,7 +365,7 @@ def test_the_install_button_installs_the_skill_or_says_why_not(facts):
 
 
 def test_python_and_pymupdf(facts):
-    assert facts["noPython"] == {"lines": [["python", "bad", "Python", "Zotero 的 PATH 上找不到 Python：安装 Python 3.9 或更高版本，"
+    assert facts["noPython"] == {"lines": [["python", "bad", "Python", "Scholium 找不到 Python：安装 Python 3.9 或更高版本，"
                                                                     "再运行 pip install -U pymupdf（智能体的终端可能有另一个 Python）。"]], "calls": []}
     assert facts["oldPython"]["lines"] == [["python", "bad", "Python", f"3.8.10 太旧，需要 3.9 或更高版本：/py/old/python.exe（{ON_PATH}）"]]
     assert facts["noPymupdf"]["lines"] == [["python", "ok", "Python", f"3.11.4：{PY}（{ON_PATH}）"],
