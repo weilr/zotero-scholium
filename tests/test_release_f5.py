@@ -191,7 +191,7 @@ const refused = (p, t) => /"subtype":"run"/.test(t);
         index: JSON.parse(h.log.writes[DIR + 'index.json']),
         removed: h.log.removed.filter(p => p.includes('/conversations/')).map(p => p.slice(DIR.length)),
         changed: Object.keys(Object.assign({}, before, after)).filter(k => before[k] !== after[k] && k !== 'index.json').map(k => k.replace(/\d{8}-\d{6}/, 'STAMP')),
-        newLogs: Object.keys(after).filter(k => k.startsWith('annotate-claude-2026110')).map(k => [k.replace(/\d{8}-\d{6}/, 'STAMP'), after[k]]),
+        newLogs: Object.keys(after).filter(k => /^annotate-claude-(?!20261001-120000)\d{8}-\d{6}/.test(k)).map(k => [k.replace(/\d{8}-\d{6}/, 'STAMP'), after[k]]),
       }, extra);
     };
     const open = async h => {
@@ -230,7 +230,7 @@ const refused = (p, t) => /"subtype":"run"/.test(t);
       const before = sizes(h);
       const G = h.runner.paintPane.constructor('return this')();
       const realRemove = G.IOUtils.remove;
-      G.IOUtils.remove = async p => { if (/annotate-claude-2026110/.test(p)) throw Error('NotAllowedError'); return realRemove(p); };
+      G.IOUtils.remove = async p => { if (/annotate-claude-(?!20261001-120000)\d{8}-\d{6}/.test(p)) throw Error('NotAllowedError'); return realRemove(p); };
       const logged = [];
       const realLog = h.runner.log.bind(h.runner);
       h.runner.log = m => { logged.push(String(m)); return realLog(m); };
