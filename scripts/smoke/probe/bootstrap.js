@@ -4,14 +4,17 @@
 
    Checks: section (the item pane's Scholium section, both tabs), localapi (Annotate with Zotero's local API off: the
    confirmation, then the run), signedout (a "not signed in" stream: the plugin's sentence, not Claude Code's),
-   pymupdf (a run whose tool result says PyMuPDF is missing: the card), apply (the skill's CLI through /scholium/apply,
-   run by smoke.py outside Zotero), reader (Ask Scholium in the reader's context menu), skill (Install the skill and
-   retry), setup (the settings page's setup check, with the real claude and codex found by the plugin).
+   pymupdf (a run whose tool result says PyMuPDF is missing: the card), reselect (a paper selected again after another
+   item shows its annotation session's card again), apply (the skill's CLI through /scholium/apply, run by smoke.py
+   outside Zotero), reader (Ask Scholium in the reader's context menu), skill (Install the skill and retry), setup (the
+   settings page's setup check, with the real claude and codex found by the plugin), copy (the setup check's Copy puts
+   its lines on the clipboard, which is restored afterwards).
 
    Screenshots are drawn from Zotero's own windows (drawSnapshot), never from the screen. */
 var CFG, OUT;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
+const Cc = Components.classes;
 const HTML = "http://www.w3.org/1999/xhtml";
 const delay = ms => Zotero.Promise.delay(ms);
 const t0 = Date.now();
@@ -103,6 +106,32 @@ function typeIn(input, text) {
   input.focus();
   input.value = text;
   input.dispatchEvent(new (input.ownerGlobal.InputEvent)("input", { bubbles: true, inputType: "insertText", data: text }));
+}
+
+// ---- the clipboard (the system's: what was on it is put back) ----
+function readClipboard() {
+  try {
+    const cb = Services.clipboard;
+    if (!cb.hasDataMatchingFlavors(["text/plain"], cb.kGlobalClipboard)) return { text: null };
+    const trans = Cc["@mozilla.org/widget/transferable;1"].createInstance(Ci.nsITransferable);
+    trans.init(null);
+    trans.addDataFlavor("text/plain");
+    try { cb.getData(trans, cb.kGlobalClipboard); }
+    catch (e) { cb.getData(trans, cb.kGlobalClipboard, win().browsingContext.currentWindowContext); }
+    const data = {};
+    trans.getTransferData("text/plain", data);
+    return { text: data.value.QueryInterface(Ci.nsISupportsString).data };
+  } catch (e) { return { text: null, error: String(e) }; }
+}
+function restoreClipboard(saved) {
+  try {
+    if (saved && saved.text != null) {
+      Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper).copyString(saved.text);
+      return "text restored";
+    }
+    Services.clipboard.emptyClipboard(Services.clipboard.kGlobalClipboard);
+    return "emptied (it held no text)";
+  } catch (e) { return "not restored: " + e; }
 }
 
 // ---- dialogs and console ----
@@ -337,6 +366,36 @@ const CHECKS = {
     result("pymupdf", c.includes(E().pymupdfCard) && c.some(x => /PyMuPDF/.test(x)), { card: c, expected: E().pymupdfCard });
   },
 
+  async reselect() {
+    const it = items.R, other = items.O;
+    const box = await selectItem(it);
+    await showTab(box, "annot");
+    await annotateHere(box, "annotate-ok");
+    const before = cards(box).map(x => x.title);
+    const w = win();
+    const libDetails = () => [...doc().querySelectorAll("item-details")].find(d => d.closest("#zotero-item-pane"));
+    // another item whose Scholium section stays off-screen (the case in which the card did not come back before)
+    await w.ZoteroPane.selectItem(other.item.id);
+    await delay(1500);
+    try { libDetails()._paneParent.scrollTo(0, 0); } catch (e) {}
+    await delay(500);
+    await w.ZoteroPane.selectItem(it.item.id);
+    await delay(500);
+    const start = Date.now();
+    let seen = null, scrolled = false, last = null;
+    for (let i = 0; i < 40 && !seen; i++) {   // 8 s: the user scrolls to the section, the card must come back
+      const s = [...doc().querySelectorAll("item-pane-custom-section")].find(x => x.dataset.pane === R().paneID && x.closest("#zotero-item-pane"));
+      if (s && !scrolled) { try { s.closest("item-details").scrollToPane(R().paneID, "instant"); scrolled = true; } catch (e) {} }
+      const b = s && s.querySelector(".scholium-pane"), p = b && paneOf(b), c = b && b.querySelector(".scholium-card");
+      last = { tab: p && p.tab, item: p && p.item && p.item.key, intro: b && txt(q(b, ".scholium-annot-intro")) };
+      if (c && c.checkVisibility() && p && p.item && p.item.id === it.item.id) seen = { ms: Date.now() - start, card: txt(c.querySelector(".scholium-card-title")) || txt(c.firstElementChild), tab: p.tab };
+      else await delay(200);
+    }
+    const b = boxes().find(x => x.closest("#zotero-item-pane"));
+    if (b) await shot("reselect-after", b);
+    result("reselect", before.length > 0 && !!seen, { cardBefore: before, cardAfter: seen, last });
+  },
+
   async apply() {
     const D = items.D;
     const notes = () => Zotero.Items.get(D.item.getNotes()).filter(n => !n.deleted);
@@ -438,6 +497,21 @@ const CHECKS = {
     const first = await ended();
     const firstLines = lines();
     await pshot("setup-checked");
+    // Copy: the lines with the versions on the clipboard; what was on it is put back
+    if (CFG.checks.includes("copy")) {
+      const copy = PW.document.getElementById("scholium-check-copy");
+      const head = `Scholium ${R().version} · Zotero ${Zotero.version}`;
+      const saved = readClipboard();
+      let copied = null, error = null, restored = null;
+      try {
+        if (copy && !copy.hidden) { await click(copy); await delay(800); copied = readClipboard(); }
+      } catch (e) { error = String(e); }
+      finally { restored = restoreClipboard(saved); }
+      const text = copied && copied.text;
+      result("copy", !!text && text.startsWith(head) && text.split("\n").length >= firstLines.length + 1,
+             { button: copy ? { hidden: copy.hidden, label: copy.label || copy.getAttribute("label") } : null, head,
+               copied: text ? text.slice(0, 400) : null, lines: text ? text.split("\n").length : 0, restored, error, readError: copied && copied.error });
+    }
     // the local API line's button turns it on, and the check runs again
     let apiOk = false;
     const apiRow = byName(E().localApiName), apiButton = apiRow && [...apiRow.children].find(x => x.localName === "button");
@@ -485,7 +559,7 @@ async function main() {
     for (let i = 0; i < 60 && !Zotero.Libraries.get(lib).getDataLoaded("item"); i++) {
       try { await Zotero.Items.loadAll(lib); } catch (e) { await delay(500); }   // /api/ requests wait for this
     }
-    const need = { A: ["section", "localapi"], B: ["signedout"], C: ["pymupdf"], D: ["apply", "reader"], S: ["skill"] };
+    const need = { A: ["section", "localapi"], B: ["signedout"], C: ["pymupdf"], R: ["reselect"], O: ["reselect"], D: ["apply", "reader"], S: ["skill"] };
     for (const [tag, uses] of Object.entries(need)) if (uses.some(c => CFG.checks.includes(c))) await makeItem(tag, "Smoke " + tag + ": " + uses.join(", "));
     const w = win();
     w.resizeTo(1500, 1000);
@@ -495,7 +569,7 @@ async function main() {
     await waitFor(() => w.ZoteroPane && w.ZoteroPane.itemsView && w.ZoteroPane.itemsView.initialized, 30000);
     await delay(2500);
   });
-  for (const name of ["section", "localapi", "signedout", "pymupdf", "apply", "reader", "skill", "setup"]) {
+  for (const name of ["section", "localapi", "signedout", "pymupdf", "reselect", "apply", "reader", "skill", "setup"]) {
     if (CFG.checks.includes(name)) await step(name, CHECKS[name]);
   }
   return finish();

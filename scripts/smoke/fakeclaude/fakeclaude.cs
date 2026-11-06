@@ -7,7 +7,8 @@
 //   a JSON event (printed as is; {{SESSION}} becomes the session id: the --resume argument, else a new one),
 //   "#delay <ms>", "#stream <ms per piece> <text>" (the text as stream_event text deltas, three characters a piece),
 //   "#wait" (until killed), "#exit <code>", "#next <name>" (writes next.txt for the following call), "//" comments.
-// - calls\<n>.txt: each call's script name, arguments and standard input, numbered.
+// - calls\<n>.txt: each call, numbered: its script name, a line "ENV SCHOLIUM_ZOTERO_PORT=<value>" (the port the
+//   plugin gives the skill's script; empty when unset), its arguments, a line "---", and its standard input.
 //
 // Build (no Visual Studio needed; the .NET Framework compiler ships with Windows):
 //   C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /out:fakeclaude.exe fakeclaude.cs
@@ -28,9 +29,10 @@ class FakeClaude {
         Directory.CreateDirectory(Path.Combine(dir, "calls"));
         int n = Directory.GetFiles(Path.Combine(dir, "calls")).Length + 1;
         string callPath = Path.Combine(dir, "calls", n.ToString("D3") + ".txt");
+        string envLine = "ENV SCHOLIUM_ZOTERO_PORT=" + (Environment.GetEnvironmentVariable("SCHOLIUM_ZOTERO_PORT") ?? "") + "\n";
         if (args.Contains("--input-format")) {
             string first = stdin.ReadLine() ?? "";
-            File.WriteAllText(callPath, "MODELS\n" + string.Join("\n", args) + "\n---\n" + first, utf8);
+            File.WriteAllText(callPath, "MODELS\n" + envLine + string.Join("\n", args) + "\n---\n" + first, utf8);
             stdout.WriteLine(File.ReadAllText(Path.Combine(dir, "models.json"), utf8).Trim());
             return 0;
         }
@@ -41,7 +43,7 @@ class FakeClaude {
             string t = File.ReadAllText(nextPath, utf8).Trim();
             if (t.Length > 0) name = t.Split('\n')[0].Trim();
         }
-        File.WriteAllText(callPath, name + "\n" + string.Join("\n", args) + "\n---\n" + prompt, utf8);
+        File.WriteAllText(callPath, name + "\n" + envLine + string.Join("\n", args) + "\n---\n" + prompt, utf8);
         string session = Guid.NewGuid().ToString();
         int r = Array.IndexOf(args, "--resume");
         if (r >= 0 && r + 1 < args.Length) session = args[r + 1];

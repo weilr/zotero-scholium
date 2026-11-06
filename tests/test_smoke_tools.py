@@ -256,3 +256,70 @@ def test_no_personal_paths_in_the_tools():
         for f in files:
             text = open(os.path.join(root, f), encoding="utf8", errors="replace").read()
             assert not re.search(r"C:\\\\?Users\\\\?lrv|scratchpad|\blrv\b", text, re.I), f
+
+
+# ---- where the checks run, and the runner's own checks ----
+def test_the_runs_are_planned_by_where_they_run():
+    assert smoke.plan(smoke.ALL_CHECKS) == {"fake": smoke.PROBE_FAKE, "after": ["port", "adddir"], "setup": ["setup", "copy"], "cli": ["scanned"]}
+    assert smoke.plan(["port"]) == {"fake": ["pymupdf"], "after": ["port"], "setup": [], "cli": []}   # a run to record
+    assert smoke.plan(["copy"])["setup"] == ["setup", "copy"]   # Copy is the setup check's button
+    fake = smoke.plan(smoke.parse_checks("fake"))
+    assert fake["setup"] == [] and fake["cli"] == ["scanned"] and "reselect" in fake["fake"]
+
+
+def test_new_checks_are_known():
+    assert smoke.parse_checks("scanned,copy,reselect,adddir,port") == ["reselect", "port", "adddir", "copy", "scanned"]
+
+
+def test_a_recorded_call_is_parsed():
+    c = smoke.parse_call("signedout\nENV SCHOLIUM_ZOTERO_PORT=23129\n-p\n--add-dir\nC:\\h\\.claude\\skills\\zotero-scholium\n---\nthe prompt\n---\nmore")
+    assert c["name"] == "signedout" and c["env"] == {"SCHOLIUM_ZOTERO_PORT": "23129"}
+    assert c["args"] == ["-p", "--add-dir", "C:\\h\\.claude\\skills\\zotero-scholium"] and c["stdin"] == "the prompt\n---\nmore"
+    old = smoke.parse_call("answer\n-p\n---\nx")   # a fake built before it recorded the environment
+    assert old["env"] == {} and old["args"] == ["-p"]
+
+
+def call(name="pymupdf", port="23129", add_dir=None):
+    env = "" if port is None else f"ENV SCHOLIUM_ZOTERO_PORT={port}\n"
+    args = "-p\n" + (f"--add-dir\n{add_dir}\n" if add_dir else "")
+    return smoke.parse_call(f"{name}\n{env}{args}---\nprompt")
+
+
+def test_the_port_check():
+    assert smoke.check_port_env([call("MODELS", port=""), call(), call("signedout")], 23129)[0]
+    assert not smoke.check_port_env([call(port="23119")], 23129)[0]
+    assert not smoke.check_port_env([call(port=None)], 23129)[0]   # not recorded
+    assert not smoke.check_port_env([call("MODELS")], 23129)[0]   # no agent run
+
+
+def test_the_add_dir_check_both_ways():
+    folder = "C:\\run\\claude-config\\skills\\zotero-scholium"
+    at = lambda c, t: dict(c, at=t)
+    # the folder appears at t=10 (the skill check installs it): runs before get no --add-dir, runs after get it
+    calls = [at(call("MODELS"), 1), at(call(), 2), at(call("noskill"), 5), at(call("annotate-ok", add_dir=folder), 12)]
+    ok, info = smoke.check_add_dir(calls, folder, installed_at=10)
+    assert ok and info["cases seen"] == [False, True]
+    assert smoke.check_add_dir([at(call(add_dir="c:/run/claude-config/skills/zotero-scholium"), 12)], folder, 10)[0]   # however written
+    assert not smoke.check_add_dir([at(call(), 12)], folder, 10)[0]   # there, not given
+    assert not smoke.check_add_dir([at(call(add_dir=folder), 2)], folder, 10)[0]   # given before it was there
+    assert smoke.check_add_dir([at(call(), 2)], folder, None)[0]   # never there, never given
+    assert not smoke.check_add_dir([at(call(add_dir=folder), 2)], folder, None)[0]
+
+
+def test_the_fake_records_the_port():
+    src = open(os.path.join(SMOKE, "fakeclaude", "fakeclaude.cs"), encoding="utf8").read()
+    assert 'GetEnvironmentVariable("SCHOLIUM_ZOTERO_PORT")' in src and "ENV SCHOLIUM_ZOTERO_PORT=" in src
+
+
+def test_the_scanned_pdf_is_image_only(tmp_path):
+    data = open(smoke.make_scanned_pdf(str(tmp_path / "s.pdf")), "rb").read()
+    assert data.startswith(b"%PDF-1.4") and data.count(b"/Type /Page ") == 2 and b"/Subtype /Image" in data and b" Tj" not in data
+
+
+def test_the_scanned_pdf_reads_as_a_scan(tmp_path):
+    pymupdf = pytest.importorskip("pymupdf")
+    doc = pymupdf.open(smoke.make_scanned_pdf(str(tmp_path / "s.pdf")))
+    for page in doc:
+        assert page.get_text().strip() == ""
+        assert any(abs(pymupdf.Rect(i["bbox"]) & page.rect) >= abs(page.rect) / 2 for i in page.get_image_info())
+

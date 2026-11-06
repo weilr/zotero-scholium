@@ -31,7 +31,7 @@ python scripts/smoke/smoke.py --zotero "C:\Program Files\Zotero\zotero.exe" --po
 | `--skill` | `skills/zotero-scholium` | the skill added in `content/skill` when the plugin has none; `""` for none |
 | `--cli` | `<skill>/scripts/scholium.py` | the skill's CLI for the `apply` check |
 | `--locale` | `zh-CN` | `zh-CN` or `en-US` |
-| `--checks` | `all` | `all`, `fake` (everything but `setup`), or a comma list |
+| `--checks` | `all` | `all`, `fake` (everything but `setup` and `copy`, which need the real programs), or a comma list |
 | `--out` | `%TEMP%\scholium-smoke\<time>` | the run folders |
 | `--minutes` | 10 | the longest one Zotero start may take |
 
@@ -54,10 +54,15 @@ depend on the wording: no "Please run /login", the card names PyMuPDF, the dialo
 | `localapi` | With Zotero's local API off, Annotate shows the confirmation. Accepted, the pref turns on, and the run starts and ends with a card. |
 | `signedout` | Claude Code's "Not logged in · Please run /login" stream shows the plugin's own sentence in Annotations and in Chat, never "Please run /login". |
 | `pymupdf` | A run whose tool result says PyMuPDF is missing ends with the card "No annotations written: PyMuPDF is missing; …". |
+| `reselect` | After a fake run, another item is selected (its Scholium section left off-screen), then the paper again. The card of its annotation session is back within 8 seconds. |
 | `apply` | The skill's CLI writes two highlights with `core_color` `#FF6666` and a note through `/scholium/apply`. The colours arrive lower-case and there is one note. A second write that Zotero rejects (an invalid sort index) leaves no second note. |
 | `reader` | In a reader tab, the context menu of a text selection offers Ask Scholium. Choosing it puts the passage above the Chat box. |
 | `skill` | Claude Code's init lists no zotero-scholium skill. The failed card offers "Install the skill and retry". Clicking it installs the package's skill into the run's `CLAUDE_CONFIG_DIR` (byte-identical) and runs again. Without a skill in the package, the hint under the box says so and nothing is written. |
+| `port` | The fake records each call's `SCHOLIUM_ZOTERO_PORT`. Every agent run must have the throwaway's port, which the skill's script uses instead of 23119. |
+| `adddir` | Every agent run gets `--add-dir <CLAUDE_CONFIG_DIR>/skills/zotero-scholium` exactly when that folder is there as the run starts. It is the run's own folder, empty until the `skill` check installs the skill, so a full run sees both cases. |
+| `scanned` | The skill's `extract` on an image-only PDF exits with code 3 and the "no text layer" error. It needs no Zotero. |
 | `setup` | The settings page's setup check, in a second Zotero start: the lines, the local API's "Turn on" and the Claude Code skill's "Install". It needs the real `claude` and `codex`: it runs `claude auth status` and `codex app-server`, which make no model calls. They report "not signed in", because the run's `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are empty. |
+| `copy` | The setup check's Copy puts "Scholium <version> · Zotero <version> · <OS>" and the lines on the clipboard. That is the system's clipboard: the text that was on it is put back (a clipboard without text is emptied). |
 
 ## Safety
 
