@@ -155,3 +155,55 @@ def test_requests_to_zotero_pass_by_a_proxy_the_environment_names(monkeypatch):
     finally:
         server.shutdown()
     assert status == 200
+
+
+@pytest.mark.parametrize("value, port", [(None, 23119), ("23129", 23129), (" 23129 ", 23129), ("1", 1), ("65535", 65535),
+                                         ("0", 23119), ("65536", 23119), ("", 23119), ("abc", 23119), ("-1", 23119),
+                                         ("23129x", 23119), ("2312.9", 23119), ("²", 23119), ("123456", 23119)])
+def test_the_port_comes_from_the_environment_when_it_is_one(value, port):
+    env = {} if value is None else {"SCHOLIUM_ZOTERO_PORT": value}
+    assert cli.zotero_base(env) == f"http://127.0.0.1:{port}"
+
+
+def test_the_script_takes_the_port_when_it_is_loaded(tmp_path):
+    """Read at import, without a request."""
+    import os
+    import subprocess
+    import sys
+    code = "import sys; sys.path.insert(0, sys.argv[1]); import scholium; print(scholium.BASE)"
+    skill = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills", "zotero-scholium", "scripts")
+    run = lambda env: subprocess.run([sys.executable, "-c", code, skill], capture_output=True, text=True, check=True,
+                                     env=env, cwd=str(tmp_path), timeout=60).stdout.strip()
+    base = {k: v for k, v in os.environ.items() if k != "SCHOLIUM_ZOTERO_PORT"}
+    assert run(dict(base, SCHOLIUM_ZOTERO_PORT="23129")) == "http://127.0.0.1:23129"
+    assert run(dict(base, SCHOLIUM_ZOTERO_PORT="99999")) == "http://127.0.0.1:23119"
+    assert run(base) == "http://127.0.0.1:23119"
+
+
+def test_requests_name_the_chosen_port_in_their_host_header(monkeypatch):
+    """Zotero's server answers only a Host of its own address and port."""
+    import http.server
+    import threading
+    seen = []
+
+    class Answer(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.headers.get("Host"))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Answer)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        port = server.server_port
+        monkeypatch.setattr(cli, "BASE", cli.zotero_base({"SCHOLIUM_ZOTERO_PORT": str(port)}))
+        status, _, _ = cli.http("GET", "/api/", timeout=5)
+    finally:
+        server.shutdown()
+    assert status == 200 and seen == [f"127.0.0.1:{port}"]
+    monkeypatch.setattr(cli, "http", lambda *a, **k: (0, {}, "refused"))
+    assert cli.zotero_down() == f"Zotero does not answer on 127.0.0.1:{port}; start Zotero, then run again"

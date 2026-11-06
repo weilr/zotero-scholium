@@ -14,6 +14,8 @@
   first use. The skill runs the script that way when uv is on PATH, else with `python` as before.
 - The setup check has a uv line with the install command for the system. With uv, a missing Python or PyMuPDF is no
   fault.
+- The skill's script reaches Zotero at the port `SCHOLIUM_ZOTERO_PORT` names, when it is set; the plugin sets it to its
+  Zotero's port (`httpServer.port`) for every process it starts, so a changed port works.
 - **Copy** in the setup check puts its lines on the clipboard as plain text, with the versions of Scholium and Zotero
   and the operating system, for a bug report.
 - `extract` stops on a scanned PDF without a text layer (most pages an image with almost no text) with exit code 3 and
@@ -72,6 +74,8 @@
 - Sticky notes beside a narrow left column sit next to it.
 - A paper selected again after another item shows its conversation and its annotation session again, instead of the
   Annotations tab's introduction.
+- Claude Code is given the skill's folder with `--add-dir` only when it is there, in `CLAUDE_CONFIG_DIR` when that is
+  set.
 - In a Codex run, `uv run` keeps its cache and the Pythons it installs in `<data dir>/tmp/scholium/uv/`, where Codex's
   sandbox lets it write, unless `UV_CACHE_DIR` or `UV_PYTHON_INSTALL_DIR` is set.
 
