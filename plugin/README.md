@@ -301,6 +301,8 @@ Code and Codex are also looked for in their usual install folders (see the notes
 **Setup check** lists, a line each: Zotero's local API, Claude Code and Codex (found, signed in, the skill), uv, Python
 and PyMuPDF, with a button where the plugin can fix it. The uv line gives uv's version and path, or the command that
 installs it on this system; with uv, a missing or old Python or PyMuPDF is no fault, since `uv run` provides them.
+Once a check has ended, **Copy** puts its lines on the clipboard as plain text, after a line with the versions of
+Scholium and Zotero and the operating system, for a bug report.
 
 While Zotero is in front, a notice in the corner of the window appears when a paper starts and when it
 ends, and closes by itself; while Zotero is in the background, a system notification reports the end

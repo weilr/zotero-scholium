@@ -14,6 +14,8 @@
   first use. The skill runs the script that way when uv is on PATH, else with `python` as before.
 - The setup check has a uv line with the install command for the system. With uv, a missing Python or PyMuPDF is no
   fault.
+- **Copy** in the setup check puts its lines on the clipboard as plain text, with the versions of Scholium and Zotero
+  and the operating system, for a bug report.
 
 ### Changed
 

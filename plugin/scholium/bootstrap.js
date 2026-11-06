@@ -562,7 +562,7 @@ var ScholiumRunner = {
   LOGIN_PATH_MS: 5000,      // the longest the login shell is waited for when its PATH is read (loginPath)
   loginPathRead: null,      // the promise of the login shell's PATH, read once a session; "" when there is none
   cites: null,              // { key, map } the sentences of the paper whose transcript is being drawn
-  settingsApi: null,          // { found(agent), setupCheck(onLine), fix(action) } on Zotero.Scholium, for the settings page
+  settingsApi: null,          // { found(agent), setupCheck(onLine), fix(action), copy(lines) } on Zotero.Scholium, for the settings page
   panes: new Map(),         // item pane section body -> { doc, keys, list, state, buttons, the conversation shown, seen }
   AGENTS: ["claude", "codex"],
   models: {},               // agent -> [{ value, label, title, efforts }] as the agent reports them; none until it answered
@@ -1138,6 +1138,24 @@ var ScholiumRunner = {
       try { await check(); } catch (e) { this.log("setup check failed: " + e); }
     }
     return lines;
+  },
+
+  // a setup check's lines as plain text, for a bug report: Scholium's and Zotero's versions and the system, then a line
+  // per check with its mark
+  async setupReport(lines) {
+    let os = "";
+    try { if (typeof Zotero.getOSVersion === "function") os = String(await Zotero.getOSVersion()).trim(); } catch (e) {}
+    if (!os) { try { os = Services.appinfo.OS + " " + Services.sysinfo.getProperty("version"); } catch (e) { os = Services.appinfo.OS; } }
+    const marks = { ok: "✓", bad: "✗", unknown: "–" };
+    return [`Scholium ${this.version} · Zotero ${Zotero.version} · ${os}`]
+      .concat((lines || []).map(l => `${marks[l.state] || marks.unknown} ${l.label}: ${l.text}`)).join("\n");
+  },
+
+  // the setup check's text (setupReport) copied to the clipboard; the text
+  async copySetup(lines) {
+    const text = await this.setupReport(lines);
+    Zotero.Utilities.Internal.copyTextToClipboard(text);
+    return text;
   },
 
   // a setup check's action: Zotero's local API turned on, or the skill the plugin carries installed (installSkill); the
@@ -7647,7 +7665,8 @@ var ScholiumRunner = {
         .then(id => { this.prefPaneID = id; }, e => this.log("settings page not registered: " + e));
     }
     // the settings page asks what the plugin finds by itself, for the grey text of the program boxes, and runs the setup check
-    this.settingsApi = { found: agent => this.foundProgram(agent), setupCheck: onLine => this.setupCheck(onLine), fix: action => this.setupFix(action) };
+    this.settingsApi = { found: agent => this.foundProgram(agent), setupCheck: onLine => this.setupCheck(onLine), fix: action => this.setupFix(action),
+                         copy: lines => this.copySetup(lines) };
     Zotero.Scholium = this.settingsApi;
     for (const win of this.windows()) this.addToWindow(win);
     if (!update) {
