@@ -9,7 +9,12 @@ pip install pymupdf
 pip install .                            # 提供 `scholium` 命令
 ```
 
-技能目录中的同一文件是 `skills/zotero-scholium/scripts/scholium.py`，`python scholium.py …` 接受相同的参数。
+技能目录中的同一文件是 `skills/zotero-scholium/scripts/scholium.py`，接受相同的参数，有两种运行方式：
+
+```bash
+python scholium.py …                     # 需已安装 Python 和 PyMuPDF
+uv run scholium.py …                     # uv 读取脚本内嵌的元数据（PEP 723），自动获取 Python 和 PyMuPDF
+```
 
 ## 步骤
 
@@ -51,6 +56,8 @@ pip install .                            # 提供 `scholium` 命令
 
    只保留用户要求的输出类型。每篇论文使用独立的 `out_dir`，如 `out/<ATTACHMENT_KEY>`，句子文件和笔记文件也放在该目录。仅完整重做时使用 `cleanup: true`；不设时只做添加（补笔记、页边批注或处理选定范围）。带阅读笔记的重做可设 `note_replace: true`，把工具以前的笔记移入回收站。
 
+   `cleanup`、`note_replace`、`cleanup_external`、`snap` 和高亮的 `core` 只能是 `true` 或 `false`，`"false"` 这样的字符串会被拒绝。可选键写 `null` 表示取其默认值。`font_size` 与 `band_min_font_size` 一样，须为 4 到 36 之间的数。`note_html` 须为已存在的 HTML 文件的路径，不能直接写 HTML。颜色写作 `#rrggbb`，大小写均可，写入时转为 Zotero 要求的小写。高亮的 `comment` 是该句的译文；论文本身已是读者的语言时省略它。
+
 4. **生成、检查、写入。** 首先不带 `--apply` 运行，检查下述四类报告并修正配置，再写入。
 
    ```bash
@@ -60,6 +67,8 @@ pip install .                            # 提供 `scholium` 命令
    ```
 
    每次运行都生成 `annotations.json`、备用的 `create_annotations.js` 以及 `preview_pages` 所列页面的 `preview_p<N>.png`（默认不生成），并报告 `missed`（附该页上最接近的原句）、`style_warnings`、`translation_warnings`、`layout_warnings` 以及运行前后 PDF 的哈希。`missed`、`style_warnings`（`core_count` 除外）或 `layout_warnings` 不为空时 `--apply` 不写入（`--accept KIND`、`--allow-missed`、`--allow-warnings`）。页边批注放不下时，单栏页面先换到另一侧页边，仍放不下则改为便签；页首或页尾的文字放不下时自动缩小字号，最小 8 pt，仍放不下则改为便签。
+
+   `--backend auto`（默认）依次经 Scholium 插件、Zotero 10 的本地 API、旧版插件写入，都不可用时生成 JavaScript 文件。本地 API 关闭时转到下一个通道，报告中说明原因；经本地 API 的读取会指出打开它的设置。本地 API 和 JavaScript 文件与插件一样，在写入任何内容之前拒绝不是该附件父条目的 `item_key`。注释使用 PDF 自身的页码标签（即 Zotero 显示的页码，如 `iv`），`sortIndex` 按阅读顺序编排，Zotero 因此按正文顺序列出注释；报告中的页码仍是从 1 开始的页序号。
 
 [本地 API 调用示例](../examples/direct_api_example.py)以约三十行代码演示了 Zotero 10 本地 API 的基本调用，可用于其他应用。
 
