@@ -96,7 +96,7 @@ var ScholiumEndpoints = {
     if (!att) throw new Error("attachment not found: " + data.attachmentKey);
     const parent = att.parentID ? Zotero.Items.get(att.parentID) : null;
     if (data.itemKey && data.itemKey !== att.key && !(parent && parent.key === data.itemKey)) {
-      throw new Error(`item ${data.itemKey} is not the parent of attachment ${data.attachmentKey}`);
+      throw new Error(`item ${data.itemKey} is not the parent of attachment ${data.attachmentKey}; set item_key to the attachment's parent key from status`);
     }
     if (data.note && data.note.html && !parent) throw new Error(`attachment ${data.attachmentKey} has no parent item to hold the note`);
     const anns = Array.isArray(data.annotations) ? data.annotations : [];
@@ -591,9 +591,11 @@ var ScholiumRunner = {
       : "curl -LsSf https://astral.sh/uv/install.sh | sh";
     const t = {
       headline: zh ? "Scholium 批注" : "Scholium annotation",
-      noPdf: zh ? "这篇论文没有 PDF 附件。" : "This paper has no PDF attachment.",
-      noFile: zh ? "这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）。" : "The paper's PDF file is not on this computer (not downloaded yet, or moved).",
-      myLibraryOnly: zh ? "Scholium 只能批注“我的文库”里的论文。" : "Scholium annotates papers in My Library only.",
+      noPdf: zh ? "这篇论文没有 PDF 附件：在 Zotero 里添加论文的 PDF 后再试。" : "This paper has no PDF attachment: add the paper's PDF in Zotero, then try again.",
+      noFile: zh ? "这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）：在 Zotero 里打开它以下载，或重新链接文件后再试。"
+                 : "The paper's PDF file is not on this computer (not downloaded yet, or moved): open it in Zotero to download it, or relink the file, then try again.",
+      myLibraryOnly: zh ? "Scholium 只能批注“我的文库”里的论文：把它复制到“我的文库”后再批注。"
+                        : "Scholium annotates papers in My Library only: copy the paper there to annotate it.",
       noClaude: zh ? "找不到 Claude Code（claude.exe）。请在 Zotero 设置 → Scholium 里指定 Claude Code 程序。"
                    : "Claude Code (claude) was not found. Set its program in Zotero Settings → Scholium.",
       noCodex: zh ? "找不到 Codex（codex.exe）。请在 Zotero 设置 → Scholium 里指定 Codex 程序。"
@@ -605,8 +607,10 @@ var ScholiumRunner = {
       installSkill: zh ? "安装技能并重试" : "Install the skill and retry",
       skillNotCarried: zh ? "这份插件没有带技能：在终端运行 npx skills add weilr/zotero-scholium -g -y 安装。"
                           : "This copy of the plugin carries no skill: install it with npx skills add weilr/zotero-scholium -g -y in a terminal.",
-      skillNoHome: zh ? "找不到用户目录，技能没有装上。" : "The home folder was not found; the skill was not installed.",
-      skillFailed: msg => zh ? `技能没有装上：${msg}` : `The skill could not be installed: ${msg}`,
+      skillNoHome: zh ? "找不到用户目录，技能没有装上：在终端运行 npx skills add weilr/zotero-scholium -g -y 安装。"
+                      : "The home folder was not found, so the skill was not installed: install it with npx skills add weilr/zotero-scholium -g -y in a terminal.",
+      skillFailed: msg => zh ? `技能没有装上：${msg}。在终端运行 npx skills add weilr/zotero-scholium -g -y 安装。`
+                             : `The skill could not be installed: ${msg}. Install it with npx skills add weilr/zotero-scholium -g -y in a terminal.`,
       notSignedIn: agent => agent === "codex"
         ? (zh ? "Codex 还没有登录：在终端运行 codex login，登录后再试。" : "Codex is not signed in: run codex login in a terminal, then try again.")
         : (zh ? "Claude Code 还没有登录：在终端运行 claude，按提示登录后再试。" : "Claude Code is not signed in: run claude in a terminal and sign in, then try again."),
@@ -628,7 +632,7 @@ var ScholiumRunner = {
       checkTurnOn: zh ? "打开" : "Turn on",
       checkInstall: zh ? "安装" : "Install",
       checkNoProgram: agent => zh ? `未找到：安装 ${this.agentName(agent)}，或在上方指定它的程序。` : `Not found: install ${this.agentName(agent)}, or set its program above.`,
-      checkProgramGone: zh ? "上方指定的程序不存在。" : "The program set above does not exist.",
+      checkProgramGone: zh ? "上方指定的程序不存在：改正路径，或清空以自动查找。" : "The program set above does not exist: correct the path, or clear it to find the program automatically.",
       checkSignedIn: zh ? "已登录。" : "Signed in.",
       checkSignedOut: agent => agent === "codex"
         ? (zh ? "还没有登录：在终端运行 codex login。" : "Not signed in: run codex login in a terminal.")

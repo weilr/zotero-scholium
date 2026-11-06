@@ -37,6 +37,11 @@
   shows.
 - Highlights carry the PDF's own page labels, and Zotero's sidebar lists them in reading order.
 - The setup check's Python lines name the Python Scholium finds, no longer Zotero's PATH.
+- More error messages end with what to do next: a paper without a PDF, or whose file is missing, or outside My
+  Library; a skill that could not be installed; a program set on the settings page that is gone; and the script's
+  errors when Zotero does not answer, its local API is off, an item is not found or not the attachment's parent,
+  authorisation is declined, the token file is not found, Zotero is older than 10 without the plugin, the `author`
+  key is given, or a page is rotated.
 
 ### Fixed
 

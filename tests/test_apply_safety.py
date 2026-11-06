@@ -109,7 +109,7 @@ def test_an_item_that_is_not_the_attachments_parent_is_refused_before_writing(tm
     note.write_text("<h1>Paper</h1><p>A reading note.</p>", encoding="utf8")
     api = MemoryApi([annotation("OWN", ["zotero-scholium"])], parent="OTHER")
     options = dict(cleanup=True, note_html=str(note), note_replace=True)
-    with pytest.raises(RuntimeError, match="^item ITEM is not the parent of attachment ATT$"):
+    with pytest.raises(RuntimeError, match="^item ITEM is not the parent of attachment ATT; set item_key to the attachment's parent key from status$"):
         cli.api_apply(config(**options), [HIGHLIGHT], api)
     assert set(api.rows) == {"OWN"} and api.created_keys == []
     assert cli.api_apply(dict(config(**options), item_key="ATT"), [], MemoryApi(parent="OTHER"))["ok"], "the attachment's own key passes"
@@ -150,7 +150,7 @@ vm.runInContext('(async function () {\n' + script + '\n})()', context)
 
 
 @pytest.mark.skipif(NODE is None, reason="Node.js is required to run the generated JavaScript")
-@pytest.mark.parametrize("item_key, error", [("PARENT", None), ("OTHER", "item OTHER is not the parent of attachment ATT")])
+@pytest.mark.parametrize("item_key, error", [("PARENT", None), ("OTHER", "item OTHER is not the parent of attachment ATT; set item_key to the attachment's parent key from status")])
 def test_the_generated_javascript_refuses_an_item_that_is_not_the_parent(tmp_path, item_key, error):
     note = tmp_path / "note.html"
     note.write_text("<h1>Paper</h1><p>A reading note.</p>", encoding="utf8")
@@ -229,7 +229,7 @@ def test_a_failed_removal_after_writing_is_reported_as_partial(tmp_path, monkeyp
 def test_a_run_names_an_item_that_is_not_the_parent(tmp_path, monkeypatch, capsys):
     api = MemoryApi(parent="OTHER")
     code, report = run_main(tmp_path, monkeypatch, capsys, api, with_note=True)
-    assert code == 2 and report["applied"] is False and report["apply_error"] == "item ITEM is not the parent of attachment ATT"
+    assert code == 2 and report["applied"] is False and report["apply_error"] == "item ITEM is not the parent of attachment ATT; set item_key to the attachment's parent key from status"
     assert api.created_keys == []
 
 

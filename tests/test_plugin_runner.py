@@ -3764,12 +3764,12 @@ def test_the_services_limit_waits_as_long_as_it_says(facts):
 
 def test_papers_outside_my_library_and_missing_files_are_not_run(facts):
     o = facts["otherLibrary"]
-    assert o["state"] == "Scholium 只能批注“我的文库”里的论文。" and o["annotateDisabled"] is True
+    assert o["state"] == "Scholium 只能批注“我的文库”里的论文：把它复制到“我的文库”后再批注。" and o["annotateDisabled"] is True
     assert o["queued"] == 0 and o["calls"] == 0
-    assert o["alerts"] == ["Scholium 只能批注“我的文库”里的论文。", "这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）。"]
-    assert facts["noPdf"]["alerts"] == ["这篇论文没有 PDF 附件。"]
+    assert o["alerts"] == ["Scholium 只能批注“我的文库”里的论文：把它复制到“我的文库”后再批注。", "这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）：在 Zotero 里打开它以下载，或重新链接文件后再试。"]
+    assert facts["noPdf"]["alerts"] == ["这篇论文没有 PDF 附件：在 Zotero 里添加论文的 PDF 后再试。"]
     assert o["composerHidden"] is True and o["controls"] == [True, True, True] and o["asked"] is False, "no message box or conversations"
-    assert o["askedMissing"] == [False, ["这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）。"], 0]
+    assert o["askedMissing"] == [False, ["这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）：在 Zotero 里打开它以下载，或重新链接文件后再试。"], 0]
 
 
 def test_annotate_again_opens_a_session_with_the_box_as_extra_instructions(facts):
