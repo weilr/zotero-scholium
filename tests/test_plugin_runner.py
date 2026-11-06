@@ -2752,8 +2752,10 @@ RUN = [ANNOTATE] + TRANSCRIPT + [CARD]   # an annotation on its tab: the closing
 def test_section_is_registered_and_removed_without_menus_or_toolbar_status(facts):
     assert facts["section"] == {
         "paneID": "scholium",
-        "header": {"l10nID": "scholium-section", "l10nArgs": "{}", "icon": "chrome://scholium/content/icon16.svg"},
-        "sidenav": {"l10nID": "scholium-sidenav", "l10nArgs": "{}", "icon": "chrome://scholium/content/icon20.svg"},
+        "header": {"l10nID": "scholium-section", "l10nArgs": "{}", "icon": "chrome://scholium/content/icon16.svg",
+                   "darkIcon": "chrome://scholium/content/icon16-dark.svg"},
+        "sidenav": {"l10nID": "scholium-sidenav", "l10nArgs": "{}", "icon": "chrome://scholium/content/icon20.svg",
+                    "darkIcon": "chrome://scholium/content/icon20-dark.svg"},
         "ftl": ["scholium.ftl"],
         "styles": [["link", "scholium-style", "stylesheet", "chrome://scholium/content/scholium.css"]],
     }
@@ -3359,9 +3361,15 @@ def test_plugin_addresses_carry_the_version(facts):
 
 def test_plugin_ships_the_section_icons_and_localization():
     import xml.dom.minidom
-    for name in ("icon16.svg", "icon20.svg"):
+    # drawn apart for 16 and 20 px, violet, lighter on a dark theme
+    for name, size, colour in (("icon16.svg", "16", "#8b5cf6"), ("icon16-dark.svg", "16", "#a78bfa"),
+                               ("icon20.svg", "20", "#8b5cf6"), ("icon20-dark.svg", "20", "#a78bfa")):
         svg = xml.dom.minidom.parse(str(PLUGIN / "content" / name)).documentElement
-        assert svg.tagName == "svg" and "context-fill" in svg.toxml()
+        assert svg.tagName == "svg" and svg.getAttribute("viewBox") == f"0 0 {size} {size}" and f'fill="{colour}"' in svg.toxml(), name
+    # the plugin list's icon, in colour
+    icons = json.loads((PLUGIN / "manifest.json").read_text(encoding="utf8"))["icons"]
+    assert icons == {"48": "content/icon96.svg", "96": "content/icon96.svg"}
+    assert xml.dom.minidom.parse(str(PLUGIN / "content" / "icon96.svg")).documentElement.getAttribute("viewBox") == "0 0 96 96"
     assert (PLUGIN / "content" / "scholium.css").is_file()
     for lang in ("en-US", "zh-CN"):
         ftl = (PLUGIN / "locale" / lang / "scholium.ftl").read_text(encoding="utf8")
