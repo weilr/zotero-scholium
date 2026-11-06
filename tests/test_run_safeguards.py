@@ -139,7 +139,9 @@ def test_the_report_says_how_many_annotations_cleanup_removes(paper, monkeypatch
     _, report = run(paper, monkeypatch, capsys, {"cleanup": True, "highlights": hl}, api=api)
     assert report["cleanup_removes"] == 2
     _, report = run(paper, monkeypatch, capsys, {"highlights": hl}, api=api)
-    assert report["cleanup_removes"] == 0, "cleanup is off by default"
+    assert "cleanup_removes" not in report, "cleanup is off by default"
+    _, report = run(paper, monkeypatch, capsys, {"highlights": hl}, "--verbose", api=api)
+    assert report["cleanup_removes"] == 0
 
 
 def test_writing_the_same_text_again_is_a_blocking_duplicate(paper, monkeypatch, capsys):
@@ -150,7 +152,7 @@ def test_writing_the_same_text_again_is_a_blocking_duplicate(paper, monkeypatch,
     assert kinds == ["duplicate_existing"] and "OWN1" in report["style_warnings"][0]["reason"]
     assert code == 2 and report["applied"] is False and "duplicate_existing" in report["apply_error"]
     _, report = run(paper, monkeypatch, capsys, {"highlights": hl, "cleanup": True}, api=api)
-    assert report["style_warnings"] == [], "a redo replaces the earlier annotation"
+    assert "style_warnings" not in report, "a redo replaces the earlier annotation"
     api = Api([ann_row("USER")])
     _, report = run(paper, monkeypatch, capsys, {"highlights": hl}, api=api)
     assert [w["kind"] for w in report["style_warnings"]] == ["user_overlap"], "the user's own highlight is no duplicate"
@@ -177,7 +179,7 @@ def test_accept_lets_a_deliberate_exception_through_and_core_count_only_informs(
     assert {w["kind"] for w in report["style_warnings"]} == {"user_overlap", "core_count"}
     assert report["applied"] is False and "user_overlap" in report["apply_error"] and "core_count" not in report["apply_error"]
     code, report = run(paper, monkeypatch, capsys, {"highlights": hl, "core_range": [10, 15]}, "--apply", "--accept", "user_overlap",
-                       api=api)
+                       "--verbose", api=api)
     assert code == 0 and report["applied"] is True
     assert list(report)[-1] == "applied", "the outcome is the last field"
     keys = json.load(open(report["result"]["keys"], encoding="utf8"))
@@ -231,9 +233,9 @@ def test_null_for_an_optional_key_stands_for_its_default(paper, monkeypatch, cap
     band = [{"page": 1, "place": "top", "text": "A short summary of the paper."}]
     config = dict({k: None for k in cli.DEFAULTS}, highlights=hl, summaries=band, snap=None, data_dir=None)
     code, report = run(paper, monkeypatch, capsys, config, "--ignore-existing")
-    assert code == 0 and report["highlights"] == 1 and report["margin_texts"] == 1 and report["missed"] == []
+    assert code == 0 and report["highlights"] == 1 and report["margin_texts"] == 1 and "missed" not in report
     assert report["colors"] == {cli.DEFAULTS["other_color"]: 1} and "previews" not in report
-    code, report = run(paper, monkeypatch, capsys, {"highlights": None, "summaries": None, "levels": None}, "--ignore-existing")
+    code, report = run(paper, monkeypatch, capsys, {"highlights": None, "summaries": None, "levels": None}, "--ignore-existing", "--verbose")
     assert code == 0 and report["highlights"] == report["margin_texts"] == 0
 
 
@@ -358,7 +360,7 @@ def test_the_plugins_keys_are_kept_and_checked_after_writing(paper, monkeypatch,
     result = {"ok": True, "removed": 0, "kept": 0, "noteCreated": False, "created": {"highlight": 1}, "createdKeys": ["NEW1"], "noteKeys": []}
     monkeypatch.setattr(cli, "plugin_apply", lambda cfg, out: (result, None))
     listing["annotations"] = [{"key": "NEW1", "tags": ["zotero-scholium"]}]
-    code, report = run(paper, monkeypatch, capsys, {"highlights": hl}, "--apply", "--ignore-existing")
+    code, report = run(paper, monkeypatch, capsys, {"highlights": hl}, "--apply", "--ignore-existing", "--verbose")
     assert code == 0 and report["applied"] is True and report["verification"] == {"missing_annotations": [], "missing_notes": []}
     tmp, _ = paper
     assert json.loads((tmp / "out" / "applied_keys.json").read_text(encoding="utf8"))["createdKeys"] == ["NEW1"]

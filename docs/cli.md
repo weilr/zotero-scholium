@@ -32,6 +32,7 @@ uv run scholium.py …                     # uv reads the script's inline metada
    scholium extract --pdf paper.pdf --sentences out/sentences.json --out out/sentences.txt
    ```
 
+   The file starts with an index of its line numbers: where each page starts and, when they are found, where the main text ends, the references start and an appendix after them starts.
    A PDF without a text layer (a scan without OCR) stops `extract` with exit code 3 and a JSON `error` that says to run OCR first.
 
 3. **Write a configuration file.** A complete template is provided in [`skills/zotero-scholium/examples/config.template.json`](../skills/zotero-scholium/examples/config.template.json).
@@ -68,7 +69,7 @@ uv run scholium.py …                     # uv reads the script's inline metada
    scholium --config config.json --list     # counts, the annotations that are not the tool's own, note titles (--full: everything)
    ```
 
-   Every run writes `annotations.json`, a fallback `create_annotations.js`, and `preview_p<N>.png` for the pages in `preview_pages` (none by default), and reports `missed` entries (each with the closest passage found on the page), `style_warnings`, `translation_warnings`, `layout_warnings`, and the PDF's hash before and after. `--apply` refuses to write while `missed`, `style_warnings` (other than `core_count`) or `layout_warnings` is non-empty (`--accept KIND`, `--allow-missed`, `--allow-warnings`). A margin note without room takes the other margin of a one-column page, or else becomes a sticky note; a top or bottom band without room is set smaller, down to 8 pt, and without room even then becomes a sticky note.
+   Every run writes `annotations.json`, a fallback `create_annotations.js`, and `preview_p<N>.png` for the pages in `preview_pages` (none by default), and reports `missed` entries (each with the closest passage found on the page), `style_warnings`, `translation_warnings`, `layout_warnings`, and the PDF's hash before and after; fields with nothing to report (the hashes of a PDF that did not change among them) are left out unless `--verbose` is given. `--apply` refuses to write while `missed`, `style_warnings` (other than `core_count`) or `layout_warnings` is non-empty (`--accept KIND`, `--allow-missed`, `--allow-warnings`). A margin note without room takes the other margin of a one-column page, or else becomes a sticky note; a top or bottom band without room is set smaller, down to 8 pt, and without room even then becomes a sticky note.
 
    `--backend auto` (the default) writes through the Scholium plugin, else through the local API of Zotero 10, else through an older plugin, else into the JavaScript file. With the local API turned off it moves on to the next channel and the report says why; reads through the local API name the setting that turns it on. The local API and the JavaScript file, like the plugin, refuse an `item_key` that is not the attachment's parent before anything is written. Annotations carry the PDF's own page labels (the page numbers Zotero shows, such as `iv`), and their `sortIndex` follows the reading order, so Zotero lists them in the order of the text; the report still names pages by number, from 1.
 

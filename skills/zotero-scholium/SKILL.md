@@ -46,7 +46,7 @@ scholium.py extract --pdf <pdf> --sentences <out_dir>/sentences.json --out <out_
 ```
 When a launching prompt names the paper as a JSON file (`paper.json`), pass that file as `--config <file>` in place of `--pdf <pdf>`, and do not edit it: write your configuration to a file of its own.
 If `extract` exits with code 3 (a scan without text), stop and give the user its `error` message.
-For a whole-paper task, read `sentences.txt` in full, appendices included; for a selected scope, read that scope with enough context. It contains page markers, headings and numbered sentences grouped by paragraph; headers, footers, bibliography and paper checklist are removed. The command prints the file's length; when one read cannot hold it, issue reads of consecutive line ranges together in one response. Do not also read the PDF or full-text cache.
+`sentences.txt` holds page markers, headings and numbered sentences by paragraph, without headers, footers, bibliography and paper checklist; its first lines give the line where each page, the main text, the references and an appendix start. Read by them: for the whole paper, the main text in full and only the appendix parts the main text calls essential; for a scope or page limit, those pages with context. Issue the reads of a long part together in one response. Do not also read the PDF or full-text cache.
 
 Extraction creates output directories and binds `sentences.json` to the PDF's SHA-256. Re-extract old caches without a fingerprint, or after replacing the PDF. If an id is reported as ambiguous, check the page's matching passages and set `occurrence` explicitly; do not guess a position.
 
@@ -69,7 +69,7 @@ First run without `--apply`. Review the report and correct the configuration; th
 - `style_warnings`: formatting, banned phrases, duplicate or overlapping highlights, text the tool already wrote on the page (`duplicate_existing`), the user's changes in Zotero that a rewrite would undo (`user_edit`), note math. `core_count` only informs. For a deliberate exception the user asked for, `--accept KIND` lets that kind through.
 - `translation_warnings` (advisory): terms or numbers absent from the sentence, or a comment much longer or shorter than it. Correct a translation that adds or omits content, or extend the highlight to its source; never alter a faithful translation only to silence a warning.
 - `layout_warnings`: a box that still has no room says what to change. A margin box without room takes the other margin of a one-column page, or else becomes a sticky note beside its paragraph; a top or bottom band is set smaller, down to 8 pt (`fitted`), or else becomes a sticky note beside the first or last line of text (`as_notes` lists the sticky notes).
-- `colors`, `fitted`, `as_notes`, `snapped`, `existing_annotations`, `pdf_sha256`, `now_in_zotero` only inform; `ambiguous_matches` lists phrases that occur more than once on their page, placed at the first occurrence unless `occurrence` is set.
+- Other fields only inform; empty ones are left out. `ambiguous_matches` lists phrases that occur more than once on their page, placed at the first occurrence unless `occurrence` is set.
 
 The report names each problem and what to change; reading `scholium.py`'s source is not needed.
 

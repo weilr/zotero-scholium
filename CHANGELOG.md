@@ -35,6 +35,13 @@
   (`~/.local/bin`, and `~/.cargo/bin` outside Windows) are added when they exist and are missing.
 - The quick start recommends uv in place of installing Python and PyMuPDF.
 - Codex is not offered the effort level max.
+- Claude Code runs get only the tools they use (`--tools`): the skill's for an annotation and its session, and WebSearch
+  and WebFetch too for a chat, which makes each message's starting context smaller.
+- The file `extract --sentences --out` writes starts with an index of its line numbers: each page, the main text, the
+  references and an appendix after them. The skill reads the main text by it and of the appendix only what the main
+  text points to as essential, and finds the pages of a page limit there.
+- The report of a dry run and of `--apply` leaves out empty fields, the generated file's path, an unchanged PDF's
+  hashes and the details of a write that succeeded; `--verbose` prints them all.
 - Ask Scholium is offered only for PDFs in My Library, in reader tabs. A reader tab's section is the one of the PDF it
   shows.
 - Highlights carry the PDF's own page labels, and Zotero's sidebar lists them in reading order.

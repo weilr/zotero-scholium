@@ -1578,6 +1578,39 @@ def render_sentences(items):
     return "\n".join(out) + "\n"
 
 
+PAGE_MARK_RE = re.compile(r"--- p\.(\d+)\b")
+
+
+def indexed(listing):
+    """The listing as the file extract writes: first an index of the file's line numbers, where each page starts and,
+    when they are found, where the main text ends, the references start and an appendix after them starts, so that a
+    part can be read by its lines. The appendix is a heading that starts with Appendix, Appendices or Supplementary
+    after the references."""
+    lines = listing.rstrip("\n").split("\n")
+    pages, refs, appendix, page = [], None, None, None
+    for i, line in enumerate(lines):
+        m = PAGE_MARK_RE.match(line)
+        if m:
+            page = int(m.group(1))
+            pages.append((page, i))
+        elif refs is None and (line == "[references removed]"
+                               or (line.startswith("## ") and REFERENCES_RE.fullmatch(norm_str(line[3:])))):
+            refs = (i, page)
+        elif refs is not None and appendix is None and line.startswith("## ") and APPENDIX_RE.match(norm_str(line[3:])):
+            appendix = (i, page)
+    if not pages:
+        return listing
+    head = 3 + (2 if refs else 0) + (1 if appendix else 0)   # the index's lines, the blank line after it included
+    at = lambda i: i + 1 + head
+    index = ["Index (line numbers of this file)"]
+    if refs:
+        index += [f"main text: lines {at(pages[0][1])}-{at(refs[0]) - 1}", f"references: line {at(refs[0])} (p.{refs[1]})"]
+    if appendix:
+        index.append(f"appendix: from line {at(appendix[0])} (p.{appendix[1]})")
+    index += ["pages: " + ", ".join(f"p.{p} {at(i)}" for p, i in pages), ""]
+    return "\n".join(index + lines) + "\n"
+
+
 def _load_sentences(cfg):
     """Load a cache for this exact PDF, counting complete sentences separately from substring matches."""
     path = cfg.get("sentences") or os.path.join(cfg["out_dir"], "sentences.json")
@@ -1646,7 +1679,8 @@ def extract_main(argv):
                                              "the bibliography and a paper checklist.")
     ap.add_argument("--pdf", help="path of the PDF (default: the \"pdf\" key of --config)")
     ap.add_argument("--config", help="JSON configuration file to take the pdf path from")
-    ap.add_argument("--out", help="write to this file instead of standard output")
+    ap.add_argument("--out", help="write to this file instead of standard output; with --sentences the file starts with an "
+                                  "index of its line numbers (pages, main text, references, appendix)")
     ap.add_argument("--pages", help="page or page range, e.g. 3 or 1-8 (default: all pages)")
     ap.add_argument("--keep-references", action="store_true", help="keep the bibliography")
     ap.add_argument("--sentences", metavar="JSON", help="write numbered sentences with their positions to this JSON file and print the numbered listing instead of plain text")
@@ -1679,6 +1713,8 @@ def extract_main(argv):
         json.dump({"pdf": pdf, "pdf_sha256": pdf_hash, "sentences": [it for it in items if "id" in it],
                    "headings": [it for it in items if "id" not in it]}, open(args.sentences, "w", encoding="utf8"), ensure_ascii=False, indent=0)
         text = render_sentences([it for it in items if not pages or it["page"] in pages])
+        if args.out:
+            text = indexed(text)
         summary = f"{n} sentences -> {args.sentences}; {text.count(chr(10))} lines, {len(text)} characters"
     else:
         text = extract_text(pdf, pages=pages, keep_references=args.keep_references)
@@ -2685,6 +2721,31 @@ HIGHLIGHT_KEYS = {"id", "ids", "page", "text", "occurrence", "core", "level", "c
 SUMMARY_KEYS = {"id", "page", "anchor", "text", "place", "side", "kind", "color", "font_size", "rect", "occurrence"}
 
 
+def _empty(v):
+    """An empty list or mapping, a zero, null or empty text; true and false are values."""
+    return not isinstance(v, bool) and (v is None or v == 0 or v in ([], {}, ""))
+
+
+def brief_report(report):
+    """The report as printed without --verbose: without empty lists and zero counts, the generated JavaScript's path (the
+    fallback names it), the PDF's hashes while it is unchanged, the numbers of the annotations read from Zotero, and after
+    a write that succeeded the channel's reason, the verification and the result's empty fields and keys file."""
+    applied = report.get("applied") is True
+    out = {}
+    for k, v in report.items():
+        if k == "js" or (k == "pdf_sha256" and v.get("unchanged")) or (k == "existing_annotations" and isinstance(v, dict)):
+            continue
+        if applied and k in ("backend_reason", "verification"):
+            continue
+        if applied and k == "result" and isinstance(v, dict):
+            v = {rk: rv for rk, rv in v.items() if rk not in ("ok", "backend", "keys") and not _empty(rv) and rv is not False}
+        if k == "cleanup_removes" and v is None:   # the tool's earlier annotations could not be read
+            out[k] = v
+        elif not _empty(v):
+            out[k] = v
+    return out
+
+
 def config_problems(raw):
     """Mistakes a run would otherwise pass over in silence or end on with a traceback: unknown keys (a misspelt
     "cleanup" keeps its default), an unknown level, a colour that is not #rrggbb, a switch that is not true or false, a
@@ -2793,6 +2854,8 @@ def main(argv=None):
     ap.add_argument("--ignore-existing", action="store_true",
                     help="do not read the attachment's existing annotations before laying out margin notes (they may then be "
                          "overlapped); --apply refuses it with cleanup: true")
+    ap.add_argument("--verbose", action="store_true",
+                    help="print the full report: also empty fields, the PDF's hashes, the generated file and the write's details")
     ap.add_argument("--version", action="version", version=f"scholium {__version__}")
     args = ap.parse_args(argv)
     try:
@@ -2934,7 +2997,7 @@ def main(argv=None):
     for key in ("applied", "apply_error", "fallback"):   # the outcome comes last, where the end of the output shows it
         if key in report:
             report[key] = report.pop(key)
-    print(json.dumps(report, ensure_ascii=False, indent=1))
+    print(json.dumps(report if args.verbose else brief_report(report), ensure_ascii=False, indent=1))
     # a write whose misses were allowed with --allow-missed succeeded
     if (missed and not (args.apply and args.allow_missed)) or (args.apply and report.get("applied") is not True):
         sys.exit(2)
