@@ -101,7 +101,52 @@ def test_failed_creation_reports_failure_and_preserves_previous_annotations(tmp_
     assert result["ok"] is False
     assert "OWN" in api.rows and result["removed"] == 0
     assert result["failed"]
-    assert result["noteCreated"] is (fail_type != "note")
+    assert result["noteCreated"] is False
+    assert set(api.rows) == {"OWN"}, "no new note and no new annotation"
+
+
+def test_the_note_is_written_after_every_annotation_was_accepted(tmp_path):
+    note = tmp_path / "note.html"
+    note.write_text("<h1>Paper</h1><p>A reading note.</p>", encoding="utf8")
+    api = MemoryApi()
+    result = cli.api_apply(config(note_html=str(note)), [HIGHLIGHT, dict(HIGHLIGHT, text="Other result.")], api)
+    assert result["ok"] and result["createdKeys"] == ["NEW1", "NEW2"] and result["noteKeys"] == ["NEW3"]
+    assert [api.rows[k]["data"]["itemType"] for k in api.created_keys] == ["annotation", "annotation", "note"]
+
+
+def test_refused_annotations_leave_no_new_note(tmp_path):
+    """The local API refuses the annotations (HTTP 500 on a second --apply): the note is not written."""
+    note = tmp_path / "note.html"
+    note.write_text("<h1>Paper</h1><p>A reading note.</p>", encoding="utf8")
+
+    class Refusing(MemoryApi):
+        def create(self, items):
+            if items[0]["itemType"] == "annotation":
+                return [], [{"message": "create failed (HTTP 500): An error occurred", "items": f"1-{len(items)} of {len(items)}"}]
+            return super().create(items)
+    api = Refusing([annotation("OWN", ["zotero-scholium"])])
+    result = cli.api_apply(config(cleanup=True, note_html=str(note), note_replace=True), [HIGHLIGHT], api)
+    assert result["ok"] is False and result["noteCreated"] is False and result["noteKeys"] == []
+    assert set(api.rows) == {"OWN"} and api.created_keys == []
+
+
+def test_a_note_that_is_not_written_takes_the_new_annotations_back(tmp_path):
+    note = tmp_path / "note.html"
+    note.write_text("<h1>Paper</h1><p>A reading note.</p>", encoding="utf8")
+    api = MemoryApi([annotation("OWN", ["zotero-scholium"])], fail_type="note")
+    result = cli.api_apply(config(cleanup=True, note_html=str(note)), [HIGHLIGHT], api)
+    assert result["ok"] is False and result["failed"] and result["removed"] == 0
+    assert set(api.rows) == {"OWN"}, "the new annotation removed again, the earlier one kept"
+    assert result["createdKeys"] == [] and result["created"] == {} and "removed again" in result["undone"]
+
+    class FailingDelete(MemoryApi):
+        def delete(self, keys):
+            raise RuntimeError("delete failed (HTTP 500): busy")
+    api = FailingDelete([annotation("OWN", ["zotero-scholium"])], fail_type="note")
+    result = cli.api_apply(config(cleanup=True, note_html=str(note)), [HIGHLIGHT], api)
+    assert result["ok"] is False and result["createdKeys"] == ["NEW1"] and "undone" not in result
+    assert result["undoError"] == ("the new annotations stay, since removing them failed: delete failed (HTTP 500): busy; "
+                                   "run --list before running again")
 
 
 def test_an_item_that_is_not_the_attachments_parent_is_refused_before_writing(tmp_path, monkeypatch):
@@ -194,12 +239,19 @@ def test_main_does_not_report_failed_items_as_applied(tmp_path, monkeypatch, cap
     assert "fallback" not in report, "retrying the entire script can duplicate a partial write"
 
 
+def test_main_leaves_no_new_note_when_the_annotations_are_refused(tmp_path, monkeypatch, capsys):
+    api = MemoryApi(fail_type="annotation")
+    code, report = run_main(tmp_path, monkeypatch, capsys, api, with_note=True)
+    assert code == 2 and report["applied"] is False and report["result"]["noteCreated"] is False
+    assert api.created_keys == [] and not any(r["data"]["itemType"] == "note" for r in api.rows.values())
+
+
 def test_main_verifies_created_keys_instead_of_total_count(tmp_path, monkeypatch, capsys):
     api = MemoryApi([annotation("UNRELATED")], hide_created=True)
     code, report = run_main(tmp_path, monkeypatch, capsys, api, with_note=True)
     assert code == 2 and report["applied"] is False
-    assert report["verification"]["missing_annotations"] == ["NEW2"]
-    assert report["verification"]["missing_notes"] == ["NEW1"]
+    assert report["verification"]["missing_annotations"] == ["NEW1"]
+    assert report["verification"]["missing_notes"] == ["NEW2"]
 
 
 def test_main_reports_readback_error_after_writing(tmp_path, monkeypatch, capsys):

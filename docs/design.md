@@ -14,7 +14,7 @@ editable, are synchronised as data, and leave the PDF file untouched.
 | Route | Availability | Assessment |
 |---|---|---|
 | **Scholium plugin** | Zotero 7 and later | **Primary channel when installed** (0.1.9 and later). Data-only endpoints on Zotero's local server, protected by a token; a run's annotations are written in one transaction and the new keys are returned. The only write channel on Zotero 7 to 9. |
-| **Local API write requests** (`POST /api/users/0/items`) | Zotero 10.0 and later (August 2026). One-time confirmation dialog; the key is bound to the Zotero instance. | **Without the plugin.** Official, supports `annotation` items including the `text` type, child notes, and batch deletion; each item is saved in its own transaction. |
+| **Local API write requests** (`POST /api/users/0/items`) | Zotero 10.0 and later (August 2026). One-time confirmation dialog; the key is bound to the Zotero instance. | **Without the plugin.** Official, supports `annotation` items including the `text` type, child notes, and batch deletion; each item is saved in its own transaction, so the note is written after every annotation was accepted, and a note that is refused takes the new annotations back. |
 | Tools → Developer → Run JavaScript | any version | Last resort; requires the user to paste and execute a generated script. |
 | Direct SQLite writes | only while Zotero is closed | Not implemented. Zotero holds an exclusive lock on the database while running, and hand-written rows are error-prone. |
 | Zotero **web** API | any version; requires a zotero.org account and synchronisation | Used by some MCP servers. Every write passes through the cloud and is not available offline. |
