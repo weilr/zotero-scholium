@@ -1,11 +1,13 @@
 <div align="center">
 
+<img src="plugin/scholium/content/icon96.svg" width="88" alt="">
+
 # zotero-scholium（注疏）
 
-**让 Claude Code 或 Codex 读完论文，直接在 Zotero 里做好批注。**
+**让 Claude Code 或 Codex 在 Zotero 里读论文：批注它，回答你关于它的问题。**
 
-重点句高亮并附译文，段落旁写页边批注，条目下生成阅读笔记。<br>
-全部是 Zotero 原生注释，可编辑、可检索、随文库同步。
+重点句高亮并附译文，段落旁写页边批注，条目下生成阅读笔记，全部是 Zotero 原生注释，可编辑、可检索、随文库同步；<br>
+旁边还能就这篇论文对话。
 
 [![CI](https://github.com/weilr/zotero-scholium/actions/workflows/ci.yml/badge.svg)](https://github.com/weilr/zotero-scholium/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/weilr/zotero-scholium?color=blue)](https://github.com/weilr/zotero-scholium/releases/latest)
@@ -13,15 +15,15 @@
 
 [English](README.md) | 中文
 
-[快速上手](#快速上手) · [功能](#功能) · [工作原理](#工作原理) · [命令行](docs/cli.zh-CN.md) · [插件](plugin/README.md) · [更新日志](CHANGELOG.md)
+[批注](#批注) · [Scholium 区块](#scholium-区块) · [快速上手](#快速上手) · [工作原理](#工作原理) · [命令行](docs/cli.zh-CN.md) · [插件](plugin/README.md) · [更新日志](CHANGELOG.md)
 
 </div>
 
-<img src="docs/images/hero.webp" alt="在 Zotero 里一键批注：在 Scholium 区块的批注页输入附加要求，点批注，结果卡片给出在 Zotero 里数出的数目，随后论文上出现黄色和红色（核心）高亮、蓝色页边批注，侧栏里是译文" width="100%">
+<img src="docs/images/hero.webp" alt="在 Zotero 里一键批注：在 Scholium 区块的批注页输入附加要求，点批注，代理工作时高亮陆续出现在页面上，结果卡片给出在 Zotero 里数出的数目，随后论文上是红、绿、黄三色高亮、紫色下划线、蓝色页边批注和便签，侧栏里是译文" width="100%">
 
-<sub>用 Claude Code 对 <i>Direct Preference Optimization</i>（CC BY 4.0）运行一次，所用个人配置见下表；动图经过加速，实际用时三分钟。本页所有示例都来自这次运行。</sub>
+<sub>用 Claude Code（Opus 5.5）对 <i>Direct Preference Optimization</i>（CC BY 4.0）运行一次，所用个人配置见下表；动图经过加速，实际用时三分半。下面的对话和个人配置来自同一次运行，其余示例来自之前用同一份配置的一次运行。</sub>
 
-## 功能
+## 批注
 
 <table>
 <tr>
@@ -49,10 +51,6 @@
 <td><img src="docs/images/f-note.webp" alt="Zotero 笔记编辑器中的阅读笔记，从概述一路滚动到方法、结果和待解问题，公式已渲染"></td>
 </tr>
 <tr>
-<td><b>在 Zotero 里一键批注</b><br>Scholium 区块对选中的论文运行 Claude Code 或 Codex。<b>批注</b>页批注这篇论文，完成后给出数目；之后在那里写的话接着修改，比如「把第 5 页的译文改短」。<b>对话</b>页回答关于论文的问题，也可以在阅读器里选中一段后点「问 Scholium」，回答里引用的原句带页码，点一下就在 PDF 里找到；之前的对话都留在「历史」里。</td>
-<td><img src="docs/images/f-pane.webp" alt="对第 2 页的一段点「问 Scholium」：这段引文出现在对话页输入框上方，问题发出后，回答以页码芯片引用原句，芯片的卡片带「定位」，点后在第 4 页找到该句"></td>
-</tr>
-<tr>
 <td><b>个人配置</b><br>从文库里已有的注释归纳你的标注习惯，再加上你自己的规则。每次运行都照它来，可以在 Zotero 里直接编辑。</td>
 <td><img src="docs/images/f-profile.webp" alt="个人配置编辑器：左边是 Markdown 规则，右边是预览"></td>
 </tr>
@@ -63,6 +61,36 @@
 </table>
 
 写入前代理会先预演：没对上的句子、多出术语或数字的译文、套话、重叠的高亮都会列出来，改好再写；放不下的页边批注会换到另一侧页边，或改成便签。技能遵循 [Agent Skills](https://agentskills.io/) 规范，Claude Code、Codex、Cursor 等代理都能用。
+
+## Scholium 区块
+
+插件在 Zotero 的条目窗格里加了一个 **Scholium** 区块，文库里和阅读器的 PDF 旁边都有。它在你的电脑上调用已安装的 Claude Code 或 Codex，处理当前显示的论文。
+
+<img src="docs/images/f-pane.webp" alt="选中第 2 页的一段，右键选「问 Scholium」：这段引文出现在对话页输入框上方，问题发出后，回答以页码芯片引用原句，芯片的卡片带「定位」，点后在第 4 页找到该句" width="100%">
+
+**批注页**
+
+- 点 **批注这篇**，可以附加要求，比如「只批注第 3–5 页」。完成后的卡片给出 Zotero 里实际的数目：高亮（其中核心几条）、页边批注、便签、阅读笔记，以及轮数和 token 数。
+- 之后在这里写的话，在同一个会话里接着修改批注，比如「把第 5 页的译文改短」。
+- **重新批注** 会先删除这篇论文的 Scholium 批注，并把 Scholium 阅读笔记移到回收站，再重新批注；⋯ 菜单里的 **删除批注** 只删除、不重新批注。两种情况下你自己的批注和笔记都不动。
+
+**对话页**
+
+- 问关于这篇论文的问题；也可以在阅读器里选中一段，右键选 **问 Scholium**。
+- 回答以页码芯片（`p.4`）引用论文原句：悬停显示原句，点一下在 PDF 里找到它。
+- Claude Code 和 Codex 共用这篇论文的对话：换了智能体，下一条消息就由它回答。**＋** 开新对话，🕘 列出之前的对话。
+- 之前的问题点 ✎ 可以改了再问；**撤销** 能找回被替换的内容。
+- 输入框上方的常用问题，点一下就发送。
+- 智能体回答时发的消息进入队列，可以拖动排序；用 Codex 时还能用它们引导正在进行的回答。
+
+**运行**
+
+- 标签页下方的芯片选择智能体、模型和推理强度。
+- 发送按钮旁的圆环显示对话占了多少上下文窗口；`/compact` 压缩上下文。
+- 某个智能体用量到达上限时，只暂停它的任务，到重置时间后自动继续。
+- Zotero 设置里有一页 Scholium：发送快捷键、跟进处理方式、上下文圆环，以及 Claude Code 和 Codex 的路径。
+
+全部细节见 [plugin/README.md](plugin/README.md)（英文）。
 
 ## 快速上手
 
@@ -75,7 +103,7 @@
    ```bash
    npx skills add weilr/zotero-scholium -g -y
    ```
-3. 下载 [`scholium.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium.xpi)，在 Zotero 中安装：工具 → 插件 → ⚙ → 从文件安装插件。已装 Scholium Bridge（0.1.9 及更早）的，也这样安装 Scholium：它会移除 Scholium Bridge，并保留原有的设置和对话；Scholium Bridge 里正在进行的任务会停下，排队的消息不保留。Scholium Bridge 不会自行更新到 Scholium。
+3. 下载 [`scholium.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium.xpi)，在 Zotero 中安装：工具 → 插件 → ⚙ → 从文件安装插件。
 4. 选中一篇论文，打开 **Scholium** 区块，在 **批注** 页点 **批注这篇**。想提问时，在 **对话** 页写问题发送。
 
 ### 在代理对话里使用
@@ -91,7 +119,7 @@
 完成后关闭并重新打开 PDF 即可看到结果。没装插件时，Zotero 10 首次写入会询问是否允许，选「始终允许」。
 
 <details>
-<summary>其他安装方式与更新</summary>
+<summary>其他安装方式、更新，以及从 Scholium Bridge 升级</summary>
 
 **Claude Code 插件**，由 `/plugin` 负责更新：
 
@@ -102,7 +130,9 @@
 
 **手动安装：** 将 [`skills/zotero-scholium/`](skills/zotero-scholium/) 复制到代理的技能目录：Claude Code 为 `~/.claude/skills/`，Codex 为 `~/.codex/skills/`，其他代理为 `~/.agents/skills/`。该目录自成一体。
 
-**更新：** `npx skills update zotero-scholium`，或 `/plugin update zotero-scholium@zotero-scholium`。插件通过 Zotero 的插件更新机制自动更新。Scholium Bridge 不会自动更新到 Scholium，请按第 3 步安装。
+**更新：** `npx skills update zotero-scholium`，或 `/plugin update zotero-scholium@zotero-scholium`。插件通过 Zotero 的插件更新机制自动更新。
+
+**从 Scholium Bridge（0.1.9 及更早）升级：** Scholium Bridge 不会自行更新到 Scholium。按第 3 步安装 Scholium：它会移除 Scholium Bridge，并保留原有的设置和对话；Scholium Bridge 里正在进行的任务会停下，排队的消息不保留。
 
 </details>
 
@@ -119,6 +149,8 @@ flowchart LR
 ```
 
 代理只需挑句子编号、写内容。原文在页面上的准确位置、页边批注放在段落旁哪块空白，都由工具算出；最后通过随附插件写入，没装插件时用 Zotero 10 的本地 API。
+
+在 Scholium 区块里，插件在你的电脑上启动 Claude Code（`claude -p`）或 Codex（`codex app-server`），用的是你平时登录它们的账号；插件不读取、也不保存它们的凭据。之后代理照同一个技能工作。
 
 详见 [docs/design.md](docs/design.md)（数据模型、写入通道、重复运行）和 [references/configuration.md](skills/zotero-scholium/references/configuration.md)（全部选项与报告字段），两者均为英文。
 

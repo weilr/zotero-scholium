@@ -1,11 +1,13 @@
 <div align="center">
 
+<img src="plugin/scholium/content/icon96.svg" width="88" alt="">
+
 # zotero-scholium
 
-**Let Claude Code or Codex read a paper and annotate it in Zotero.**
+**Let Claude Code or Codex read a paper in Zotero, annotate it and answer your questions about it.**
 
 Key sentences highlighted and translated, margin notes beside the paragraphs, a reading note under the item,<br>
-all as native Zotero annotations you can edit, search and sync.
+all as native Zotero annotations you can edit, search and sync, and a chat about the paper beside it.
 
 [![CI](https://github.com/weilr/zotero-scholium/actions/workflows/ci.yml/badge.svg)](https://github.com/weilr/zotero-scholium/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/weilr/zotero-scholium?color=blue)](https://github.com/weilr/zotero-scholium/releases/latest)
@@ -13,15 +15,15 @@ all as native Zotero annotations you can edit, search and sync.
 
 English | [中文](README.zh-CN.md)
 
-[Quick start](#quick-start) · [Features](#features) · [How it works](#how-it-works) · [Command line](docs/cli.md) · [Plugin](plugin/README.md) · [Changelog](CHANGELOG.md)
+[Annotations](#annotations) · [The Scholium section](#the-scholium-section) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Command line](docs/cli.md) · [Plugin](plugin/README.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
-<img src="docs/images/hero.webp" alt="A one-click run in Zotero: the extra instructions typed on the Scholium section's Annotations tab, Annotate pressed, the result card with the numbers counted in Zotero, then the paper with yellow and red (core) highlights, blue margin notes and the translations in the sidebar" width="100%">
+<img src="docs/images/hero.webp" alt="A one-click run in Zotero: the extra instructions typed on the Scholium section's Annotations tab, Annotate pressed, the highlights appearing on the page while the agent works, the result card with the numbers counted in Zotero, then the paper with red, green and yellow highlights, purple underlines, blue margin notes and sticky notes, and the translations in the sidebar" width="100%">
 
-<sub>One run of Claude Code on <i>Direct Preference Optimization</i> (CC BY 4.0) with the profile shown below, sped up (it took three minutes). All the examples on this page come from that run.</sub>
+<sub>One run of Claude Code (Opus 5.5) on <i>Direct Preference Optimization</i> (CC BY 4.0) with the profile shown below, sped up (it took three and a half minutes). The chat and the profile below come from the same run; the other examples, from an earlier run with that profile.</sub>
 
-## Features
+## Annotations
 
 <table>
 <tr>
@@ -49,10 +51,6 @@ English | [中文](README.zh-CN.md)
 <td><img src="docs/images/f-note.webp" alt="The reading note in Zotero's note editor, scrolled from the summary through Method, Results and Open questions, with rendered equations"></td>
 </tr>
 <tr>
-<td><b>One click in Zotero</b><br>The Scholium section runs Claude Code or Codex on the selected paper. Its <b>Annotations</b> tab annotates the paper and counts the result; words typed there afterwards change it, such as <i>shorten the translation on page 5</i>. Its <b>Chat</b> tab answers questions about the paper, also about a passage selected in the reader (<b>Ask Scholium</b>), and cites the paper's sentences with their page, a click away in the PDF; earlier conversations stay under History.</td>
-<td><img src="docs/images/f-pane.webp" alt="Ask Scholium on a passage of page 2: the passage quoted above the Chat tab's box, the question sent, the answer citing the paper's sentences as page chips, a chip's card with Locate, and the cited sentence found on page 4"></td>
-</tr>
-<tr>
 <td><b>Your profile</b><br>How you annotate, learned from the annotations already in your library, plus your own rules. Every run follows it; edit it inside Zotero.</td>
 <td><img src="docs/images/f-profile.webp" alt="The profile editor: the Markdown rules on the left and their preview on the right"></td>
 </tr>
@@ -63,6 +61,43 @@ English | [中文](README.zh-CN.md)
 </table>
 
 The agent does a dry run before writing: unmatched sentences, translations that add terms or numbers, stock phrases and overlapping highlights are reported and fixed first; a margin note without room moves to the other margin or becomes a sticky note. The skill follows the [Agent Skills](https://agentskills.io/) format, so Claude Code, Codex, Cursor and other agents can use it.
+
+## The Scholium section
+
+The plugin adds a **Scholium** section to Zotero's item pane, in the library and beside the PDF in the reader. It runs
+the Claude Code or Codex installed on your computer on the paper shown.
+
+<img src="docs/images/f-pane.webp" alt="A passage of page 2 selected and right-clicked, Ask Scholium chosen in the menu: the passage quoted above the Chat tab's box, the question sent, the answer citing the paper's sentences as page chips, a chip's card with Locate, and the cited sentence found on page 4" width="100%">
+
+**Annotations tab**
+
+- **Annotate** with extra instructions if you like, such as *pages 3–5 only*. A card at the end counts what is in
+  Zotero: highlights (and the core ones), margin notes, sticky notes and reading notes, with the turns and tokens.
+- Words typed afterwards change the annotations in the same session, such as *shorten the translation on page 5*.
+- **Annotate again** deletes the paper's Scholium annotations and moves its Scholium reading notes to the trash, then
+  annotates anew. **Delete annotations** in the ⋯ menu removes them without a new run. Your own annotations and notes
+  stay either way.
+
+**Chat tab**
+
+- Ask about the paper, or right-click a passage selected in the reader and choose **Ask Scholium**.
+- Answers cite the paper's sentences as page chips (`p.4`): hover shows the sentence, a click finds it in the PDF.
+- Claude Code and Codex share the paper's conversations: switch the agent and the next message goes to it. **＋** starts
+  a conversation, 🕘 lists the earlier ones.
+- ✎ on an earlier question asks it again, edited; **Undo** brings back what it replaced.
+- Saved prompts above the box send with a click.
+- Messages sent while the agent answers wait in a queue you can reorder; with Codex they can steer the answer under
+  way.
+
+**Runs**
+
+- The chip under the tabs picks the agent, the model and the effort.
+- The ring beside the send button shows how much of the context window the conversation takes; `/compact` compacts it.
+- When an agent reaches its usage limit, only its runs pause, and they go on by themselves after the reset.
+- A Scholium page in Zotero's settings holds the send shortcut, the follow-up behavior, the context ring and the paths
+  of Claude Code and Codex.
+
+Every detail is in [plugin/README.md](plugin/README.md).
 
 ## Quick start
 
@@ -75,7 +110,7 @@ You need Zotero 7 or later with its local API turned on (Settings → Advanced �
    ```bash
    npx skills add weilr/zotero-scholium -g -y
    ```
-3. Download [`scholium.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium.xpi) and install it in Zotero: Tools → Plugins → ⚙ → Install Plugin From File. With Scholium Bridge installed (0.1.9 or earlier), install Scholium the same way: it removes Scholium Bridge and keeps its settings and conversations; a run under way in Scholium Bridge stops, and its queued messages are not kept. Scholium Bridge does not update to Scholium by itself.
+3. Download [`scholium.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium.xpi) and install it in Zotero: Tools → Plugins → ⚙ → Install Plugin From File.
 4. Select a paper, open the **Scholium** section and press **Annotate** on its **Annotations** tab. To ask about the paper, type the question on its **Chat** tab and send it.
 
 ### From your agent
@@ -91,7 +126,7 @@ Write a reading note for "Direct Preference Optimization"
 Close and reopen the PDF afterwards to see the result. Without the plugin, Zotero 10 asks once whether the tool may write: choose *Always Allow*.
 
 <details>
-<summary>Other ways to install the skill, and updating</summary>
+<summary>Other ways to install the skill, updating, and coming from Scholium Bridge</summary>
 
 **Claude Code plugin**, kept up to date by `/plugin`:
 
@@ -102,7 +137,9 @@ Close and reopen the PDF afterwards to see the result. Without the plugin, Zoter
 
 **Manual:** copy [`skills/zotero-scholium/`](skills/zotero-scholium/) into the agent's skills directory: `~/.claude/skills/` for Claude Code, `~/.codex/skills/` for Codex, `~/.agents/skills/` for other agents. The directory is self-contained.
 
-**Updating:** `npx skills update zotero-scholium`, or `/plugin update zotero-scholium@zotero-scholium`. The plugin updates itself through Zotero's add-on updater. Scholium Bridge does not update to Scholium: install Scholium (step 3).
+**Updating:** `npx skills update zotero-scholium`, or `/plugin update zotero-scholium@zotero-scholium`. The plugin updates itself through Zotero's add-on updater.
+
+**From Scholium Bridge (0.1.9 or earlier):** Scholium Bridge does not update to Scholium by itself. Install Scholium as in step 3: it removes Scholium Bridge and keeps its settings and conversations; a run under way in Scholium Bridge stops, and its queued messages are not kept.
 
 </details>
 
@@ -119,6 +156,8 @@ flowchart LR
 ```
 
 The agent only picks sentence numbers and writes the text. The tool finds the exact words and their position on the page, places each margin note beside its paragraph where there is room, and writes everything through the bundled plugin, or through Zotero 10's local API without it.
+
+From the Scholium section, the plugin starts Claude Code (`claude -p`) or Codex (`codex app-server`) on your computer, with the sign-in you already use for them; it does not read or store their credentials. The agent then follows the same skill.
 
 More in [docs/design.md](docs/design.md) (data model, write channels, repeated runs) and [references/configuration.md](skills/zotero-scholium/references/configuration.md) (every option and report field).
 
