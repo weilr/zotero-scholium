@@ -66,14 +66,14 @@ SCENARIOS = r"""
     const again = p.pane();
     facts.pending.again = again.quoteBox.hidden ? null : again.quote;
   }
-  // the popup's listener is registered with the plugin and let go of with it
+  // the context menu's listener is registered with the plugin and let go of with it
   {
     const h = harness({});
     h.zotero.version = '10.0.7';   // Zotero 7-9 keep it (test_release_f3)
     h.runner.start('x');
-    const had = h.log.listeners.some(l => l.type === 'renderTextSelectionPopup');
+    const had = h.log.listeners.some(l => l.type === 'createViewContextMenu');
     h.runner.stop();
-    facts.listener = { had, after: h.log.listeners.some(l => l.type === 'renderTextSelectionPopup') };
+    facts.listener = { had, after: h.log.listeners.some(l => l.type === 'createViewContextMenu') };
   }
   // a quote queued behind a run waits with its message and goes with it; a retry of a turn sends it again; an update
   // hands it over
@@ -678,7 +678,7 @@ def test_a_passage_chosen_before_the_section_is_drawn_waits_for_it(facts):
     assert p["again"] == {"text": PASSAGE, "page": "4"}
 
 
-def test_the_popup_listener_comes_and_goes_with_the_plugin(facts):
+def test_the_context_menu_listener_comes_and_goes_with_the_plugin(facts):
     assert facts["listener"] == {"had": True, "after": False}
 
 

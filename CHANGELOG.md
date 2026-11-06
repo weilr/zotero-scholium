@@ -4,6 +4,8 @@
 
 ### Changed
 
+- **Ask Scholium** is in the context menu of a PDF reader: a right click on selected text offers it, at the end of the
+  menu. The selection popup no longer has it.
 - A new icon: a page with a note over its corner, drawn for 16 and 20 px in the style of Zotero's item-pane icons, in a
   lighter violet on a dark theme; it shows in the Scholium section's header, the side navigation and the settings, and
   in colour in Zotero's Plugins list, which showed the default icon before.
@@ -17,6 +19,8 @@
 - The settings layer is as wide as its longest option needs, so the model dropdown is no wider than its options;
   layers no longer reach past the pane's edge.
 - `<sub>…</sub>` and `<sup>…</sup>` in an agent's answer show as subscript and superscript instead of the tags.
+- After **Ask Scholium**, Zotero 10 no longer keeps drawing the cleared selection on the page, and on Zotero 7 the
+  cursor goes to the box: opening the Scholium section no longer waits more than a second for it to scroll into view.
 
 ## 0.2.0 (2026-11-04)
 

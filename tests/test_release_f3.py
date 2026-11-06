@@ -57,26 +57,36 @@ const all = n => [n, ...((n && n.children) || []).filter(c => c && c.tagName).fl
     pane.chip.click();
     facts.switchNote[locale] = pane.popover.node.children.find(c => c.className === 'scholium-note').textContent;
   } });
-  // Ask Scholium: in a PDF's reader only; on Zotero 7-9 the PDF view has no clearSelection
+  // Ask Scholium in the context menu: in a PDF's reader only, with text selected; the selection is the one the reader keeps
+  // for the view used last; on Zotero 7-9 the PDF view has no clearSelection, on Zotero 10 it draws nothing by itself
   await step(async () => {
     const h = harness({ locale: 'en-US' });
     h.runner.start('x');
-    const l = h.log.listeners.find(x => x.type === 'renderTextSelectionPopup');
-    const doc = { createElement: tag => new El(tag) };
-    const fire = (itemID, view) => {
+    const l = h.log.listeners.find(x => x.type === 'createViewContextMenu');
+    const passage = (text, page) => ({ annotation: { text, pageLabel: page, position: { pageIndex: Number(page) - 1, rects: [] } } });
+    const fire = (itemID, view, state = { primaryViewSelectionPopup: passage('A passage.', '3') }, lastPrimary = true) => {
       const appended = [];
-      l.handler({ reader: { itemID, _window: h.paneWin, tabID: 'tab-r', _internalReader: { _primaryView: view } }, doc,
-                  params: { annotation: { text: 'A passage.', pageLabel: '3', position: { pageIndex: 2, rects: [] } } },
-                  append: (...n) => appended.push(...n) });
+      l.handler({ reader: { itemID, _window: h.paneWin, tabID: 'tab-r', _internalReader: { _primaryView: view, _lastViewPrimary: lastPrimary, _state: state } },
+                  doc: {}, params: { x: 1, y: 1 }, append: (...n) => appended.push(...n) });
       return appended;
     };
-    const snapshot = fire('HTML_ITEM1', { clearSelection() {} }).map(n => n.textContent);
+    const snapshot = fire('HTML_ITEM1', { clearSelection() {} }).map(n => n.label);
+    const none = { nothing: fire('ATT1', {}, {}).length, blank: fire('ATT1', {}, { primaryViewSelectionPopup: passage('  ', '3') }).length };
     const old = { ranges: [], rendered: 0, removed: 0 };
     const view = { _setSelectionRanges(r) { old.ranges.push(r === undefined ? 'none' : r); }, _render() { old.rendered++; },
                    _iframeWindow: { getSelection: () => ({ removeAllRanges() { old.removed++; } }) } };
     const pdf = fire('ATT1', view);
-    pdf[0].click(); await settle(30);
-    facts.askReaders = { snapshot, pdf: pdf.map(n => n.textContent), old, pending: [...h.runner.pendingQuotes.keys()] };
+    pdf[0].onCommand(); await settle(30);
+    // the secondary view used last: its passage
+    h.runner.pendingQuotes.clear();
+    fire('ATT1', {}, { primaryViewSelectionPopup: passage('In the first view.', '3'), secondaryViewSelectionPopup: passage('In the second view.', '5') }, false)[0].onCommand();
+    await settle(30);
+    const secondary = h.runner.pendingQuotes.get('ATT1');
+    // Zotero 10's view: cleared, then drawn again
+    const ten = { cleared: 0, rendered: 0 };
+    fire('ATT1', { clearSelection() { ten.cleared++; }, _render() { ten.rendered++; } })[0].onCommand();
+    await settle(30);
+    facts.askReaders = { snapshot, none, pdf: pdf.map(n => n.label), old, pending: [...h.runner.pendingQuotes.keys()], secondary, ten };
   });
   // the first Ask Scholium of a reader tab: the section drawn then takes the passage and the focus
   await step(async () => {
@@ -360,8 +370,9 @@ const all = n => [n, ...((n && n.children) || []).filter(c => c && c.tagName).fl
     const toolbar = [];
     h.toggle.onRenderToolbar = e => toolbar.push(e);
     const appended = [];
-    const popup = () => ({ reader: { itemID: 'ATT1', _window: h.paneWin }, doc: { createElement: t => new El(t) },
-                           params: { annotation: { text: 'A passage.', position: { pageIndex: 0, rects: [] } } }, append: (...n) => appended.push(...n) });
+    const popup = () => ({ reader: { itemID: 'ATT1', _window: h.paneWin,
+                                     _internalReader: { _lastViewPrimary: true, _state: { primaryViewSelectionPopup: { annotation: { text: 'A passage.', position: { pageIndex: 0, rects: [] } } } } } },
+                           doc: { createElement: t => new El(t) }, params: { x: 1, y: 1 }, append: (...n) => appended.push(...n) });
     const fireAll = () => { for (const l of real._registeredListeners.filter(x => x.pluginID === 'scholium')) l.handler(popup()); };
     for (const l of ours) l.handler(popup());
     const stopped = { toolbar: toolbar.length, popup: appended.length };
@@ -404,7 +415,16 @@ def test_the_settings_layer_says_the_conversation_stays_when_the_agent_changes(f
 def test_ask_scholium_shows_in_pdf_readers_only(facts):
     a = facts["askReaders"]
     assert a["snapshot"] == [], "an EPUB or snapshot reader has no Scholium section"
+    assert a["none"] == {"nothing": 0, "blank": 0}, "no item without text selected"
     assert a["pdf"] == ["Ask Scholium"] and a["pending"] == ["ATT1"]
+
+
+def test_ask_scholium_takes_the_selection_of_the_view_used_last(facts):
+    assert facts["askReaders"]["secondary"] == {"text": "In the second view.", "page": "5"}
+
+
+def test_ask_scholium_draws_zotero_10s_page_again_after_clearing_the_selection(facts):
+    assert facts["askReaders"]["ten"] == {"cleared": 1, "rendered": 1}
 
 
 def test_ask_scholium_closes_the_popup_on_zotero_7_to_9(facts):
@@ -547,7 +567,7 @@ def test_zotero_7_to_9_keep_the_other_plugins_reader_listeners(facts, version):
 
 def test_zotero_10_unregisters_the_reader_listeners(facts):
     r = facts["readerListeners"]["10.0.7"]
-    assert r["calls"] == ["renderTextSelectionPopup", "renderToolbar"] * 2
+    assert r["calls"] == ["createViewContextMenu", "renderToolbar"] * 2
     assert r["afterStop"] == ["translate@example:renderTextSelectionPopup", "translate@example:renderToolbar"]
     assert r["stopped"] == {"toolbar": 0, "popup": 0}
     assert r["again"] == {"toolbar": 1, "popup": 1}

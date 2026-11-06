@@ -2759,7 +2759,7 @@ def test_section_is_registered_and_removed_without_menus_or_toolbar_status(facts
         "ftl": ["scholium.ftl"],
         "styles": [["link", "scholium-style", "stylesheet", "chrome://scholium/content/scholium.css"]],
     }
-    assert facts["contextMenus"] == {"menus": 0, "readerListeners": ["renderTextSelectionPopup"]}
+    assert facts["contextMenus"] == {"menus": 0, "readerListeners": ["createViewContextMenu"]}
     assert facts["stopped"] == {"sections": ["scholium-pane"], "ftl": "removed", "panes": 0, "toolbarItems": 0, "observers": 0,
                                 "styles": 0}
 

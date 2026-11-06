@@ -1673,32 +1673,46 @@ var ScholiumRunner = {
     }) || null;
   },
 
-  // Ask Scholium under the colours of the reader's selection popup, in a PDF's reader: an EPUB or a snapshot has no
+  // Ask Scholium in the context menu of a PDF reader's page while text is selected there: an EPUB or a snapshot has no
   // Scholium section
-  selectionButton({ reader, doc, params, append }) {
-    const a = params && params.annotation;
-    if (!a || !String(a.text || "").trim()) return;
+  contextMenuItem({ reader, append }) {
+    const a = this.readerSelection(reader);
+    if (!a) return;
     const att = reader && Zotero.Items.get(reader.itemID);
     if (!att || att.attachmentContentType !== "application/pdf") return;
-    const b = doc.createElement("button");
-    b.className = "toolbar-button wide-button scholium-ask";
-    b.textContent = this.text("askScholium");
-    b.addEventListener("click", () => { this.askAboutSelection(reader, a).catch(e => this.log("ask failed: " + e)); });
-    append(b);
+    append({ label: this.text("askScholium"), onCommand: () => { this.askAboutSelection(reader, a).catch(e => this.log("ask failed: " + e)); } });
+  },
+
+  // the text selected in a reader: the menu's event does not give it; the reader keeps it, with its page and position,
+  // as the selection popup's annotation of each view, the view used last first
+  readerSelection(reader) {
+    try {
+      const ir = reader && reader._internalReader, s = ir && ir._state;
+      if (!s) return null;
+      const popups = ir._lastViewPrimary === false ? [s.secondaryViewSelectionPopup, s.primaryViewSelectionPopup]
+        : [s.primaryViewSelectionPopup, s.secondaryViewSelectionPopup];
+      for (const p of popups) if (p && p.annotation && String(p.annotation.text || "").trim()) return p.annotation;
+    } catch (e) {}
+    return null;
   },
 
   // the passage goes above the chat's box of the paper's section, in the window of the reader
   async askAboutSelection(reader, a) {
     const att = Zotero.Items.get(reader.itemID);
     if (!att) return;
-    // the popup closes, as after a colour: the views' selection is cleared (Zotero 7–9's PDF view has no clearSelection:
+    // the selection's popup closes, as after a colour: the views' selection is cleared (Zotero 7–9's PDF view has no clearSelection:
     // what Zotero 10's does there, drawn again as 7–9 do when an annotation is selected)
     try {
       const ir = reader._internalReader;
       for (const view of [ir && ir._primaryView, ir && ir._secondaryView]) {
         if (!view) continue;
         try {   // a view that throws leaves the other to be cleared
-          if (typeof view.clearSelection === "function") { view.clearSelection(); continue; }
+          // Zotero 10's PDF view clears its ranges without drawing the page again
+          if (typeof view.clearSelection === "function") {
+            view.clearSelection();
+            if (typeof view._render === "function") view._render();
+            continue;
+          }
           if (typeof view._setSelectionRanges === "function") {
             view._setSelectionRanges();
             if (typeof view._render === "function") view._render();
@@ -1712,8 +1726,11 @@ var ScholiumRunner = {
     if (!pane) { this.pendingQuotes.set(att.key, quote); await this.revealSection(reader._window, null, reader.tabID || null); return; }
     pane.quote = quote;
     this.setTab(pane, "chat");
-    await this.revealSection(reader._window, pane);
+    // the section is opened at once and the box takes the focus before its scrolling settles
+    const shown = this.revealSection(reader._window, pane);
     try { pane.input.focus(); } catch (e) {}
+    await shown;
+    try { if (pane.doc.activeElement !== pane.input) pane.input.focus(); } catch (e) {}
   },
 
   // the section of a paper in a window: a reader's is the one of its side pane (the library's stays drawn behind the
@@ -1749,7 +1766,12 @@ var ScholiumRunner = {
       }
     } catch (e) {}
     try { if (section) section.open = true; } catch (e) {}
-    try { if (details && typeof details.scrollToPane === "function") await details.scrollToPane(this.paneID); } catch (e) {}
+    // Zotero 7's scrollToPane may not settle: a second at most
+    try {
+      if (details && typeof details.scrollToPane === "function") {
+        await Promise.race([details.scrollToPane(this.paneID), Zotero.Promise.delay(1000)]);
+      }
+    } catch (e) {}
   },
 
   dropPane(body) {
@@ -7071,9 +7093,9 @@ var ScholiumRunner = {
     this.registerPane(pluginID);
     try {
       // a handler left registered (see unregisterReaderListener) does nothing once this copy stopped
-      const handler = this.selectionHandler = event => { if (this.selectionHandler === handler) this.selectionButton(event); };
-      Zotero.Reader.registerEventListener("renderTextSelectionPopup", this.selectionHandler, pluginID);
-    } catch (e) { this.log("selection popup not registered: " + e); }
+      const handler = this.menuHandler = event => { if (this.menuHandler === handler) this.contextMenuItem(event); };
+      Zotero.Reader.registerEventListener("createViewContextMenu", this.menuHandler, pluginID);
+    } catch (e) { this.log("context menu not registered: " + e); }
     // the Scholium page of Zotero's settings; Zotero removes it when the plugin stops
     if (Zotero.PreferencePanes && this.rootURI) {
       Zotero.PreferencePanes.register({ pluginID, src: this.rootURI + "settings.xhtml", label: "Scholium",
@@ -7230,8 +7252,8 @@ var ScholiumRunner = {
     for (const win of this.windows()) this.removeFromWindow(win);
     try { if (this.paneID) Zotero.ItemPaneManager.unregisterSection(this.paneID); } catch (e) {}
     this.paneID = null;
-    unregisterReaderListener("renderTextSelectionPopup", this.selectionHandler);
-    this.selectionHandler = null;
+    unregisterReaderListener("createViewContextMenu", this.menuHandler);
+    this.menuHandler = null;
     this.pendingQuotes.clear();
     this.prefPaneID = null;
     if (Zotero.Scholium === this.settingsApi) delete Zotero.Scholium;   // a newer copy's stays
