@@ -37,7 +37,7 @@ except ImportError:   # PyMuPDF before 1.24 is imported as fitz
 
 PYMUPDF_MISSING = "PyMuPDF is not installed; run: pip install -U pymupdf"
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 TAG = "zotero-scholium"     # tag applied to every annotation and note created by this tool
 LEGACY_TAGS = {"zotero-marginalia", "zotero-paper-annotate"}   # tags written by earlier versions; still recognised as belonging to this tool
