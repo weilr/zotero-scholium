@@ -2059,7 +2059,7 @@ var ScholiumRunner = {
       sidenav: { l10nID: "scholium-sidenav", l10nArgs: "{}", icon: this.chrome + "icon20.svg", darkIcon: this.chrome + "icon20-dark.svg" },
       onItemChange: ({ item, setEnabled }) => { setEnabled(this.paneKeys(item).length > 0); },
       onRender: ({ doc, body, item }) => { this.renderPane(doc, body, item); },
-      onAsyncRender: ({ body }) => this.loadHistory(body),
+      onAsyncRender: ({ body }) => this.loadPane(body),
       onDestroy: ({ body }) => { this.dropPane(body); },
     }) || null;
   },
@@ -2749,7 +2749,7 @@ var ScholiumRunner = {
     try { section = pane.body.closest("collapsible-section"); } catch (e) {}
     if (!section || typeof section.addEventListener !== "function") return;
     const opened = () => {
-      if (section.open && this.panes.get(pane.body) === pane && !pane.showing) this.loadHistory(pane.body).catch(e => this.log("history failed: " + e));
+      if (section.open && this.panes.get(pane.body) === pane && !pane.showing) this.loadPane(pane.body);
     };
     section.addEventListener("toggle", opened);
     pane.unopen = () => { section.removeEventListener("toggle", opened); };
@@ -2954,6 +2954,19 @@ var ScholiumRunner = {
     // a passage asked about before the section was drawn: the words to it go in the box
     if (pending) { try { pane.input.focus(); } catch (e) {} }
     this.loadModels().catch(() => {});
+    // the conversation and the annotation session now: Zotero skips the async render of an item it did last when the item
+    // comes back after another item's sync render; a collapsed section loads them when it is opened (watchOpen)
+    let section = null;
+    try { section = body.closest("collapsible-section"); } catch (e) {}
+    if (!section || section.open !== false) this.loadPane(body);
+  },
+
+  // a drawing's conversation and annotation session, read once: the async render after the sync one waits for the same load
+  loadPane(body) {
+    const pane = this.panes.get(body);
+    if (!pane) return Promise.resolve();
+    if (!pane.loading) pane.loading = this.loadHistory(body).catch(e => { this.log("history failed: " + e); });
+    return pane.loading;
   },
 
   // the annotation profile, <data dir>/zotero-scholium/profile.md, which every run follows; a missing

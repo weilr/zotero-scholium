@@ -57,6 +57,8 @@
 - With Zotero's local API turned off, the tool falls back to the other write channels.
 - Annotation positions that are not numbers no longer stop a run or the profile.
 - Sticky notes beside a narrow left column sit next to it.
+- A paper selected again after another item shows its conversation and its annotation session again, instead of the
+  Annotations tab's introduction.
 
 ## 0.2.1 (2026-11-06)
 
