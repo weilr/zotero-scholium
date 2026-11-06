@@ -1,7 +1,6 @@
 """The Scholium section's layout: the settings page, the tabs, the settings layer, the message box and its round
 button, the context ring, the transcript by runs, the history layer, the saved prompts and the retry."""
 import json
-import os
 import re
 import subprocess
 import xml.etree.ElementTree as ET
@@ -1201,13 +1200,6 @@ context.startup({ id: 'x', version: '0.1.9', rootURI: 'jar:file:///x.xpi!/' }, 5
 """
     out = json.loads(subprocess.run([NODE, "-e", script, str(BOOTSTRAP)], text=True, capture_output=True, check=True, timeout=15).stdout)
     assert out == ["jar:file:///x.xpi!/"]
-
-
-def test_the_release_workflow_zips_every_top_level_entry_of_the_plugin():
-    workflow = (PLUGIN.parent.parent / ".github" / "workflows" / "release.yml").read_text(encoding="utf8")
-    line = next(l for l in workflow.splitlines() if l.strip().startswith("zip ") and "scholium.xpi" in l)
-    zipped = set(line.split("scholium.xpi", 1)[1].split())
-    assert set(os.listdir(PLUGIN)) <= zipped, set(os.listdir(PLUGIN)) - zipped
 
 
 def test_the_annotation_tab_introduction_is_one_line(facts):

@@ -23,4 +23,4 @@ After changing `src/zotero_scholium/cli.py`, run `python scripts/sync_skill_scri
 
 ## Building the plugin
 
-The plugin is packaged by the release workflow, after the checks of `ci.yml` pass and the tag matches the versions. To build it locally, archive `manifest.json`, `bootstrap.js`, `prefs.js`, `settings.xhtml`, `settings.js` and the `content/` and `locale/` folders from `plugin/scholium/` at the root of a zip file named `scholium.xpi`.
+The plugin is packaged by the release workflow, after the checks of `ci.yml` pass and the tag matches the versions. To build it locally, run `python scripts/build_xpi.py scholium.xpi`: it packs `plugin/scholium/` with the skill under `content/skill/zotero-scholium/`, which the plugin installs when an agent has none. `python scripts/check_xpi.py scholium.xpi` checks the package, as CI does.
