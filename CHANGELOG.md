@@ -13,6 +13,7 @@
 
 - The settings layer is as wide as its longest option needs, so the model dropdown is no wider than its options;
   layers no longer reach past the pane's edge.
+- `<sub>…</sub>` and `<sup>…</sup>` in an agent's answer show as subscript and superscript instead of the tags.
 
 ## 0.2.0 (2026-11-04)
 

@@ -765,6 +765,9 @@ SCENARIOS = r"""
                     '## Rules', '', '1. first', '2. second', '   - nested `#ff6666` red', '     continued', '- other list', '  1. inner ordered', '',
                     '> quote **q**', '', '```', '<script>alert(1)</script> **not bold**', '```', '', '---', '3. starts at three', '<b>raw</b>'].join('\r\n');
     facts.markdown = h.runner.renderMarkdown(h.paneDoc, sample).map(tree);
+    // subscripts and superscripts as agents write them; other tags, unclosed or crossed ones stay text
+    facts.markdownSubSup = h.runner.renderMarkdown(h.paneDoc,
+      'π<sub>ref</sub>(y|x) and e<sup>**2**</sup>, <b>b</b>, <sub>open and <sub>a<sup>b</sub></sup>').map(tree);
     // tables: the colons align, an escaped bar stays, a short row is filled and a long one cut; bars without
     // a rule of as many cells under them stay text
     const table = ['Before', '| a | b \\| c | d |', '| :-: | --- | ---: |', '| `x` | 2 |', '| 1 | 2 | 3 | 4 |', '',
@@ -3151,6 +3154,9 @@ def test_markdown_preview_builds_elements_and_never_markup(facts):
         ["pre", ["code", "<script>alert(1)</script> **not bold**"]],
         ["hr"],
         ["ol[start=3]", ["li", "starts at three\n<b>raw</b>"]],
+    ]
+    assert facts["markdownSubSup"] == [
+        ["p", "π", ["sub", "ref"], "(y|x) and e", ["sup", ["strong", "2"]], ", <b>b</b>, <sub>open and <sub>a<sup>b</sub></sup>"],
     ]
     assert facts["markdownTable"] == [
         ["p", "Before"],

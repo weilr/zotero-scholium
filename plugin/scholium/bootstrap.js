@@ -2918,8 +2918,8 @@ var ScholiumRunner = {
   },
 
   // `code` (a colour code with a swatch of its colour), formulas (\( \), $ $, and set apart \[ \], $$ $$),
-  // backslash escapes, **bold**, *italics*, [links](…) and bare web addresses. A link shows its text with the
-  // address as tooltip; the transcript and the profile preview open web and zotero: addresses on a click
+  // backslash escapes, **bold**, *italics*, [links](…), bare web addresses, and <sub>…</sub> and <sup>…</sup> as
+  // subscript and superscript (other tags stay text). A link shows its text with the address as tooltip; the transcript and the profile preview open web and zotero: addresses on a click
   // (followLinks). A $ opens a formula before a non-space and closes one after a non-space that no digit
   // follows, so that prices stay text.
   inlineMarkdown(doc, parent, text, inLink = false) {
@@ -2935,6 +2935,7 @@ var ScholiumRunner = {
       "\\[([^\\]\\n]+)\\]\\(([^)\\s]+)\\)",            // 9, 10 link
       "((?:https?|zotero)://[^\\s<>\"'`()（）\\[\\]{}，。；：！？、]+)",   // 11 a bare address
       "\\[#(\\d{1,6})\\]",                             // 12 a sentence of the paper
+      "<(sub|sup)>([^<>\\n]+?)</\\13>",                // 13, 14 subscript, superscript
     ].join("|"), "g");
     let at = 0;
     let m;
@@ -2953,6 +2954,12 @@ var ScholiumRunner = {
         continue;
       }
       at = re.lastIndex;
+      if (m[13] !== undefined) {
+        const el = doc.createElement(m[13]);
+        this.inlineMarkdown(doc, el, m[14], inLink);
+        parent.append(el);
+        continue;
+      }
       if (m[12] !== undefined) {
         const found = this.cites && this.cites.map.get(Number(m[12]));
         parent.append(found ? this.citeNode(doc, this.cites.key, Number(m[12]), found) : doc.createTextNode(m[0]));
