@@ -690,7 +690,8 @@ def test_a_run_that_read_the_scripts_source_names_nothing_missing(facts):
 def test_the_scholium_command_running_afterwards_clears_it_though_it_failed(facts):
     assert facts["missing_consoleLater"] == {"cls": "scholium-card none", "title": "没有写入批注"}
     assert facts["missing_codex"] == {"cls": "scholium-card none",
-                                      "title": "没有写入批注：缺少 PyMuPDF，在终端运行 pip install -U pymupdf 后再试。"}
+                                      "title": "没有写入批注：缺少 PyMuPDF，安装 uv（在终端运行 powershell -ExecutionPolicy ByPass -c "
+                                               '"irm https://astral.sh/uv/install.ps1 | iex"）或运行 pip install -U pymupdf 后再试。'}
     assert facts["missing_codexLater"] == {"cls": "scholium-card none", "title": "没有写入批注"}
 
 

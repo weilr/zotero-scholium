@@ -284,13 +284,14 @@ const CONTENT = require('node:path').join(require('node:path').dirname(process.a
 function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, exitCode = 0, script = null, claudeExists = true, gateFirst = false,
                    home = 'dirsvc', eraseFails = false, logs = {}, models = 'ok', claudeAt = CLAUDE, scripts = [], readFails = false,
                    writeFails = false, codex = {}, logTimes = {}, notes = [], secondPdf = false, failLogWrites = null, stdinFails = false, holdDirs = false,
-                   unreadable = [], unremovable = [], addonManager = null, env = {}, present = [], dirs = {}, auth = 'in', python = {} } = {}) {
+                   unreadable = [], unremovable = [], addonManager = null, env = {}, present = [], dirs = {}, auth = 'in', python = {},
+                   os = 'WINNT', shell = null, uv = {} } = {}) {
   const log = { calls: [], stdin: [], notices: [], alerts: [], confirms: [], kills: 0, menus: [], unregistered: [], listeners: [],
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
                 ftl: [], tabs: [], selected: [], opened: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
                 prefPanes: [], openedPrefs: [], madeDirs: [], trashed: [], versionCalls: [], codexCalls: [], codexProcs: [], codexKills: 0, codexTurns: 0, steers: [],
                 mtimes: Object.assign({}, logTimes), clock: Date.now(), copied: [], removed: [], threads: 0, tmpPaths: [], reads: [], readerOpened: [], navigated: [], finds: [],
-                authCalls: [], pyCalls: [], checkKills: 0 };
+                authCalls: [], pyCalls: [], checkKills: 0, shellCalls: [], shellKills: 0, uvCalls: [] };
   const co = Object.assign({ versions: CODEX_VERSIONS, scripts: [], skillAt: '/data', fail: null, failMessage: '' }, codex);
   // the files there are: Claude Code, Codex's copies, and a test's own (present)
   const files = new Set((claudeExists ? [claudeAt] : []).concat(Object.keys(co.versions), present));
@@ -463,8 +464,17 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     async wait() { return { exitCode: this.killed ? 1 : 0 }; }
     kill() { log.codexKills++; this.killed = true; if (this.wake) { const w = this.wake; this.wake = null; w(); } }
   }
+  // the login shell asked for its PATH (shell: its output, 'HOLD' until it is killed, { fails } when it does not start, or
+  // null for a failing one); uv --version (uv: the output of each program path)
+  class ShellProc extends OutProc { kill() { log.shellKills++; this.killed = true; if (this.gate) this.gate(); } }
   const Subprocess = {
     call: async opts => {
+      if (opts.arguments[0] === '-ilc') {
+        log.shellCalls.push(opts);
+        if (shell && shell.fails) throw Error(shell.fails);
+        return new ShellProc(typeof shell === 'string' ? [shell, 0] : ['', 1]);
+      }
+      if (/(?:^|\/)uv(?:\.exe)?$/.test(opts.command)) { log.uvCalls.push(opts); return new OutProc(opts.command in uv ? [uv[opts.command], 0] : ['', 1]); }
       if (opts.arguments[0] === '--version') { log.versionCalls.push(opts.command); return new VersionProc(opts.command); }
       if (opts.arguments[0] === 'app-server') {
         log.codexCalls.push(opts);
@@ -476,7 +486,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       if (opts.arguments.includes('--input-format')) { log.modelCalls.push(opts); return new ModelProc(); }
       const p = new Proc(); log.calls.push({ opts, proc: p }); return p;
     },
-    pathSearch: async () => { throw Error('not found'); },
+    getEnvironment: () => Object.assign({}, env),
   };
   class ProgressWindow {
     constructor(options) {
@@ -606,7 +616,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
         if (home !== 'dirsvc' || key !== 'Home' || iface !== NSIFILE) throw Error('NS_ERROR_FAILURE');
         return { path: '/home/u' };
       } },
-      appinfo: { OS: 'WINNT' },
+      appinfo: { OS: os },
       // the preferences of `prefs` by branch, as Firefox's preference service gives them; a value's type is its own
       prefs: { PREF_INVALID: 0, PREF_STRING: 32, PREF_INT: 64, PREF_BOOL: 128,
                getBranch: root => ({

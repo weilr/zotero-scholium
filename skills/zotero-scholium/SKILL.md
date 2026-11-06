@@ -21,11 +21,11 @@ Sticky notes (`kind: "note"`) only when the profile shows that habit or the user
 
 ## Requirements
 
-`scripts/scholium.py` needs Python 3.9 or later and PyMuPDF (if missing, ask the user to run `pip install -U pymupdf`). Zotero must be running. Only items in My Library are supported, not group libraries. The write channel (the Scholium plugin when installed, else the local API on Zotero 10, a JavaScript file as fallback) is selected automatically; read `references/backends.md` only when `--apply` does not write.
+Run `scholium.py …` below as `uv run <skill dir>/scripts/scholium.py …` from any directory when `uv` is on PATH (it brings Python and PyMuPDF), else as `python <skill dir>/scripts/scholium.py …` (if Python or PyMuPDF is missing, ask the user to install uv or run `pip install -U pymupdf`). Zotero must be running. Only items in My Library are supported, not group libraries. The write channel (the Scholium plugin when installed, else the local API on Zotero 10, a JavaScript file as fallback) is selected automatically; read `references/backends.md` only when `--apply` does not write.
 
 ## Workflow
 
-Run `python <skill dir>/scripts/scholium.py …` from any directory. Use a separate `<out_dir>` for each attachment, e.g. `out/<ATTACHMENT_KEY>`, and keep every file you write for the paper there. Write files with your file-writing tool, not a shell here-document.
+Use a separate `<out_dir>` for each attachment, e.g. `out/<ATTACHMENT_KEY>`, and keep every file you write for the paper there. Write files with your file-writing tool, not a shell here-document.
 
 ### 0. Profile
 
@@ -34,15 +34,15 @@ Read the profile: its path is the `profile` field of `status` (step 1), or the o
 ### 1. Locate the item and the PDF (read-only)
 
 ```bash
-python <skill dir>/scripts/scholium.py status --query "<title words>"   # matching items and their keys
-python <skill dir>/scripts/scholium.py status <ITEM_KEY>                # the paper's current state
+scholium.py status --query "<title words>"   # matching items and their keys
+scholium.py status <ITEM_KEY>                # the paper's current state
 ```
 `status` gives the item's authors, date, venue, DOI and URL (for the note's citation), its PDF attachments with their file paths and the annotations already on each (the tool's own by type and colour, and the user's), and the notes under the item (title, length, whether the tool wrote them). Prefer the published version over a preprint. An error saying Zotero does not answer: ask the user to start it; "Local API is not enabled": ask the user to turn on Settings → Advanced → *Allow other applications on this computer to communicate with Zotero*.
 
 ### 2. Read the paper once, then write the configuration
 
 ```bash
-python <skill dir>/scripts/scholium.py extract --pdf <pdf> --sentences <out_dir>/sentences.json --out <out_dir>/sentences.txt
+scholium.py extract --pdf <pdf> --sentences <out_dir>/sentences.json --out <out_dir>/sentences.txt
 ```
 When a launching prompt names the paper as a JSON file (`paper.json`), pass that file as `--config <file>` in place of `--pdf <pdf>`, and do not edit it: write your configuration to a file of its own.
 For a whole-paper task, read `sentences.txt` in full, appendices included; for a selected scope, read that scope with enough context. It contains page markers, headings and numbered sentences grouped by paragraph; headers, footers, bibliography and paper checklist are removed. The command prints the file's length; when one read cannot hold it, issue reads of consecutive line ranges together in one response. Do not also read the PDF or full-text cache.
@@ -59,8 +59,8 @@ Write one configuration from `examples/config.template.json`, including only req
 ### 3. Review the report, then apply
 
 ```bash
-python <skill dir>/scripts/scholium.py --config <config.json>
-python <skill dir>/scripts/scholium.py --config <config.json> --apply
+scholium.py --config <config.json>
+scholium.py --config <config.json> --apply
 ```
 First run without `--apply`. Review the report and correct the configuration; this is a quality check, not another request for write permission. After correcting, run `--apply` directly: it repeats every check and writes nothing while `missed`, `style_warnings` or `layout_warnings` holds a blocking finding, so a second dry run is not needed. Its outcome is the last field of its output.
 

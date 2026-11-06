@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["pymupdf"]
+# ///
 """
 zotero-scholium: write reading results, produced by a person or by a language model, back into
 Zotero as native annotations.
@@ -15,8 +19,8 @@ Backends (--backend auto takes the plugin from 0.1.9, else the local API on Zote
   api     official local API of Zotero 10 and later (no plugin; one confirmation dialog on first use)
   js      a "Run JavaScript" file for manual execution in Zotero (last resort)
 
-Requires: pip install pymupdf
-Usage:    scholium --config config.json [--apply] [--list] [--backend auto|api|plugin|js]
+Requires: PyMuPDF (pip install pymupdf); `uv run scholium.py …` brings Python and PyMuPDF itself
+Usage:   scholium --config config.json [--apply] [--list] [--backend auto|api|plugin|js]
           scholium status ITEM_KEY | --query WORDS
           scholium extract --pdf paper.pdf [--sentences sentences.json] [--out sentences.txt]
           scholium samples [KEY ...] [--query WORDS]
@@ -35,7 +39,7 @@ except ImportError:   # PyMuPDF before 1.24 is imported as fitz
     except ImportError:
         pymupdf = None
 
-PYMUPDF_MISSING = "PyMuPDF is not installed; run: pip install -U pymupdf"
+PYMUPDF_MISSING = "PyMuPDF is not installed; run the script with uv run, or run: pip install -U pymupdf"
 
 __version__ = "0.2.1"
 

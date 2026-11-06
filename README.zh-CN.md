@@ -94,7 +94,14 @@
 
 ## 快速上手
 
-需要 Zotero 7 及以上，以及 Python 3.9+ 和 PyMuPDF（`pip install pymupdf`）。
+需要 Zotero 7 及以上，以及 [uv](https://docs.astral.sh/uv/)（推荐：首次使用时自动准备 Python 和 PyMuPDF，一条命令即可安装），或 Python 3.9+ 和 PyMuPDF（`pip install pymupdf`）：
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh                                     # macOS、Linux（或 brew install uv）
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"   # Windows
+```
+
+国内下载慢时，可把环境变量 `UV_DEFAULT_INDEX` 设为镜像，例如 `https://pypi.tuna.tsinghua.edu.cn/simple`。
 
 ### 在 Zotero 里一键批注
 

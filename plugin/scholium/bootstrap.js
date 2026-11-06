@@ -559,6 +559,8 @@ var ScholiumRunner = {
   codexRefused: new Set(),  // the names a thread refused as servers of config.toml, in this session
   CODEX_LIST_MS: 10000,     // the longest a run waits for the servers' list, when Codex never listed them
   CHECK_MS: 10000,          // the longest the setup check waits for a program's answer
+  LOGIN_PATH_MS: 5000,      // the longest the login shell is waited for when its PATH is read (loginPath)
+  loginPathRead: null,      // the promise of the login shell's PATH, read once a session; "" when there is none
   cites: null,              // { key, map } the sentences of the paper whose transcript is being drawn
   settingsApi: null,          // { found(agent), setupCheck(onLine), fix(action) } on Zotero.Scholium, for the settings page
   panes: new Map(),         // item pane section body -> { doc, keys, list, state, buttons, the conversation shown, seen }
@@ -583,6 +585,10 @@ var ScholiumRunner = {
     const zh = this.zh();
     const word = (k, one, many) => (k === 1 ? one : many);
     const plural = (k, one, many) => `${k} ${word(k, one, many)}`;
+    const os = Services.appinfo.OS;
+    // uv's installer for this system, as uv's documentation gives it
+    const uvInstall = os === "WINNT" ? 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"'
+      : "curl -LsSf https://astral.sh/uv/install.sh | sh";
     const t = {
       headline: zh ? "Scholium 批注" : "Scholium annotation",
       noPdf: zh ? "这篇论文没有 PDF 附件。" : "This paper has no PDF attachment.",
@@ -606,12 +612,14 @@ var ScholiumRunner = {
         : (zh ? "Claude Code 还没有登录：在终端运行 claude，按提示登录后再试。" : "Claude Code is not signed in: run claude in a terminal and sign in, then try again."),
       localApiOff: zh ? "Scholium 通过 Zotero 的本地 API 读取论文，它现在是关闭的（设置 → 高级 → 允许此计算机上的其他应用程序与 Zotero 通讯）。现在打开吗？"
                       : "Scholium reads the paper through Zotero's local API, which is turned off (Settings → Advanced → Allow other applications on this computer to communicate with Zotero). Turn it on now?",
-      pymupdfMissing: zh ? "缺少 PyMuPDF，在终端运行 pip install -U pymupdf 后再试。" : "PyMuPDF is missing; run pip install -U pymupdf in a terminal, then try again.",
-      noPython: zh ? "找不到 Python，安装 Python 3.9 或更高版本并运行 pip install -U pymupdf 后再试。"
-                   : "Python was not found; install Python 3.9 or later and run pip install -U pymupdf, then try again.",
+      pymupdfMissing: zh ? `缺少 PyMuPDF，安装 uv（在终端运行 ${uvInstall}）或运行 pip install -U pymupdf 后再试。`
+                         : `PyMuPDF is missing; install uv (run ${uvInstall} in a terminal) or run pip install -U pymupdf, then try again.`,
+      noPython: zh ? `找不到 Python，安装 uv（在终端运行 ${uvInstall}），或安装 Python 3.9 或更高版本并运行 pip install -U pymupdf 后再试。`
+                   : `Python was not found; install uv (run ${uvInstall} in a terminal), or install Python 3.9 or later and run pip install -U pymupdf, then try again.`,
+      noUv: zh ? `找不到 uv，在终端运行 ${uvInstall} 安装后再试。` : `uv was not found; install it with ${uvInstall} in a terminal, then try again.`,
       // the setup check of the settings page: each line's name, its sentence, and its button
       checkLabel: id => ({ localApi: zh ? "本地 API" : "Local API", claude: "Claude Code", claudeSkill: zh ? "Claude Code 的技能" : "Claude Code's skill",
-                           codex: "Codex", codexSkill: zh ? "Codex 的技能" : "Codex's skill", python: "Python", pymupdf: "PyMuPDF" })[id] || id,
+                           codex: "Codex", codexSkill: zh ? "Codex 的技能" : "Codex's skill", uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,
       checkApiOn: zh ? "已打开，Scholium 通过它读取论文。" : "On; Scholium reads papers through it.",
       checkApiOff: zh ? "已关闭，Scholium 读不到论文：点“打开”，或在 设置 → 高级 里勾选“允许此计算机上的其他应用程序与 Zotero 通讯”。"
                       : "Off, so Scholium cannot read papers: press Turn on, or tick “Allow other applications on this computer to communicate with Zotero” in Settings → Advanced.",
@@ -630,6 +638,14 @@ var ScholiumRunner = {
       checkSkillAt: dir => zh ? `已找到：${dir}` : `Found: ${dir}`,
       checkSkillMissing: zh ? "未找到：点“安装”，或在终端运行 npx skills add weilr/zotero-scholium -g -y。"
                             : "Not found: press Install, or run npx skills add weilr/zotero-scholium -g -y in a terminal.",
+      checkUv: (v, path) => zh ? `${v}：${path}` : `${v} at ${path}`,
+      checkUvSilent: path => zh ? `${path} 没有报出版本` : `${path} did not give its version`,
+      checkNoUv: zh ? `未找到。推荐安装：uv 会自行提供 Python 和 PyMuPDF。在终端运行 ${uvInstall} 安装${os === "Darwin" ? "（或 brew install uv）" : ""}。`
+                    : `Not found. Recommended: uv provides Python and PyMuPDF by itself; install it with ${uvInstall} in a terminal`
+                      + `${os === "Darwin" ? " (or brew install uv)" : ""}.`,
+      checkNoPythonUv: zh ? "Zotero 的 PATH 上找不到 Python；uv 会代为提供 Python 和 PyMuPDF。" : "No Python on Zotero's PATH; uv provides Python and PyMuPDF instead.",
+      checkPythonOldUv: (v, path) => zh ? `${v} 太旧：${path}；uv 会代为提供 Python 和 PyMuPDF。` : `${v} at ${path} is too old; uv provides Python and PyMuPDF instead.`,
+      checkPymupdfUv: zh ? "未安装；uv 会代为提供 PyMuPDF。" : "Not installed; uv provides PyMuPDF instead.",
       checkOnPath: zh ? "Zotero 的 PATH 上找到的这一个，智能体的终端可能用另一个" : "the one on Zotero's PATH; an agent's shell may use another",
       checkPython: (v, path) => zh ? `${v}：${path}（${this.text("checkOnPath")}）` : `${v} at ${path} (${this.text("checkOnPath")})`,
       checkPythonOld: (v, path) => zh ? `${v} 太旧，需要 3.9 或更高版本：${path}（${this.text("checkOnPath")}）`
@@ -1041,7 +1057,7 @@ var ScholiumRunner = {
     return this.autoClaude();
   },
 
-  // claude.exe where it is usually installed, or on PATH
+  // claude.exe where it is usually installed, or on the agent's PATH (agentPath)
   async autoClaude() {
     const home = this.home();
     const win = Services.appinfo.OS === "WINNT";
@@ -1052,7 +1068,7 @@ var ScholiumRunner = {
     if (home) candidates.push(PathUtils.join(home, ".local", "bin", exe), PathUtils.join(home, ".claude", "local", exe));
     if (!win) candidates.push("/opt/homebrew/bin/claude", "/usr/local/bin/claude", "/usr/bin/claude");
     for (const c of candidates) if (await this.exists(c)) return c;
-    try { return await this.subprocess().pathSearch(exe); } catch (e) { return null; }
+    return this.onPath([exe]);
   },
 
   // the codex executable: the one set on the settings page, else the one found
@@ -1064,7 +1080,7 @@ var ScholiumRunner = {
 
   // the newest codex executable among the usual places: the Codex app keeps its own copy in a folder
   // that changes with each update, npm's package carries a native one (its shim is a .cmd file), and
-  // Cargo, Homebrew and PATH may hold others. An older Codex may not read a newer one's config.toml.
+  // Cargo, Homebrew and the agent's PATH (agentPath) may hold others. An older Codex may not read a newer one's config.toml.
   async autoCodex() {
     const home = this.home();
     const win = Services.appinfo.OS === "WINNT";
@@ -1089,7 +1105,8 @@ var ScholiumRunner = {
       candidates.push("/Applications/Codex.app/Contents/Resources/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex");
     }
     if (home) candidates.push(PathUtils.join(home, ".cargo", "bin", exe), PathUtils.join(home, ".local", "bin", exe));
-    try { candidates.push(await this.subprocess().pathSearch(exe)); } catch (e) {}
+    const onPath = await this.onPath([exe]);
+    if (onPath) candidates.push(onPath);
     let best = null;
     for (const path of new Set(candidates)) {
       if (!(await this.exists(path))) continue;
@@ -1115,7 +1132,9 @@ var ScholiumRunner = {
     };
     if (Zotero.Prefs.get("httpServer.localAPI.enabled")) say("localApi", "ok", this.text("checkApiOn"));
     else say("localApi", "bad", this.text("checkApiOff"), { kind: "localApi" });
-    for (const check of [() => this.checkClaude(say), () => this.checkCodex(say), () => this.checkPython(say)]) {
+    let uv = false;
+    for (const check of [() => this.checkClaude(say), () => this.checkCodex(say), async () => { uv = await this.checkUv(say); },
+                         () => this.checkPython(say, uv)]) {
       try { await check(); } catch (e) { this.log("setup check failed: " + e); }
     }
     return lines;
@@ -1144,7 +1163,7 @@ var ScholiumRunner = {
   // killed
   async checkOutput(command, args) {
     let proc;
-    try { proc = await this.subprocess().call({ command, arguments: args, workdir: Zotero.DataDirectory.dir }); }
+    try { proc = await this.subprocess().call(Object.assign({ command, arguments: args, workdir: Zotero.DataDirectory.dir }, await this.agentEnv())); }
     catch (e) {
       this.log("setup check: not started: " + e);
       return null;
@@ -1243,13 +1262,81 @@ var ScholiumRunner = {
     }
   },
 
-  // Python as Zotero's PATH finds it: python.exe on Windows, else python3 or python; a WindowsApps folder (the Microsoft
-  // Store's alias) is passed over. null when there is none
-  async pathPython() {
+  // the PATH of the user's login shell on macOS and Linux, read once a session: Zotero started from the Dock or a desktop
+  // menu has a short PATH, without the folders of Homebrew, nvm or uv. "" on Windows, or when the shell fails or does not
+  // answer in LOGIN_PATH_MS (it is then killed)
+  loginPath() {
+    if (Services.appinfo.OS === "WINNT") return Promise.resolve("");
+    if (!this.loginPathRead) this.loginPathRead = this.readLoginPath().catch(e => { this.log("login PATH not read: " + e); return ""; });
+    return this.loginPathRead;
+  },
+
+  // $SHELL (else /bin/zsh) started as an interactive login shell that prints its PATH between two marks, so that what its
+  // startup files print is left out; a mark starts and ends with @, which no variable name holds
+  async readLoginPath() {
+    const named = this.env("SHELL");
+    const shell = named.startsWith("/") && (await this.exists(named)) ? named : (await this.exists("/bin/zsh")) ? "/bin/zsh" : "";
+    if (!shell) return "";
+    const mark = "@SCHOLIUM_PATH@";
+    const proc = await this.subprocess().call({ command: shell, arguments: ["-ilc", `printf '%s' "${mark}$PATH${mark}"`] });
+    const timer = setTimeout(() => { try { proc.kill(); } catch (e) {} }, this.LOGIN_PATH_MS);
+    let out = "";
+    try {
+      try { await proc.stdin.close(); } catch (e) {}
+      for (;;) { const s = await proc.stdout.readString(); if (!s) break; out += s; }
+      await proc.wait();
+    } finally { clearTimeout(timer); }
+    const parts = out.split(mark);
+    const path = parts.length >= 3 ? parts[1].trim() : "";
+    return path.split(":").some(d => d.startsWith("/")) ? path : "";
+  },
+
+  // the PATH an agent's process is given, and on which the plugin looks for programs (onPath): on macOS and Linux the
+  // login shell's (loginPath) before Zotero's, each folder once; then uv's folders (~/.local/bin, and ~/.cargo/bin outside
+  // Windows) when they are there and missing. Zotero's own PATH when nothing is added
+  async agentPath() {
     const win = Services.appinfo.OS === "WINNT";
-    const dirs = this.env("PATH").split(win ? ";" : ":").map(d => d.trim().replace(/^"(.*)"$/, "$1"))
-      .filter(d => d && !/[\\/]WindowsApps[\\/]?$/i.test(d));
-    for (const name of win ? ["python.exe"] : ["python3", "python"]) {
+    const sep = win ? ";" : ":";
+    const own = this.env("PATH");
+    const login = await this.loginPath();
+    const key = d => (win ? d.replace(/^"(.*)"$/, "$1").replace(/(.)[\\/]+$/, "$1").toLowerCase() : d.replace(/(.)\/+$/, "$1"));
+    const dirs = [], seen = new Set();
+    for (const d of (login ? login.split(sep) : []).concat(own.split(sep))) {
+      if (d && !seen.has(key(d))) { seen.add(key(d)); dirs.push(d); }
+    }
+    const home = this.home();
+    const uvDirs = !home ? [] : [PathUtils.join(home, ".local", "bin")].concat(win ? [] : [PathUtils.join(home, ".cargo", "bin")]);
+    let added = false;
+    for (const d of uvDirs) {
+      if (!seen.has(key(d)) && (await this.exists(d))) { seen.add(key(d)); dirs.push(d); added = true; }
+    }
+    return login || added ? dirs.join(sep) : own;
+  },
+
+  // the options of Subprocess.call for an agent's process, or a program of the setup check: Zotero's environment with
+  // Python's output in UTF-8 and the agent's PATH (agentPath) when it is not Zotero's own
+  async agentEnv() {
+    const environment = { PYTHONIOENCODING: "utf-8" };
+    const path = await this.agentPath();
+    if (path !== this.env("PATH")) environment[this.pathName()] = path;
+    return { environment, environmentAppend: true };
+  },
+
+  // the name of the PATH variable: on Windows the one the environment has (often Path), since a second spelling would be a
+  // second variable
+  pathName() {
+    if (Services.appinfo.OS !== "WINNT") return "PATH";
+    try { return Object.keys(this.subprocess().getEnvironment()).find(k => k.toUpperCase() === "PATH") || "PATH"; }
+    catch (e) { return "PATH"; }
+  },
+
+  // the first of the names in a folder of the agent's PATH (agentPath), each name looked for in every folder before the
+  // next; a folder that skip matches is passed over. null when there is none
+  async onPath(names, skip = null) {
+    const win = Services.appinfo.OS === "WINNT";
+    const dirs = (await this.agentPath()).split(win ? ";" : ":").map(d => d.trim().replace(/^"(.*)"$/, "$1"))
+      .filter(d => d && !(skip && skip.test(d)));
+    for (const name of names) {
       for (const dir of dirs) {
         let path;
         try { path = PathUtils.join(dir, name); } catch (e) { continue; }   // a relative folder
@@ -1259,25 +1346,45 @@ var ScholiumRunner = {
     return null;
   },
 
-  // that Python's version, and for 3.9 or later its PyMuPDF (imported as fitz before PyMuPDF 1.24)
-  async checkPython(say) {
+  // Python on the agent's PATH: python.exe on Windows, else python3 or python; a WindowsApps folder (the Microsoft Store's
+  // alias) is passed over. null when there is none
+  pathPython() {
+    return this.onPath(Services.appinfo.OS === "WINNT" ? ["python.exe"] : ["python3", "python"], /[\\/]WindowsApps[\\/]?$/i);
+  },
+
+  // uv on the agent's PATH and its version: the skill's script then runs as `uv run`, which provides Python and PyMuPDF.
+  // Whether it answered
+  async checkUv(say) {
+    const uv = await this.onPath([Services.appinfo.OS === "WINNT" ? "uv.exe" : "uv"]);
+    if (!uv) { say("uv", "unknown", this.text("checkNoUv")); return false; }
+    const v = /\d+\.\d+\.\d+\S*/.exec(String((await this.checkOutput(uv, ["--version"])) || ""));
+    if (!v) { say("uv", "unknown", this.text("checkUvSilent", uv)); return false; }
+    say("uv", "ok", this.text("checkUv", v[0], uv));
+    return true;
+  },
+
+  // that Python's version, and for 3.9 or later its PyMuPDF (imported as fitz before PyMuPDF 1.24); with uv (checkUv) a
+  // missing or old one is no fault
+  async checkPython(say, uv = false) {
     const python = await this.pathPython();
-    if (!python) return say("python", "bad", this.text("checkNoPython"));
+    if (!python) return say("python", uv ? "unknown" : "bad", this.text(uv ? "checkNoPythonUv" : "checkNoPython"));
     const out = await this.checkOutput(python, ["-c", "import sys; print(sys.version.split()[0]); import importlib.util as u; "
       + "m = __import__('pymupdf' if u.find_spec('pymupdf') else 'fitz'); print(m.VersionBind)"]);
     const [version, pymupdf] = String(out || "").split(/\r?\n/).map(s => s.trim());
     const v = /^(\d+)\.(\d+)/.exec(version || "");
     if (!v) return say("python", "unknown", this.text("checkPythonSilent", python));
-    if (Number(v[1]) < 3 || (Number(v[1]) === 3 && Number(v[2]) < 9)) return say("python", "bad", this.text("checkPythonOld", version, python));
+    if (Number(v[1]) < 3 || (Number(v[1]) === 3 && Number(v[2]) < 9)) {
+      return say("python", uv ? "unknown" : "bad", this.text(uv ? "checkPythonOldUv" : "checkPythonOld", version, python));
+    }
     say("python", "ok", this.text("checkPython", version, python));
     if (/^\d+\.\d+/.test(pymupdf || "")) say("pymupdf", "ok", this.text("checkPymupdf", pymupdf));
-    else say("pymupdf", "bad", this.text("checkPymupdfMissing"));
+    else say("pymupdf", uv ? "unknown" : "bad", this.text(uv ? "checkPymupdfUv" : "checkPymupdfMissing"));
   },
 
   // "codex-cli 0.160.0" -> [0, 160, 0, ""]; null when it does not start or answer
   async codexVersion(path) {
     try {
-      const proc = await this.subprocess().call({ command: path, arguments: ["--version"], stderr: "stdout" });
+      const proc = await this.subprocess().call(Object.assign({ command: path, arguments: ["--version"], stderr: "stdout" }, await this.agentEnv()));
       const timer = setTimeout(() => { try { proc.kill(); } catch (e) {} }, 15000);
       let out = "";
       try {
@@ -1609,14 +1716,15 @@ var ScholiumRunner = {
     return step;
   },
 
-  // the step of a command of the tool (scholium.py, or the scholium command), the furthest when one line
-  // holds several: a write to Zotero, a dry run, extracting sentences
+  // the step of a command of the tool (scholium.py run by python or by uv run, or the scholium command), the furthest when
+  // one line holds several: a write to Zotero, a dry run, extracting sentences. --config is the script's option, not uv's
+  // --config-file
   commandStep(cmd) {
     if (!/\bscholium(?:\.py)?\b/.test(cmd)) return null;
     if (/--apply\b/.test(cmd)) return "applying";
     if (/\bscholium(?:\.py)?["']?\s+extract\b/.test(cmd)) return "extract";
     if (/--list\b/.test(cmd)) return null;
-    if (/--config\b/.test(cmd)) return "dryRun";
+    if (/--config(?:[\s=]|$)/.test(cmd)) return "dryRun";
     return null;
   },
 
@@ -1643,7 +1751,9 @@ var ScholiumRunner = {
     const text = typeof output === "string" ? output
       : Array.isArray(output) ? output.map(c => (c && c.type === "text" ? c.text : "")).join("\n") : "";
     if (text.includes("PyMuPDF is not installed") && !text.includes("PYMUPDF_MISSING")) return "pymupdfMissing";
-    if (/Python was not found|\bpython3?: (?:command )?not found|'python3?' is not recognized/i.test(text)) return "noPython";
+    if (/Python was not found|\bpython3?: (?:command )?not found|command not found: python3?\b|'python3?' is not recognized/i.test(text)) return "noPython";
+    // uv missing, as bash or sh, zsh, fish, PowerShell or cmd say it
+    if (/\buv: (?:command )?not found|command not found: uv\b|Unknown command: uv\b|'uv' is not recognized/i.test(text)) return "noUv";
     return /scholium\.py\b|(?:^|[\s;&|("'])scholium\s/.test(command) ? null : before;
   },
 
@@ -2397,11 +2507,11 @@ var ScholiumRunner = {
   async askModels() {
     const claude = await this.findClaude();
     if (!claude) return null;
-    const proc = await this.subprocess().call({
+    const proc = await this.subprocess().call(Object.assign({
       command: claude, arguments: ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                                    "--strict-mcp-config", "--settings", JSON.stringify({ disableAllHooks: true })],
       workdir: Zotero.DataDirectory.dir, stderr: "stdout",
-    });
+    }, await this.agentEnv()));
     const timer = setTimeout(() => { try { proc.kill(); } catch (e) {} }, 60000);
     try {
       await proc.stdin.write(JSON.stringify({ type: "control_request", request_id: "scholium-models",
@@ -6734,10 +6844,9 @@ var ScholiumRunner = {
   // Claude Code: `claude -p` with the prompt on stdin and its stream-json events on stdout
   async runClaude(claude, ctx) {
     const { job, key } = ctx;
-    const proc = await this.subprocess().call({
+    const proc = await this.subprocess().call(Object.assign({
       command: claude, arguments: this.args(job), workdir: Zotero.DataDirectory.dir, stderr: "pipe",
-      environment: { PYTHONIOENCODING: "utf-8" }, environmentAppend: true,
-    });
+    }, await this.agentEnv()));
     if (this.job !== ctx.running || ctx.running.stopAsked) {   // the plugin stopped, or ■, while the process was being created
       try { proc.kill(); } catch (e) {}
       ctx.current = { key, proc, cancelled: true };
@@ -6856,10 +6965,9 @@ var ScholiumRunner = {
   // requests, questions from Codex are answered by codexAnswer, and everything else goes to
   // onMessage([[message, line], …]) a chunk at a time.
   async codexServer(codex, workdir, onMessage = null) {
-    const proc = await this.subprocess().call({
+    const proc = await this.subprocess().call(Object.assign({
       command: codex, arguments: ["app-server"], workdir, stderr: "pipe",
-      environment: { PYTHONIOENCODING: "utf-8" }, environmentAppend: true,
-    });
+    }, await this.agentEnv()));
     const rpc = { proc, next: 1, pending: new Map(), stderr: "" };
     const send = msg => proc.stdin.write(JSON.stringify(msg) + "\n");
     rpc.request = (method, params) => new Promise((resolve, reject) => {
