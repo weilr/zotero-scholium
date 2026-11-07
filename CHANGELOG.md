@@ -30,6 +30,10 @@
   conversation a child note of the paper: its title and date, each question with its quoted passage, each answer with
   the agent that gave it, formulas as Zotero's note editor sets them. It is tagged `scholium-chat`, so Annotate again
   and Delete annotations leave it.
+- **Ask Scholium (N papers)** in the items list's context menu, for 2 to 8 papers or PDFs: the first paper's Chat tab
+  opens on a new conversation with the others as removable chips above the box, and each message goes with every
+  paper's `paper.json`. The conversation is kept with the first paper; its log names the others, so later messages keep
+  them.
 
 ### Changed
 
