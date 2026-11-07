@@ -715,6 +715,12 @@ var ScholiumRunner = {
       annotateThis: zh ? "批注这篇" : "Annotate",
       deleteThis: zh ? "删除批注" : "Delete annotations",
       logButton: zh ? "打开日志" : "Show log",
+      saveNote: zh ? "存为笔记" : "Save as note",
+      noteSaved: zh ? "已存为这篇论文的笔记" : "Saved as a note of the paper",
+      noteNotSaved: why => zh ? `没有存为笔记：${why}` : `Not saved as a note: ${why}`,
+      noteReadOnly: zh ? "你在这个群组里没有编辑权限，无法存为笔记。" : "You cannot edit this group's library, so the note cannot be saved.",
+      noteQuestion: zh ? "问：" : "Question:",
+      noteAnswer: who => (who ? (zh ? `答（${who}）：` : `Answer (${who}):`) : (zh ? "答：" : "Answer:")),
       copyMessage: zh ? "复制这条回复（Markdown）" : "Copy this message (Markdown)",
       copiedMessage: zh ? "已复制" : "Copied",
       worked: d => zh ? `已处理 ${d}` : `Worked for ${d}`,
@@ -2628,12 +2634,15 @@ var ScholiumRunner = {
                     item(this.text("deleteThis"), () => {
                       const att = pane.item && this.attOf(pane.item.libraryID, pane.annot.shownKey || pane.keys[0]);
                       this.removeAnnotations(att ? [att] : []).catch(e => this.log("delete failed: " + e));
-                    }, pane.keys.some(k => this.busy(k))),
-                    sep, item(this.text("settingsOpen"), () => { this.openSettings(); }));
+                    }, pane.keys.some(k => this.busy(k))));
+        // the session shown, as a note
+        if (pane.annot.shownPath) node.append(item(this.text("saveNote"), () => { this.saveAsNote(pane).catch(e => this.log("note failed: " + e)); }));
+        node.append(sep, item(this.text("settingsOpen"), () => { this.openSettings(); }));
         return;
       }
       node.append(item(this.text("logButton"), () => { this.revealLog(pane.shownPath); }, !pane.shownPath),
-                  item(this.text("profileOpen"), () => { this.openProfile(doc, pane.more); }), sep,
+                  item(this.text("profileOpen"), () => { this.openProfile(doc, pane.more); }),
+                  item(this.text("saveNote"), () => { this.saveAsNote(pane).catch(e => this.log("note failed: " + e)); }, !pane.shownPath), sep,
                   item(this.text("settingsOpen"), () => { this.openSettings(); }));
     }, { focus });
   },
@@ -3521,6 +3530,13 @@ var ScholiumRunner = {
   // untrusted (no links, pictures or classes from the TeX), and of what it writes only MathML elements
   // and attributes are kept.
   mathNode(doc, tex, display) {
+    // for a note: the TeX itself, which Zotero's note editor sets (noteMarkup)
+    if (this.noteTex) {
+      const s = doc.createElement("span");
+      s.className = "scholium-tex";
+      s.setAttribute("data-tex", tex);
+      return s;
+    }
     const key = (display ? "D" : "I") + tex;
     let node = this.mathCache.get(key);
     if (node === undefined) {
@@ -5751,6 +5767,116 @@ var ScholiumRunner = {
   revealLog(path) {
     if (!path) return;
     try { Zotero.File.reveal(path); } catch (e) { this.log("reveal failed: " + e); }
+  },
+
+  NOTE_TAG: "scholium-chat",   // a saved conversation's tag: not the tool's, so Annotate again and Delete annotations leave it
+  NOTE_TAGS: new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "blockquote", "pre", "code", "strong", "em", "hr",
+                      "table", "thead", "tbody", "tr", "th", "td", "sub", "sup", "br"]),
+
+  escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  },
+
+  // the conversation the tab shows as a note of its paper (a note of its own for a PDF without a parent item), tagged
+  // scholium-chat; then a notice, and the note selected in the library, where it opens
+  async saveAsNote(pane) {
+    const view = this.viewOf(pane, pane.tab);
+    const key = view.shownKey, id = view.shownConv;
+    const att = key && id && view.shownPath && pane.item ? this.attOf(pane.item.libraryID, key) : null;
+    if (!att) return null;
+    try {
+      const library = Zotero.Libraries.get(att.libraryID);
+      if (library && library.editable === false) { this.sayUnderBox(pane, this.text("noteReadOnly")); return null; }
+      const log = await this.readLog(key, id);
+      if (!log) throw new Error(view.shownPath);
+      const parent = att.parentID ? Zotero.Items.get(att.parentID) : null;
+      await this.loadCitations(key);
+      const html = this.withCites(key, () => this.noteHtml(pane.doc, (parent || att).getDisplayTitle(), log.entries));
+      const note = new Zotero.Item("note");
+      note.libraryID = att.libraryID;
+      if (parent) note.parentID = parent.id;
+      note.setNote(html);
+      note.setTags([{ tag: this.NOTE_TAG }]);
+      await note.saveTx();
+      this.noteNotice(att);
+      try { await Zotero.getMainWindow().ZoteroPane.selectItem(note.id); } catch (e) { this.log("note not selected: " + e); }
+      return note;
+    } catch (e) {
+      this.log("note not saved: " + e);
+      this.sayUnderBox(pane, this.text("noteNotSaved", String((e && e.message) || e)));
+      return null;
+    }
+  },
+
+  noteNotice(att) {
+    try {
+      const pw = new Zotero.ProgressWindow({ closeOnClick: true });
+      pw.changeHeadline(this.text("headline"));
+      const line = new pw.ItemProgress("note", this.text("noteSaved"));
+      line.setProgress(100);
+      pw.show();
+      pw.startCloseTimer(this.NOTICE_MS);
+    } catch (e) { this.log("notice failed: " + e); }
+  },
+
+  // a conversation as a note's HTML: the paper's title and the date it started, then each question with its quoted
+  // passage, and each answer with the agent and model that gave it, its Markdown set as the transcript sets it
+  noteHtml(doc, title, entries) {
+    const esc = s => this.escapeHtml(s);
+    const runs = this.runsOf(entries).filter(r => !r.compact);
+    const first = runs.find(r => r.start > 0);
+    const d = new Date(first ? first.start : Date.now());
+    const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const out = [`<h1>${esc(title)}</h1>`, `<p>Scholium · ${date}</p>`];
+    const was = this.noteTex;
+    this.noteTex = true;
+    try {
+      for (const r of runs) {
+        if (r.prompt) {
+          if (r.prompt.quote) out.push(`<blockquote><p>${esc(this.quoteLabel(r.prompt.quote))}</p></blockquote>`);
+          out.push(`<p><strong>${esc(this.text("noteQuestion"))}</strong> ${esc(r.prompt.text).replace(/\n/g, "<br>")}</p>`);
+        }
+        if (!r.answer.length) continue;
+        out.push(`<p><strong>${esc(this.text("noteAnswer", r.model ? this.answeredBy(r.model) : ""))}</strong></p>`);
+        for (const e of r.answer) {
+          let nodes;
+          try { nodes = this.renderMarkdown(doc, e.text); } catch (err) { nodes = null; }
+          out.push(nodes ? nodes.map(n => this.noteMarkup(n)).join("") : `<p>${esc(e.text)}</p>`);
+        }
+      }
+    } finally { this.noteTex = was; }
+    return out.join("\n");
+  },
+
+  // an element of the transcript's Markdown as a note's HTML: the plain tags with their own attributes, a formula as
+  // Zotero's note editor keeps it ($…$ in span.math, $$…$$ in pre.math), a link as a link, a cited sentence as [p.N];
+  // anything else as its content
+  noteMarkup(n) {
+    if (!n) return "";
+    if (!n.localName) return this.escapeHtml(n.textContent || "");   // text
+    const list = [...(n.childNodes || n.children || [])];
+    const inner = () => (list.length ? list.map(c => this.noteMarkup(c)).join("") : this.escapeHtml(n.textContent || ""));
+    const cls = String(n.className || ""), tag = n.localName;
+    const tex = node => [node, ...[...(node.childNodes || node.children || [])]].map(c => c && c.getAttribute && c.getAttribute("data-tex")).find(t => t != null);
+    if (cls === "scholium-tex") return `<span class="math">$${this.escapeHtml(n.getAttribute("data-tex"))}$</span>`;
+    if (cls === "scholium-math") {
+      const t = tex(n);
+      if (t == null) return inner();
+      return tag === "div" ? `<pre class="math">$$${this.escapeHtml(t)}$$</pre>` : `<span class="math">$\\displaystyle ${this.escapeHtml(t)}$</span>`;
+    }
+    if (cls === "scholium-swatch") return "";
+    if (cls === "scholium-cite") return this.escapeHtml(`[${n.textContent}]`);
+    if (cls === "scholium-link") {
+      const href = n.getAttribute("data-href");
+      return href ? `<a href="${this.escapeHtml(href)}">${inner()}</a>` : inner();
+    }
+    if (!this.NOTE_TAGS.has(tag)) return inner();
+    if (tag === "hr" || tag === "br") return `<${tag}>`;
+    let attrs = "";
+    if (tag === "ol" && n.getAttribute("start")) attrs = ` start="${this.escapeHtml(n.getAttribute("start"))}"`;
+    const style = (tag === "th" || tag === "td") && /^text-align: (left|right|center)$/.exec(n.getAttribute("style") || "");
+    if (style) attrs = ` style="${style[0]}"`;
+    return `<${tag}${attrs}>${inner()}</${tag}>`;
   },
 
   // system notification, for while Zotero is in the background (the corner notice is for when it is in front)

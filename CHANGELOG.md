@@ -26,6 +26,10 @@
 - `extract` stops on a scanned PDF without a text layer (most pages an image with almost no text) with exit code 3 and
   a JSON `error` that says to run OCR first; the skill stops there and passes the message on, and an annotation that
   wrote nothing says so on its card.
+- **Save as note** in the ⋯ menu of the Chat tab (and of the Annotations tab while it shows a session) makes the
+  conversation a child note of the paper: its title and date, each question with its quoted passage, each answer with
+  the agent that gave it, formulas as Zotero's note editor sets them. It is tagged `scholium-chat`, so Annotate again
+  and Delete annotations leave it.
 
 ### Changed
 

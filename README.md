@@ -84,7 +84,8 @@ the Claude Code or Codex installed on your computer on the paper shown.
 - Ask about the paper, or right-click a passage selected in the reader and choose **Ask Scholium**.
 - Answers cite the paper's sentences as page chips (`p.4`): hover shows the sentence, a click finds it in the PDF.
 - Claude Code and Codex share the paper's conversations: switch the agent and the next message goes to it. **＋** starts
-  a conversation, 🕘 lists the earlier ones.
+  a conversation, the clock lists the earlier ones, and **Save as note** in the ⋯ menu keeps the one shown as a note
+  of the paper.
 - ✎ on an earlier question asks it again, edited; **Undo** brings back what it replaced.
 - Saved prompts above the box send with a click.
 - Messages sent while the agent answers wait in a queue you can reorder; with Codex they can steer the answer under
