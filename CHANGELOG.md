@@ -44,8 +44,9 @@
   and WebFetch too for a chat, which makes each message's starting context smaller. PowerShell is among them on Windows
   only.
 - The file `extract --sentences --out` writes starts with an index of its line numbers: each page, the main text, the
-  references and an appendix after them. The skill reads the main text by it and of the appendix only what the main
-  text points to as essential, and finds the pages of a page limit there.
+  references, and after them an appendix heading or, when the text there starts without one, that text. The skill
+  reads the main text by it and of the appendix only what the main text points to as essential, and finds the pages of
+  a page limit there.
 - The report of a dry run and of `--apply` leaves out empty fields, the generated file's path, an unchanged PDF's
   hashes and the details of a write that succeeded; `--verbose` prints them all.
 - Ask Scholium is offered only in reader tabs. A reader tab's section is the one of the PDF it shows.

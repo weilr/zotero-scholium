@@ -32,7 +32,7 @@ uv run scholium.py …                     # uv 读取脚本内嵌的元数据�
    scholium extract --pdf paper.pdf --sentences out/sentences.json --out out/sentences.txt
    ```
 
-   文件开头是行号索引：每页从哪一行开始；找得到时，还有正文在哪一行结束、参考文献和其后的附录从哪一行开始。
+   文件开头是行号索引：每页从哪一行开始；找得到时，还有正文在哪一行结束、参考文献从哪一行开始、其后的文字和附录从哪一行开始。
    没有文字层的 PDF（未做 OCR 的扫描件）会让 `extract` 以退出码 3 停下，并输出 JSON `error`，提示先做 OCR。
 
 3. **编写配置文件。** 完整模板见[配置模板](../skills/zotero-scholium/examples/config.template.json)。

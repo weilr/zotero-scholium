@@ -1596,13 +1596,19 @@ def render_sentences(items):
 PAGE_MARK_RE = re.compile(r"--- p\.(\d+)\b")
 
 
+SENTENCE_LINE_RE = re.compile(r"\d+ \| ")
+
+
 def indexed(listing):
     """The listing as the file extract writes: first an index of the file's line numbers, where each page starts and,
-    when they are found, where the main text ends, the references start and an appendix after them starts, so that a
-    part can be read by its lines. The appendix is a heading that starts with Appendix, Appendices or Supplementary
-    after the references."""
+    when they are found, where the main text ends, the references start, the text after them starts and an appendix
+    after them starts, so that a part can be read by its lines. The text after the references starts at the first line
+    after the removed bibliography that is neither a page marker nor a marker line, or with the references kept at the
+    first heading after theirs; it is listed when sentences follow and it does not start where the appendix does. The
+    appendix is a heading that starts with Appendix, Appendices or Supplementary after the references."""
     lines = listing.rstrip("\n").split("\n")
-    pages, refs, appendix, page = [], None, None, None
+    pages, refs, after, appendix, page = [], None, None, None, None
+    sentences_after = False
     for i, line in enumerate(lines):
         m = PAGE_MARK_RE.match(line)
         if m:
@@ -1611,15 +1617,24 @@ def indexed(listing):
         elif refs is None and (line == "[references removed]"
                                or (line.startswith("## ") and REFERENCES_RE.fullmatch(norm_str(line[3:])))):
             refs = (i, page)
-        elif refs is not None and appendix is None and line.startswith("## ") and APPENDIX_RE.match(norm_str(line[3:])):
-            appendix = (i, page)
+        elif refs is not None:
+            kept = lines[refs[0]].startswith("## ")
+            if after is None and (line.startswith("## ") if kept else line.strip() and not line.startswith("[")):
+                after = (i, page)
+            sentences_after = sentences_after or (after is not None and bool(SENTENCE_LINE_RE.match(line)))
+            if appendix is None and line.startswith("## ") and APPENDIX_RE.match(norm_str(line[3:])):
+                appendix = (i, page)
     if not pages:
         return listing
-    head = 3 + (2 if refs else 0) + (1 if appendix else 0)   # the index's lines, the blank line after it included
+    if not sentences_after or (appendix and after[0] == appendix[0]):
+        after = None
+    head = 3 + (2 if refs else 0) + (1 if after else 0) + (1 if appendix else 0)   # the index's lines and the blank one after
     at = lambda i: i + 1 + head
     index = ["Index (line numbers of this file)"]
     if refs:
         index += [f"main text: lines {at(pages[0][1])}-{at(refs[0]) - 1}", f"references: line {at(refs[0])} (p.{refs[1]})"]
+    if after:
+        index.append(f"after the references: from line {at(after[0])} (p.{after[1]})")
     if appendix:
         index.append(f"appendix: from line {at(appendix[0])} (p.{appendix[1]})")
     index += ["pages: " + ", ".join(f"p.{p} {at(i)}" for p, i in pages), ""]

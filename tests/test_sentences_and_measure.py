@@ -153,15 +153,16 @@ def test_extract_main_writes_numbered_listing_and_json(tmp_path, capsys):
     assert "pages: p.2 4\n" in part, "the index covers the pages listed"
 
 
-def _paper_with_appendix(path, before_refs=None):
-    """Two pages of main text, the references, an appendix of two sections; optionally a main-text section called like an
-    appendix before the references."""
+def _paper_with_appendix(path, before_refs=None, first="Appendix A Proofs", then="B Further results"):
+    """Two pages of main text, the references, an appendix of two sections (their headings first and then, none after
+    the references when first is None); optionally a main-text section called like an appendix before the references."""
     pages = [[("1 Introduction", 13), ("The method improves the result on every benchmark.", 10)],
              [("2 Method", 13), ("Each element is encoded independently of the others.", 10)]
              + ([(before_refs, 13), ("These runs repeat the main experiment twice.", 10)] if before_refs else []),
-             [("References", 13), ("[1] A. Author. A paper. 2020.", 9)],
-             [("Appendix A Proofs", 13), ("The proof of the first theorem follows here.", 10)],
-             [("B Further results", 13), ("More ablations are shown in this table.", 10)]]
+             [("References", 13), ("[1] A. Author. A paper. 2020.", 9)]]
+    if first:
+        pages += [[(first, 13), ("The proof of the first theorem follows here.", 10)],
+                  [(then, 13), ("More ablations are shown in this table.", 10)]]
     doc = pymupdf.open()
     for lines in pages:
         page = doc.new_page(width=612, height=792)
@@ -217,6 +218,39 @@ def test_the_index_with_the_references_kept_and_without_them(tmp_path, capsys):
     cli.extract_main(["--pdf", str(plain), "--sentences", str(js), "--out", str(out)])
     index, lines = _index(out.read_text(encoding="utf8"))
     assert index == {"pages": "p.1 4, p.2 7"} and lines[3] == "--- p.1 ---" and lines[6] == "--- p.2 ---"
+
+
+@pytest.mark.parametrize("keep", [False, True])
+def test_the_text_after_the_references_without_an_appendix_heading(tmp_path, keep):
+    # the appendix's sections are "A Mathematical Derivations", "B …" (DPO): the text after the references is listed
+    fp = _paper_with_appendix(tmp_path / "paper.pdf", first="A Mathematical Derivations")
+    js, out = tmp_path / "sentences.json", tmp_path / "sentences.txt"
+    cli.extract_main(["--pdf", fp, "--sentences", str(js), "--out", str(out)] + (["--keep-references"] if keep else []))
+    index, lines = _index(out.read_text(encoding="utf8"))
+    assert set(index) == {"main text", "references", "after the references", "pages"}
+    start = index["after the references"]
+    assert start.startswith("from line ") and start.endswith(" (p.4)")
+    assert lines[int(start.split()[2]) - 1] == "## A Mathematical Derivations"
+    if not keep:
+        assert start == "from line 19 (p.4)" and lines[17] == "--- p.4 ---"
+
+
+def test_the_text_after_the_references_and_an_appendix_heading_later(tmp_path):
+    fp = _paper_with_appendix(tmp_path / "paper.pdf", first="A Mathematical Derivations", then="Appendix B Proofs")
+    js, out = tmp_path / "sentences.json", tmp_path / "sentences.txt"
+    cli.extract_main(["--pdf", fp, "--sentences", str(js), "--out", str(out)])
+    index, lines = _index(out.read_text(encoding="utf8"))
+    assert lines[int(index["after the references"].split()[2]) - 1] == "## A Mathematical Derivations"
+    assert lines[int(index["appendix"].split()[2]) - 1] == "## Appendix B Proofs"
+    assert index["after the references"].endswith("(p.4)") and index["appendix"].endswith("(p.5)")
+
+
+def test_nothing_after_the_references_lists_no_such_line(tmp_path):
+    fp = _paper_with_appendix(tmp_path / "paper.pdf", first=None)
+    js, out = tmp_path / "sentences.json", tmp_path / "sentences.txt"
+    cli.extract_main(["--pdf", fp, "--sentences", str(js), "--out", str(out)])
+    index, _ = _index(out.read_text(encoding="utf8"))
+    assert set(index) == {"main text", "references", "pages"}
 
 
 @pytest.mark.parametrize("heading", ["Supplementary experiments", "Appendix of results"])
