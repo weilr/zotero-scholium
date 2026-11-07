@@ -104,7 +104,7 @@ def test_environment_is_isolated(tmp_path):
         assert os.path.commonpath([env[k], run]) == run, k
     assert not [k for k in env if k.upper().startswith("CLAUDE") and k != "CLAUDE_CONFIG_DIR"]
     assert env["HOME"] == "C:\\home"
-    assert env["PATH"].split(os.pathsep)[:2] == ["C:\\agents", "C:\\bin"]
+    assert env["PATH"] == os.pathsep.join(["C:\\agents", "C:\\bin"])
 
 
 def test_environment_without_fake_or_extra_path(tmp_path):

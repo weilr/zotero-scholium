@@ -39,6 +39,36 @@ def test_the_local_api_gets_the_configurations_group(monkeypatch):
     assert cli.pick_backend("api", {})[1].lib == "/api/users/0"
 
 
+def test_the_local_api_is_not_taken_for_a_library_that_is_no_group(monkeypatch):
+    """library_id without group_id: a library the local API has no path for."""
+    monkeypatch.setattr(cli, "plugin_connect", lambda cfg: (None, "Scholium plugin is not installed (HTTP 404)", None))
+    monkeypatch.setattr(cli, "zotero_version", lambda: ("10.0.1", "SID"))
+    assert cli.pick_backend("api", {"library_id": 5}) == (None, None, "the local API reaches My Library and groups only")
+    name, _, why = cli.pick_backend("auto", {"library_id": 5})
+    assert name == "js" and "the local API reaches My Library and groups only" in why
+    assert cli.pick_backend("api", {"library_id": 1})[1].lib == "/api/users/0", "My Library's id"
+    monkeypatch.setattr(cli, "plugin_connect", lambda cfg: ("TOKEN", {"ok": True, "version": "0.1.8", "libraryID": 5}, "/scholium"))
+    assert cli.pick_backend("auto", {"library_id": 5})[:2] == ("plugin", "TOKEN")
+
+
+def test_a_paper_json_naming_a_library_that_is_no_group_writes_nothing_to_my_library(tmp_path, monkeypatch, capsys):
+    sent = []
+
+    def http(method, path, body=None, headers=None, timeout=60):
+        sent.append((method, path))
+        if path == "/api/":
+            return 200, {"X-Zotero-Version": "10.0.1", "Zotero-Server-ID": "SID"}, "Nothing to see here."
+        return 404, {}, "No endpoint found"
+    monkeypatch.setattr(cli, "http", http)
+    config = _paper(tmp_path, {"attachment_key": "ATT", "library_id": 5}, cleanup=True)
+    code, report = _run(capsys, "--config", str(config), "--apply")
+    assert report["backend"] == "js" and "the local API reaches My Library and groups only" in report["backend_reason"]
+    assert not [path for _, path in sent if path.startswith("/api/users/")], sent
+    code, report = _run(capsys, "--config", str(config), "--apply", "--backend", "api")
+    assert report["applied"] is False and "the local API reaches My Library and groups only" in json.dumps(report)
+    assert not [path for _, path in sent if path.startswith("/api/users/")], sent
+
+
 def _paper(tmp_path, paper=None, **options):
     pdf = tmp_path / "paper.pdf"
     with pymupdf.open() as doc:
@@ -105,6 +135,16 @@ def test_an_older_plugin_is_not_asked_to_write_to_a_group(tmp_path, monkeypatch,
                         "--ignore-existing")
     assert code == 2 and report["applied"] is False
     assert "reads and writes My Library only; update it" in report["apply_error"]
+    assert "/scholium/apply" not in [p for p, _ in bodies]
+
+
+def test_an_older_plugin_and_a_group_paper_ask_for_the_update_before_writing(tmp_path, monkeypatch, capsys):
+    """--ignore-existing would not help: the plugin cannot write to the group either."""
+    bodies = _plugin(monkeypatch, listed=False)
+    code, report = _run(capsys, "--config", str(_paper(tmp_path, None, group_id=777)), "--apply")
+    assert code == 2 and report["applied"] is False
+    assert report["apply_error"] == ("the Scholium plugin installed reads and writes My Library only; update it to annotate "
+                                     "a paper of a group library")
     assert "/scholium/apply" not in [p for p, _ in bodies]
 
 

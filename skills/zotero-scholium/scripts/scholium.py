@@ -54,11 +54,14 @@ ZOTERO_PORT = 23119   # Zotero's local server; SCHOLIUM_ZOTERO_PORT names anothe
 
 
 def zotero_base(env=None):
-    """Zotero's local server: http://127.0.0.1:<SCHOLIUM_ZOTERO_PORT> when that is a port number (1-65535), else port
-    ZOTERO_PORT. A request's Host header is taken from it."""
+    """Zotero's local server: http://127.0.0.1:<SCHOLIUM_ZOTERO_PORT> when that is set, else port ZOTERO_PORT. A value
+    that is not a port number (1-65535) stops the script. A request's Host header is taken from it."""
     value = str((os.environ if env is None else env).get("SCHOLIUM_ZOTERO_PORT", "")).strip()
-    port = int(value) if re.fullmatch(r"[0-9]{1,5}", value) and 1 <= int(value) <= 65535 else ZOTERO_PORT
-    return f"http://127.0.0.1:{port}"
+    if not value:
+        return f"http://127.0.0.1:{ZOTERO_PORT}"
+    if not (re.fullmatch(r"[0-9]{1,5}", value) and 1 <= int(value) <= 65535):
+        sys.exit(f'SCHOLIUM_ZOTERO_PORT is "{value}", not a port number from 1 to 65535; set it to Zotero\'s port or unset it')
+    return f"http://127.0.0.1:{int(value)}"
 
 
 BASE = zotero_base()
@@ -1676,17 +1679,17 @@ def _unmatched_ids(pg, ids, recs):
     return f"the text of sentence {ids[0]} is not found on the page as extracted; use page and text"
 
 
-SCAN_TEXT_CHARS = 100   # a page with fewer characters of text than this under an image over half of it is a scanned page
+SCAN_TEXT_CHARS = 10   # a page with at most this many characters of text under an image over half of it is a scanned page
 
 
 def scanned_pages(pdf_path):
     """(pages, scanned): the PDF's number of pages and how many of them are scanned: an image over at least half of the
-    page with fewer than SCAN_TEXT_CHARS characters of text."""
+    page with at most SCAN_TEXT_CHARS characters of text."""
     doc = pymupdf.open(pdf_path)
     try:
         scanned = 0
         for page in doc:
-            if len("".join(page.get_text("text").split())) >= SCAN_TEXT_CHARS:
+            if len("".join(page.get_text("text").split())) > SCAN_TEXT_CHARS:
                 continue
             area = abs(page.rect) or 1
             covered = max((abs(pymupdf.Rect(i["bbox"]) & page.rect) for i in page.get_image_info()), default=0)
@@ -2139,6 +2142,9 @@ def legacy_profile_dir():
 
 PLUGIN_PATHS = ("/scholium", "/scholium-bridge")   # the endpoints' base paths; Scholium Bridge 0.1.9 has only the second
 TOKEN_FILES = ("scholium.token", "scholium-bridge.token")   # Scholium Bridge 0.1.9 keeps its token in the second
+PLUGIN_NOT_INSTALLED = "Scholium plugin is not installed (HTTP 404)"
+PLUGIN_MY_LIBRARY_ONLY = ("the Scholium plugin installed reads and writes My Library only; update it to annotate a paper of a "
+                          "group library")
 
 
 def plugin_library(cfg):
@@ -2169,7 +2175,7 @@ def plugin_connect(cfg):
     if s == 0:
         return None, "Zotero is not running or its local server is disabled (" + t[:80] + "); start Zotero, then run again", None
     if s == 404:
-        return None, "Scholium plugin is not installed (HTTP 404)", None
+        return None, PLUGIN_NOT_INSTALLED, None
     if s == 401:
         return None, "token mismatch or token file not found (scholium.token in the Zotero data directory; set data_dir in the config)", None
     if not token:
@@ -2179,8 +2185,7 @@ def plugin_connect(cfg):
     if not res.get("ok"):
         return token, {"ok": False, "error": "list failed (HTTP %s): %s" % (s, t[:200])}, base
     if plugin_library(cfg) and "libraryID" not in res:   # a plugin before 0.2.2 reads and writes My Library only
-        return token, {"ok": False, "error": "the Scholium plugin installed reads and writes My Library only; update it to "
-                                             "annotate a paper of a group library"}, base
+        return token, {"ok": False, "error": PLUGIN_MY_LIBRARY_ONLY}, base
     res["backend"] = "plugin"
     return token, res, base
 
@@ -2558,6 +2563,8 @@ def _sha256(path):
 
 
 PLUGIN_FIRST = (0, 1, 9)   # from this plugin version on, `auto` writes through the plugin: one transaction, keys returned
+MY_LIBRARY_ID = 1   # Zotero's id of My Library (its libraryID)
+API_LIBRARIES = "the local API reaches My Library and groups only"
 
 
 def _version(text):
@@ -2567,14 +2574,18 @@ def _version(text):
 def pick_backend(requested, cfg):
     """Return (name, handle, reason). `auto` takes the Scholium plugin when it is recent enough, else the
     local API on Zotero 10 when it is turned on, else an older plugin. When `auto` falls back to the JavaScript
-    file, the reason names why each write channel was unavailable."""
+    file, the reason names why each write channel was unavailable. A library that is neither My Library nor a group
+    (library_id without group_id) has no path in the local API."""
     plugin = plugin_connect(cfg) if requested in ("auto", "plugin") else None
     if requested == "auto" and plugin[0] and isinstance(plugin[1], dict) and _version(plugin[1].get("version")) >= PLUGIN_FIRST:
         return "plugin", plugin[0], f"Scholium plugin {plugin[1]['version']}"
-    ver, sid = zotero_version() if requested in ("auto", "api") else (None, None)
+    other_library = (cfg or {}).get("library_id") not in (None, MY_LIBRARY_ID) and not (cfg or {}).get("group_id")
+    ver, sid = zotero_version() if requested in ("auto", "api") and not other_library else (None, None)
     why_not = []
     if requested in ("auto", "api"):
-        if ver is None:
+        if other_library:
+            why_not.append(API_LIBRARIES)
+        elif ver is None:
             why_not.append("Zotero is not running or its local server is disabled")
         elif sid is None:
             why_not.append(LOCAL_API_OFF)
@@ -2656,7 +2667,8 @@ def citation(item):
 def pdf_annotations(key, lib=USER_LIBRARY, seen=None):
     """The annotations on a PDF, as rows of the local API. Zotero 7 to 9 list none under an attachment (their searches
     give an annotation's PDF in its place): when a PDF shows none and Zotero says it is older than 10, the Scholium
-    plugin's listing gives them in the same shape; None when it cannot. `seen` keeps Zotero's version between PDFs."""
+    plugin's listing gives them in the same shape; None when it cannot, with the plugin's error in seen["plugin_error"].
+    `seen` keeps Zotero's version between PDFs."""
     anns = _get(f"/items/{key}/children?itemType=annotation", lib)
     if anns:
         return anns
@@ -2667,7 +2679,7 @@ def pdf_annotations(key, lib=USER_LIBRARY, seen=None):
     if not major or major[0] >= 10:
         return anns
     group = re.match(r"/api/groups/(\d+)", lib)
-    listing, _ = plugin_list(dict({"attachment_key": key}, **({"group_id": int(group.group(1))} if group else {})))
+    listing, seen["plugin_error"] = plugin_list(dict({"attachment_key": key}, **({"group_id": int(group.group(1))} if group else {})))
     if not listing:
         return None
     return [{"key": a.get("key"), "data": {"itemType": "annotation", "parentItem": key, "annotationType": a.get("type"),
@@ -2687,10 +2699,12 @@ def paper_status(key, lib=USER_LIBRARY):
         d = p["data"]
         path = os.path.join(data_dir, "storage", p["key"], d["filename"]) if d.get("filename") else (d.get("path") or "")
         anns = pdf_annotations(p["key"], lib, seen)
-        if anns is None:     # Zotero 7 to 9 without the plugin
+        if anns is None:     # Zotero 7 to 9 without the plugin, or with one that cannot list this PDF
+            why = seen.get("plugin_error")
             out.append({"key": p["key"], "file": path, "exists": bool(path) and os.path.exists(path), "own": None, "others": None,
                         "own_by_type": {}, "own_by_color": {},
-                        "annotations_error": f"Zotero {seen['version']}'s local API lists no annotations; install the Scholium plugin"})
+                        "annotations_error": f"Zotero {seen['version']}'s local API lists no annotations; " +
+                                             ("install the Scholium plugin" if why in (None, PLUGIN_NOT_INSTALLED) else why)})
             continue
         own = [a for a in anns if _own(a)]
         out.append({"key": p["key"], "file": path, "exists": bool(path) and os.path.exists(path),
@@ -3041,7 +3055,9 @@ def main(argv=None):
             blockers.append("layout warnings are reported; move, shorten or drop those notes, or pass --accept layout")
         if args.ignore_existing and cfg.get("cleanup"):
             blockers.append("--ignore-existing cannot be combined with cleanup: true; run without --ignore-existing")
-        if unread:
+        if unread == PLUGIN_MY_LIBRARY_ONLY:   # the plugin cannot write to this library either
+            blockers.append(unread)
+        elif unread:
             blockers.append(f"the annotations already on the attachment could not be read ({unread}); run again when Zotero "
                             "answers" + ("" if cfg.get("cleanup") else ", or pass --ignore-existing"))
         if blockers:

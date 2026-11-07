@@ -14,8 +14,9 @@
   first use. The skill runs the script that way when uv is on PATH, else with `python` as before.
 - The setup check has a uv line with the install command for the system. With uv, a missing Python or PyMuPDF is no
   fault.
-- The skill's script reaches Zotero at the port `SCHOLIUM_ZOTERO_PORT` names, when it is set; the plugin sets it to its
-  Zotero's port (`httpServer.port`) for every process it starts, so a changed port works.
+- The skill's script reaches Zotero at the port `SCHOLIUM_ZOTERO_PORT` names, when it is set (a value that is not a
+  port number stops it with an error); the plugin sets it to its Zotero's port (`httpServer.port`) for every process it
+  starts, so a changed port works.
 - **Copy** in the setup check puts its lines on the clipboard as plain text, with the versions of Scholium and Zotero
   and the operating system, for a bug report.
 - Papers in group libraries: Annotate, questions and Ask Scholium work as in My Library, and the annotations go into
