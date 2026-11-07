@@ -73,6 +73,57 @@ SCENARIOS = r"""
     const again = await h.runner.agentEnv();
     facts.held = { during, kills: h.log.shellKills, env: got.environment, again: again.environment, calls: h.log.shellCalls.length, ms: h.runner.LOGIN_PATH_MS };
   }
+  // a shell whose output never ends, not even when it is killed (a child its startup files started holds it): after
+  // LOGIN_PATH_MS it is killed and Zotero's PATH is used; a run started meanwhile goes on then, and ■ meanwhile stops it
+  {
+    const h = harness(mac({ shell: 'OPEN' }));
+    let got = null;
+    h.runner.agentEnv().then(e => { got = e; });
+    await settle(60);
+    const during = { got: !!got, timers: h.live() };
+    h.fire(); await settle(60);
+    let again = null;
+    h.runner.agentEnv().then(e => { again = e; });
+    await settle(20);
+    facts.open = { during, env: got && got.environment, again: again && again.environment, kills: h.log.shellKills, calls: h.log.shellCalls.length,
+                   timers: h.live() };
+  }
+  {
+    const h = harness(mac({ shell: 'OPEN' }));
+    h.runner.start('x');
+    await h.runner.annotate([h.item1]); await settle(100);
+    const before = { calls: h.log.calls.length, job: !!h.runner.job };
+    h.fire(); await settle(300);
+    facts.openRun = { before, envs: h.log.calls.map(c => c.opts.environment), kills: h.log.shellKills };
+    h.runner.stop();
+  }
+  {
+    const h = harness(mac({ shell: 'OPEN' }));
+    h.runner.start('x');
+    await h.runner.annotate([h.item1]); await settle(100);
+    const stopped = h.runner.cancel();
+    h.fire(); await settle(300);
+    facts.openStop = { stopped, job: !!h.runner.job, calls: h.log.calls.length, killed: h.log.kills, queue: h.runner.queue.length };
+    h.runner.stop();
+  }
+  // its marked PATH came and its output stays open: the PATH is used at once, and the shell is not killed
+  {
+    const h = harness(mac({ shell: { open: SAID } }));
+    let got = null;
+    h.runner.agentEnv().then(e => { got = e; });
+    await settle(60);
+    facts.openSaid = { env: got && got.environment, kills: h.log.shellKills, timers: h.live() };
+  }
+  // a Codex copy whose --version never ends is left out after 15 s; the others are compared
+  {
+    const h = harness({ codex: { versions: Object.assign({}, CODEX_VERSIONS, { [CODEX_APP]: 'OPEN' }) } });
+    let found;
+    h.runner.findCodex().then(p => { found = p; });
+    await settle(100);
+    const during = { found, timers: h.live() };
+    h.fire(); await settle(100);
+    facts.codexOpen = { during, found, timers: h.live() };
+  }
   // a shell that does not start, or prints no marked PATH, or one of relative folders: ignored, and not asked again
   for (const [name, shell] of [['notStarted', { fails: 'NS_ERROR_FILE_ACCESS_DENIED' }], ['noMarks', 'zsh: no such option: foo\n'],
                                ['relative', '@SCHOLIUM_PATH@bin:.@SCHOLIUM_PATH@'], ['failing', null]]) {
@@ -264,6 +315,31 @@ def test_a_shell_that_does_not_answer_is_killed_and_zoteros_path_kept(facts):
     assert h["kills"] == 1
     assert h["env"] == PLAIN and h["again"] == PLAIN
     assert h["calls"] == 1, "not asked again in the session"
+
+
+def test_a_shell_whose_output_never_ends_is_given_up_after_its_time(facts):
+    o = facts["open"]
+    assert o["during"] == {"got": False, "timers": [5000]}
+    assert o["env"] == PLAIN and o["again"] == PLAIN, "Zotero's PATH, also afterwards"
+    assert o["kills"] == 1 and o["calls"] == 1 and o["timers"] == []
+    r = facts["openRun"]
+    assert r["before"] == {"calls": 0, "job": True}, "the run waits for the shell"
+    assert r["envs"] == [PLAIN], "then goes on with Zotero's PATH"
+    assert r["kills"] == 1
+    s = facts["openStop"]
+    assert s["stopped"] is True and s["job"] is False and s["queue"] == 0, "■ while it waits stops the run"
+    assert s["calls"] == s["killed"] == 1, "the process created meanwhile is killed at once"
+
+
+def test_a_shell_that_printed_its_path_is_not_waited_for(facts):
+    s = facts["openSaid"]
+    assert s["env"] == dict(PLAIN, PATH=MERGED) and s["kills"] == 0 and s["timers"] == []
+
+
+def test_a_codex_whose_version_never_ends_is_left_out(facts):
+    c = facts["codexOpen"]
+    assert c["during"] == {"timers": [15000]}
+    assert c["found"] == "/home/u/.cargo/bin/codex.exe" and c["timers"] == []
 
 
 def test_a_shell_that_fails_is_ignored_and_not_asked_again(facts):

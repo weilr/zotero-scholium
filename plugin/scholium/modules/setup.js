@@ -297,18 +297,39 @@ Object.assign(ScholiumRunner, {
       this.log("setup check: not started: " + e);
       return null;
     }
-    let late = false;
-    const timer = setTimeout(() => { late = true; try { proc.kill(); } catch (e) {} }, this.CHECK_MS);
-    let out = "";
     try {
-      try { await proc.stdin.close(); } catch (e) {}
-      for (;;) { const s = await proc.stdout.readString(); if (!s) break; out += s; }
-      await proc.wait();
+      const { out, late } = await this.readOutput(proc, this.CHECK_MS);
+      return late ? null : out;
     } catch (e) {
       this.log("setup check: no answer: " + e);
       return null;
-    } finally { clearTimeout(timer); }
-    return late ? null : out;
+    }
+  },
+
+  // a process's standard output { out, late }, read until it ends and the process exits, until done(out) holds, or until
+  // ms pass (late): the process is then killed and the reading ends, since a child it started may keep its output open.
+  // After done(out), a process that has not exited by then is still killed at that time
+  async readOutput(proc, ms, done = null) {
+    let late = false, ended = false, timer = null, out = "";
+    const deadline = new Promise(resolve => { timer = setTimeout(() => { late = true; try { proc.kill(); } catch (e) {} resolve(); }, ms); });
+    const read = (async () => {
+      try { await proc.stdin.close(); } catch (e) {}
+      for (;;) {
+        const s = await proc.stdout.readString();
+        if (late) return;
+        if (!s) break;
+        out += s;
+        if (done && done(out)) return;
+      }
+      await proc.wait();
+      ended = true;
+    })();
+    try { await Promise.race([read, deadline]); }
+    finally {
+      if (ended || late) clearTimeout(timer);
+      else proc.wait().then(() => clearTimeout(timer), () => {});
+    }
+    return { out, late };
   },
 
   // Claude Code: the program a run uses and whether it is signed in (only loggedIn of `claude auth status` is read), then
@@ -393,7 +414,7 @@ Object.assign(ScholiumRunner, {
 
   // the PATH of the user's login shell on macOS and Linux, read once a session: Zotero started from the Dock or a desktop
   // menu has a short PATH, without the folders of Homebrew, nvm or uv. "" on Windows, or when the shell fails or does not
-  // answer in LOGIN_PATH_MS (it is then killed)
+  // print it in LOGIN_PATH_MS (it is then killed, and its output, which a child it started may keep open, is left)
   loginPath() {
     if (Services.appinfo.OS === "WINNT") return Promise.resolve("");
     if (!this.loginPathRead) this.loginPathRead = this.readLoginPath().catch(e => { this.log("login PATH not read: " + e); return ""; });
@@ -408,13 +429,7 @@ Object.assign(ScholiumRunner, {
     if (!shell) return "";
     const mark = "@SCHOLIUM_PATH@";
     const proc = await this.subprocess().call({ command: shell, arguments: ["-ilc", `printf '%s' "${mark}$PATH${mark}"`] });
-    const timer = setTimeout(() => { try { proc.kill(); } catch (e) {} }, this.LOGIN_PATH_MS);
-    let out = "";
-    try {
-      try { await proc.stdin.close(); } catch (e) {}
-      for (;;) { const s = await proc.stdout.readString(); if (!s) break; out += s; }
-      await proc.wait();
-    } finally { clearTimeout(timer); }
+    const { out } = await this.readOutput(proc, this.LOGIN_PATH_MS, o => o.split(mark).length >= 3);
     const parts = out.split(mark);
     const path = parts.length >= 3 ? parts[1].trim() : "";
     return path.split(":").some(d => d.startsWith("/")) ? path : "";
@@ -528,12 +543,7 @@ Object.assign(ScholiumRunner, {
   async codexVersion(path) {
     try {
       const proc = await this.subprocess().call(Object.assign({ command: path, arguments: ["--version"], stderr: "stdout" }, await this.agentEnv()));
-      const timer = setTimeout(() => { try { proc.kill(); } catch (e) {} }, 15000);
-      let out = "";
-      try {
-        for (;;) { const s = await proc.stdout.readString(); if (!s) break; out += s; }
-        await proc.wait();
-      } finally { clearTimeout(timer); }
+      const { out } = await this.readOutput(proc, 15000);
       const m = /(\d+)\.(\d+)\.(\d+)(-[\w.]+)?/.exec(out);
       return m ? [Number(m[1]), Number(m[2]), Number(m[3]), m[4] || ""] : null;
     } catch (e) { return null; }

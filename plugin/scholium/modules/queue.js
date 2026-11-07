@@ -52,15 +52,16 @@ Object.assign(ScholiumRunner, {
     } catch (e) { this.log("notice failed: " + e); }
   },
 
-  // a conversation as a note's HTML: the paper's title and the date it started, then each question with its quoted
-  // passage, and each answer with the agent and model that gave it, its Markdown set as the transcript sets it
+  // a conversation as a note's HTML: a heading with the paper's title (noteHeading) and the date it started, then each
+  // question with its quoted passage, and each answer with the agent and model that gave it, its Markdown set as the
+  // transcript sets it
   noteHtml(doc, title, entries) {
     const esc = s => this.escapeHtml(s);
     const runs = this.runsOf(entries).filter(r => !r.compact);
     const first = runs.find(r => r.start > 0);
     const d = new Date(first ? first.start : Date.now());
     const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    const out = [`<h1>${esc(title)}</h1>`, `<p>Scholium · ${date}</p>`];
+    const out = [`<h1>${esc(this.text("noteHeading", title))}</h1>`, `<p>Scholium · ${date}</p>`];
     const was = this.noteTex;
     this.noteTex = true;
     try {
@@ -289,7 +290,7 @@ Object.assign(ScholiumRunner, {
       q.className = "scholium-prompt-quote";
       const t = doc.createElement("span");
       t.textContent = this.quoteLabel(quote);
-      q.append(t, this.iconButton(doc, "close", this.text("quoteRemove"), () => { quote = null; q.remove(); }));
+      q.append(t, this.iconButton(doc, "close", this.text("quoteRemove"), () => { quote = null; q.remove(); try { input.focus(); } catch (e) {} }));
       box.append(q);
     }
     const input = doc.createElement("textarea");

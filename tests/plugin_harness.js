@@ -347,28 +347,34 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     async wait() { return { exitCode: 0 }; }
     kill() { log.modelKills++; this.killed = true; }
   }
-  // codex --version
+  // codex --version; 'OPEN': its output never ends (a child it started holds it), not even when it is killed
   class VersionProc {
-    constructor(path) { this.out = co.versions[path] ? [co.versions[path]] : []; }
-    get stdout() { return { readString: async () => { await tick(); return this.out.shift() || ''; } }; }
+    constructor(path) { this.open = co.versions[path] === 'OPEN'; this.out = co.versions[path] && !this.open ? [co.versions[path]] : []; }
+    get stdout() { return { readString: async () => { await tick(); return this.open ? new Promise(() => {}) : this.out.shift() || ''; } }; }
     async wait() { return { exitCode: 0 }; }
     kill() {}
   }
   // a short command of the setup check: claude auth status (auth: 'in' or 'out' as Claude Code answers, with details the
   // plugin must not keep; 'fail' ends without an answer) and python -c (python: the output of each program path; none for
-  // one that answers nothing). 'HOLD' holds it until it is killed
+  // one that answers nothing). 'HOLD' holds it until it is killed; 'OPEN' never ends its output, not even when it is killed
+  // (a child it started holds it), and neither does one made with open after its output
   const AUTH = {
     in: ['{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"someone@example.com","orgId":"org-1","subscriptionType":"max"}\n', 0],
     out: ['{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}\n', 1],
     fail: ['', 1],
     HOLD: ['HOLD', 0],
+    OPEN: ['OPEN', 0],
   };
   class OutProc {
-    constructor([out, exit]) { this.out = out === 'HOLD' ? null : [out]; this.exit = exit; this.killed = false; this.gate = null; }
+    constructor([out, exit, open = false]) {
+      if (out === 'OPEN') { out = ''; open = true; }
+      this.out = out === 'HOLD' ? null : [out]; this.exit = exit; this.open = open; this.killed = false; this.gate = null;
+    }
     get stdin() { return { write: async () => {}, close: async () => {} }; }
     get stdout() {
       return { readString: async () => {
         await tick();
+        if (this.open) return this.out[0] ? this.out.shift() : new Promise(() => {});
         if (!this.out && !this.killed) await new Promise(r => { this.gate = r; });
         return this.killed || !this.out ? '' : this.out.shift() || '';
       } };
@@ -466,15 +472,16 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     async wait() { return { exitCode: this.killed ? 1 : 0 }; }
     kill() { log.codexKills++; this.killed = true; if (this.wake) { const w = this.wake; this.wake = null; w(); } }
   }
-  // the login shell asked for its PATH (shell: its output, 'HOLD' until it is killed, { fails } when it does not start, or
-  // null for a failing one); uv --version (uv: the output of each program path)
+  // the login shell asked for its PATH (shell: its output, 'HOLD' until it is killed, 'OPEN' never ending, { open } its
+  // output that then never ends, { fails } when it does not start, or null for a failing one); uv --version (uv: the
+  // output of each program path)
   class ShellProc extends OutProc { kill() { log.shellKills++; this.killed = true; if (this.gate) this.gate(); } }
   const Subprocess = {
     call: async opts => {
       if (opts.arguments[0] === '-ilc') {
         log.shellCalls.push(opts);
         if (shell && shell.fails) throw Error(shell.fails);
-        return new ShellProc(typeof shell === 'string' ? [shell, 0] : ['', 1]);
+        return new ShellProc(typeof shell === 'string' ? [shell, 0] : shell && 'open' in shell ? [shell.open, 0, true] : ['', 1]);
       }
       if (/(?:^|\/)uv(?:\.exe)?$/.test(opts.command)) { log.uvCalls.push(opts); return new OutProc(opts.command in uv ? [uv[opts.command], 0] : ['', 1]); }
       if (opts.arguments[0] === '--version') { log.versionCalls.push(opts.command); return new VersionProc(opts.command); }

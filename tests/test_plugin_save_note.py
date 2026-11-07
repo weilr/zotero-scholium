@@ -1,5 +1,6 @@
 """Save as note: the conversation the Chat tab shows (or the session the Annotations tab shows) becomes a child note of
-the paper, with a heading of the paper's title and the date, each question with its quoted passage and each answer set
+the paper, with a heading of the paper's title after a prefix (not the title alone, which the skill's reading notes
+start with) and the date, each question with its quoted passage and each answer set
 from its Markdown with the agent that gave it, tagged scholium-chat so that Annotate again and Delete leave it."""
 import pytest
 
@@ -132,7 +133,7 @@ def test_the_chat_menu_saves_the_conversation_as_a_child_note(facts):
 
 def test_the_notes_html(facts):
     html = facts["chat_zh-CN"]["saved"][0]["html"]
-    assert html.startswith("<h1>Paper ITEM1</h1>\n<p>Scholium · 2026-11-01</p>")
+    assert html.startswith("<h1>Scholium 对话：Paper ITEM1</h1>\n<p>Scholium · 2026-11-01</p>")
     # the question with its quoted passage, escaped, and its line breaks
     assert "<blockquote><p>p.3 · A &lt;quoted&gt; passage.</p></blockquote>\n<p><strong>问：</strong> 问题1<br>第二行</p>" in html
     # the answer: who gave it, then its Markdown as the transcript sets it
@@ -149,6 +150,7 @@ def test_english_labels(facts):
     f = facts["chat_en-US"]
     assert ["Save as note", False] in f["items"] and f["notices"] == [["Saved as a note of the paper"]]
     html = f["saved"][0]["html"]
+    assert html.startswith("<h1>Scholium conversation: Paper ITEM1</h1>\n")
     assert "<p><strong>Question:</strong> 问题1<br>第二行</p>" in html and "<p><strong>Answer (Claude Code · Opus 5.5):</strong></p>" in html
 
 
