@@ -323,3 +323,24 @@ def test_the_scanned_pdf_reads_as_a_scan(tmp_path):
         assert page.get_text().strip() == ""
         assert any(abs(pymupdf.Rect(i["bbox"]) & page.rect) >= abs(page.rect) / 2 for i in page.get_image_info())
 
+
+# ---- the groups check ----
+def test_the_cli_config_names_the_group(tmp_path):
+    req = {"pdf": "p.pdf", "item_key": "ITEMKEY1", "attachment_key": "ATTKEY01", "group_id": "9100001"}
+    cfg = smoke.cli_config(req, str(tmp_path), str(tmp_path / "data"), None, smoke.FIRST_HIGHLIGHTS)
+    assert cfg["group_id"] == 9100001 and "library_id" not in cfg
+    assert cfg["core_color"] == "#FF6666" and cfg["highlights"] == smoke.FIRST_HIGHLIGHTS
+    mine = smoke.cli_config(dict(req, group_id=None), str(tmp_path), str(tmp_path / "data"), None, smoke.FIRST_HIGHLIGHTS)
+    assert "group_id" not in mine   # My Library: no library key
+
+
+def test_the_groups_check_is_planned_with_the_fake():
+    assert "groups" in smoke.PROBE_FAKE and smoke.plan(["groups"]) == {"fake": ["groups"], "after": [], "setup": [], "cli": []}
+    probe = open(os.path.join(SMOKE, "probe", "bootstrap.js"), encoding="utf8").read()
+    assert "async groups()" in probe and '"groups", "skill"' in probe
+
+
+def test_the_endpoint_list_refuses_the_users_port(tmp_path):
+    with pytest.raises(ValueError, match="23119"):
+        smoke.endpoint_list(str(tmp_path), 23119, {"attachmentKey": "X"})
+

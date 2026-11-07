@@ -15,6 +15,9 @@ such as plugin/scholium, or a built .xpi) and a probe plugin (probe/bootstrap.js
   apply      the skill's CLI writes through /scholium/apply (upper-case colours arrive lower-case, one note); a write
              that Zotero rejects leaves no second note
   reader     Ask Scholium in the reader's context menu puts the passage above the Chat box
+  groups     a paper in a local group library: the one-time confirmation before the first Annotate (not again), the
+             skill's CLI writes into the group with group_id and list answers its libraryID; with the group not
+             editable, the Annotations tab says so, Annotate is off and the write is refused
   skill      Install the skill and retry (from a package that carries the skill in content/skill, or the hint without)
   port       the agent's environment has SCHOLIUM_ZOTERO_PORT = this throwaway's port (from the fake's recorded calls)
   adddir     the agent gets --add-dir <CLAUDE_CONFIG_DIR>/skills/zotero-scholium exactly when that folder is there (the
@@ -44,7 +47,7 @@ import zipfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 USER_PORT = 23119
-PROBE_FAKE = ["section", "localapi", "signedout", "pymupdf", "reselect", "apply", "reader", "skill"]   # the probe's, fake Claude
+PROBE_FAKE = ["section", "localapi", "signedout", "pymupdf", "reselect", "apply", "reader", "groups", "skill"]   # the probe's, fake Claude
 RUNNER_FAKE = ["port", "adddir"]   # read from the fake's recorded calls once the fake session ends
 SETUP_CHECKS = ["setup", "copy"]   # a second Zotero start, with the real programs
 CLI_CHECKS = ["scanned"]           # the skill's CLI alone, no Zotero
@@ -405,12 +408,27 @@ def end_ours(profile):
 # ---------------------------------------------------------------------------------------------------------------------
 # the CLI step of the apply check
 # ---------------------------------------------------------------------------------------------------------------------
+FIRST_HIGHLIGHTS = [{"page": 1, "text": PDF_PAGES[0][2][0], "core": True, "comment": "我们提出一种在临时文库中测试批注工具的简单方法。"},
+                    {"page": 1, "text": PDF_PAGES[0][5][0], "core": False, "comment": "实验表明这种方法在实践中快速而可靠。"}]
+SECOND_HIGHLIGHTS = [{"page": 1, "text": PDF_PAGES[0][3][0], "core": True, "comment": "该方法生成一份只含几句普通文字的小文档。"},
+                     {"page": 1, "text": PDF_PAGES[0][4][0], "core": False, "comment": "每个句子都可以高亮，而不改动原文件。"}]
+
+
+def cli_config(req, out_dir, data_dir, note, highlights):
+    """The skill's configuration for a CLI step: the paper the probe names (with its group_id or library_id when it is
+    in another library than My Library), upper-case colours, a note."""
+    cfg = {"pdf": req["pdf"], "item_key": req["item_key"], "attachment_key": req["attachment_key"], "out_dir": out_dir,
+           "data_dir": data_dir, "core_color": "#FF6666", "other_color": "#FFD400", "note_html": note, "highlights": highlights}
+    for k in ("group_id", "library_id"):
+        if req.get(k):
+            cfg[k] = int(req[k])
+    return cfg
+
+
 def run_cli(run, port, cli, req, env, name, note, highlights, bad=False, extra=("--apply",)):
     out_dir = os.path.join(run, "cli-" + name)
     os.makedirs(out_dir, exist_ok=True)
-    cfg = {"pdf": req["pdf"], "item_key": req["item_key"], "attachment_key": req["attachment_key"], "out_dir": out_dir,
-           "data_dir": os.path.join(run, "data"), "core_color": "#FF6666", "other_color": "#FFD400", "note_html": note,
-           "highlights": highlights}
+    cfg = cli_config(req, out_dir, os.path.join(run, "data"), note, highlights)
     cfg_path = os.path.join(out_dir, "config.json")
     with open(cfg_path, "w", encoding="utf8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=1)
@@ -429,16 +447,49 @@ def run_cli(run, port, cli, req, env, name, note, highlights, bad=False, extra=(
     return keep
 
 
+def write_note(run, name, title, body):
+    path = os.path.join(run, name)
+    with open(path, "w", encoding="utf8") as f:
+        f.write(f"<h1>{title}</h1><p>{body}</p>")
+    return path
+
+
+def endpoint_list(run, port, body):
+    """The plugin's /scholium/list, as the CLI asks it (with the token of the run's data folder)."""
+    import urllib.request
+    port = check_port(port)
+    with open(os.path.join(run, "data", "scholium.token"), encoding="utf8") as f:
+        token = f.read().strip()
+    req = urllib.request.Request("http://127.0.0.1:%d/scholium/list" % port, data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "X-Annotate-Token": token})
+    try:
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=60) as r:
+            status, text = r.status, r.read().decode("utf8", "replace")
+    except urllib.error.HTTPError as e:
+        status, text = e.code, e.read().decode("utf8", "replace")
+    try:
+        js = json.loads(text)
+    except ValueError:
+        js = {"raw": text[:300]}
+    return {"status": status, "json": {k: (len(v) if isinstance(v, list) else v) for k, v in js.items()}}
+
+
+def groups_step(run, port, cli, env, req):
+    """The groups check's CLI steps: a write with group_id and the plugin's list of the group's PDF; or, with the group
+    not editable, a write that must be refused."""
+    if req.get("kind") == "readonly":
+        return {"apply": run_cli(run, port, cli, req, env, "group-readonly", write_note(run, "group-note2.html", "Group note", "Refused."),
+                                 SECOND_HIGHLIGHTS)}
+    out = {"apply": run_cli(run, port, cli, req, env, "group-apply", write_note(run, "group-note1.html", "Group note", "In the group."),
+                            FIRST_HIGHLIGHTS)}
+    out["list"] = endpoint_list(run, port, {"attachmentKey": req["attachment_key"], "groupID": int(req["group_id"])})
+    return out
+
+
 def apply_step(run, port, cli, env, req):
     def note(name, title, body):
-        path = os.path.join(run, name)
-        with open(path, "w", encoding="utf8") as f:
-            f.write(f"<h1>{title}</h1><p>{body}</p>")
-        return path
-    first = [{"page": 1, "text": PDF_PAGES[0][2][0], "core": True, "comment": "我们提出一种在临时文库中测试批注工具的简单方法。"},
-             {"page": 1, "text": PDF_PAGES[0][5][0], "core": False, "comment": "实验表明这种方法在实践中快速而可靠。"}]
-    second = [{"page": 1, "text": PDF_PAGES[0][3][0], "core": True, "comment": "该方法生成一份只含几句普通文字的小文档。"},
-              {"page": 1, "text": PDF_PAGES[0][4][0], "core": False, "comment": "每个句子都可以高亮，而不改动原文件。"}]
+        return write_note(run, name, title, body)
+    first, second = FIRST_HIGHLIGHTS, SECOND_HIGHLIGHTS
     out = {"run1": run_cli(run, port, cli, req, env, "run1", note("note1.html", "Smoke note", "First write."), first)}
     # a write Zotero rejects (an annotation's sort index it does not accept) with another note: nothing may stay of it
     out["run2"] = run_cli(run, port, cli, req, env, "run2", note("note2.html", "Second smoke note", "A rejected write."), second, bad=True)
@@ -490,7 +541,7 @@ def run_session(a, name, checks, runner_checks=()):
     print(f"[{name}] netstat :{USER_PORT} before: {before}", flush=True)
     log = open(os.path.join(run, "zotero-debug.txt"), "a", encoding="utf8")
     subprocess.Popen([a.zotero, "-no-remote", "-profile", dirs["profile"], "-ZoteroDebugText"], env=env, stdout=log, stderr=subprocess.STDOUT)
-    started, ended, cli_done = time.time(), "quit", False
+    started, ended, cli_done, served = time.time(), "quit", False, set()
     try:
         time.sleep(8)
         while time.time() < started + a.minutes * 60:
@@ -505,6 +556,16 @@ def run_session(a, name, checks, runner_checks=()):
                 with open(os.path.join(run, "cli-done.json"), "w", encoding="utf8") as f:
                     json.dump(res, f, ensure_ascii=False, indent=1)
                 cli_done = True
+            for f in sorted(os.listdir(run)):   # the groups check's steps: cli-request-<step>.json -> cli-done-<step>.json
+                if f.startswith("cli-request-") and f not in served:
+                    served.add(f)
+                    time.sleep(0.3)
+                    try:
+                        res = groups_step(run, a.port, a.cli, make_env(os.environ, run), json.load(open(os.path.join(run, f), encoding="utf8")))
+                    except Exception as e:
+                        res = {"error": repr(e)}
+                    with open(os.path.join(run, f.replace("cli-request-", "cli-done-")), "w", encoding="utf8") as h:
+                        json.dump(res, h, ensure_ascii=False, indent=1)
             if not pick_ours(zotero_processes(), dirs["profile"]):
                 break
         else:

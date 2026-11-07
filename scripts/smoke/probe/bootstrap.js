@@ -6,7 +6,8 @@
    confirmation, then the run), signedout (a "not signed in" stream: the plugin's sentence, not Claude Code's),
    pymupdf (a run whose tool result says PyMuPDF is missing: the card), reselect (a paper selected again after another
    item shows its annotation session's card again), apply (the skill's CLI through /scholium/apply, run by smoke.py
-   outside Zotero), reader (Ask Scholium in the reader's context menu), skill (Install the skill and retry), setup (the
+   outside Zotero), reader (Ask Scholium in the reader's context menu), groups (a paper in a local group library: the
+   one-time confirmation, a write with group_id, a group that is not editable), skill (Install the skill and retry), setup (the
    settings page's setup check, with the real claude and codex found by the plugin), copy (the setup check's Copy puts
    its lines on the clipboard, which is restored afterwards).
 
@@ -304,7 +305,8 @@ function expected() {
   const r = R(), t = (key, ...args) => { try { return r.text(key, ...args); } catch (e) { return null; } };
   EXPECTED = { localApiOff: t("localApiOff"), signedOut: t("notSignedIn", "claude"), pymupdfCard: t("annotNoneWarn", t("pymupdfMissing")),
                askLabel: t("askScholium"), installSkill: t("installSkill"), skillNotCarried: t("skillNotCarried"),
-               localApiName: t("checkLabel", "localApi"), claudeSkillName: t("checkLabel", "claudeSkill"), question: CFG.question };
+               localApiName: t("checkLabel", "localApi"), claudeSkillName: t("checkLabel", "claudeSkill"), question: CFG.question,
+               groupFirst: t("groupFirst"), groupReadOnly: t("groupReadOnly") };
   line("expected", EXPECTED);
   return EXPECTED;
 }
@@ -445,6 +447,65 @@ const CHECKS = {
            { selection: drag.selection, menuItem: ask.getAttribute("label"), menus: items2, tab: p && p.tab, quote: strip });
   },
 
+  async groups() {
+    // a local group library, as Zotero's own tests make one (no sync: the throwaway has no account)
+    const g = new Zotero.Group();
+    g.id = 9100001;
+    g.name = "Smoke group";
+    g.description = "";
+    g.version = 0;
+    g.editable = true;
+    g.filesEditable = true;
+    await g.saveTx();
+    try { await Zotero.Items.loadAll(g.libraryID); } catch (e) {}
+    const item = new Zotero.Item("journalArticle");
+    item.libraryID = g.libraryID;
+    item.setField("title", "Smoke group paper");
+    await item.saveTx();
+    const att = await Zotero.Attachments.importFromFile({ file: CFG.pdf, parentItemID: item.id, libraryID: g.libraryID });
+    const it = { item, att };
+    const step = async (name, body) => {   // the runner's CLI step, through cli-request-<name>.json
+      await IOUtils.writeUTF8(PathUtils.join(CFG.run, `cli-request-${name}.json`), JSON.stringify(body));
+      let done = false;
+      for (let i = 0; i < 300 && !done; i++) { done = await IOUtils.exists(PathUtils.join(CFG.run, `cli-done-${name}.json`)); if (!done) await delay(1000); }
+      return done ? JSON.parse(await IOUtils.readUTF8(PathUtils.join(CFG.run, `cli-done-${name}.json`))) : { error: "no answer from smoke.py" };
+    };
+    try { await win().ZoteroPane.collectionsView.selectLibrary(g.libraryID); } catch (e) {}
+    await delay(1500);
+    let box = await selectItem(it);
+    const tabsOk = tabs(box).labels.length === 2;
+    await showTab(box, "annot");
+    const n0 = dialogs.length;
+    const ran1 = await annotateHere(box, "annotate-ok");
+    const first = dialogs.slice(n0).map(d => d.text);
+    const n1 = dialogs.length;
+    const ran2 = await annotateHere(box, "annotate-ok");
+    const second = dialogs.slice(n1).map(d => d.text);
+    await shot("groups-annotated", box);
+    const pdf = await att.getFilePathAsync();
+    const written = await step("groups-apply", { kind: "apply", pdf, item_key: item.key, attachment_key: att.key, group_id: g.id });
+    const anns = att.getAnnotations().map(a => ({ lib: a.libraryID, color: a.annotationColor }));
+    // a group whose library the user cannot edit
+    g.editable = false;
+    await g.saveTx();
+    box = await selectItem(it);
+    await showTab(box, "annot");
+    await delay(800);
+    const state = txt(q(box, ".scholium-state")), go = annotGo(box);
+    await shot("groups-readonly", box);
+    const refused = await step("groups-readonly", { kind: "readonly", pdf, item_key: item.key, attachment_key: att.key, group_id: g.id });
+    const after = att.getAnnotations().length;
+    g.editable = true;
+    await g.saveTx();
+    const w = written.apply || {}, l = written.list || {}, r = refused.apply || {};
+    result("groups", tabsOk && ran1 && ran2 && first.length === 1 && first[0] === E().groupFirst && second.length === 0
+                     && w.applied === true && anns.length === 2 && anns.every(a => a.lib === g.libraryID && /^#[0-9a-f]{6}$/.test(a.color))
+                     && l.status === 200 && l.json && l.json.libraryID === g.libraryID
+                     && state === E().groupReadOnly && !!go && go.disabled && r.applied === false && /cannot edit/.test(String(r.apply_error || "")) && after === 2,
+           { libraryID: g.libraryID, confirmation: first, again: second, started: [ran1, ran2], write: { applied: w.applied, error: w.apply_error },
+             annotations: anns, list: l, readOnly: { state, annotateDisabled: !!go && go.disabled, write: { applied: r.applied, error: r.apply_error }, annotationsAfter: after } });
+  },
+
   async skill() {
     const box = await selectItem(items.S);
     await showTab(box, "annot");
@@ -569,7 +630,7 @@ async function main() {
     await waitFor(() => w.ZoteroPane && w.ZoteroPane.itemsView && w.ZoteroPane.itemsView.initialized, 30000);
     await delay(2500);
   });
-  for (const name of ["section", "localapi", "signedout", "pymupdf", "reselect", "apply", "reader", "skill", "setup"]) {
+  for (const name of ["section", "localapi", "signedout", "pymupdf", "reselect", "apply", "reader", "groups", "skill", "setup"]) {
     if (CFG.checks.includes(name)) await step(name, CHECKS[name]);
   }
   return finish();
