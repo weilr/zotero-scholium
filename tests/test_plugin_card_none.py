@@ -51,4 +51,4 @@ def test_a_card_with_annotations_is_a_success(facts):
 
 
 def test_the_empty_cards_title_is_in_the_warning_colour():
-    assert "color: var(--accent-orange)" in css_rules()[".scholium-card.none .scholium-card-title"]
+    assert "color: var(--scholium-orange-text)" in css_rules()[".scholium-card.none .scholium-card-title"]

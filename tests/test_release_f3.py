@@ -191,7 +191,7 @@ const all = n => [n, ...((n && n.children) || []).filter(c => c && c.tagName).fl
     pane.input.focus();
     // the settings layer, the ⋯ menu and the history from the keyboard: the focus goes in, and Esc brings it back
     pane.chip.focus(); keyClick(pane.chip);
-    k.settings = { focus: doc.activeElement === pane.agent };
+    k.settings = { focus: doc.activeElement === pane.model };   // the model, not the agent an arrow key would switch
     key(pane.popover.node, { key: 'Escape' });
     k.settings.back = !pane.popover && doc.activeElement === pane.chip;
     pane.more.focus(); keyClick(pane.more);

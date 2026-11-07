@@ -679,7 +679,7 @@ SCENARIOS = r"""
     f.cancel = view();
     save.click(); await settle(20);
     f.saved = { text: h.log.writes[PROFILE_PATH], view: view(), confirms: h.log.confirms.slice(), focusListeners: focusListeners(),
-                refocused: !!h.lastFocus.focused };
+                refocused: !!q.more.focused, notBefore: !h.lastFocus.focused };
     facts.profile = f;
   }
   {
@@ -2824,7 +2824,7 @@ def test_section_is_styled_by_its_stylesheet(facts):
     assert look["buttons"] == ["scholium-button primary small", "scholium-button quiet small", "scholium-round send"]
     assert look["tabs"] == ["scholium-tab on", "scholium-tab"]
     assert look["newChat"] == ["scholium-button quiet glyph add", "新对话"], "New chat is the add icon, its words its tooltip"
-    assert look["history"] == "scholium-button quiet icon"
+    assert look["history"] == "scholium-button quiet glyph history"
     assert look["selects"] == ["scholium-select"] * 3 and look["input"] == "scholium-input"
     assert look["inputNative"] == "true"   # Zotero's text-box look (a line under the text on focus) stays off
     assert look["tool"] == [["span", "scholium-bullet"], ["span", "scholium-content"]] and look["name"] == ["b", "text"]
@@ -2857,17 +2857,17 @@ def test_section_is_styled_by_its_stylesheet(facts):
     assert [sel for sel, body in rules.items() if "monospace" in body] == [".scholium-entry.tool, .scholium-entry.result", "#scholium-profile-sheet .scholium-editor",
                                                                                ".scholium-markdown code"]
     assert "var(--accent-blue10)" in rules[".scholium-entry.prompt"] and "auto" in rules[".scholium-entry.prompt"]
-    assert "var(--accent-blue)" in rules[".scholium-button.primary"] and "var(--accent-blue)" in rules[".scholium-tab.on"]
+    assert "var(--accent-blue)" in rules[".scholium-button.primary"] and "var(--scholium-blue-text)" in rules[".scholium-tab.on"]
     assert "border-color: var(--accent-blue)" in rules[".scholium-composer:focus-within"]
     for kind, colour in (("running", "blue"), ("ok", "green"), ("error", "red"), ("paused", "orange")):
         assert f"var(--accent-{colour})" in rules[f".scholium-state.{kind}::before"], kind
     assert "animation: scholium-pulse" in rules[".scholium-state.running::before"]
     assert "var(--accent-orange)" in rules[".scholium-ring.warn"] and "conic-gradient" in rules[".scholium-ring"] and "inset: 3px" in rules[".scholium-ring::after"] and "var(--fill-primary)" in rules[".scholium-round.stop"] and "var(--accent-blue)" in rules[".scholium-round"]
     # a run: its steps folded into a line, blue with a ring while it runs; the model and the time under the answer
-    assert "flex-direction: column" in rules[".scholium-run"] and "var(--accent-blue)" in rules[".scholium-fold-head.live"]
+    assert "flex-direction: column" in rules[".scholium-run"] and "var(--scholium-blue-text)" in rules[".scholium-fold-head.live"]
     assert "background: transparent" in rules[".scholium-fold-head"] and "var(--fill-secondary)" in rules[".scholium-fold-head"]
     assert 'content: "◌ "' in rules[".scholium-fold-head.live::before"] and "var(--fill-quinary)" in rules[".scholium-fold-body"]
-    assert "space-between" in rules[".scholium-meta"] and "var(--fill-tertiary)" in rules[".scholium-meta"]
+    assert "space-between" in rules[".scholium-meta"] and "var(--fill-secondary)" in rules[".scholium-meta"]
     # the annotation tab: the card (red when it failed, four numbers in a row), the question in place on a red tint, its
     # Replace in red
     assert not any("scholium-step" in sel for sel in rules), "no list of steps"
@@ -2880,8 +2880,8 @@ def test_section_is_styled_by_its_stylesheet(facts):
     assert "visibility: hidden" in rules[".scholium-history-row .scholium-button.glyph"]
     assert "visibility: visible" in rules[".scholium-history-row:hover .scholium-button.glyph, .scholium-history-row:focus-within .scholium-button.glyph"], \
         "rename and delete show with the pointer or the keyboard in their row, so that Tab reaches them"
-    assert "height: 22px" in rules[".scholium-tabs .scholium-button.icon"] and "height: 22px" in rules[".scholium-button.glyph"], \
-        "🕘 as high as ＋ beside it"
+    assert "height: 22px" in rules[".scholium-button.glyph"] and 'url("history16.svg")' in rules[".glyph.history .scholium-glyph"], \
+        "History is an icon as high as ＋ beside it"
     assert "padding: 0 4px" in rules[".scholium-queue .scholium-undo"] and "padding: 2px 4px" in rules[".scholium-queued"], \
         "the queue's Undo strip starts where its rows do"
     assert "text-overflow: ellipsis" in rules[".scholium-history-title"] and "overflow: auto" in rules[".scholium-popover.history"]
@@ -3115,7 +3115,7 @@ def test_personal_profile_is_edited_as_markdown_over_the_zotero_window(facts):
     saved = f["saved"]
     assert saved["text"].endswith("\r\n- 页边批注用蓝色\r\n- 公式不高亮\r\n") and saved["view"]["open"] is False
     assert saved["confirms"] == ["放弃未保存的修改吗？", "放弃未保存的修改吗？"]
-    assert saved["focusListeners"] == 0 and saved["refocused"] is True
+    assert saved["focusListeners"] == 0 and saved["refocused"] is True and saved["notBefore"] is True, "the focus goes back to ⋯"
 
 
 def test_profile_preview_shows_the_text_as_markdown_as_it_is_typed(facts):
@@ -3343,7 +3343,7 @@ def test_profile_sheet_covers_the_window_in_zotero_colours():
     assert "background: var(--material-sidepane)" in rules[".scholium-sheet"]
     editor = rules["#scholium-profile-sheet .scholium-editor"]
     assert "background: var(--material-background)" in editor and "color: var(--fill-primary)" in editor
-    assert "var(--accent-red)" in rules[".scholium-hint.error"]
+    assert "var(--scholium-red-text)" in rules[".scholium-hint.error"]
     assert not (PLUGIN / "content" / "profile.xhtml").exists()
 
 

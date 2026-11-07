@@ -1,6 +1,22 @@
 /* The Scholium section of the item pane and the editor of the personal profile. The colours are
    Zotero's theme variables, so both follow the light and the dark theme. */
 
+/* text colours of their own where Zotero's accents are too faint as text on the pane's ground: at least 4.5:1 in the
+   light and the dark theme */
+:root {
+  --scholium-blue-text: #2e62d6;
+  --scholium-orange-text: #b84a1c;
+  --scholium-red-text: #c42131;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --scholium-blue-text: #7ea6ff;
+    --scholium-orange-text: #ff9a6e;
+    --scholium-red-text: #ff7b84;
+  }
+}
+
 /* the section takes the item pane's width: nothing in it widens Zotero's item pane */
 .scholium-pane {
   contain: inline-size;
@@ -31,8 +47,8 @@
 }
 
 .scholium-tab.on {
-  color: var(--accent-blue);
-  border-bottom: 2px solid var(--accent-blue);
+  color: var(--scholium-blue-text);
+  border-bottom: 2px solid var(--scholium-blue-text);
   font-weight: 600;
   margin-bottom: -1px;
 }
@@ -44,12 +60,6 @@
   border-radius: 50%;
   background: var(--accent-blue);
   margin-inline-start: 4px;
-}
-
-/* 🕘 as high as the icon ＋ beside it */
-.scholium-tabs .scholium-button.icon {
-  height: 22px;
-  padding: 0 5px;
 }
 
 .scholium-line {
@@ -83,10 +93,12 @@
 .scholium-annot-intro-title { font-weight: 600; color: var(--fill-primary); }
 .scholium-fold-more { color: var(--fill-secondary); }
 .scholium-card { border: var(--material-border-quarternary); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
-.scholium-card.failed { border-color: var(--accent-red); color: var(--accent-red); }
-.scholium-card.failed > .scholium-button { align-self: flex-start; }
+/* a failed card's reason on its own line, its buttons side by side under it */
+.scholium-card.failed { border-color: var(--accent-red); color: var(--scholium-red-text); flex-direction: row; flex-wrap: wrap;
+  align-items: center; }
+.scholium-card.failed > :not(.scholium-button) { flex-basis: 100%; }
 .scholium-card-title { font-weight: 600; }
-.scholium-card.none .scholium-card-title { color: var(--accent-orange); }
+.scholium-card.none .scholium-card-title { color: var(--scholium-orange-text); }
 .scholium-card-nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; text-align: center; }
 .scholium-card-nums b { display: block; font-size: 16px; }
 .scholium-card-nums span, .scholium-card-usage { font-size: 10.5px; color: var(--fill-secondary); }
@@ -185,7 +197,7 @@
 }
 
 .scholium-menu-item.danger {
-  color: var(--accent-red);
+  color: var(--scholium-red-text);
 }
 
 .scholium-menu-sep {
@@ -579,14 +591,14 @@
 }
 
 .scholium-entry.error {
-  color: var(--accent-red);
+  color: var(--scholium-red-text);
 }
 
 /* a run: the user's words, its steps folded into one line, the answer, the model and the time */
 .scholium-run { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
 .scholium-fold-head { appearance: none; align-self: flex-start; border: 0; background: transparent; padding: 0; font-size: 11px;
   color: var(--fill-secondary); cursor: pointer; }
-.scholium-fold-head.live { color: var(--accent-blue); }
+.scholium-fold-head.live { color: var(--scholium-blue-text); }
 /* a finished run without steps: its time, with nothing to open */
 .scholium-fold-head.plain { cursor: default; }
 .scholium-fold-head.live::before { content: "◌ "; }
@@ -605,11 +617,11 @@
 @keyframes scholium-shimmer { from { background-position: 100% 0; } to { background-position: 0% 0; } }
 @media (prefers-reduced-motion: reduce) {
   .scholium-fold-head.live .scholium-working,
-  .scholium-compact.live .scholium-working { animation: none; background: none; color: var(--accent-blue); }
+  .scholium-compact.live .scholium-working { animation: none; background: none; color: var(--scholium-blue-text); }
 }
 .scholium-fold-body { border-inline-start: 2px solid var(--fill-quinary); margin-inline-start: 4px; padding-inline-start: 8px;
   display: flex; flex-direction: column; gap: 3px; }
-.scholium-meta { display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; color: var(--fill-tertiary); }
+.scholium-meta { display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; color: var(--fill-secondary); }
 
 /* the message box */
 
@@ -657,10 +669,10 @@
 .scholium-queue-held > span { flex: 1; }
 .scholium-queued { display: flex; align-items: center; gap: 4px; font-size: 11.5px; padding: 2px 4px; border-radius: 4px; }
 .scholium-queued:hover { background: var(--fill-quinary); }
-.scholium-queued-handle { cursor: grab; color: var(--fill-tertiary); }
+.scholium-queued-handle { cursor: grab; color: var(--fill-secondary); }
 .scholium-queued-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .scholium-queued.full .scholium-queued-text { white-space: pre-wrap; }
-.scholium-queued.failed .scholium-queued-text { color: var(--accent-red); }
+.scholium-queued.failed .scholium-queued-text { color: var(--scholium-red-text); }
 .scholium-queued .scholium-button { height: 20px; padding: 0 6px; }
 .scholium-queue .scholium-undo { padding: 0 4px; font-size: 11.5px; }
 .scholium-queued.sending { color: var(--fill-secondary); }
@@ -779,7 +791,7 @@
 }
 
 .scholium-hint.error {
-  color: var(--accent-red);
+  color: var(--scholium-red-text);
 }
 
 /* the editor of the personal profile: a sheet over the Zotero window */
@@ -1052,7 +1064,7 @@
 }
 
 .scholium-link {
-  color: var(--accent-blue);
+  color: var(--scholium-blue-text);
   text-decoration: underline;
 }
 
@@ -1089,7 +1101,7 @@
 
 .scholium-compact { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--fill-secondary); margin: 6px 0; }
 .scholium-compact::before, .scholium-compact::after { content: ""; flex: 1; border-top: 1px dashed var(--fill-quarternary); }
-.scholium-compact.live { color: var(--accent-blue); }
+.scholium-compact.live { color: var(--scholium-blue-text); }
 
 .scholium-quote { display: flex; align-items: flex-start; gap: 4px; border-inline-start: 3px solid var(--accent-blue); padding: 2px 6px;
   background: var(--fill-quinary); border-radius: 0 4px 4px 0; font-size: 11.5px; }
@@ -1098,7 +1110,7 @@
   font-size: 11.5px; margin-bottom: 3px; }
 
 .scholium-cite { display: inline-block; padding: 0 4px; margin: 0 1px; border-radius: 3px; font-size: 10.5px; cursor: pointer;
-  background: color-mix(in srgb, var(--accent-blue) 12%, transparent); color: var(--accent-blue); }
+  background: color-mix(in srgb, var(--accent-blue) 12%, transparent); color: var(--scholium-blue-text); }
 .scholium-popover.cite { width: 240px; }
 .scholium-cite-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--fill-secondary); }
 .scholium-cite-text { font-size: 11.5px; margin-top: 4px; }
@@ -1134,8 +1146,9 @@
 .glyph.add .scholium-glyph { background-image: url("add16.svg"); }
 .glyph.close .scholium-glyph { background-image: url("close16.svg"); }
 .glyph.check .scholium-glyph { background-image: url("check16.svg"); }
+.glyph.history .scholium-glyph { background-image: url("history16.svg"); }
 .scholium-glyph.cancelled { background-image: url("cancelled16.svg"); }
-.scholium-glyph.warn { background-image: url("warn16.svg"); margin-inline-end: 4px; color: var(--accent-red); }
+.scholium-glyph.warn { background-image: url("warn16.svg"); margin-inline-end: 4px; color: var(--scholium-red-text); }
 
 .scholium-entry.final.error.cancelled { display: flex; align-items: center; gap: 6px; color: var(--fill-secondary); }
 
