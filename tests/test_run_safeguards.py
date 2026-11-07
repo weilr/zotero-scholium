@@ -323,6 +323,20 @@ def test_profile_path_prints_the_path(tmp_path, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["exists"] is False
 
 
+def test_zotero_7s_read_only_local_api_is_named_as_such(monkeypatch):
+    """Zotero 7 answers /api/ with its version and no server ID: the local API is there but only reads."""
+    def http(method, path, body=None, headers=None, timeout=60):
+        if path == "/api/":
+            return 200, {"X-Zotero-Version": "7.0.32", "Zotero-API-Version": "3"}, "Nothing to see here."
+        return 404, {}, "No endpoint found"
+    monkeypatch.setattr(cli, "http", http)
+    assert cli.zotero_version() == ("7.0.32", "")
+    reason = "Zotero 7.0.32: the local API is read-only before Zotero 10; install the Scholium plugin"
+    assert cli.pick_backend("api", {}) == (None, None, reason)
+    name, _, why = cli.pick_backend("auto", {})
+    assert name == "js" and reason in why and "not running" not in why
+
+
 def test_the_javascript_fallback_names_why_each_channel_was_unavailable(monkeypatch):
     monkeypatch.setattr(cli, "zotero_version", lambda: ("9.0.1", "SID"))
     monkeypatch.setattr(cli, "plugin_connect", lambda cfg: (None, "Scholium plugin is not installed (HTTP 404)", None))

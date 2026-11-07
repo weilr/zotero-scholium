@@ -2574,18 +2574,16 @@ def pick_backend(requested, cfg):
     ver, sid = zotero_version() if requested in ("auto", "api") else (None, None)
     why_not = []
     if requested in ("auto", "api"):
-        if ver and sid:
-            try:
-                major = int(ver.split(".")[0])
-            except ValueError:
-                major = 0
-            if major >= 10:
-                return "api", LocalApi(sid, library_path((cfg or {}).get("group_id"))), f"Zotero {ver}: official local API write support"
-            why_not.append(f"Zotero {ver}: the local API is read-only before Zotero 10; install the Scholium plugin")
-        elif ver is not None and sid is None:
+        if ver is None:
+            why_not.append("Zotero is not running or its local server is disabled")
+        elif sid is None:
             why_not.append(LOCAL_API_OFF)
         else:
-            why_not.append("Zotero is not running or its local server is disabled")
+            major = (_version(ver) or (0,))[0]
+            if major >= 10 and sid:
+                return "api", LocalApi(sid, library_path((cfg or {}).get("group_id"))), f"Zotero {ver}: official local API write support"
+            # Zotero 7 to 9 answer with their version and no server ID: their local API only reads
+            why_not.append(f"Zotero {ver or '(version unknown)'}: the local API is read-only before Zotero 10; install the Scholium plugin")
         if requested == "api":
             return None, None, why_not[-1]
     if requested in ("auto", "plugin"):
@@ -2655,16 +2653,45 @@ def citation(item):
     return {k: v for k, v in out.items() if v or k in ("key", "title")}
 
 
+def pdf_annotations(key, lib=USER_LIBRARY, seen=None):
+    """The annotations on a PDF, as rows of the local API. Zotero 7 to 9 list none under an attachment (their searches
+    give an annotation's PDF in its place): when a PDF shows none and Zotero says it is older than 10, the Scholium
+    plugin's listing gives them in the same shape; None when it cannot. `seen` keeps Zotero's version between PDFs."""
+    anns = _get(f"/items/{key}/children?itemType=annotation", lib)
+    if anns:
+        return anns
+    seen = {} if seen is None else seen
+    if "version" not in seen:
+        seen["version"] = zotero_version()[0] or ""
+    major = _version(seen["version"])
+    if not major or major[0] >= 10:
+        return anns
+    group = re.match(r"/api/groups/(\d+)", lib)
+    listing, _ = plugin_list(dict({"attachment_key": key}, **({"group_id": int(group.group(1))} if group else {})))
+    if not listing:
+        return None
+    return [{"key": a.get("key"), "data": {"itemType": "annotation", "parentItem": key, "annotationType": a.get("type"),
+                                           "annotationColor": a.get("color"), "annotationText": a.get("text", ""),
+                                           "annotationComment": a.get("comment", ""), "annotationPageLabel": a.get("pageLabel"),
+                                           "tags": [{"tag": t} for t in a.get("tags") or []], "dateModified": a.get("modified", "")}}
+            for a in listing.get("annotations", [])]
+
+
 def paper_status(key, lib=USER_LIBRARY):
     """What a paper already has: each PDF with its file and the annotations on it (the tool's own counted by type and
     colour, the user's counted), and the notes under the item (title, length, whether the tool wrote them)."""
     item, pdfs, notes = _paper(key, lib)
     data_dir = zotero_data_dir()
-    out = []
+    out, seen = [], {}
     for p in pdfs:
         d = p["data"]
         path = os.path.join(data_dir, "storage", p["key"], d["filename"]) if d.get("filename") else (d.get("path") or "")
-        anns = _get(f"/items/{p['key']}/children?itemType=annotation", lib)
+        anns = pdf_annotations(p["key"], lib, seen)
+        if anns is None:     # Zotero 7 to 9 without the plugin
+            out.append({"key": p["key"], "file": path, "exists": bool(path) and os.path.exists(path), "own": None, "others": None,
+                        "own_by_type": {}, "own_by_color": {},
+                        "annotations_error": f"Zotero {seen['version']}'s local API lists no annotations; install the Scholium plugin"})
+            continue
         own = [a for a in anns if _own(a)]
         out.append({"key": p["key"], "file": path, "exists": bool(path) and os.path.exists(path),
                     "own": len(own), "others": len(anns) - len(own),
@@ -2705,9 +2732,9 @@ def status_main(argv):
 
 def paper_samples(item, pdfs, notes, per_kind, lib=USER_LIBRARY):
     """A few of the tool's annotations on one paper and the start of its reading note, evenly spread over the paper."""
-    anns = []
+    anns, seen = [], {}
     for p in pdfs:
-        anns += [a for a in _get(f"/items/{p['key']}/children?itemType=annotation", lib) if _own(a)]
+        anns += [a for a in pdf_annotations(p["key"], lib, seen) or [] if _own(a)]
     anns.sort(key=lambda a: a["data"].get("annotationSortIndex", ""))
 
     def spread(rows):     # first, last and evenly between
