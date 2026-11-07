@@ -1,5 +1,6 @@
 """The tools Claude Code gets (--tools): an annotation run and the messages to its session have the ones the skill uses;
-a chat's question also has WebSearch and WebFetch; resumed, compacted and rewound runs keep theirs."""
+a chat's question also has WebSearch and WebFetch; resumed, compacted and rewound runs keep theirs. PowerShell is
+there on Windows only."""
 import pytest
 
 from plugin_harness import NODE, run_scenarios
@@ -26,6 +27,13 @@ SCENARIOS = r"""
                     tail: rewound.slice(rewound.indexOf('--resume')) };
   facts.annotCompact = tools(await h.runner.args({ kind: 'annotate', compact: true, resume: 'S1' }));
   h.runner.stop();
+  // macOS and Linux: no PowerShell, Bash still there
+  for (const os of ['Darwin', 'Linux']) {
+    const o = harness({ os });
+    o.runner.start('x');
+    facts[os] = { annotate: tools(await o.runner.args({ kind: 'annotate' })), chat: tools(await o.runner.args({ kind: 'chat' })) };
+    o.runner.stop();
+  }
   process.stdout.write(JSON.stringify(facts));
 })().catch(e => { process.stderr.write(String(e.stack || e)); process.exit(1); });
 """
@@ -52,3 +60,10 @@ def test_a_chat_also_gets_the_web_tools(facts):
     r = facts["rewound"]
     assert r["tools"] == WEB and r["at"] == "u1" and r["fork"] is True
     assert r["tail"] == ["--resume", "S1", "--resume-session-at", "u1", "--fork-session"]
+
+
+@pytest.mark.parametrize("os_name", ["Darwin", "Linux"])
+def test_powershell_only_on_windows(facts, os_name):
+    unix = BASE.replace(",PowerShell", "")
+    assert facts[os_name] == {"annotate": unix, "chat": unix + ",WebSearch,WebFetch"}
+    assert "PowerShell" in facts["runs"][0]["tools"], "Windows keeps it"

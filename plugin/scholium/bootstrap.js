@@ -1799,8 +1799,9 @@ var ScholiumRunner = {
     if (skill && (await this.exists(skill))) args.push("--add-dir", skill);
     const outRoot = PathUtils.join(Zotero.DataDirectory.dir, "tmp", "scholium").replace(/\\/g, "/");
     args.push("--allowedTools", "Skill", "Read", `Write(${outRoot}/**)`, `Edit(${outRoot}/**)`);
-    // only the tools a run uses are in its context; a chat's message may also look something up on the web
-    const tools = ["Skill", "Bash", "PowerShell", "Read", "Write", "Edit", "Grep", "Glob"];
+    // only the tools a run uses are in its context (PowerShell only on Windows, where Claude Code has it); a chat's
+    // message may also look something up on the web
+    const tools = ["Skill", "Bash"].concat(Services.appinfo.OS === "WINNT" ? ["PowerShell"] : [], ["Read", "Write", "Edit", "Grep", "Glob"]);
     if (!job || job.kind !== "annotate") tools.push("WebSearch", "WebFetch");
     args.push("--tools", tools.join(","));
     // the user's MCP servers and hooks stay out of the run; their skills stay
