@@ -444,6 +444,8 @@ are at the root of the archive, and the skill under `content/skill/zotero-scholi
 agent has none. `prefs.js` holds the defaults of the settings page's preferences,
 `settings.xhtml` and `settings.js` the page.
 `content/` holds the section's icons and its stylesheet `scholium.css`, which uses Zotero's theme variables.
+`content/i18n/` holds the section's texts in each language but English and Simplified Chinese (those are in
+`bootstrap.js`), one file per folder of `locale/`, which holds the settings page's Fluent files.
 
 ## Notes for plugin authors
 
