@@ -144,9 +144,10 @@ def test_zotero_locale_chooses_the_language(facts):
 
 
 def test_each_language_is_a_locale_folder_and_has_a_table():
-    # every language but English and Simplified Chinese (baseTexts) has a table; pt-PT takes pt-BR's
-    assert set(LOCALES) - {"pt-PT"} <= set(CHOICES.values())
+    # every language but English and Simplified Chinese (baseTexts) has a table; pt-PT has pt-BR's settings page
+    assert set(LOCALES) == set(CHOICES.values()) | {"pt-PT"}
     assert set(LANGS) == set(LOCALES) - {"en-US", "zh-CN", "pt-PT"}
+    assert (PLUGIN / "locale/pt-PT/scholium.ftl").read_bytes() == (PLUGIN / "locale/pt-BR/scholium.ftl").read_bytes()
 
 
 def test_the_english_and_chinese_texts_render(facts):
