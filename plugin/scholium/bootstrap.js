@@ -10,6 +10,7 @@
  *   GET  /scholium/ping   -> { ok, version, dataDir }                       (no token)
  *   POST /scholium/list   -> annotations and notes of one attachment, the plugin's version (token)
  *   POST /scholium/apply  -> clean up + create annotations / child note, the new keys (token)
+ * list and apply take the attachment in My Library, or in the library a request names by groupID or libraryID.
  * The same endpoints answer at /scholium-bridge/ping, /list and /apply, which the skill of Scholium Bridge 0.1.9 calls.
  * No code is evaluated: requests carry plain data (highlight, text, and note annotations).
  * The token is stored in <Zotero data directory>/scholium.token (created on first start), and in
@@ -79,21 +80,46 @@ var ScholiumEndpoints = {
     };
   },
 
-  async list(data) {
-    const libraryID = Zotero.Libraries.userLibraryID;
+  // the library a request names: a group by its id (groupID), or a library by its id (libraryID); My Library without either
+  library(data) {
+    if (data.groupID !== undefined && data.groupID !== null && data.groupID !== "") {
+      const id = Zotero.Groups.getLibraryIDFromGroupID(Number(data.groupID));
+      if (!id) throw new Error(`group ${data.groupID} not found in this Zotero; check group_id in the configuration`);
+      return id;
+    }
+    if (data.libraryID !== undefined && data.libraryID !== null && data.libraryID !== "") {
+      const id = Number(data.libraryID);
+      if (!Zotero.Libraries.get(id)) throw new Error(`library ${data.libraryID} not found in this Zotero; check library_id in the configuration`);
+      return id;
+    }
+    return Zotero.Libraries.userLibraryID;
+  },
+
+  // the PDF attachment a request names, in its library
+  attachment(data, libraryID) {
     const att = Zotero.Items.getByLibraryAndKey(libraryID, data.attachmentKey);
-    if (!att) throw new Error("attachment not found: " + data.attachmentKey);
+    if (!att) throw new Error("attachment not found: " + data.attachmentKey
+                              + (libraryID === Zotero.Libraries.userLibraryID ? " in My Library" : " in library " + libraryID));
+    return att;
+  },
+
+  async list(data) {
+    const libraryID = this.library(data);
+    const att = this.attachment(data, libraryID);
     const anns = att.getAnnotations(true).map(a => this.summarize(a));
     const notes = [];
     const parent = att.parentID ? Zotero.Items.get(att.parentID) : null;
     if (parent) for (const n of Zotero.Items.get(parent.getNotes())) notes.push({ key: n.key, title: n.getNoteTitle(), tags: n.getTags().map(t => t.tag) });
-    return { ok: true, version: this.version, attachmentKey: att.key, parentKey: parent ? parent.key : null, annotations: anns, notes };
+    return { ok: true, version: this.version, libraryID, attachmentKey: att.key, parentKey: parent ? parent.key : null, annotations: anns, notes };
   },
 
   async apply(data) {
-    const libraryID = Zotero.Libraries.userLibraryID;
-    const att = Zotero.Items.getByLibraryAndKey(libraryID, data.attachmentKey);
-    if (!att) throw new Error("attachment not found: " + data.attachmentKey);
+    const libraryID = this.library(data);
+    const att = this.attachment(data, libraryID);
+    const lib = libraryID === Zotero.Libraries.userLibraryID ? null : Zotero.Libraries.get(libraryID);
+    if (lib && (lib.editable === false || lib.filesEditable === false)) {
+      throw new Error("You cannot edit this group's library, so annotations cannot be written.");
+    }
     const parent = att.parentID ? Zotero.Items.get(att.parentID) : null;
     if (data.itemKey && data.itemKey !== att.key && !(parent && parent.key === data.itemKey)) {
       throw new Error(`item ${data.itemKey} is not the parent of attachment ${data.attachmentKey}; set item_key to the attachment's parent key from status`);
@@ -489,7 +515,8 @@ var ScholiumToggle = {
  * close by themselves while Zotero is in front; while it is in the background a system notification
  * reports the end; neither shows while the paper's Scholium section is on screen in the focused window.
  * An update of the plugin hands the papers still to do over to the new copy, and the running paper
- * continues its conversation there. Only papers in My Library are annotated. Every event but the
+ * continues its conversation there. Papers of group libraries are annotated when the user can edit the group's library,
+ * after the user agreed once for each group; their runs and files are kept apart (keyOf). Every event but the
  * pieces of a message being written and the user's message as Codex repeats it, and the plugin's own lines (the start
  * of each run, the user's words or Annotate, an edit's rewind marker, a continuation, a session the agent no longer has, the end of a run
  * without a result of its own, when a run ended), is logged to the conversation's log,
@@ -589,13 +616,17 @@ var ScholiumRunner = {
     // uv's installer for this system, as uv's documentation gives it
     const uvInstall = os === "WINNT" ? 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"'
       : "curl -LsSf https://astral.sh/uv/install.sh | sh";
+    // the sentence a redo's or a deletion's question has for a paper in a group library
+    const groupShared = zh ? "这是群组文库：群组的所有成员都受影响。" : "This is a group library: it applies to every member.";
     const t = {
       headline: zh ? "Scholium 批注" : "Scholium annotation",
       noPdf: zh ? "这篇论文没有 PDF 附件：在 Zotero 里添加论文的 PDF 后再试。" : "This paper has no PDF attachment: add the paper's PDF in Zotero, then try again.",
       noFile: zh ? "这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）：在 Zotero 里打开它以下载，或重新链接文件后再试。"
                  : "The paper's PDF file is not on this computer (not downloaded yet, or moved): open it in Zotero to download it, or relink the file, then try again.",
-      myLibraryOnly: zh ? "Scholium 只能批注“我的文库”里的论文：把它复制到“我的文库”后再批注。"
-                        : "Scholium annotates papers in My Library only: copy the paper there to annotate it.",
+      groupReadOnly: zh ? "你在这个群组里没有编辑权限，无法写入批注。" : "You cannot edit this group's library, so annotations cannot be written.",
+      groupFirstTitle: zh ? "群组文库" : "Group library",
+      groupFirst: zh ? "批注会写进群组文库，群组的所有成员都能看到。继续吗？"
+                     : "The annotations go into the group's library, where every member sees them. Continue?",
       noClaude: zh ? "找不到 Claude Code（claude.exe）。请在 Zotero 设置 → Scholium 里指定 Claude Code 程序。"
                    : "Claude Code (claude) was not found. Set its program in Zotero Settings → Scholium.",
       noCodex: zh ? "找不到 Codex（codex.exe）。请在 Zotero 设置 → Scholium 里指定 Codex 程序。"
@@ -662,10 +693,12 @@ var ScholiumRunner = {
       checkPymupdf: v => zh ? `已安装 ${v}` : `Installed: ${v}`,
       checkPymupdfMissing: zh ? "未安装：在终端运行 pip install -U pymupdf。" : "Not installed: run pip install -U pymupdf in a terminal.",
       redoTitle: zh ? "重新批注" : "Annotate again",
-      redo: (n, notes) => zh
-        ? `这篇论文已有 ${n} 条 Scholium 批注。重新批注会先删除它们${notes ? `，并把 ${notes} 篇阅读笔记移到回收站` : ""}，你自己的批注和笔记不受影响。继续吗？`
+      redo: (n, notes, group = false) => zh
+        ? `这篇论文已有 ${n} 条 Scholium 批注。重新批注会先删除它们${notes ? `，并把 ${notes} 篇阅读笔记移到回收站` : ""}，你自己的批注和笔记不受影响。`
+          + (group ? groupShared : "") + "继续吗？"
         : `This paper already carries ${plural(n, "Scholium annotation", "Scholium annotations")}. Annotating again first deletes ${n === 1 ? "it" : "them"}`
-          + (notes ? ` and moves ${plural(notes, "reading note", "reading notes")} to the trash` : "") + "; your own annotations and notes are not affected. Continue?",
+          + (notes ? ` and moves ${plural(notes, "reading note", "reading notes")} to the trash` : "") + "; your own annotations and notes are not affected. "
+          + (group ? groupShared + " " : "") + "Continue?",
       typical: zh ? "已在后台开始，通常需要 10–20 分钟。过程和进度见条目侧栏的 Scholium 区块。"
                   : "Started in the background; this usually takes 10–20 minutes. The Scholium section of the item pane shows the process and the progress.",
       paneAgent: zh ? "智能体" : "Agent",
@@ -704,18 +737,17 @@ var ScholiumRunner = {
       profileNotSaved: zh ? "未保存：文件已被别处改动" : "Not saved: the file was changed elsewhere",
       profileReadFailed: msg => zh ? `读不到个人配置文件：${msg}` : `The profile could not be read: ${msg}`,
       profileFailed: msg => zh ? `保存失败：${msg}` : `The profile could not be saved: ${msg}`,
-      noHistory: zh ? "这篇还没有运行记录。" : "This paper has not been run yet.",
       queuedThis: n => zh ? `排队中，前面还有 ${n} 篇` : `Queued, ${n} ahead`,
       deleteTitle: zh ? "删除 Scholium 批注和笔记" : "Delete Scholium annotations and notes",
-      deleteConfirm: (n, notes) => zh
+      deleteConfirm: (n, notes, group = false) => zh
         ? `将删除带 zotero-scholium 标签的${[n ? `这个 PDF 上的 ${n} 条批注` : "", notes ? `这篇论文的 ${notes} 篇阅读笔记` : ""].filter(Boolean).join("和")}。`
           + [n ? "批注永久删除，不能撤销" : "", notes ? "笔记移到回收站，可以恢复" : ""].filter(Boolean).join("；")
-          + "。你自己的批注和笔记都保留。删除会同步。继续吗？"
+          + "。你自己的批注和笔记都保留。删除会同步。" + (group ? groupShared : "") + "继续吗？"
         : `This deletes ${[n ? plural(n, "annotation", "annotations") + " on this PDF" : "", notes ? plural(notes, "reading note", "reading notes") + " of the paper" : ""]
             .filter(Boolean).join(" and ")}, tagged zotero-scholium. `
           + [n ? "The annotations are deleted for good" : "", notes ? (n ? "the" : "The") + (notes === 1 ? " note goes to the trash, where it can be restored" : " notes go to the trash, where they can be restored") : ""]
             .filter(Boolean).join("; ")
-          + ". Your own annotations and notes are kept. The deletion syncs. Continue?",
+          + ". Your own annotations and notes are kept. The deletion syncs. " + (group ? groupShared + " " : "") + "Continue?",
       deleteSkipped: zh ? "正在批注或排队的 PDF 不会删除。" : "A PDF being annotated or queued is skipped.",
       deleteNone: zh ? "这个 PDF 没有 Scholium 批注，这篇论文也没有 Scholium 阅读笔记。"
                      : "This PDF carries no Scholium annotations, and the paper no Scholium reading notes.",
@@ -803,9 +835,10 @@ var ScholiumRunner = {
                          : "Highlights key sentences (translated when the paper is in another language), adds margin notes and a reading note.",
       annotExtraHint: zh ? "附加要求（可不填），例如：只批注第 3–5 页" : "Extra instructions (optional), e.g. only pages 3–5",
       annotFollowUpHint: zh ? "接着这次批注修改，例如：第 5 页那条译文改短" : "Continue this annotation, e.g. shorten the translation on page 5",
-      redoInline: (n, notes) => zh ? `重新批注会先删除这篇的 ${n} 条 Scholium 批注${notes ? `，${notes} 篇阅读笔记移到回收站` : ""}（你自己的不动）。`
+      redoInline: (n, notes, group = false) => zh ? `重新批注会先删除这篇的 ${n} 条 Scholium 批注${notes ? `，${notes} 篇阅读笔记移到回收站` : ""}（你自己的不动）。`
+          + (group ? groupShared : "")
         : `Annotating again first deletes this paper's ${plural(n, "Scholium annotation", "Scholium annotations")}`
-          + (notes ? ` and moves ${plural(notes, "reading note", "reading notes")} to the trash` : "") + " (yours stay).",
+          + (notes ? ` and moves ${plural(notes, "reading note", "reading notes")} to the trash` : "") + " (yours stay)." + (group ? " " + groupShared : ""),
       replace: zh ? "替换" : "Replace",
       cancelButton: zh ? "取消" : "Cancel",
       details: zh ? "详情" : "Details",
@@ -934,7 +967,7 @@ var ScholiumRunner = {
   steerable(pane, job = null) {
     const run = this.job;
     if (!run || !pane.keys.includes(run.key) || (run.source.kind || "chat") !== pane.tab || run.source.compact) return false;
-    if (job && (job.att.key !== run.key || (job.kind || "chat") !== (run.source.kind || "chat"))) return false;
+    if (job && (this.keyOf(job.att) !== run.key || (job.kind || "chat") !== (run.source.kind || "chat"))) return false;
     // a turn being stopped takes no more words
     return this.canSteer(run.agent) && !!this.current && !this.current.cancelled && typeof this.current.steer === "function";
   },
@@ -1456,6 +1489,34 @@ var ScholiumRunner = {
     return { att, path, parentKey: parent ? parent.key : "", title: (parent || att).getDisplayTitle() };
   },
 
+  // the key a PDF's runs and files are kept under: its own in My Library; in another library, where the same key may
+  // stand for another item, with that library's group id (ABCD2345_g123), or its library id when it is no group
+  keyOf(att) {
+    if (!att) return null;
+    if (!att.libraryID || att.libraryID === Zotero.Libraries.userLibraryID) return att.key;
+    const group = this.groupOf(att.libraryID);
+    return `${att.key}_${group ? "g" + group : "l" + att.libraryID}`;
+  },
+
+  // the PDF of a library a key of keyOf names
+  attOf(libraryID, key) { return key ? Zotero.Items.getByLibraryAndKey(libraryID, String(key).replace(/_[gl]\d+$/, "")) : null; },
+
+  // the group id of a group's library; null for My Library and other libraries
+  groupOf(libraryID) {
+    if (!libraryID || libraryID === Zotero.Libraries.userLibraryID) return null;
+    try { return Zotero.Groups.getGroupIDFromLibraryID(libraryID) || null; } catch (e) { return null; }
+  },
+
+  // whether annotations can be written to the PDF's library: a group whose library or files the user cannot edit
+  // cannot take them
+  writable(att) {
+    if (!att || !att.libraryID || att.libraryID === Zotero.Libraries.userLibraryID) return true;
+    try {
+      const lib = Zotero.Libraries.get(att.libraryID);
+      return !lib || (lib.editable !== false && lib.filesEditable !== false);
+    } catch (e) { return true; }
+  },
+
   // the message, after the conversation so far for a new session that is not given it otherwise, or after the turns a
   // session that goes on has not seen
   prompt(job, own, history = true) {
@@ -1480,7 +1541,7 @@ var ScholiumRunner = {
                    + "edit it and set cleanup: true, so that the whole set replaces them (and note_replace: true when the reading note changes); "
                    + "do not write a separate configuration with just new entries."];
     }
-    const paper = this.paperPath(job.att.key);
+    const paper = this.paperPath(this.keyOf(job.att));
     return [zh ? `这篇论文已有 ${own} 条本工具的批注；问到它们的内容时，用 --config ${paper} --list --full 列出。`
                  + "要改批注或补几条时，编辑输出目录里写入它们的那份配置（它是这篇论文的全部批注），设 cleanup: true 整份重写"
                  + "（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置。"
@@ -1516,18 +1577,27 @@ var ScholiumRunner = {
   // paper's metadata; the agent's configuration is a file of its own
   paperRule(key) {
     const paper = this.paperPath(key), own = PathUtils.join(this.outDir(key), "config.json");
+    // paper.json of another library than My Library also names it (library_id, and group_id for a group)
+    const n = /_g\d+$/.test(key) ? 6 : /_l\d+$/.test(key) ? 5 : 4;
     return this.zh() ? `${paper} 是插件的文件，只读，不要修改：只有 extract（代替 --pdf）和 --list 用 --config ${paper}。`
-                       + `你的配置另写一个文件，放在输出目录里（如 ${own}），从 ${paper} 的四个键写起，试运行和 --apply 都用它。`
+                       + `你的配置另写一个文件，放在输出目录里（如 ${own}），从 ${paper} 的${"四五六"[n - 4]}个键写起，试运行和 --apply 都用它。`
                        + "不要把 PDF 路径、论文标题或其他题录写进命令行。"
                      : `${paper} is the plugin's and read-only; do not edit it. Only extract (in place of --pdf) and --list take --config ${paper}. `
-                       + `Write your configuration to a file of your own in the output directory (e.g. ${own}), starting from the four keys of ${paper}, `
+                       + `Write your configuration to a file of your own in the output directory (e.g. ${own}), starting from the ${["four", "five", "six"][n - 4]} keys of ${paper}, `
                        + "and give that one to the dry run and to --apply. Never put the PDF's path, the paper's title or other metadata on a command line.";
+  },
+
+  // the prompt's line of a paper in a group library: the group, which status and samples are given
+  groupLines(job) {
+    const group = this.groupOf(job.att.libraryID);
+    if (!group) return [];
+    return [this.zh() ? `- 群组文库：${group}（status 和 samples 加 --group ${group}）` : `- Group library: ${group} (give status and samples --group ${group})`];
   },
 
   // the message itself: a follow-up in the agent's own session, a question (or a follow-up in a session the agent
   // starts), or the annotation task
   taskPrompt(job, own) {
-    const outDir = this.outDir(job.att.key);
+    const outDir = this.outDir(this.keyOf(job.att));
     // an annotation that continues a question's conversation gets the whole task
     if (job.resume && !job.annotate) return this.followUpPrompt(job);
     if (job.say) return this.questionPrompt(job, own);
@@ -1537,12 +1607,13 @@ var ScholiumRunner = {
         "",
         `- 条目 key：${job.parentKey}`,
         `- 附件 key：${job.att.key}`,
-        `- 论文：${this.paperPath(job.att.key)}（PDF 的路径、两个 key 和输出目录）`,
+        ...this.groupLines(job),
+        `- 论文：${this.paperPath(this.keyOf(job.att))}（PDF 的路径、两个 key 和输出目录）`,
         `- 输出目录：${outDir}`,
         job.profile ? `- 画像：${job.profile}` : "- 画像：没有；按默认值标注，不要生成或修改画像",
         "",
         "这是从 Zotero 里一键启动的无人值守任务：不要向用户提问，不要启动子代理，由你独立完成第 1–3 步并写入 Zotero。",
-        this.paperRule(job.att.key),
+        this.paperRule(this.keyOf(job.att)),
         own ? `这篇论文已有 ${own} 条本工具的注释，用户已确认整篇重做（配置里设 cleanup: true）。` : "这篇论文目前没有本工具的注释。",
         ...(job.extra ? ["", "用户的附加要求：", job.extra] : []),
         "",
@@ -1554,12 +1625,13 @@ var ScholiumRunner = {
       "",
       `- Item key: ${job.parentKey}`,
       `- Attachment key: ${job.att.key}`,
-      `- Paper: ${this.paperPath(job.att.key)} (the PDF's path, the two keys and the output directory)`,
+      ...this.groupLines(job),
+      `- Paper: ${this.paperPath(this.keyOf(job.att))} (the PDF's path, the two keys and the output directory)`,
       `- Output directory: ${outDir}`,
       job.profile ? `- Profile: ${job.profile}` : "- Profile: none; annotate with the defaults and do not create or change a profile",
       "",
       "This is an unattended task started from Zotero with one click: do not ask the user anything and do not start sub-agents; complete steps 1-3 yourself and write to Zotero.",
-      this.paperRule(job.att.key),
+      this.paperRule(this.keyOf(job.att)),
       own ? `The paper already carries ${own} annotations of this tool; the user confirmed a complete redo (cleanup: true in the configuration).` : "The paper carries no annotations of this tool yet.",
       ...(job.extra ? ["", "The user's extra instructions:", job.extra] : []),
       "",
@@ -1570,20 +1642,21 @@ var ScholiumRunner = {
   // the user's words to a new session: the first message of a conversation, which answers without annotating, or the
   // next one of a conversation whose session is gone
   questionPrompt(job, own) {
-    const outDir = this.outDir(job.att.key);
-    const paper = this.paperPath(job.att.key);
+    const outDir = this.outDir(this.keyOf(job.att));
+    const paper = this.paperPath(this.keyOf(job.att));
     const later = !!(job.history && job.history.length);   // a message of a conversation that a new session goes on with
     return (this.zh() ? [
       "使用 zotero-scholium 技能读下面这篇论文（status 给出题录，extract 给出正文），回答用户在 Zotero 里提的问题。",
       "",
       `- 条目 key：${job.parentKey}`,
       `- 附件 key：${job.att.key}`,
+      ...this.groupLines(job),
       `- 论文：${paper}（PDF 的路径、两个 key 和输出目录）`,
       `- 输出目录：${outDir}`,
       job.profile ? `- 画像：${job.profile}` : "- 画像：没有；不要生成或修改画像",
       "",
       "这是从 Zotero 里发来的无人值守任务：不要向用户提问，不要启动子代理。只回答，不写批注和笔记；用户在问题里明确要求时，才按技能的流程写入 Zotero。",
-      this.paperRule(job.att.key),
+      this.paperRule(this.keyOf(job.att)),
       ...this.annotationLines(job, own),
       `引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt（已有就直接读 sentences.txt）。`,
       "",
@@ -1596,13 +1669,14 @@ var ScholiumRunner = {
       "",
       `- Item key: ${job.parentKey}`,
       `- Attachment key: ${job.att.key}`,
+      ...this.groupLines(job),
       `- Paper: ${paper} (the PDF's path, the two keys and the output directory)`,
       `- Output directory: ${outDir}`,
       job.profile ? `- Profile: ${job.profile}` : "- Profile: none; do not create or change a profile",
       "",
       "This is an unattended task sent from Zotero: do not ask the user anything and do not start sub-agents. Only answer; write no annotations "
         + "and no note unless the question asks for them, and then write to Zotero as the skill describes.",
-      this.paperRule(job.att.key),
+      this.paperRule(this.keyOf(job.att)),
       ...this.annotationLines(job, own),
       `When you quote a sentence of the paper, put its sentence number after it as [#123] (several: [#12][#15]); the numbers come from extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt (read sentences.txt when it is there).`,
       "",
@@ -2088,8 +2162,8 @@ var ScholiumRunner = {
   paneKeys(item) {
     try {
       if (!item) return [];
-      if (item.isRegularItem && item.isRegularItem()) return this.pdfAttachments([item]).map(a => a.key);
-      if (item.isAttachment && item.isAttachment() && item.attachmentContentType === "application/pdf") return [item.key];
+      if (item.isRegularItem && item.isRegularItem()) return this.pdfAttachments([item]).map(a => this.keyOf(a));
+      if (item.isAttachment && item.isAttachment() && item.attachmentContentType === "application/pdf") return [this.keyOf(item)];
     } catch (e) {}
     return [];
   },
@@ -2116,7 +2190,7 @@ var ScholiumRunner = {
     const a = this.readerSelection(reader);
     if (!a) return;
     const att = reader && Zotero.Items.get(reader.itemID);
-    if (!att || att.attachmentContentType !== "application/pdf" || att.libraryID !== Zotero.Libraries.userLibraryID) return;
+    if (!att || att.attachmentContentType !== "application/pdf") return;
     // a reader window of its own (reader.xhtml) has no item pane to ask in
     try { if (/\/reader\.xhtml(?:[?#]|$)/.test(String(reader._window && reader._window.location && reader._window.location.href))) return; } catch (e) {}
     append({ label: this.text("askScholium"), onCommand: () => { this.askAboutSelection(reader, a).catch(e => this.log("ask failed: " + e)); } });
@@ -2161,8 +2235,8 @@ var ScholiumRunner = {
       }
     } catch (e) {}
     const quote = this.quoteOf({ text: String(a.text).replace(/\s+/g, " ").trim(), page: this.pageOf(a), label: a.pageLabel });
-    const pane = this.paneFor(reader._window, att.key, reader.tabID || null);
-    if (!pane) { this.pendingQuotes.set(att.key, { quote, at: Date.now() }); await this.revealSection(reader._window, null, reader.tabID || null); return; }
+    const pane = this.paneFor(reader._window, this.keyOf(att), reader.tabID || null);
+    if (!pane) { this.pendingQuotes.set(this.keyOf(att), { quote, at: Date.now() }); await this.revealSection(reader._window, null, reader.tabID || null); return; }
     pane.quote = quote;
     this.setTab(pane, "chat");
     // the section is opened at once and the box takes the focus before its scrolling settles
@@ -2191,7 +2265,7 @@ var ScholiumRunner = {
       const details = pane.body.closest("item-details");
       const reader = details && details.tabID && Zotero.Reader.getByTabID(details.tabID);
       const att = reader && Zotero.Items.get(reader.itemID);
-      return att ? att.key : null;
+      return att ? this.keyOf(att) : null;
     } catch (e) { return null; }
   },
 
@@ -2373,7 +2447,7 @@ var ScholiumRunner = {
   // the run of the tab shown stops; a paper of it that only waits there leaves the queue, the other tab's wait stays. The
   // tab's queued messages stay, held until Resume, as Codex holds its queue after an interruption
   stopFromPane(pane) {
-    const mine = j => pane.keys.includes(j.att.key) && (j.kind || "chat") === pane.tab;
+    const mine = j => pane.keys.includes(this.keyOf(j.att)) && (j.kind || "chat") === pane.tab;
     for (const j of this.queue) if (j.qid && mine(j)) this.heldQueues.add(this.queueKey(j));
     if (this.job && mine(this.job.source)) this.cancel();
     else this.dequeue(pane.keys, pane.tab, { rows: false });
@@ -2520,7 +2594,7 @@ var ScholiumRunner = {
                     item(this.text("logButton"), () => { this.revealLog(pane.annot.shownPath); }, !pane.annot.shownPath),
                     // the PDF the section shows, as its conversations
                     item(this.text("deleteThis"), () => {
-                      const att = pane.item && Zotero.Items.getByLibraryAndKey(pane.item.libraryID, pane.annot.shownKey || pane.keys[0]);
+                      const att = pane.item && this.attOf(pane.item.libraryID, pane.annot.shownKey || pane.keys[0]);
                       this.removeAnnotations(att ? [att] : []).catch(e => this.log("delete failed: " + e));
                     }, pane.keys.some(k => this.busy(k))),
                     sep, item(this.text("settingsOpen"), () => { this.openSettings(); }));
@@ -2815,7 +2889,7 @@ var ScholiumRunner = {
   // whether a section's paper has a run of this kind going on or waiting; a held queued message does not wait for a run
   busyKind(pane, kind) {
     return !!(this.job && pane.keys.includes(this.job.key) && (this.job.source.kind || "chat") === kind)
-      || this.queue.some(j => pane.keys.includes(j.att.key) && (j.kind || "chat") === kind && !this.isHeld(j));
+      || this.queue.some(j => pane.keys.includes(this.keyOf(j.att)) && (j.kind || "chat") === kind && !this.isHeld(j));
   },
 
   // each tab keeps the words typed to it
@@ -2913,7 +2987,7 @@ var ScholiumRunner = {
     pane.state = div("scholium-state");          // one line of small text at the right
     // Continue now: the runs of the agent whose limit the tab's next run waits for
     pane.resume = this.paneButton(doc, this.text("resumeNow"), () => {
-      const next = this.queue.find(j => pane.keys.includes(j.att.key) && (j.kind || "chat") === pane.tab && !this.isHeld(j));
+      const next = this.queue.find(j => pane.keys.includes(this.keyOf(j.att)) && (j.kind || "chat") === pane.tab && !this.isHeld(j));
       const hold = next && this.heldByLimit(next);
       if (hold) this.resumeQueue(hold.agent);
     }, "quiet small");
@@ -3619,7 +3693,7 @@ var ScholiumRunner = {
   async locate(key, s) {
     if (!s || !s.page) return;
     const pane = [...this.panes.values()].find(p => p.keys.includes(key) && p.item);
-    const att = pane && Zotero.Items.getByLibraryAndKey(pane.item.libraryID, key);
+    const att = pane && this.attOf(pane.item.libraryID, key);
     if (!att) return;
     const pageIndex = s.page - 1;
     try { await Zotero.Reader.open(att.id, s.rects ? { position: { pageIndex, rects: s.rects } } : { pageIndex }); }
@@ -3720,7 +3794,7 @@ var ScholiumRunner = {
   // leave the box once they went
   queueFromPane(pane, say, { before = null, typed = true } = {}) {
     const view = this.viewOf(pane, pane.tab);
-    const att = view.shownKey && Zotero.Items.getByLibraryAndKey(pane.item.libraryID, view.shownKey);   // the paper of the tab's conversation
+    const att = view.shownKey && this.attOf(pane.item.libraryID, view.shownKey);   // the paper of the tab's conversation
     const quote = pane.tab === "chat" ? pane.quote : null, tab = pane.tab, key = this.unsentKey(pane);
     if (typed) pane.sending = say;
     return this.send(att || pane.item, say, { kind: pane.tab, conv: view.shownConv, before, quote })
@@ -3744,7 +3818,7 @@ var ScholiumRunner = {
   async compactFromPane(pane, focus = "") {
     if (!this.compactable(pane)) return false;
     const view = this.viewOf(pane, pane.tab);
-    const att = Zotero.Items.getByLibraryAndKey(pane.item.libraryID, view.shownKey);
+    const att = this.attOf(pane.item.libraryID, view.shownKey);
     return !!att && this.send(att, focus, { compact: true, kind: pane.tab, conv: view.shownConv });
   },
 
@@ -3758,14 +3832,14 @@ var ScholiumRunner = {
   // Scholium annotations it first asks in place, and Replace deletes them at once
   annotateFromPane(pane, { extra = String(pane.input.value || "").trim() } = {}) {
     const key = pane.annot.shownKey || pane.keys[0];
-    const att = key && pane.item && Zotero.Items.getByLibraryAndKey(pane.item.libraryID, key);
+    const att = key && pane.item && this.attOf(pane.item.libraryID, key);
     if (!att) return;
     const go = (replace = false) => this.annotate([att], { extra, confirmed: true, replace })
       .then(n => { if (n && String(pane.input.value || "").trim() === extra) this.clearInput(pane); })
       .catch(e => this.log("annotate failed: " + e));
     const own = att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length;
     if (!own) { go(); return; }
-    this.askInPlace(pane, this.text("redoInline", own, this.clearedNotes([att]).length),
+    this.askInPlace(pane, this.text("redoInline", own, this.clearedNotes([att]).length, !!this.groupOf(att.libraryID)),
                     [[this.text("cancelButton"), "quiet small", () => {}], [this.text("replace"), "small danger", () => go(true)]]);
   },
 
@@ -4398,7 +4472,7 @@ var ScholiumRunner = {
       if (own && pane.keys.includes(own)) pane.keys = [own];
       else {
         const job = await this.resolve(pane.item);
-        if (job && this.panes.get(body) === pane) pane.keys = [job.att.key];
+        if (job && this.panes.get(body) === pane) pane.keys = [this.keyOf(job.att)];
       }
     }
     await this.showConversation(pane);
@@ -4437,9 +4511,7 @@ var ScholiumRunner = {
     // the run shown as it went is drawn again as finished; anything else anew, at the latest, so that what follows is followed
     if (kept) this.refreshRun(pane, pane.runCount - 1);
     else if (entries.length) this.renderTranscript(pane, entries, false);
-    else if (pane.item && pane.item.libraryID !== Zotero.Libraries.userLibraryID) {
-      this.renderTranscript(pane, [{ kind: "info", text: this.text("noHistory") }], false);
-    } else this.renderTranscript(pane, [], false);
+    else this.renderTranscript(pane, [], false);
     this.swapUnsent(pane, before);
     this.paintPane(pane);
     if (pane.popover && pane.popover.name === "history") await this.renderHistory(pane);
@@ -4452,7 +4524,7 @@ var ScholiumRunner = {
     const view = pane.annot, seq = view.showing = (view.showing || 0) + 1;
     const key = pane.keys[0] || null;
     const agent = this.agent();
-    const coming = this.queue.some(j => j.att.key === key && j.annotate && !j.conv && !this.started(j));
+    const coming = this.queue.some(j => this.keyOf(j.att) === key && j.annotate && !j.conv && !this.started(j));
     const id = key && !coming ? await this.annotationConv(key, agent) : null;
     const log = id ? await this.readLog(key, id) : null;
     const own = key && pane.item ? this.ownCount(pane.item.libraryID, key) : 0;
@@ -4482,7 +4554,7 @@ var ScholiumRunner = {
   // the Scholium annotations on the PDF with this key, whoever wrote them
   ownCount(libraryID, key) {
     try {
-      const att = key ? Zotero.Items.getByLibraryAndKey(libraryID, key) : null;
+      const att = key ? this.attOf(libraryID, key) : null;
       return att ? att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length : 0;
     } catch (e) { return 0; }
   },
@@ -4882,7 +4954,7 @@ var ScholiumRunner = {
     entry.finishing = true;
     clearTimeout(entry.timer);
     // its queued messages go with it
-    const rows = this.queue.filter(j => j.qid && j.att.key === entry.key && j.conv === entry.id);
+    const rows = this.queue.filter(j => j.qid && this.keyOf(j.att) === entry.key && j.conv === entry.id);
     if (rows.length) this.dropQueued(rows);
     // the Codex threads of the conversation are archived at the next Codex run, once its log is gone
     let threads = new Set();
@@ -5061,7 +5133,7 @@ var ScholiumRunner = {
     // run of words to the session. A queued message that failed has its Retry on its row
     const failedLast = !live && index === (view.runCount || 0) - 1 && !run.answer.length && !!view.pane && (view.kind === "chat" || !!run.turn)
       && !this.busy(view.shownKey)
-      && !this.queue.some(j => j.failed && j.att.key === view.shownKey && (j.kind || "chat") === view.kind && (j.conv || null) === (view.shownConv || null));
+      && !this.queue.some(j => j.failed && this.keyOf(j.att) === view.shownKey && (j.kind || "chat") === view.kind && (j.conv || null) === (view.shownConv || null));
     let retryable = failedLast ? [...run.lead, ...run.other].filter(e => e.kind === "final" && e.error).pop() : null;
     const line = e => {
       const n = this.entryNode(doc, e);
@@ -5130,7 +5202,7 @@ var ScholiumRunner = {
     const lines = run.lead.concat(run.other);
     const counts = lines.find(e => e.kind === "counts");
     const goesOn = run.continued || (index === (view.runCount || 0) - 1
-      && this.queue.some(j => j.att.key === view.shownKey && j.conv === view.shownConv && this.started(j)));
+      && this.queue.some(j => this.keyOf(j.att) === view.shownKey && j.conv === view.shownConv && this.started(j)));
     const failure = live || goesOn ? null : lines.filter(e => e.kind === "final" && e.error).pop();
     const card = counts || failure;
     const lead = card && run.lead.includes(card) ? run.lead.slice(0, run.lead.indexOf(card)) : run.lead;
@@ -5472,7 +5544,7 @@ var ScholiumRunner = {
     try {
       const tab = pane.tab;
       const running = this.job && pane.keys.includes(this.job.key) && (this.job.source.kind || "chat") === tab;
-      const queuedAt = this.queue.findIndex(j => pane.keys.includes(j.att.key) && (j.kind || "chat") === tab && !this.isHeld(j));
+      const queuedAt = this.queue.findIndex(j => pane.keys.includes(this.keyOf(j.att)) && (j.kind || "chat") === tab && !this.isHeld(j));
       // a chat's outcome is its conversation's; the annotation tab's line has a deletion's only (an annotation's is its card)
       const latest = notes => notes.filter(Boolean).sort((a, b) => b.at - a.at)[0] || null;
       const note = tab === "annotate" ? latest(pane.keys.map(k => this.notes.get(`${k}/annotate`)))
@@ -5482,7 +5554,8 @@ var ScholiumRunner = {
       const hold = queuedAt >= 0 ? this.heldByLimit(this.queue[queuedAt]) : null;
       const paused = hold ? this.text(hold.throttled ? "throttledState" : hold.known ? "pausedState" : "pausedRetry", this.clock(hold.until),
                                       this.agentName(hold.agent)) : null;
-      const foreign = !!pane.item && pane.item.libraryID !== Zotero.Libraries.userLibraryID;
+      // a group's paper the user cannot write annotations to: the annotation tab says so and has no Annotate
+      const readOnly = tab === "annotate" && !!pane.item && !this.writable(pane.item);
       const lines = [];
       let kind = "info", title = "";
       if (running) {
@@ -5496,8 +5569,8 @@ var ScholiumRunner = {
         const ahead = this.queue.slice(0, queuedAt).filter(j => !this.isHeld(j) && [null, hold].includes(this.heldByLimit(j))).length;
         if (!(paused && ahead === 0)) lines.push(this.text("queuedThis", ahead + (this.job ? 1 : 0)));
         if (paused) { lines.push(paused); kind = "paused"; }
-      } else if (foreign) {
-        lines.push(this.text("myLibraryOnly"));
+      } else if (readOnly) {
+        lines.push(this.text("groupReadOnly"));
       } else if (note) {
         lines.push(note.text);
         kind = note.error ? "error" : "ok";
@@ -5526,18 +5599,18 @@ var ScholiumRunner = {
       this.show(pane.newChat, tab === "chat");
       this.show(pane.historyButton, tab === "chat");
       // an annotation waits behind the paper's chat; not behind another annotation
-      pane.annotGo.disabled = this.busyKind(pane, "annotate") || foreign;
+      pane.annotGo.disabled = this.busyKind(pane, "annotate") || readOnly;
       this.show(pane.resume, !!hold);
       // the conversations of the tab stay as they are while its run goes or waits; the agent while any run of the paper does
-      pane.agent.disabled = any || foreign;
-      pane.newChat.disabled = busy || foreign || !pane.shownConv;
-      pane.historyButton.disabled = busy || foreign;
-      if (busy || foreign) this.closePopover(pane, "history");
+      pane.agent.disabled = any;
+      pane.newChat.disabled = busy || !pane.shownConv;
+      pane.historyButton.disabled = busy;
+      if (busy) this.closePopover(pane, "history");
       const asking = running ? !!this.job.asking : queuedAt >= 0 && this.asking(this.queue[queuedAt]);
       // a question while the conversation is a question's; a follow-up once it has turns of another kind (an earlier
       // version's annotation), and while such a run goes or waits
       pane.busy = this.busyKind(pane, tab);
-      this.show(pane.composer, !foreign);
+      this.show(pane.composer, !readOnly);
       this.paintSaved(pane);
       // the annotation tab: extra wishes and Annotate until it shows a session; then words to the session, with Annotate
       // again beside the send button; while its run goes or waits, ■
@@ -5628,14 +5701,14 @@ var ScholiumRunner = {
   },
 
   async annotate(items, { extra = "", confirmed = false, replace = false } = {}) {
-    const jobs = [];
-    let found = 0, foreign = false;
+    let jobs = [];
+    let found = 0, readOnly = false;
     for (const item of items || []) {
       try {
         const job = await this.resolve(item);
         if (job) found += 1;
-        if (job && job.att.libraryID !== Zotero.Libraries.userLibraryID) { foreign = true; continue; }
-        if (job && !jobs.some(j => j.att.key === job.att.key) && !this.busy(job.att.key, "annotate")) jobs.push(job);
+        if (job && !this.writable(job.att)) { readOnly = true; continue; }
+        if (job && !jobs.some(j => this.keyOf(j.att) === this.keyOf(job.att)) && !this.busy(this.keyOf(job.att), "annotate")) jobs.push(job);
       } catch (e) { this.log("resolve failed: " + e); }
     }
     const win = Zotero.getMainWindow();
@@ -5643,14 +5716,27 @@ var ScholiumRunner = {
       Services.prompt.alert(win, this.text("headline"), this.text(this.pdfAttachments(items).length ? "noFile" : "noPdf"));
       return 0;
     }
-    if (!jobs.length && foreign) { Services.prompt.alert(win, this.text("headline"), this.text("myLibraryOnly")); return 0; }
+    if (!jobs.length && readOnly) { Services.prompt.alert(win, this.text("headline"), this.text("groupReadOnly")); return 0; }
     if (!jobs.length) { this.refresh(); return 0; }   // every paper is already queued or running
+    // the first annotation in a group's library, once for each group: its members see what is written there
+    const asked = String(this.getPref("groupsAsked") || "").split(",").filter(Boolean);
+    const groups = [...new Set(jobs.map(j => this.groupOf(j.att.libraryID)).filter(g => g && !asked.includes(String(g))))];
+    if (groups.length) {
+      if (!Services.prompt.confirm(win, this.text("groupFirstTitle"), this.text("groupFirst"))) {
+        jobs = jobs.filter(j => !groups.includes(this.groupOf(j.att.libraryID)));
+        if (!jobs.length) return 0;
+      } else {
+        try { Zotero.Prefs.set(this.pref + "groupsAsked", asked.concat(groups.map(String)).join(","), true); }
+        catch (e) { this.log("preference not saved: " + e); }
+      }
+    }
     if (!this.localApiReady()) return 0;
     const own = jobs.map(j => j.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length);
     const total = own.reduce((a, b) => a + b, 0);
     const replaced = jobs.filter((j, i) => own[i] > 0).map(j => j.att);
     if (total && !confirmed) {
-      if (!Services.prompt.confirm(win, this.text("redoTitle"), this.text("redo", total, this.clearedNotes(replaced).length))) return 0;
+      const shared = replaced.some(a => this.groupOf(a.libraryID));
+      if (!Services.prompt.confirm(win, this.text("redoTitle"), this.text("redo", total, this.clearedNotes(replaced).length, shared))) return 0;
       replace = true;
     }
     for (const [i, j] of jobs.entries()) {
@@ -5658,7 +5744,7 @@ var ScholiumRunner = {
       await this.place(j);
     }
     // another annotation may have been queued for a paper meanwhile
-    let ready = jobs.filter(j => !this.busy(j.att.key, "annotate"));
+    let ready = jobs.filter(j => !this.busy(this.keyOf(j.att), "annotate"));
     if (!ready.length) { this.refresh(); return 0; }
     // the user agreed to replace them: the papers' Scholium annotations are deleted now and their Scholium notes moved
     // to the trash, before the runs start
@@ -5666,14 +5752,14 @@ var ScholiumRunner = {
     if (redone.length) {
       try { await this.clearOwn(redone.map(j => j.att)); } catch (e) { this.log("delete failed: " + e); }
       for (const j of redone) j.own = j.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length;
-      ready = ready.filter(j => !this.busy(j.att.key, "annotate"));
+      ready = ready.filter(j => !this.busy(this.keyOf(j.att), "annotate"));
       if (!ready.length) { this.refresh(); return 0; }
     }
     this.enqueue(ready);
     // a paper's tab that shows an earlier session shows the session to come while its annotation waits
     const waiting = ready.filter(j => this.queue.includes(j));
     for (const pane of [...this.panes.values()]) {
-      const shows = j => pane.keys.includes(j.att.key);
+      const shows = j => pane.keys.includes(this.keyOf(j.att));
       if ((pane.annot.shownConv || redone.some(shows)) && waiting.some(shows)) this.showAnnotation(pane).catch(e => this.log("section not shown: " + e));
     }
     return ready.length;
@@ -5687,7 +5773,7 @@ var ScholiumRunner = {
     const mine = log => (log && log.agents[job.agent === "codex" ? "codex" : "claude"]) || null;
     if ((job.retry || job.compact || job.qid) && job.conv) {
       if (job.kind === "annotate") job.agent = this.convAgent(job.conv);   // an annotation session is its agent's own
-      const log = await this.readLog(job.att.key, job.conv), a = mine(log);
+      const log = await this.readLog(this.keyOf(job.att), job.conv), a = mine(log);
       job.resume = (a && a.session) || null;
       job.rewind = job.resume ? (a && a.rewind) || null : null;
       job.question = false;
@@ -5696,8 +5782,8 @@ var ScholiumRunner = {
     }
     // an annotation starts a session of its own when it runs
     if (job.annotate) { Object.assign(job, { conv: null, resume: null, question: false, asking: false }); return; }
-    const conv = job.kind === "annotate" ? await this.annotationConv(job.att.key, job.agent) : await this.currentConv(job.att.key);
-    const log = conv ? await this.readLog(job.att.key, conv) : null, a = mine(log);
+    const conv = job.kind === "annotate" ? await this.annotationConv(this.keyOf(job.att), job.agent) : await this.currentConv(this.keyOf(job.att));
+    const log = conv ? await this.readLog(this.keyOf(job.att), conv) : null, a = mine(log);
     job.conv = conv;
     job.resume = (a && a.session) || null;
     // an edited question goes back to its point; a message after an edit whose run never reached the agent, to that one's
@@ -5714,7 +5800,7 @@ var ScholiumRunner = {
     const log = await this.readLog(key, conv);
     const turn = log && log.turns[log.turns.length - 1];
     if (!turn || view.shownKey !== key || view.shownConv !== conv) return;
-    const att = Zotero.Items.getByLibraryAndKey(pane.item.libraryID, key);
+    const att = this.attOf(pane.item.libraryID, key);
     if (this.busy(key)) return;
     // the chat's turn goes to the agent chosen now; an annotation session's to its own agent
     const agent = view.kind === "chat" ? this.agent() : this.convAgent(conv);
@@ -5883,7 +5969,7 @@ var ScholiumRunner = {
     }
     this.replaced.set(id, r);
     await this.chooseConv(key, conv);
-    const att = Zotero.Items.getByLibraryAndKey(pane.item.libraryID, key);
+    const att = this.attOf(pane.item.libraryID, key);
     let sent = false;
     try { sent = await this.send(att || pane.item, say, { kind: "chat", conv, agent, quote, rewind: this.pointOf(points[agent]), edited: true }); }
     catch (e) { this.log("edit not sent: " + e); }
@@ -5906,7 +5992,7 @@ var ScholiumRunner = {
     if (!r) return;
     clearTimeout(r.timer);
     this.replaced.delete(id);
-    const mine = j => j.att.key === r.key && (j.kind || "chat") === "chat" && (j.conv || null) === r.conv;
+    const mine = j => this.keyOf(j.att) === r.key && (j.kind || "chat") === "chat" && (j.conv || null) === r.conv;
     for (const j of this.queue) if (j.qid && mine(j)) this.heldQueues.add(this.queueKey(j));
     this.queue = this.queue.filter(j => j.qid || !mine(j));
     const running = () => !!this.job && this.job.key === r.key && mine(this.job.source);
@@ -5948,7 +6034,7 @@ var ScholiumRunner = {
   undoTimeUp(id) {
     const r = this.replaced.get(id);
     if (!r) return;
-    if (this.queue.some(j => j.edited && `${j.att.key}/${j.conv}` === id && !this.started(j))) r.timer = setTimeout(() => this.undoTimeUp(id), this.UNDO_MS);
+    if (this.queue.some(j => j.edited && `${this.keyOf(j.att)}/${j.conv}` === id && !this.started(j))) r.timer = setTimeout(() => this.undoTimeUp(id), this.UNDO_MS);
     else this.endReplaced(id);
   },
 
@@ -5995,10 +6081,15 @@ var ScholiumRunner = {
       return false;
     }
     const kind = opts.kind === "annotate" ? "annotate" : "chat";
-    if (job.att.libraryID !== Zotero.Libraries.userLibraryID) return false;
+    // words to the annotation tab write annotations, which a group's library the user cannot edit does not take; a
+    // question there is answered
+    if (kind === "annotate" && !opts.compact && !this.writable(job.att)) {
+      Services.prompt.alert(Zotero.getMainWindow(), this.text("headline"), this.text("groupReadOnly"));
+      return false;
+    }
     if (!opts.compact && !this.localApiReady()) return false;
     // the paper's run of the other tab leaves it free; a compaction, a retry or an edited question is no message to queue
-    const busy = this.busy(job.att.key, kind);
+    const busy = this.busy(this.keyOf(job.att), kind);
     if (busy && (opts.compact || opts.retry || opts.edited)) return false;
     Object.assign(job, { agent: (opts.retry || opts.edited) && opts.agent ? opts.agent : this.agent(), say, own: job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length,
                          kind, retry: !!opts.retry, compact: !!opts.compact, quote: opts.quote || null, rewind: opts.rewind || null,
@@ -6012,7 +6103,7 @@ var ScholiumRunner = {
       return true;
     }
     // words to the annotation tab without a session go with a new annotation, as its extra wishes
-    if (kind === "annotate" && !opts.retry && !opts.compact && !(await this.annotationConv(job.att.key, this.agent()))) {
+    if (kind === "annotate" && !opts.retry && !opts.compact && !(await this.annotationConv(this.keyOf(job.att), this.agent()))) {
       return (await this.annotate([job.att], { extra: say })) > 0;
     }
     if (opts.retry) Object.assign(job, { conv: opts.conv, logged: true });
@@ -6020,7 +6111,7 @@ var ScholiumRunner = {
     if (opts.compact) Object.assign(job, { conv: opts.conv, agent: kind === "annotate" ? this.convAgent(opts.conv) : job.agent });
     await this.place(job);
     if (job.compact && !job.resume) return false;
-    if (this.busy(job.att.key, kind)) return false;
+    if (this.busy(this.keyOf(job.att), kind)) return false;
     // ahead of a held queue it is sent past (Send message), else where a conversation's message goes
     const ahead = opts.before ? this.queue.indexOf(opts.before) : -1;
     this.enqueue([job], ahead >= 0 ? ahead : this.conversationAt());
@@ -6049,7 +6140,7 @@ var ScholiumRunner = {
   // to come, to its tab, drawn again unless what ended the job stays on it
   handBack(job, redraw = true) {
     if (!job.annotate) return this.giveBack(job);
-    const queued = job.conv ? [] : this.queue.filter(j => j.qid && (j.kind || "chat") === "annotate" && !j.conv && j.att.key === job.att.key);
+    const queued = job.conv ? [] : this.queue.filter(j => j.qid && (j.kind || "chat") === "annotate" && !j.conv && this.keyOf(j.att) === this.keyOf(job.att));
     this.queue = this.queue.filter(j => !queued.includes(j));
     this.annotationBack(job, queued, redraw).catch(err => this.log("annotation not given back: " + err));
   },
@@ -6077,7 +6168,7 @@ var ScholiumRunner = {
   // not for a run: it leaves the paper free
   busy(key, kind = null) {
     const of = j => !kind || (j.kind || "chat") === kind;
-    return !!(this.job && this.job.key === key && of(this.job.source)) || this.queue.some(j => j.att.key === key && of(j) && !this.isHeld(j));
+    return !!(this.job && this.job.key === key && of(this.job.source)) || this.queue.some(j => this.keyOf(j.att) === key && of(j) && !this.isHeld(j));
   },
 
   // where a follow-up joins the queue: after what is queued for its conversation, else where a conversation's message goes
@@ -6089,12 +6180,12 @@ var ScholiumRunner = {
 
   // the queue of a conversation (of a tab of a paper): its queued messages go one after another, held together; one
   // queued before its conversation had its log is in the queue of none until the run before it makes one (run)
-  queueKey(job) { return `${job.att.key}/${job.kind || "chat"}/${job.conv || ""}`; },
+  queueKey(job) { return `${this.keyOf(job.att)}/${job.kind || "chat"}/${job.conv || ""}`; },
 
   // whether a job is a message queued to the conversation a tab shows
   shownQueued(pane, job) {
     const view = this.viewOf(pane, pane.tab);
-    return !!job.qid && pane.keys.includes(job.att.key) && (job.kind || "chat") === pane.tab && (job.conv || null) === (view.shownConv || null);
+    return !!job.qid && pane.keys.includes(this.keyOf(job.att)) && (job.kind || "chat") === pane.tab && (job.conv || null) === (view.shownConv || null);
   },
 
   // a queued message that waits: its queue held after a stop, or behind a message of it that could not be sent
@@ -6231,9 +6322,9 @@ var ScholiumRunner = {
   // goes back to its box, an annotation's wishes too, with the messages queued for its session to come (which leave the
   // queue with it); an edited question that had not started is undone
   dequeue(keys, kind = null, { rows = true } = {}) {
-    const ours = j => keys.includes(j.att.key) && (!kind || (j.kind || "chat") === kind) && (rows || !j.qid);
+    const ours = j => keys.includes(this.keyOf(j.att)) && (!kind || (j.kind || "chat") === kind) && (rows || !j.qid);
     const removed = this.queue.filter(ours);
-    const coming = j => removed.some(a => a.annotate && !a.conv && !this.started(a) && a.att.key === j.att.key);
+    const coming = j => removed.some(a => a.annotate && !a.conv && !this.started(a) && this.keyOf(a.att) === this.keyOf(j.att));
     const toCome = this.queue.filter(j => j.qid && (j.kind || "chat") === "annotate" && !j.conv && coming(j));
     this.queue = this.queue.filter(j => !ours(j) && !toCome.includes(j));
     for (const agent of Object.keys(this.paused || {})) {
@@ -6242,9 +6333,9 @@ var ScholiumRunner = {
     this.refresh();
     for (const job of removed) {
       if (this.started(job)) this.endWaiting(job).catch(e => this.log("cancel not logged: " + e));
-      else if (job.edited && job.conv) this.undoReplace(`${job.att.key}/${job.conv}`).catch(e => this.log("edit not undone: " + e));
+      else if (job.edited && job.conv) this.undoReplace(`${this.keyOf(job.att)}/${job.conv}`).catch(e => this.log("edit not undone: " + e));
       else if (job.annotate) {
-        const queued = job.conv ? [] : toCome.filter(j => j.att.key === job.att.key);
+        const queued = job.conv ? [] : toCome.filter(j => this.keyOf(j.att) === this.keyOf(job.att));
         this.annotationBack(job, queued).catch(e => this.log("annotation not given back: " + e));
       } else this.giveBack(job);
     }
@@ -6254,15 +6345,15 @@ var ScholiumRunner = {
   // its session to come and those typed to it meanwhile back in the tab's box, in one piece
   async annotationBack(job, queued = [], redraw = true) {
     const words = [job.extra].concat(queued.map(j => j.say), job.typed || []).filter(Boolean).join("\n\n");
-    if (words) this.giveBack(Object.assign({}, job, { say: words, conv: await this.annotationConv(job.att.key, job.agent) }));
-    if (redraw) for (const pane of [...this.panes.values()]) if (pane.keys.includes(job.att.key)) await this.showAnnotation(pane);
+    if (words) this.giveBack(Object.assign({}, job, { say: words, conv: await this.annotationConv(this.keyOf(job.att), job.agent) }));
+    if (redraw) for (const pane of [...this.panes.values()]) if (pane.keys.includes(this.keyOf(job.att))) await this.showAnnotation(pane);
   },
 
   // an annotation's new session whose log refused its first line: its empty log goes, the agent's session before it is
   // the paper's again, and the messages queued for it wait for a session to come again
   async unmakeConv(key, agent, made) {
     for (const q of this.queue) {
-      if (!q.qid || q.conv !== made.conv || q.att.key !== key) continue;
+      if (!q.qid || q.conv !== made.conv || this.keyOf(q.att) !== key) continue;
       const was = this.queueKey(q);
       q.conv = null;
       if (this.heldQueues.delete(was)) this.heldQueues.add(this.queueKey(q));
@@ -6293,7 +6384,7 @@ var ScholiumRunner = {
 
   // a paper whose run waited ends as cancelled, in its log and its sections
   async endWaiting(job) {
-    const key = job.att.key;
+    const key = this.keyOf(job.att);
     if ((job.kind || "chat") === "chat") this.notes.set(`${key}/chat`, { text: this.text("cancelled"), error: true, at: Date.now(), conv: job.conv || null });
     else this.notes.delete(`${key}/annotate`);
     if (job.conv) {
@@ -6321,7 +6412,7 @@ var ScholiumRunner = {
         const wait = (this.queue[i].retryAt || 0) - Date.now();
         if (wait > 0) { await Zotero.Promise.delay(Math.min(wait, 1000)); continue; }
         const job = this.queue[i];
-        if (this.discarded(job.att)) { this.queue.splice(i, 1); this.log("left out, in the trash: " + job.att.key); continue; }
+        if (this.discarded(job.att)) { this.queue.splice(i, 1); this.log("left out, in the trash: " + this.keyOf(job.att)); continue; }
         // a queued message takes its conversation as it is now; it stays in the queue meanwhile, so that a stop hands it over
         if (job.qid) {
           job.own = job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length;
@@ -6343,12 +6434,12 @@ var ScholiumRunner = {
           const unlogged = !job.logPath;
           if (unlogged) {
             this.handBack(job);
-            if (this.transcriptKey === job.att.key) this.transcriptPath = null;
-            for (const pane of this.panes.values()) if (pane.keys.includes(job.att.key)) { pane.live = false; pane.annot.live = false; }
+            if (this.transcriptKey === this.keyOf(job.att)) this.transcriptPath = null;
+            for (const pane of this.panes.values()) if (pane.keys.includes(this.keyOf(job.att))) { pane.live = false; pane.annot.live = false; }
           } else this.appendEntries(this.entries(await this.logEnd(job.logPath, "failed", message)));
           this.notice(job, `${this.text("failed")} · ${message}`, true);
           this.finish(job, false, message, unlogged && (job.kind || "chat") === "chat" ? `${this.text("failed")} · ${message}` : undefined);
-          if (unlogged) for (const pane of [...this.panes.values()]) if (pane.keys.includes(job.att.key)) await this.showConversation(pane);
+          if (unlogged) for (const pane of [...this.panes.values()]) if (pane.keys.includes(this.keyOf(job.att))) await this.showConversation(pane);
           this.log("run failed: " + e);
           if (!job.logPath) outcome = { ok: false, delivered: false };   // its words reached nothing
         }
@@ -6381,7 +6472,7 @@ var ScholiumRunner = {
   // the usage limit, or a limit of the service: the interrupted paper waits at the head of the queue and continues
   // its conversation when the limit resets; no other run of its agent starts meanwhile, the other agent's go on
   pause(job, { until, session, throttled }) {
-    if (this.job && this.job.key === job.att.key) this.job = null;
+    if (this.job && this.job.key === this.keyOf(job.att)) this.job = null;
     // a question stays one when its conversation continues; an annotation that continued a question's conversation
     // has its prompt there. A run after the wait may have its second try again. A queued message that was sent is no row.
     // An edited question's new session goes on as it is; until there is one, the run goes back to the point again
@@ -6442,7 +6533,7 @@ var ScholiumRunner = {
     const kind = job.kind || "chat";
     for (const j of this.queue) {
       if (j === job) break;
-      if (j.att.key === job.att.key && (j.kind || "chat") === kind && !this.isHeld(j) && this.pauseOf(this.agentOf(j))) return this.pauseOf(this.agentOf(j));
+      if (this.keyOf(j.att) === this.keyOf(job.att) && (j.kind || "chat") === kind && !this.isHeld(j) && this.pauseOf(this.agentOf(j))) return this.pauseOf(this.agentOf(j));
     }
     return null;
   },
@@ -6455,7 +6546,7 @@ var ScholiumRunner = {
   // a short notice in the corner of the window that closes by itself, while Zotero is in front; left out while
   // the paper's Scholium section is on screen, whose state line says the same
   notice(job, text, error = false) {
-    if (!this.focused() || this.paneInView(job.att && job.att.key, job.kind || "chat")) return;
+    if (!this.focused() || this.paneInView(this.keyOf(job.att), job.kind || "chat")) return;
     try {
       const pw = new Zotero.ProgressWindow({ closeOnClick: true });
       pw.changeHeadline(this.text("headline"));
@@ -6474,19 +6565,19 @@ var ScholiumRunner = {
 
   // record the end of one paper: its section keeps the outcome in short, the transcript has the rest
   finish(job, ok, summary, outcome, detail, answered = false) {
-    if (this.job && this.job.key === job.att.key) this.job = null;
+    if (this.job && this.job.key === this.keyOf(job.att)) this.job = null;
     const title = this.text(ok && job.compact ? "compactedTitle" : answered ? "answered" : ok ? "finished" : this.asking(job) ? "failedAsk" : "failedLine", job.title);
     // a chat's outcome is its state line's; an annotation's is its card, and a deletion's note before it goes
     if ((job.kind || "chat") === "chat") {
-      this.notes.set(`${job.att.key}/chat`, { text: outcome || this.text(ok ? "done" : "failed"), error: !ok, at: Date.now(),
+      this.notes.set(`${this.keyOf(job.att)}/chat`, { text: outcome || this.text(ok ? "done" : "failed"), error: !ok, at: Date.now(),
                                               title: detail || "", conv: job.conv || null });
-    } else this.notes.delete(`${job.att.key}/annotate`);
+    } else this.notes.delete(`${this.keyOf(job.att)}/annotate`);
     if (!this.focused() && !job.undone) this.notify(title, ok && !answered ? this.brief(summary) : summary || "");
     this.refresh();
     // the sections of the paper take what its log now says of the conversation; without a log, they draw the run ended
     if (job.logPath) {
       for (const pane of [...this.panes.values()]) {
-        if (pane.keys.includes(job.att.key)) this.showConversation(pane).catch(e => this.log("section not shown: " + e));
+        if (pane.keys.includes(this.keyOf(job.att))) this.showConversation(pane).catch(e => this.log("section not shown: " + e));
       }
     } else this.settleRun();
   },
@@ -6551,7 +6642,7 @@ var ScholiumRunner = {
 
   async run(job) {
     const started = Date.now();
-    const key = job.att.key;
+    const key = this.keyOf(job.att);
     const agent = job.agent === "codex" ? "codex" : "claude";
     this.job = { title: job.title, key, libraryID: job.att.libraryID, started, elapsed: 0, agent, step: job.resume && !job.annotate ? "continuing" : "starting",
                  source: job, session: job.resume || null, log: null, asking: this.asking(job), context: null };
@@ -6626,8 +6717,12 @@ var ScholiumRunner = {
     await IOUtils.makeDirectory(this.outDir(key), { createAncestors: true, ignoreExisting: true });
     if (this.job !== running || running.stopAsked) return this.halted(job, running);   // the plugin stopped, or ■, while the folder was prepared
     const paper = this.paperPath(key);
-    await IOUtils.writeUTF8(paper, JSON.stringify({ pdf: job.path, item_key: job.parentKey, attachment_key: key, out_dir: this.outDir(key) }, null, 1) + "\n",
-                            { tmpPath: paper + ".tmp" });
+    // a paper of another library than My Library names it, for the skill's script
+    const group = this.groupOf(job.att.libraryID);
+    const library = job.att.libraryID && job.att.libraryID !== Zotero.Libraries.userLibraryID
+      ? Object.assign({ library_id: job.att.libraryID }, group ? { group_id: group } : {}) : {};
+    await IOUtils.writeUTF8(paper, JSON.stringify(Object.assign({ pdf: job.path, item_key: job.parentKey, attachment_key: job.att.key, out_dir: this.outDir(key) },
+                                                                library), null, 1) + "\n", { tmpPath: paper + ".tmp" });
     let made = null;   // an annotation's new session, and the agent's session before it
     if (!job.conv) {
       if (job.annotate) made = { before: (await this.index(key)).annotation[agent] || null };
@@ -6635,7 +6730,7 @@ var ScholiumRunner = {
       if (made) made.conv = job.conv;
       // the messages queued meanwhile go on with this conversation, held still when they were
       for (const q of this.queue) {
-        if (!q.qid || q.conv || q.att.key !== key || (q.kind || "chat") !== (job.kind || "chat")) continue;
+        if (!q.qid || q.conv || this.keyOf(q.att) !== key || (q.kind || "chat") !== (job.kind || "chat")) continue;
         const was = this.queueKey(q);
         q.conv = job.conv;
         if (this.heldQueues.delete(was)) this.heldQueues.add(this.queueKey(q));
@@ -7556,9 +7651,9 @@ var ScholiumRunner = {
   // the reading notes an annotation that replaces these PDFs' annotations moves to the trash: not those of a paper whose
   // other PDF is being annotated or waits, as a deletion leaves them
   clearedNotes(atts) {
-    const keys = new Set(atts.map(a => a.key));
-    const busy = new Set(this.queue.filter(j => !this.isHeld(j)).map(j => j.att).concat(this.job ? [Zotero.Items.getByLibraryAndKey(Zotero.Libraries.userLibraryID, this.job.key)] : [])
-      .filter(a => a && !keys.has(a.key) && a.parentID).map(a => a.parentID));
+    const keys = new Set(atts.map(a => this.keyOf(a)));
+    const busy = new Set(this.queue.filter(j => !this.isHeld(j)).map(j => j.att).concat(this.job ? [this.attOf(this.job.libraryID, this.job.key)] : [])
+      .filter(a => a && !keys.has(this.keyOf(a)) && a.parentID).map(a => a.parentID));
     return this.ownNotesOf(atts.filter(a => !busy.has(a.parentID)));
   },
 
@@ -7580,7 +7675,7 @@ var ScholiumRunner = {
   // the paper's Scholium annotations and reading notes as the annotation card counts them
   async countOwn(att) {
     const own = att.getAnnotations().filter(a => ScholiumToggle.isOwn(a));
-    const core = await this.coreColor(att.key);
+    const core = await this.coreColor(this.keyOf(att));
     const marks = own.filter(a => ["highlight", "underline"].includes(a.annotationType));
     let readingNotes = 0;
     try { if (att.parentID) readingNotes = this.ownNotes(Zotero.Items.get(att.parentID)).length; } catch (e) {}
@@ -7612,12 +7707,14 @@ var ScholiumRunner = {
   // queued is left alone, notes included; messages held after a stop do not count. The outcome is the annotation tab's.
   async removeAnnotations(items) {
     const win = Zotero.getMainWindow();
-    const busy = new Set(this.queue.filter(j => !this.isHeld(j)).map(j => j.att.key).concat(this.job ? [this.job.key] : []));
-    const atts = this.pdfAttachments(items);
-    const skipped = atts.filter(a => busy.has(a.key)).length;
-    const busyParents = new Set(atts.filter(a => busy.has(a.key) && a.parentID).map(a => a.parentID));
+    const busy = new Set(this.queue.filter(j => !this.isHeld(j)).map(j => this.keyOf(j.att)).concat(this.job ? [this.job.key] : []));
+    // a group's library the user cannot edit keeps its annotations
+    const all = this.pdfAttachments(items), atts = all.filter(a => this.writable(a));
+    if (all.length && !atts.length) { Services.prompt.alert(win, this.text("deleteTitle"), this.text("groupReadOnly")); return 0; }
+    const skipped = atts.filter(a => busy.has(this.keyOf(a))).length;
+    const busyParents = new Set(atts.filter(a => busy.has(this.keyOf(a)) && a.parentID).map(a => a.parentID));
     const parents = new Set();
-    const targets = atts.filter(a => !busy.has(a.key)).map(att => {
+    const targets = atts.filter(a => !busy.has(this.keyOf(a))).map(att => {
       const own = att.getAnnotations().filter(a => ScholiumToggle.isOwn(a));
       let notes = [];
       if (att.parentID && !parents.has(att.parentID) && !busyParents.has(att.parentID)) {
@@ -7632,15 +7729,16 @@ var ScholiumRunner = {
     const skippedText = skipped ? "\n\n" + this.text("deleteSkipped") : "";
     if (!total && !notes) {
       // the paper's other PDFs, which their own sections delete
-      const shown = new Set(atts.map(a => a.key));
+      const shown = new Set(atts.map(a => this.keyOf(a)));
       const parents = atts.map(a => a.parentID && Zotero.Items.get(a.parentID)).filter(Boolean);
-      const elsewhere = this.pdfAttachments(parents).filter(a => !shown.has(a.key))
+      const elsewhere = this.pdfAttachments(parents).filter(a => !shown.has(this.keyOf(a)))
         .reduce((n, a) => n + a.getAnnotations().filter(x => ScholiumToggle.isOwn(x)).length, 0);
       Services.prompt.alert(win, this.text("deleteTitle"), this.text("deleteNone")
         + (elsewhere ? "\n\n" + this.text("deleteElsewhere", elsewhere) : "") + skippedText);
       return 0;
     }
-    if (!Services.prompt.confirm(win, this.text("deleteTitle"), this.text("deleteConfirm", total, notes) + skippedText)) return 0;
+    const shared = targets.some(t => this.groupOf(t.att.libraryID));
+    if (!Services.prompt.confirm(win, this.text("deleteTitle"), this.text("deleteConfirm", total, notes, shared) + skippedText)) return 0;
     let removed = 0, trashed = 0, current = null;
     try {
       for (const t of targets) {
@@ -7649,7 +7747,7 @@ var ScholiumRunner = {
         removed += t.own.length;
         if (t.notes.length) await Zotero.Items.trashTx(t.notes.map(n => n.id));
         trashed += t.notes.length;
-        this.notes.set(`${t.att.key}/annotate`, { text: this.text("deleteDone", t.own.length, t.notes.length), error: false, at: Date.now() });
+        this.notes.set(`${this.keyOf(t.att)}/annotate`, { text: this.text("deleteDone", t.own.length, t.notes.length), error: false, at: Date.now() });
       }
       this.notice({ att: targets[0].att, title: this.text("deleteTitle"), kind: "annotate" }, this.text("deleteDone", removed, trashed));
     } catch (e) {
@@ -7657,12 +7755,12 @@ var ScholiumRunner = {
         + (removed || trashed ? " " + this.text("deleteDone", removed, trashed) : "");
       this.log("delete failed: " + e);
       const att = (current || targets[0]).att;
-      this.notes.set(`${att.key}/annotate`, { text: message, error: true, at: Date.now() });
+      this.notes.set(`${this.keyOf(att)}/annotate`, { text: message, error: true, at: Date.now() });
       this.notice({ att, title: this.text("deleteTitle"), kind: "annotate" }, message, true);
     }
     this.refresh();
     // the annotation tabs of these PDFs count their Scholium annotations again
-    const keys = targets.map(t => t.att.key);
+    const keys = targets.map(t => this.keyOf(t.att));
     for (const pane of [...this.panes.values()]) {
       if (pane.keys.some(k => keys.includes(k))) this.showAnnotation(pane).catch(e => this.log("section not shown: " + e));
     }
@@ -7745,7 +7843,7 @@ var ScholiumRunner = {
       // a paper's chat and its annotation are handed over each, with the messages queued behind them
       const kind = s && s.kind === "annotate" ? "annotate" : "chat";
       const qid = s && typeof s.qid === "string" && s.qid ? s.qid : null;
-      if (!job || (!qid && (this.busy(job.att.key, kind) || jobs.some(j => !j.qid && j.att.key === job.att.key && j.kind === kind)))) continue;
+      if (!job || (!qid && (this.busy(this.keyOf(job.att), kind) || jobs.some(j => !j.qid && this.keyOf(j.att) === this.keyOf(job.att) && j.kind === kind)))) continue;
       const agent = s.agent === "codex" ? "codex" : "claude";
       Object.assign(job, { agent, extra: String(s.extra || ""), say: String(s.say || ""), resume: s.resume || null, asked: !!s.asked,
                            question: !!s.question, annotate: !!s.annotate, own: Number(s.own) || 0, updated: !!s.updated, fresh: !!s.fresh,
@@ -7762,7 +7860,7 @@ var ScholiumRunner = {
         // a question that goes on is the conversation's already; words whose run had begun are the last turn of its log,
         // asked again there
         if (job.resume) job.question = false;
-        const legacy = job.say ? await this.readLog(job.att.key, this.LEGACY[agent]) : null;
+        const legacy = job.say ? await this.readLog(this.keyOf(job.att), this.LEGACY[agent]) : null;
         const last = legacy && legacy.turns[legacy.turns.length - 1];
         const begun = !!last && !last.done && last.user === job.say;
         if (job.resume || job.interrupted || job.retried || begun) job.conv = this.LEGACY[agent];
@@ -7774,7 +7872,7 @@ var ScholiumRunner = {
         if (begun) job.turnAt = legacy.turns.length - 1;
         // that copy kept neither of these for a follow-up
         job.own = job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length;
-        const log = await this.readLog(job.att.key, job.conv);
+        const log = await this.readLog(this.keyOf(job.att), job.conv);
         if (!job.annotate) job.asking = !!(job.question || (log && log.question));
       }
       jobs.push(job);

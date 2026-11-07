@@ -105,16 +105,32 @@ def test_status_lists_matching_items_and_reports_failures(zotero, capsys, monkey
     out, code = run(capsys, "status", "--query", "paper t")
     assert code == 0 and [m["key"] for m in out["matches"]] == ["I2", "I3"]
     out, code = run(capsys, "status", "NOPE")
-    assert code == 1 and "HTTP 404: the item was not found in My Library; items in group libraries are not supported" in out["error"]
+    assert code == 1 and ("HTTP 404: the item was not found in My Library: check the key with status --query; for an item in a "
+                          "group library, give its group (status and samples --group ID, group_id in the configuration)") in out["error"]
     monkeypatch.setattr(cli, "http", lambda *a, **k: (0, {}, "refused"))
     out, code = run(capsys, "status", "I1")
     assert code == 1 and out["error"] == "Zotero does not answer on 127.0.0.1:23119; start Zotero, then run again"
 
 
-def test_an_attachment_outside_my_library_is_named_as_such(monkeypatch):
+def test_an_attachment_outside_the_library_read_is_named_as_such(monkeypatch):
     monkeypatch.setattr(cli, "http", lambda *a, **k: (404, {}, "Not found"))
-    with pytest.raises(RuntimeError, match="HTTP 404.*not found in My Library; items in group libraries are not supported"):
+    with pytest.raises(RuntimeError, match="HTTP 404.*not found in My Library.*give its group"):
         cli.LocalApi("SID").children("GROUPATT", "annotation")
+    with pytest.raises(RuntimeError, match=r"HTTP 404\): the item was not found in group 777: check the key with status --query --group 777"):
+        cli.LocalApi("SID", cli.library_path(777)).children("ATT", "annotation")
+
+
+def test_status_and_samples_read_a_group_library(zotero, capsys):
+    out, code = run(capsys, "status", "A1", "--group", "777")
+    assert code == 0 and out["item"]["key"] == "I1" and [p["key"] for p in out["pdfs"]] == ["A1", "A2"]
+    out, code = run(capsys, "status", "--query", "paper t", "--group", "777")
+    assert code == 0 and [m["key"] for m in out["matches"]] == ["I2", "I3"]
+    out, code = run(capsys, "samples", "--group", "777")
+    assert code == 0 and [p["item"] for p in out["papers"]] == ["I2", "I1"]
+    assert zotero and all(path.startswith("/api/groups/777/") for path in zotero), "every read is the group's"
+    zotero.clear()
+    run(capsys, "status", "A1")
+    assert zotero and all(path.startswith("/api/users/0/") for path in zotero), "My Library by default"
 
 
 def test_samples_give_a_few_examples_of_other_papers(zotero, capsys):

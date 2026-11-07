@@ -77,6 +77,7 @@ the Claude Code or Codex installed on your computer on the paper shown.
 - **Annotate again** deletes the paper's Scholium annotations and moves its Scholium reading notes to the trash, then
   annotates anew. **Delete annotations** in the ⋯ menu removes them without a new run. Your own annotations and notes
   stay either way.
+- Papers in group libraries work too, when you can edit the group; every member of the group sees the annotations.
 
 **Chat tab**
 

@@ -34,8 +34,12 @@ the plugin shows them again in open readers.
 **Annotate** in the *Scholium* section of the item pane starts the Claude Code CLI or the Codex CLI
 in the background for the selected paper; papers started while another runs wait in a queue and run
 one at a time, and a paper moved to the trash meanwhile is left out. A regular item is annotated through its
-best PDF attachment. Only papers in My Library are annotated: for a paper in a group library the section says
-so, **Annotate**, **Agent**, **New chat** and **History** are off, and the message box is hidden.
+best PDF attachment. A paper in a group library is annotated as one in My Library, into the group's library, where
+every member sees the annotations: the first annotation in each group asks once, and **Annotate again** and **Delete
+annotations** say that the change is the group's. When the user cannot edit the group's library or its files, the
+annotation tab says so and has no **Annotate** and no message box; questions in the chat are answered. paper.json then
+names the library (`library_id`, `group_id`), and the paper's runs and files are kept under `<key>_g<group id>`, since
+a key is unique only in its library.
 
 Requirements: Claude Code or Codex installed and signed in, and the zotero-scholium skill installed for
 it (`~/.claude/skills/zotero-scholium` for Claude Code; for Codex, `~/.codex/skills/`,
@@ -388,6 +392,9 @@ which listens on localhost only), and the same three at the paths of Scholium Br
 | `POST /scholium/list` | lists the annotations of one attachment (the tool's own whole, with the dates they were added and changed) and the child notes of its parent item, with their tags, and the plugin's version |
 | `POST /scholium/apply` | writes a child note (unless a note of the tool has the same text), then, in one transaction, creates highlights and text annotations and, with `cleanup`, deletes those the tool created earlier; with `note.trashOwn`, moves the tool's earlier notes to the trash; returns the keys it created |
 | `/scholium-bridge/ping`, `/scholium-bridge/list`, `/scholium-bridge/apply` | the same three, for the skill of Scholium Bridge 0.1.9 |
+
+`list` and `apply` look the attachment up in My Library, or in the library the request names by `groupID` (a group's id)
+or `libraryID`; `list` returns that `libraryID`. `apply` refuses a group's library the user cannot edit.
 
 Requests must carry the header `X-Annotate-Token`, whose value is the content of
 `<Zotero data directory>/scholium.token`, a random string written by the plugin on first

@@ -285,7 +285,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                    home = 'dirsvc', eraseFails = false, logs = {}, models = 'ok', claudeAt = CLAUDE, scripts = [], readFails = false,
                    writeFails = false, codex = {}, logTimes = {}, notes = [], secondPdf = false, failLogWrites = null, stdinFails = false, holdDirs = false,
                    unreadable = [], unremovable = [], addonManager = null, env = {}, present = [], dirs = {}, auth = 'in', python = {},
-                   os = 'WINNT', shell = null, uv = {} } = {}) {
+                   os = 'WINNT', shell = null, uv = {}, groups = {} } = {}) {
   const log = { calls: [], stdin: [], notices: [], alerts: [], confirms: [], kills: 0, menus: [], unregistered: [], listeners: [],
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
                 ftl: [], tabs: [], selected: [], opened: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
@@ -520,6 +520,18 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                          isPDFAttachment: () => false, getAnnotations: () => { throw Error('not a file attachment with annotations'); } });
   [item1, item2, att1, att2, attachment('ATT3', 'ITEM1', []), html('HTML_ITEM1'), html('HTML_ITEM2'), ...childNotes.ITEM1]
     .forEach(i => items.set(i.id, i));
+  // a paper in another library (groups: { libraryID: { groupID, editable, filesEditable } }), with the keys given, which
+  // may be those of a paper in My Library; its items' ids are their own
+  const groupPaper = (libraryID, key = 'ATT1', parentKey = 'ITEM1', anns = []) => {
+    const id = k => `L${libraryID}_${k}`;
+    const att = Object.assign(attachment(key, id(parentKey), anns), { id: id(key), libraryID, parentItemKey: parentKey });
+    const notesOf = [];
+    const item = { key: parentKey, id: id(parentKey), libraryID, isRegularItem: () => true, isAttachment: () => false, isPDFAttachment: () => false,
+                   getBestAttachment: async () => att, getDisplayTitle: () => 'Group paper ' + parentKey, getAttachments: () => [att.id],
+                   getNotes: () => notesOf.map(n => n.id) };
+    items.set(att.id, att); items.set(item.id, item);
+    return { item, att };
+  };
   // Zotero's local API is on unless a test turns it off
   const store = new Map(Object.entries(Object.assign({ 'httpServer.localAPI.enabled': true }, prefs)));
   const mainDoc = {
@@ -571,13 +583,17 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     setTimeout: laterTimeout, clearTimeout: clearLater,
     Zotero: {
       debug() {}, locale, DataDirectory: { dir: '/data' },
-      Libraries: { userLibraryID: 1 },
+      Libraries: { userLibraryID: 1,
+                   get: id => (id === 1 ? { libraryID: 1, libraryType: 'user', editable: true, filesEditable: true }
+                     : groups[id] ? Object.assign({ libraryID: id, libraryType: 'group', editable: true, filesEditable: true }, groups[id]) : false) },
+      Groups: { getGroupIDFromLibraryID: id => { if (!groups[id] || !groups[id].groupID) throw Error('no group with library ' + id); return groups[id].groupID; },
+                getLibraryIDFromGroupID: gid => { const e = Object.entries(groups).find(([, g]) => g.groupID === gid); return e ? Number(e[0]) : false; } },
       PreferencePanes: { register: async o => { log.prefPanes.push(o); return 'scholium-pane-id'; } },
       Utilities: { Internal: { copyTextToClipboard: text => log.copied.push(text), openPreferences: (id, o) => log.openedPrefs.push(id) } },
       Prefs: { get: (n, g) => store.get(n), set: (n, v, g) => store.set(n, v) },
       Items: {
         get: id => (Array.isArray(id) ? id.map(i => items.get(i)).filter(Boolean) : items.get(id) || null),
-        getByLibraryAndKey: (lib, key) => (lib === 1 ? items.get(key) || null : null),
+        getByLibraryAndKey: (lib, key) => [...items.values()].find(i => (i.libraryID || 1) === lib && i.key === key) || null,
         erase: async ids => {
           if (eraseFails) throw Error('library is read-only');
           log.erased.push(...ids);
@@ -746,7 +762,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     }, pane: () => runner.panes.get(body) };
   };
   const styles = () => mainDoc.documentElement.children.map(c => [c.tagName, c.id, c.attrs.rel, c.attrs.href]);
-  return { runner, zotero: context.Zotero, log, item1, item2, att1, att2, note, pane, store, see, resize, focus, observers, timers, fire, styles, sheet, paneWin, paneDoc, lastFocus, El,
+  return { runner, zotero: context.Zotero, log, item1, item2, att1, att2, note, pane, store, groupPaper, see, resize, focus, observers, timers, fire, styles, sheet, paneWin, paneDoc, lastFocus, El,
            ann: (key, type, color, tags = ['zotero-scholium']) => annotation(key, tags, type, color),
            flat: view => flatNodes(runner, view),
            chromePackage: context.chromePackage, replacing: context.replacing, takingOver: context.takingOver,

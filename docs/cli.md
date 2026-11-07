@@ -59,6 +59,8 @@ uv run scholium.py …                     # uv reads the script's inline metada
 
    Include only the requested output types. Use a separate `out_dir` for each paper, such as `out/<ATTACHMENT_KEY>`, and place its sentence and note files there. Set `cleanup: true` only for a complete redo; without it a run only adds (added notes, margin remarks, a selected scope). For a redo with a reading note, `note_replace: true` moves the tool's earlier notes to the trash.
 
+   For an item in a group library, add `"group_id": <the group's id>` (the plugin's `paper.json` carries it), and give `status` and `samples` `--group <id>`.
+
    `cleanup`, `note_replace`, `cleanup_external`, `snap` and a highlight's `core` must be `true` or `false`; a string such as `"false"` is refused. `null` for an optional key means its default. `font_size`, like `band_min_font_size`, is a number from 4 to 36. `note_html` must be the path of an existing HTML file, not the HTML itself. Colours are `#rrggbb` in either case and are written in lower case, the form Zotero takes. A highlight's `comment` is the translation of its sentence; leave it out when the paper is already in the reader's language.
 
 4. **Generate, review, and apply.** Run without `--apply` first, review all four warning fields below and correct the configuration before applying.

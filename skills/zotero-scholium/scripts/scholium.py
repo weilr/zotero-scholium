@@ -21,9 +21,9 @@ Backends (--backend auto takes the plugin from 0.1.9, else the local API on Zote
 
 Requires: PyMuPDF (pip install pymupdf); `uv run scholium.py …` brings Python and PyMuPDF itself
 Usage:   scholium --config config.json [--apply] [--list] [--backend auto|api|plugin|js]
-          scholium status ITEM_KEY | --query WORDS
+          scholium status ITEM_KEY | --query WORDS [--group ID]
           scholium extract --pdf paper.pdf [--sentences sentences.json] [--out sentences.txt]
-          scholium samples [KEY ...] [--query WORDS]
+          scholium samples [KEY ...] [--query WORDS] [--group ID]
           scholium profile [--from-library | --path]
 """
 import argparse
@@ -62,10 +62,25 @@ def zotero_base(env=None):
 
 
 BASE = zotero_base()
-NOT_IN_MY_LIBRARY = ("the item was not found in My Library; items in group libraries are not supported: check the key with "
-                     "status --query, or copy the item to My Library")
+USER_LIBRARY = "/api/users/0"   # the local API's My Library; a group library is /api/groups/<group id>
+NOT_IN_MY_LIBRARY = ("the item was not found in My Library: check the key with status --query; for an item in a group "
+                     "library, give its group (status and samples --group ID, group_id in the configuration)")
 LOCAL_API_OFF = ("Zotero's local API is turned off: turn on Settings → Advanced → Allow other applications on this computer "
                  "to communicate with Zotero")
+
+
+def library_path(group_id=None):
+    """The local API's path of a library: a group's by its id, else My Library."""
+    return f"/api/groups/{int(group_id)}" if group_id else USER_LIBRARY
+
+
+def not_found(lib=USER_LIBRARY):
+    """The error of an item the local API does not have in this library."""
+    if lib == USER_LIBRARY:
+        return NOT_IN_MY_LIBRARY
+    group = lib.rsplit("/", 1)[-1]
+    return f"the item was not found in group {group}: check the key with status --query --group {group}, and the group's id"
+
 
 DEFAULTS = {
     "levels": {},               # named colour levels, e.g. {"claim": "#ff6666", "method": "#ffd400"}; referenced by "level" in highlights
@@ -1784,17 +1799,18 @@ def zotero_down():
     return f"Zotero does not answer on {BASE.split('//')[-1]}; start Zotero, then run again"
 
 
-def _read_failure(status, text):
-    """Why a read of the local API failed: a 404 is an item outside My Library, a 403 the local API turned off."""
-    return NOT_IN_MY_LIBRARY if status == 404 else LOCAL_API_OFF if status == 403 else text[:200]
+def _read_failure(status, text, lib=USER_LIBRARY):
+    """Why a read of the local API failed: a 404 is an item outside the library read, a 403 the local API turned off."""
+    return not_found(lib) if status == 404 else LOCAL_API_OFF if status == 403 else text[:200]
 
 
 # ---------------------------------------------------------------------------
 # Backend 1: official local API (Zotero 10+)
 # ---------------------------------------------------------------------------
 class LocalApi:
-    def __init__(self, server_id):
+    def __init__(self, server_id, lib=USER_LIBRARY):
         self.server_id = server_id
+        self.lib = lib   # the library's path: My Library, or a group's (library_path)
         base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config")
         self.key_file = os.path.join(base, "zotero-scholium", "local-api-keys.json")
         self.keys = {}
@@ -1860,20 +1876,20 @@ class LocalApi:
         return s, h, t
 
     def library_version(self):
-        s, h, _ = http("GET", "/api/users/0/items?limit=1")
+        s, h, _ = http("GET", self.lib + "/items?limit=1")
         return h.get("Last-Modified-Version", "0")
 
     def children(self, key, item_type=None):
         q = f"?itemType={item_type}" if item_type else ""
-        s, h, t = http("GET", f"/api/users/0/items/{key}/children{q}")
+        s, h, t = http("GET", f"{self.lib}/items/{key}/children{q}")
         if s != 200:
-            raise RuntimeError(f"failed to read children (HTTP {s}): {_read_failure(s, t)}")
+            raise RuntimeError(f"failed to read children (HTTP {s}): {_read_failure(s, t, self.lib)}")
         return json.loads(t)
 
     def item(self, key):
-        s, h, t = http("GET", f"/api/users/0/items/{key}")
+        s, h, t = http("GET", f"{self.lib}/items/{key}")
         if s != 200:
-            raise RuntimeError(f"failed to read item {key} (HTTP {s}): {_read_failure(s, t)}")
+            raise RuntimeError(f"failed to read item {key} (HTTP {s}): {_read_failure(s, t, self.lib)}")
         return json.loads(t)
 
     def create(self, items):
@@ -1882,7 +1898,7 @@ class LocalApi:
         created, failed = [], []
         for i in range(0, len(items), 50):
             try:   # a 401 whose new authorisation fails raises
-                s, h, t = self.write("POST", "/api/users/0/items", items[i:i + 50])
+                s, h, t = self.write("POST", self.lib + "/items", items[i:i + 50])
                 reason = None if s == 200 else f"create failed (HTTP {s}): {t[:300]}"
                 d = json.loads(t) if s == 200 else {}
             except Exception as e:
@@ -1896,7 +1912,7 @@ class LocalApi:
 
     def delete(self, keys):
         for i in range(0, len(keys), 50):
-            s, h, t = self.write("DELETE", "/api/users/0/items?itemKey=" + ",".join(keys[i:i + 50]),
+            s, h, t = self.write("DELETE", self.lib + "/items?itemKey=" + ",".join(keys[i:i + 50]),
                                  None, {"If-Unmodified-Since-Version": self.library_version()})
             if s not in (204, 200):
                 raise RuntimeError(f"delete failed (HTTP {s}): {t[:300]}")
@@ -1906,7 +1922,7 @@ class LocalApi:
         """Move items to Zotero's trash (recoverable there); `rows` are their API rows, whose versions guard the write."""
         for i in range(0, len(rows), 50):
             body = [{"key": r["key"], "version": r["data"].get("version", r.get("version", 0)), "deleted": True} for r in rows[i:i + 50]]
-            s, h, t = self.write("POST", "/api/users/0/items", body)
+            s, h, t = self.write("POST", self.lib + "/items", body)
             failed = (json.loads(t).get("failed") or {}) if s == 200 else None
             if s != 200 or failed:
                 raise RuntimeError(f"moving notes to the trash failed (HTTP {s}): {(json.dumps(failed) if failed else t)[:300]}")
@@ -2110,6 +2126,16 @@ PLUGIN_PATHS = ("/scholium", "/scholium-bridge")   # the endpoints' base paths; 
 TOKEN_FILES = ("scholium.token", "scholium-bridge.token")   # Scholium Bridge 0.1.9 keeps its token in the second
 
 
+def plugin_library(cfg):
+    """The library of a request to the plugin: a group by its id (groupID), another library by its id (libraryID); My
+    Library without either. A plugin before 0.2.2 ignores them and looks in My Library."""
+    if (cfg or {}).get("group_id"):
+        return {"groupID": int(cfg["group_id"])}
+    if (cfg or {}).get("library_id"):
+        return {"libraryID": int(cfg["library_id"])}
+    return {}
+
+
 def plugin_connect(cfg):
     """(token, the attachment's listing, the endpoints' base path) once the plugin answers; (None, reason, None)
     otherwise. The connection check is the list request itself, so the listing comes with it ({"ok": False, "error": ...}
@@ -2121,7 +2147,7 @@ def plugin_connect(cfg):
             token = open(found[0], encoding="utf8").read().strip()
             break
     for base in PLUGIN_PATHS:
-        s, h, t = http("POST", base + "/list", {"attachmentKey": cfg.get("attachment_key", "")},
+        s, h, t = http("POST", base + "/list", dict({"attachmentKey": cfg.get("attachment_key", "")}, **plugin_library(cfg)),
                        {"X-Annotate-Token": token or ""}, timeout=15)
         if s != 404:
             break
@@ -2137,6 +2163,9 @@ def plugin_connect(cfg):
     res = json.loads(t) if s == 200 else {}
     if not res.get("ok"):
         return token, {"ok": False, "error": "list failed (HTTP %s): %s" % (s, t[:200])}, base
+    if plugin_library(cfg) and "libraryID" not in res:   # a plugin before 0.2.2 reads and writes My Library only
+        return token, {"ok": False, "error": "the Scholium plugin installed reads and writes My Library only; update it to "
+                                             "annotate a paper of a group library"}, base
     res["backend"] = "plugin"
     return token, res, base
 
@@ -2152,6 +2181,8 @@ def plugin_apply(cfg, out):
     token, lst, base = plugin_connect(cfg)
     if not token:
         return None, lst
+    if not lst.get("ok"):   # nothing is written where the attachment could not be read
+        return None, lst.get("error")
     html = read_text(cfg["note_html"]) if cfg.get("note_html") else None
     prefix = cfg.get("note_title_prefix") or cfg.get("note_title") or ""
     only = cfg.get("note_title_prefix") or ""
@@ -2163,7 +2194,8 @@ def plugin_apply(cfg, out):
     # trashOwn and trashTitlePrefix are new keys: an older plugin ignores them and trashes nothing
     payload = {"itemKey": cfg["item_key"], "attachmentKey": cfg["attachment_key"],
                "cleanup": bool(cfg.get("cleanup", False)), "cleanupExternal": bool(cfg.get("cleanup_external")), "tag": TAG, "legacyTags": sorted(LEGACY_TAGS), "annotations": out,
-               "note": {"html": html, "titlePrefix": prefix, "trashOwn": replace, "trashTitlePrefix": only} if html else None}
+               "note": {"html": html, "titlePrefix": prefix, "trashOwn": replace, "trashTitlePrefix": only} if html else None,
+               **plugin_library(cfg)}
     s, h, t = http("POST", base + "/apply", payload, {"X-Annotate-Token": token}, timeout=LocalApi.WRITE_TIMEOUT)
     res = json.loads(t) if s == 200 else {}
     if not res.get("ok"):
@@ -2200,7 +2232,9 @@ var NOTE_TITLE_PREFIX = {json.dumps(title_prefix, ensure_ascii=False)};
 var NOTE_REPLACE = {json.dumps(replace)}, TRASH_TITLE_PREFIX = {json.dumps(cfg.get('note_title_prefix') or '', ensure_ascii=False)};
 var ANNOTATIONS = {json.dumps(out, ensure_ascii=False)};
 
-var libraryID = Zotero.Libraries.userLibraryID;
+var GROUP_ID = {json.dumps(cfg.get('group_id'))}, LIBRARY_ID = {json.dumps(cfg.get('library_id'))};
+var libraryID = GROUP_ID ? Zotero.Groups.getLibraryIDFromGroupID(GROUP_ID) : LIBRARY_ID || Zotero.Libraries.userLibraryID;
+if (!libraryID) throw new Error("group not found in this Zotero: " + GROUP_ID);
 var parent = Zotero.Items.getByLibraryAndKey(libraryID, ITEM_KEY);
 var att = Zotero.Items.getByLibraryAndKey(libraryID, ATT_KEY);
 if (!parent) throw new Error("item not found: " + ITEM_KEY);
@@ -2531,7 +2565,7 @@ def pick_backend(requested, cfg):
             except ValueError:
                 major = 0
             if major >= 10:
-                return "api", LocalApi(sid), f"Zotero {ver}: official local API write support"
+                return "api", LocalApi(sid, library_path((cfg or {}).get("group_id"))), f"Zotero {ver}: official local API write support"
             why_not.append(f"Zotero {ver}: the local API is read-only before Zotero 10; install the Scholium plugin")
         elif ver is not None and sid is None:
             why_not.append(LOCAL_API_OFF)
@@ -2558,11 +2592,11 @@ def backend_choice(value):
     return "plugin" if value == "bridge" else value
 
 
-def _get(path):
-    """A read of the local API (Zotero 7 and later), as JSON."""
-    s, _, t = http("GET", "/api/users/0" + path)
+def _get(path, lib=USER_LIBRARY):
+    """A read of the local API (Zotero 7 and later) in a library (library_path), as JSON."""
+    s, _, t = http("GET", lib + path)
     if s in (403, 404):
-        raise RuntimeError(f"GET {path}: HTTP {s}: {_read_failure(s, t)}")
+        raise RuntimeError(f"GET {path}: HTTP {s}: {_read_failure(s, t, lib)}")
     if s != 200:
         raise RuntimeError(f"GET {path}: HTTP {s}: {t[:160]}" if s else zotero_down())
     return json.loads(t)
@@ -2576,17 +2610,17 @@ def _plain(html):
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html or "")).strip()
 
 
-def _paper(key):
+def _paper(key, lib=USER_LIBRARY):
     """The regular item and its PDF attachment rows, from an item key or a PDF attachment key."""
-    row = _get(f"/items/{urllib.parse.quote(key)}")
+    row = _get(f"/items/{urllib.parse.quote(key)}", lib)
     if row["data"]["itemType"] == "attachment":
         parent = row["data"].get("parentItem")
         if not parent:
             return None, [row], []
-        item = _get(f"/items/{parent}")
+        item = _get(f"/items/{parent}", lib)
     else:
         item = row
-    kids = _get(f"/items/{item['key']}/children")
+    kids = _get(f"/items/{item['key']}/children", lib)
     pdfs = [k for k in kids if k["data"]["itemType"] == "attachment" and k["data"].get("contentType") == "application/pdf"]
     return item, pdfs, [k for k in kids if k["data"]["itemType"] == "note"]
 
@@ -2606,16 +2640,16 @@ def citation(item):
     return {k: v for k, v in out.items() if v or k in ("key", "title")}
 
 
-def paper_status(key):
+def paper_status(key, lib=USER_LIBRARY):
     """What a paper already has: each PDF with its file and the annotations on it (the tool's own counted by type and
     colour, the user's counted), and the notes under the item (title, length, whether the tool wrote them)."""
-    item, pdfs, notes = _paper(key)
+    item, pdfs, notes = _paper(key, lib)
     data_dir = zotero_data_dir()
     out = []
     for p in pdfs:
         d = p["data"]
         path = os.path.join(data_dir, "storage", p["key"], d["filename"]) if d.get("filename") else (d.get("path") or "")
-        anns = _get(f"/items/{p['key']}/children?itemType=annotation")
+        anns = _get(f"/items/{p['key']}/children?itemType=annotation", lib)
         own = [a for a in anns if _own(a)]
         out.append({"key": p["key"], "file": path, "exists": bool(path) and os.path.exists(path),
                     "own": len(own), "others": len(anns) - len(own),
@@ -2632,31 +2666,33 @@ def paper_status(key):
 def status_main(argv):
     """`scholium status KEY` prints what a paper already has, before a configuration is written: its PDF attachments
     with their files, the annotations on each, and the notes under the item. `scholium status --query WORDS` lists
-    the matching items."""
+    the matching items. --group ID reads a group library instead of My Library."""
     ap = argparse.ArgumentParser(prog="scholium status", description=status_main.__doc__)
     ap.add_argument("key", nargs="?", help="item key or PDF attachment key")
     ap.add_argument("--query", help="title words: list the matching items")
+    ap.add_argument("--group", type=int, metavar="ID", help="the group library's id (paper.json's group_id); default: My Library")
     a = ap.parse_args(argv)
+    lib = library_path(a.group)
     if not a.key and not a.query:
         ap.error("give a key or --query")
     try:
         if a.query:
-            rows = _get(f"/items/top?q={urllib.parse.quote(a.query)}&limit=10")
+            rows = _get(f"/items/top?q={urllib.parse.quote(a.query)}&limit=10", lib)
             out = {"matches": [{"key": r["key"], "title": r["data"].get("title", "")[:150], "year": (r["data"].get("date") or "")[:4],
                                 "type": r["data"]["itemType"]} for r in rows]}
         else:
-            out = paper_status(a.key)
+            out = paper_status(a.key, lib)
     except RuntimeError as e:
         out = {"error": str(e)}
     print(json.dumps(out, ensure_ascii=False, indent=1))
     return 1 if "error" in out else 0
 
 
-def paper_samples(item, pdfs, notes, per_kind):
+def paper_samples(item, pdfs, notes, per_kind, lib=USER_LIBRARY):
     """A few of the tool's annotations on one paper and the start of its reading note, evenly spread over the paper."""
     anns = []
     for p in pdfs:
-        anns += [a for a in _get(f"/items/{p['key']}/children?itemType=annotation") if _own(a)]
+        anns += [a for a in _get(f"/items/{p['key']}/children?itemType=annotation", lib) if _own(a)]
     anns.sort(key=lambda a: a["data"].get("annotationSortIndex", ""))
 
     def spread(rows):     # first, last and evenly between
@@ -2678,21 +2714,23 @@ def paper_samples(item, pdfs, notes, per_kind):
 def samples_main(argv):
     """`scholium samples` prints short examples of the tool's earlier annotations in this library, as a reference
     for their style: for each paper a few highlights with their comments, margin and page texts, and the start of the
-    reading note. Without keys it takes the papers annotated most recently."""
+    reading note. Without keys it takes the papers annotated most recently. --group ID reads a group library."""
     ap = argparse.ArgumentParser(prog="scholium samples", description=samples_main.__doc__)
     ap.add_argument("keys", nargs="*", help="item or PDF attachment keys")
     ap.add_argument("--query", help="title words of the papers to take")
     ap.add_argument("--exclude", action="append", default=[], help="an item or attachment key to leave out (the paper being annotated)")
     ap.add_argument("--papers", type=int, default=2, help="how many papers (default 2)")
     ap.add_argument("--per-kind", type=int, default=4, help="examples of each kind per paper (default 4)")
+    ap.add_argument("--group", type=int, metavar="ID", help="the group library's id (paper.json's group_id); default: My Library")
     a = ap.parse_args(argv)
+    lib = library_path(a.group)
     try:
         keys = list(a.keys)
         if a.query:
-            keys += [r["key"] for r in _get(f"/items/top?q={urllib.parse.quote(a.query)}&limit=10")]
+            keys += [r["key"] for r in _get(f"/items/top?q={urllib.parse.quote(a.query)}&limit=10", lib)]
         if not keys:     # the attachments of the most recently changed annotations of the tool, a page at a time
             for start in range(0, 2000, 100):
-                rows = _get(f"/items?itemType=annotation&tag={TAG}&sort=dateModified&direction=desc&limit=100&start={start}")
+                rows = _get(f"/items?itemType=annotation&tag={TAG}&sort=dateModified&direction=desc&limit=100&start={start}", lib)
                 keys = list(dict.fromkeys(keys + [r["data"]["parentItem"] for r in rows if r["data"].get("parentItem")]))
                 if len(rows) < 100 or len(set(keys) - set(a.exclude)) > a.papers:
                     break
@@ -2700,12 +2738,12 @@ def samples_main(argv):
         for key in keys:
             if len(out) >= a.papers:
                 break
-            item, pdfs, notes = _paper(key)
+            item, pdfs, notes = _paper(key, lib)
             ident = {item["key"] if item else None} | {p["key"] for p in pdfs}
             if ident & seen:
                 continue
             seen |= ident
-            sample = paper_samples(item, pdfs, notes, a.per_kind)
+            sample = paper_samples(item, pdfs, notes, a.per_kind, lib)
             if sample["highlights"] or sample["margin_and_page_texts"] or sample["note_start"]:
                 out.append(sample)
         result = {"papers": out}
@@ -2716,9 +2754,24 @@ def samples_main(argv):
 
 
 ADVISORY_STYLE = {"core_count"}   # style warnings that inform without blocking --apply
-CONFIG_KEYS = set(DEFAULTS) | {"pdf", "item_key", "attachment_key", "out_dir", "highlights", "summaries", "data_dir", "snap"}
+CONFIG_KEYS = set(DEFAULTS) | {"pdf", "item_key", "attachment_key", "out_dir", "highlights", "summaries", "data_dir", "snap",
+                               "group_id", "library_id"}
 HIGHLIGHT_KEYS = {"id", "ids", "page", "text", "occurrence", "core", "level", "color", "comment", "type"}
 SUMMARY_KEYS = {"id", "page", "anchor", "text", "place", "side", "kind", "color", "font_size", "rect", "occurrence"}
+
+
+def paper_library(cfg):
+    """For a configuration that names no library, the library of the plugin's paper.json in its output directory when
+    that is for the same attachment (group_id, library_id); none otherwise."""
+    if cfg.get("group_id") or cfg.get("library_id"):
+        return {}
+    try:
+        paper = json.loads(read_text(os.path.join(cfg["out_dir"], "paper.json")))
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+    if not isinstance(paper, dict) or not cfg.get("attachment_key") or paper.get("attachment_key") != cfg["attachment_key"]:
+        return {}
+    return {k: v for k, v in paper.items() if k in ("group_id", "library_id") and isinstance(v, int) and not isinstance(v, bool) and v >= 1}
 
 
 def _empty(v):
@@ -2776,6 +2829,10 @@ def config_problems(raw):
 
     def whole(v, low=1):
         return isinstance(v, int) and not isinstance(v, bool) and v >= low
+
+    for k in ("group_id", "library_id"):
+        if raw.get(k) is not None and not whole(raw[k]):
+            problems.append(f"{k} must be a number from 1 (as paper.json gives it)")
 
     def colour(v):
         return isinstance(v, str) and HEX_COLOR_RE.match(v)
@@ -2866,6 +2923,7 @@ def main(argv=None):
     if problems:
         sys.exit("config error: " + "; ".join(problems))
     cfg = dict(DEFAULTS); cfg.update({k: v for k, v in raw.items() if v is not None})   # null keeps the default
+    cfg.update(paper_library(cfg))
     if pymupdf is None and not args.list:
         sys.exit(PYMUPDF_MISSING)
 

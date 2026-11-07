@@ -59,6 +59,8 @@ uv run scholium.py …                     # uv 读取脚本内嵌的元数据�
 
    只保留用户要求的输出类型。每篇论文使用独立的 `out_dir`，如 `out/<ATTACHMENT_KEY>`，句子文件和笔记文件也放在该目录。仅完整重做时使用 `cleanup: true`；不设时只做添加（补笔记、页边批注或处理选定范围）。带阅读笔记的重做可设 `note_replace: true`，把工具以前的笔记移入回收站。
 
+   群组文库里的条目，在配置里加 `"group_id": <群组 ID>`（插件的 `paper.json` 里有），`status` 和 `samples` 加 `--group <ID>`。
+
    `cleanup`、`note_replace`、`cleanup_external`、`snap` 和高亮的 `core` 只能是 `true` 或 `false`，`"false"` 这样的字符串会被拒绝。可选键写 `null` 表示取其默认值。`font_size` 与 `band_min_font_size` 一样，须为 4 到 36 之间的数。`note_html` 须为已存在的 HTML 文件的路径，不能直接写 HTML。颜色写作 `#rrggbb`，大小写均可，写入时转为 Zotero 要求的小写。高亮的 `comment` 是该句的译文；论文本身已是读者的语言时省略它。
 
 4. **生成、检查、写入。** 首先不带 `--apply` 运行，检查下述四类报告并修正配置，再写入。

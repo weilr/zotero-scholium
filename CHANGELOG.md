@@ -18,6 +18,11 @@
   Zotero's port (`httpServer.port`) for every process it starts, so a changed port works.
 - **Copy** in the setup check puts its lines on the clipboard as plain text, with the versions of Scholium and Zotero
   and the operating system, for a bug report.
+- Papers in group libraries: Annotate, questions and Ask Scholium work as in My Library, and the annotations go into
+  the group's library, where every member sees them. The first annotation in each group asks once; Annotate again and
+  Delete annotations say that the change is the group's. A group the user cannot edit gets no annotations and says so;
+  its papers' questions are answered. The skill's script reads and writes the library `group_id` names (the plugin's
+  `paper.json` carries it; `status` and `samples` take `--group`).
 - `extract` stops on a scanned PDF without a text layer (most pages an image with almost no text) with exit code 3 and
   a JSON `error` that says to run OCR first; the skill stops there and passes the message on, and an annotation that
   wrote nothing says so on its card.
@@ -42,12 +47,11 @@
   text points to as essential, and finds the pages of a page limit there.
 - The report of a dry run and of `--apply` leaves out empty fields, the generated file's path, an unchanged PDF's
   hashes and the details of a write that succeeded; `--verbose` prints them all.
-- Ask Scholium is offered only for PDFs in My Library, in reader tabs. A reader tab's section is the one of the PDF it
-  shows.
+- Ask Scholium is offered only in reader tabs. A reader tab's section is the one of the PDF it shows.
 - Highlights carry the PDF's own page labels, and Zotero's sidebar lists them in reading order.
 - The setup check's Python lines name the Python Scholium finds, no longer Zotero's PATH.
-- More error messages end with what to do next: a paper without a PDF, or whose file is missing, or outside My
-  Library; a skill that could not be installed; a program set on the settings page that is gone; and the script's
+- More error messages end with what to do next: a paper without a PDF, or whose file is missing; a skill that could
+  not be installed; a program set on the settings page that is gone; and the script's
   errors when Zotero does not answer, its local API is off, an item is not found or not the attachment's parent,
   authorisation is declined, the token file is not found, Zotero is older than 10 without the plugin, the `author`
   key is given, or a page is rotated.
