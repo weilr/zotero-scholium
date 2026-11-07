@@ -2,10 +2,10 @@
 
     python scripts/build_xpi.py OUT.xpi
 
-The archive holds manifest.json, bootstrap.js, prefs.js, settings.xhtml, settings.js and the content/ and locale/
-folders of plugin/scholium, and skills/zotero-scholium at content/skill/zotero-scholium/, which the plugin installs
-when an agent has none. __pycache__ folders and .pyc files are left out. The files are read where they are; nothing is
-written into the working tree. scripts/check_xpi.py checks the result.
+The archive holds manifest.json, bootstrap.js, prefs.js, settings.xhtml, settings.js and the content/, locale/ and
+modules/ folders of plugin/scholium, and skills/zotero-scholium at content/skill/zotero-scholium/, which the plugin
+installs when an agent has none. __pycache__ folders and .pyc files are left out. The files are read where they are;
+nothing is written into the working tree. scripts/check_xpi.py checks the result.
 """
 
 import argparse
@@ -14,7 +14,7 @@ import sys
 import zipfile
 
 TOP = ["manifest.json", "bootstrap.js", "prefs.js", "settings.xhtml", "settings.js"]
-FOLDERS = ["content", "locale"]
+FOLDERS = ["content", "locale", "modules"]
 SKILL_AT = "content/skill"
 
 

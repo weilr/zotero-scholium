@@ -3,7 +3,7 @@ the paper, with a heading of the paper's title and the date, each question with 
 from its Markdown with the agent that gave it, tagged scholium-chat so that Annotate again and Delete leave it."""
 import pytest
 
-from plugin_harness import BOOTSTRAP, NODE, run_scenarios
+from plugin_harness import NODE, plugin_source, run_scenarios
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
@@ -177,5 +177,5 @@ def test_a_read_only_group_gets_no_note(facts):
 
 def test_a_saved_conversation_is_not_the_tools_note(facts):
     assert facts["own"] == ["N1"]
-    source = BOOTSTRAP.read_text(encoding="utf8")
+    source = plugin_source()
     assert 'NOTE_TAG: "scholium-chat"' in source and '"scholium-chat"' not in source.split("OWN_TAGS:")[1].split("\n")[0]

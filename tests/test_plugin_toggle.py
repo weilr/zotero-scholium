@@ -13,6 +13,7 @@ import subprocess
 
 import pytest
 
+from plugin_harness import LOAD_PLUGIN
 from zotero_scholium import cli
 
 
@@ -20,10 +21,9 @@ BOOTSTRAP = Path(__file__).resolve().parents[1] / "plugin/scholium/bootstrap.js"
 NODE = shutil.which("node")
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
-HARNESS = r"""
+HARNESS = LOAD_PLUGIN + r"""
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync(process.argv[1], 'utf8');
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const settle = async () => { for (let i = 0; i < 5; i++) await tick(); };
 
@@ -163,7 +163,7 @@ function boot(locale, prefs = {}, Reader = new ReaderManager()) {
       set(name, value, global) { if (!global) throw Error('expected a full preference name'); full(name); store.set(name, value); },
     },
   } });
-  vm.runInContext(source, context);
+  loadPlugin(context, process.argv[1]);
   return { Reader, toggle: context.ScholiumToggle, store };
 }
 const PREF = 'extensions.scholium.showAnnotations';

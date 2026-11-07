@@ -9,6 +9,8 @@ import zipfile
 
 import pytest
 
+from plugin_harness import plugin_source
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SMOKE = os.path.join(ROOT, "scripts", "smoke")
 
@@ -237,7 +239,7 @@ def test_the_probe_asks_the_plugin_for_texts_it_has():
     keys = set(re.findall(r'\bt\("(\w+)"', probe))
     assert {"notSignedIn", "pymupdfMissing", "annotNoneWarn", "askScholium", "installSkill", "skillNotCarried", "checkLabel",
             "localApiOff"} <= keys
-    plugin = open(os.path.join(ROOT, "plugin", "scholium", "bootstrap.js"), encoding="utf8").read()
+    plugin = plugin_source()
     table = plugin[plugin.index("  text(key, ...args) {"):]
     for key in keys:
         assert re.search(r"\n\s+%s: " % key, table), key

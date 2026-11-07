@@ -1,4 +1,4 @@
-/* Scholium's texts in Spanish (es-ES), for ScholiumRunner.text() in bootstrap.js: the keys of its baseTexts, each a
+/* Scholium's texts in Spanish (es-ES), for ScholiumRunner.text() in modules/runner.js: the keys of its baseTexts, each a
  * string or a function of the same arguments as the English. h gives name(agent, short) (Claude Code, Claude or Codex),
  * text(key, ...args) (another text of this table), os ("WINNT", "Darwin" or "Linux") and uvInstall (uv's install command
  * for the system). */

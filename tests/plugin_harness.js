@@ -280,6 +280,8 @@ const cloneEl = n => {
 };
 // the plugin's content folder, for Services.scriptloader (KaTeX)
 const CONTENT = require('node:path').join(require('node:path').dirname(process.argv[2]), 'content');
+// the plugin's folder as Zotero gives it to startup() (rootURI), for the modules bootstrap.js loads from it
+const ROOT_URI = require('node:url').pathToFileURL(require('node:path').dirname(process.argv[2])).href + '/';
 
 function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, exitCode = 0, script = null, claudeExists = true, gateFirst = false,
                    home = 'dirsvc', eraseFails = false, logs = {}, models = 'ok', claudeAt = CLAUDE, scripts = [], readFails = false,
@@ -646,6 +648,15 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
         log.scripts = (log.scripts || 0) + 1;
         const rel = url.replace(/^chrome:\/\/[^/]+\/content\//, '');
         vm.runInNewContext(fs.readFileSync(require('node:path').join(CONTENT, rel), 'utf8'), scope);
+      },
+      // the plugin's modules, as Zotero loads bootstrap.js: into the plugin's own scope, past the script cache
+      loadSubScriptWithOptions: (url, { target, ignoreCache } = {}) => {
+        if (!url.startsWith(ROOT_URI) || target !== vm.runInContext('globalThis', context) || ignoreCache !== true) {
+          throw Error('unexpected script load: ' + url);
+        }
+        (log.modules = log.modules || []).push(url.slice(ROOT_URI.length));
+        const file = require('node:url').fileURLToPath(url);
+        vm.runInContext(fs.readFileSync(file, 'utf8'), context, { filename: file });
       } },
     },
     Components: {
@@ -704,6 +715,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     ChromeUtils: { importESModule: url => (/AddonManager/.test(url) ? { AddonManager: addonManager } : { Subprocess }) },
   });
   vm.runInContext(source, context);
+  context.loadModules(ROOT_URI);   // as startup() does first
   const runner = context.ScholiumRunner;
   runner.NET_RETRY_MS = 40;
   // each run's end as finish() is given it: its outcome and the tokens' detail (a chat's state line shows them, an

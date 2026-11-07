@@ -305,5 +305,5 @@ def test_backend_bridge_is_the_plugin(tmp_path, plugin, capsys, backend):
 
 
 def test_the_plugin_reads_no_backend_name():
-    from plugin_harness import BOOTSTRAP
-    assert '"bridge"' not in BOOTSTRAP.read_text(encoding="utf8")
+    from plugin_harness import plugin_source
+    assert '"bridge"' not in plugin_source()

@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-from plugin_harness import BOOTSTRAP, NODE, run_scenarios
+from plugin_harness import BOOTSTRAP, LOAD_PLUGIN, NODE, run_scenarios
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
@@ -566,7 +566,7 @@ def facts(tmp_path_factory):
 
 
 # the /scholium/apply endpoint in a Zotero whose transaction keeps what was saved inside it only when it ends without an error
-RUN_APPLY = r"""
+RUN_APPLY = LOAD_PLUGIN + r"""
 const fs = require('node:fs');
 const vm = require('node:vm');
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
@@ -597,7 +597,7 @@ const context = vm.createContext({ Zotero: {
   DB: { executeTransaction: async callback => { pending = []; try { await callback(); committed.push(...pending); } finally { pending = null; } } },
   Item,
 } });
-vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+loadPlugin(context, process.argv[1]);
 context.ScholiumEndpoints.apply(input.data)
   .then(result => ({ result }), error => ({ error: String(error && error.message || error) }))
   .then(out => process.stdout.write(JSON.stringify(Object.assign(out, {

@@ -9,7 +9,7 @@ import sys
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-TOP = {"manifest.json", "bootstrap.js", "prefs.js", "settings.xhtml", "settings.js", "content", "locale"}
+TOP = {"manifest.json", "bootstrap.js", "prefs.js", "settings.xhtml", "settings.js", "content", "locale", "modules"}
 
 
 def run(script, *args):
@@ -57,6 +57,10 @@ def test_package_of_the_working_tree(tmp_path):
     assert {n.split("/")[0] for n in files} == TOP == set(os.listdir(ROOT / "plugin/scholium"))
     assert files["content/skill/zotero-scholium/SKILL.md"] == (ROOT / "skills/zotero-scholium/SKILL.md").read_bytes()
     assert files["bootstrap.js"] == (ROOT / "plugin/scholium/bootstrap.js").read_bytes()
+    modules = sorted((ROOT / "plugin/scholium/modules").iterdir())
+    assert modules and f"modules: {len(modules)};" in out
+    for module in modules:
+        assert files["modules/" + module.name] == module.read_bytes(), module.name
 
 
 def test_build_leaves_out_compiled_python_and_an_old_content_skill(tmp_path):
@@ -84,12 +88,14 @@ def test_check_names_what_is_missing_or_changed(tmp_path):
     assert run("build_xpi.py", "--repo", repo, xpi)[0] == 0
     at = "content/skill/zotero-scholium/"
     bad = rewrite(xpi, tmp_path / "bad.xpi",
-                  drop={at + "scripts/scholium.py", "content/scholium.css", "locale/zh-CN/scholium.ftl"},
-                  put={at + "SKILL.md": b"changed\n", at + "scripts/__pycache__/scholium.cpython-312.pyc": b"\0"})
+                  drop={at + "scripts/scholium.py", "content/scholium.css", "locale/zh-CN/scholium.ftl", "modules/agents.js"},
+                  put={at + "SKILL.md": b"changed\n", at + "scripts/__pycache__/scholium.cpython-312.pyc": b"\0",
+                       "modules/extra.js": b"\n"})
     code, out = run("check_xpi.py", "--repo", repo, bad)
     assert code == 1, out
     for expected in ["missing content/skill/zotero-scholium/scripts/scholium.py", "missing content/scholium.css",
-                     "missing locale/zh-CN/scholium.ftl",
+                     "missing locale/zh-CN/scholium.ftl", "missing modules/agents.js",
+                     "modules/extra.js is not in MODULES, so the plugin does not load it",
                      "content/skill/zotero-scholium/SKILL.md differs from skills/zotero-scholium/SKILL.md",
                      "scripts/__pycache__/scholium.cpython-312.pyc: compiled Python"]:
         assert expected in out, out

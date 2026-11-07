@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from plugin_harness import BOOTSTRAP, NODE, run_scenarios
+from plugin_harness import BOOTSTRAP, NODE, plugin_source, run_scenarios
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
@@ -153,5 +153,5 @@ def skill_files():
 
 
 def test_the_plugin_names_every_file_of_the_skill():
-    named = re.search(r"SKILL_FILES: \[(.*?)\]", Path(BOOTSTRAP).read_text(encoding="utf8"), re.S).group(1)
+    named = re.search(r"SKILL_FILES: \[(.*?)\]", plugin_source(), re.S).group(1)
     assert sorted(re.findall(r'"([^"]+)"', named)) == sorted(skill_files())

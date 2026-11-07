@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from plugin_harness import BOOTSTRAP, NODE, PLUGIN, css_rules, run_scenarios
+from plugin_harness import BOOTSTRAP, LOAD_PLUGIN, NODE, PLUGIN, css_rules, run_scenarios
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
@@ -1182,7 +1182,7 @@ def test_the_settings_page_controls_show_their_words():
 
 
 def test_startup_gives_the_runner_its_root_before_it_starts():
-    script = r"""
+    script = LOAD_PLUGIN + r"""
 const fs = require('node:fs');
 const vm = require('node:vm');
 const context = vm.createContext({
@@ -1191,7 +1191,7 @@ const context = vm.createContext({
   PathUtils: { join: (...p) => p.join('/') }, IOUtils: { exists: async () => false, writeUTF8: async () => {} },
   setTimeout: () => 0, clearTimeout() {},
 });
-vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+loadPlugin(context, process.argv[1]);
 const seen = [];
 context.ScholiumRunner.start = () => { seen.push(context.ScholiumRunner.rootURI); };
 context.startup({ id: 'x', version: '0.1.9', rootURI: 'jar:file:///x.xpi!/' }, 5)
