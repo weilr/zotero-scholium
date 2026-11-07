@@ -34,6 +34,8 @@
   opens on a new conversation with the others as removable chips above the box, and each message goes with every
   paper's `paper.json`. The conversation is kept with the first paper; its log names the others, so later messages keep
   them.
+- With Zotero in Japanese, Korean, German, French, Spanish, Russian, Portuguese or Traditional Chinese, the plugin's
+  prompts give the agent that language, so the translations, margin notes, reading note and answers are written in it.
 
 ### Changed
 

@@ -372,11 +372,8 @@ var ScholiumToggle = {
     } catch (e) {}
   },
 
-  label(shown) {
-    const zh = String(Zotero.locale || "").toLowerCase().startsWith("zh");
-    if (shown) return zh ? "隐藏 Scholium 批注" : "Hide scholium annotations";
-    return zh ? "显示 Scholium 批注" : "Show scholium annotations";
-  },
+  // the button's words, in Zotero's language (the runner's texts)
+  label(shown) { return ScholiumRunner.text(shown ? "toggleHide" : "toggleShow"); },
 
   // 20 x 20 eye; crossed out while the annotations are hidden
   icon(doc, shown) {
@@ -555,6 +552,7 @@ var ScholiumRunner = {
   unsent: new Map(),        // "<library>/<item key>/<tab>/<agent>/<conversation>" -> the words in a section's message box, not yet
                             // sent; the agent only for an annotation session
   katexLib: undefined,      // KaTeX once loaded (null when it cannot be), for the formulas in messages
+  i18n: {},                 // language -> its texts (content/i18n/<language>.js) once loaded, null when they cannot be
   mathCache: new Map(),     // "D"/"I" + TeX -> its MathML, or null when KaTeX cannot read it
   paused: null,             // { <agent>: { agent, until, known, throttled, timer } } while an agent's usage limit or its
                             // service's limit holds that agent's runs; null while none does
@@ -610,19 +608,75 @@ var ScholiumRunner = {
 
   log(msg) { Zotero.debug("[scholium] " + msg); },
 
+  // the prompts' language: Chinese in both Chinese locales, else English
   zh() { return String(Zotero.locale || "").toLowerCase().startsWith("zh"); },
 
+  // the language of the section's texts, from Zotero's: a locale/ folder's name (pt-BR for pt-PT too), en-US for one
+  // the plugin does not have
+  lang() {
+    const locale = String(Zotero.locale || "").toLowerCase(), first = locale.split(/[-_]/)[0];
+    if (first === "zh") return /^zh[-_](tw|hk|mo|hant)\b/.test(locale) ? "zh-TW" : "zh-CN";
+    return { ja: "ja-JP", ko: "ko-KR", de: "de", fr: "fr-FR", es: "es-ES", ru: "ru-RU", pt: "pt-BR" }[first] || "en-US";
+  },
+
+  // the line that gives an agent the user's language where the prompt's own is not it (Traditional Chinese has the
+  // Chinese prompt, the others the English one)
+  languageLines() {
+    const lang = this.lang();
+    if (lang === "zh-TW") return ["用户使用繁体中文：高亮的译文、页边批注、阅读笔记和回答都用繁体中文写。"];
+    const name = { "ja-JP": "Japanese", "ko-KR": "Korean", de: "German", "fr-FR": "French", "es-ES": "Spanish", "ru-RU": "Russian",
+                   "pt-BR": /^pt[-_]pt/i.test(String(Zotero.locale)) ? "European Portuguese" : "Brazilian Portuguese" }[lang];
+    return name ? [`The user's language is ${name}: write the highlight translations, margin notes, the reading note and answers in ${name}.`] : [];
+  },
+
+  // uv's installer for this system, as uv's documentation gives it
+  uvInstall() {
+    return Services.appinfo.OS === "WINNT" ? 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"'
+      : "curl -LsSf https://astral.sh/uv/install.sh | sh";
+  },
+
+  // a text of the section in Zotero's language: from the language's table (a key it lacks in English), else from the
+  // English or Simplified Chinese of baseTexts
   text(key, ...args) {
-    const zh = this.zh();
+    const lang = this.lang();
+    const own = lang === "en-US" || lang === "zh-CN" ? null : this.localTexts(lang);
+    const t = own && key in own ? own[key] : this.baseTexts(lang === "zh-CN")[key];
+    return typeof t === "function" ? t(...args) : t;
+  },
+
+  // a language's table, content/i18n/<language>.js, loaded once: the file sets `texts`, a function that is given the
+  // helpers below and gives the keys of baseTexts, each a string or a function of the same arguments; null when it
+  // cannot be loaded
+  localTexts(lang) {
+    if (!(lang in this.i18n)) {
+      this.i18n[lang] = null;
+      try {
+        const scope = {};
+        Services.scriptloader.loadSubScript(`${this.chrome}i18n/${lang}.js`, scope);
+        const runner = this;
+        if (typeof scope.texts === "function") {
+          this.i18n[lang] = scope.texts({
+            name: (agent, short = false) => runner.agentName(agent, short),   // Claude Code, Claude or Codex
+            text: (key, ...args) => runner.text(key, ...args),               // another text of the table
+            get os() { return Services.appinfo.OS; },                         // WINNT, Darwin or Linux
+            get uvInstall() { return runner.uvInstall(); },                   // uv's install command for the system
+          });
+        }
+      } catch (e) { this.log(`texts of ${lang} not loaded: ` + e); }
+    }
+    return this.i18n[lang];
+  },
+
+  // the section's texts in English, or in Simplified Chinese (zh); each other language has a table of the same keys in
+  // content/i18n (localTexts)
+  baseTexts(zh) {
     const word = (k, one, many) => (k === 1 ? one : many);
     const plural = (k, one, many) => `${k} ${word(k, one, many)}`;
     const os = Services.appinfo.OS;
-    // uv's installer for this system, as uv's documentation gives it
-    const uvInstall = os === "WINNT" ? 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"'
-      : "curl -LsSf https://astral.sh/uv/install.sh | sh";
+    const uvInstall = this.uvInstall();
     // the sentence a redo's or a deletion's question has for a paper in a group library
     const groupShared = zh ? "这是群组文库：群组的所有成员都受影响。" : "This is a group library: it applies to every member.";
-    const t = {
+    return {
       headline: zh ? "Scholium 批注" : "Scholium annotation",
       noPdf: zh ? "这篇论文没有 PDF 附件：在 Zotero 里添加论文的 PDF 后再试。" : "This paper has no PDF attachment: add the paper's PDF in Zotero, then try again.",
       noFile: zh ? "这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）：在 Zotero 里打开它以下载，或重新链接文件后再试。"
@@ -940,8 +994,13 @@ var ScholiumRunner = {
       tokCacheWrite: zh ? "缓存写入" : "cache write",
       tokCacheRead: zh ? "缓存读取" : "cache read",
       tokOut: zh ? "输出" : "output",
-    }[key];
-    return typeof t === "function" ? t(...args) : t;
+      // a date without the year; a length of time in words (6 分 17 秒 / 6m 17s), whole hours with their minutes
+      monthDay: (month, day) => zh ? `${month}月${day}日` : `${month}/${day}`,
+      durationWords: (h, m, s) => zh ? (h ? `${h} 小时 ${m} 分` : m ? `${m} 分 ${s} 秒` : `${s} 秒`) : h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`,
+      // the reader toolbar's eye button
+      toggleHide: zh ? "隐藏 Scholium 批注" : "Hide scholium annotations",
+      toggleShow: zh ? "显示 Scholium 批注" : "Show scholium annotations",
+    };
   },
 
   getPref(name) {
@@ -1645,6 +1704,7 @@ var ScholiumRunner = {
         "",
         "这是从 Zotero 里一键启动的无人值守任务：不要向用户提问，不要启动子代理，由你独立完成第 1–3 步并写入 Zotero。",
         this.paperRule(this.keyOf(job.att)),
+        ...this.languageLines(),
         own ? `这篇论文已有 ${own} 条本工具的注释，用户已确认整篇重做（配置里设 cleanup: true）。` : "这篇论文目前没有本工具的注释。",
         ...(job.extra ? ["", "用户的附加要求：", job.extra] : []),
         "",
@@ -1663,6 +1723,7 @@ var ScholiumRunner = {
       "",
       "This is an unattended task started from Zotero with one click: do not ask the user anything and do not start sub-agents; complete steps 1-3 yourself and write to Zotero.",
       this.paperRule(this.keyOf(job.att)),
+      ...this.languageLines(),
       own ? `The paper already carries ${own} annotations of this tool; the user confirmed a complete redo (cleanup: true in the configuration).` : "The paper carries no annotations of this tool yet.",
       ...(job.extra ? ["", "The user's extra instructions:", job.extra] : []),
       "",
@@ -1689,6 +1750,7 @@ var ScholiumRunner = {
       "",
       "这是从 Zotero 里发来的无人值守任务：不要向用户提问，不要启动子代理。只回答，不写批注和笔记；用户在问题里明确要求时，才按技能的流程写入 Zotero。",
       this.paperRule(this.keyOf(job.att)),
+      ...this.languageLines(),
       ...this.annotationLines(job, own),
       `引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt（已有就直接读 sentences.txt）。`,
       "",
@@ -1710,6 +1772,7 @@ var ScholiumRunner = {
       "This is an unattended task sent from Zotero: do not ask the user anything and do not start sub-agents. Only answer; write no annotations "
         + "and no note unless the question asks for them, and then write to Zotero as the skill describes.",
       this.paperRule(this.keyOf(job.att)),
+      ...this.languageLines(),
       ...this.annotationLines(job, own),
       `When you quote a sentence of the paper, put its sentence number after it as [#123] (several: [#12][#15]); the numbers come from extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt (read sentences.txt when it is there).`,
       "",
@@ -1781,6 +1844,7 @@ var ScholiumRunner = {
       return (zh ? [
         "下面是用户在 Zotero 里针对这篇论文发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
           + "只是提问就直接回答；用户明确要求写批注或笔记时，才按技能的流程写入 Zotero。",
+        ...this.languageLines(),
         ...changed,
         ...this.papersLines(job),
         "",
@@ -1790,6 +1854,7 @@ var ScholiumRunner = {
       ] : [
         "Below is a follow-up message about this paper, sent from Zotero. It is still unattended: do not ask the user anything and do not start sub-agents. "
           + "Answer a question directly; write annotations or a note only when the user asks for them, and then write to Zotero as the skill describes.",
+        ...this.languageLines(),
         ...changed,
         ...this.papersLines(job),
         "",
@@ -1801,6 +1866,7 @@ var ScholiumRunner = {
     return (zh ? [
       "下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
         + "只是提问就直接回答；要改批注时按技能的流程修改配置，再写入 Zotero。",
+      ...this.languageLines(),
       ...(job.own ? ["改已经写入的批注或补几条时，都编辑写入它们的那份配置（它是这篇论文的全部批注），设 cleanup: true 整份重写"
                      + "（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置，否则下次整份重写时会把它们删掉。"] : []),
       ...changed,
@@ -1812,6 +1878,7 @@ var ScholiumRunner = {
     ] : [
       "Below is a follow-up message about this paper and its annotations, sent from Zotero. It is still unattended: do not ask the user anything and do not start sub-agents. "
         + "Answer a question directly; to change annotations, edit the configuration as the skill describes and write it to Zotero again.",
+      ...this.languageLines(),
       ...(job.own ? ["To change annotations already written or to add a few, edit the configuration they were written from (it holds the paper's whole "
                      + "set) and set cleanup: true, so that the whole set replaces them (and note_replace: true when the reading note changes); do not "
                      + "write a separate configuration with just new entries, which the next whole rewrite would delete."] : []),
@@ -4821,7 +4888,7 @@ var ScholiumRunner = {
       line.className = "scholium-annot-applied";
       const d = new Date(applied.at);
       line.textContent = this.text("appliedBy", this.agentName(applied.agent === "codex" ? "codex" : "claude"),
-                                   this.zh() ? `${d.getMonth() + 1}月${d.getDate()}日` : `${d.getMonth() + 1}/${d.getDate()}`);
+                                   this.text("monthDay", d.getMonth() + 1, d.getDate()));
       node.append(line);
     }
     return node;
@@ -5588,8 +5655,7 @@ var ScholiumRunner = {
   durationWords(ms) {
     const all = Math.max(0, Math.round(ms / 1000));
     const h = Math.floor(all / 3600), m = Math.floor((all % 3600) / 60), s = all % 60;
-    if (this.zh()) return h ? `${h} 小时 ${m} 分` : m ? `${m} 分 ${s} 秒` : `${s} 秒`;
-    return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`;
+    return this.text("durationWords", h, m, s);
   },
 
   // Opus 5.5 for claude-opus-5-5: the label the agent gave the model, else the name made readable
@@ -5787,7 +5853,7 @@ var ScholiumRunner = {
     const d = new Date(ms);
     const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
     if (d.toDateString() === new Date().toDateString()) return hm;
-    return this.zh() ? `${d.getMonth() + 1}月${d.getDate()}日 ${hm}` : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+    return `${this.text("monthDay", d.getMonth() + 1, d.getDate())} ${hm}`;
   },
 
   // the state line: this paper running, queued or paused, or its latest outcome; other papers' runs are
@@ -8340,6 +8406,7 @@ var ScholiumRunner = {
     clearTimeout(this.draftTimer);
     this.draft = this.draftTimer = null;
     this.katexLib = undefined;
+    this.i18n = {};
     this.mathCache.clear();
     this.citations.clear();
     try { if (this.codexRefresh) this.codexRefresh.close(); } catch (e) {}
