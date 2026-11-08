@@ -92,7 +92,9 @@ dir>/tmp/scholium/<attachment key>`, the file `paper.json` in it and the profile
 and no profile is created), and are told not to ask questions or start sub-agents. Before each run the plugin writes
 `paper.json` (the PDF's path, the item and attachment keys, the output directory); the prompt names that file, not the
 PDF's path. It is the plugin's and read-only: only `extract` (in place of `--pdf`) and `--list` take it with
-`--config`, and the agent writes its own configuration to another file in the output directory. A question is told to read
+`--config`, and the agent writes its own configuration to another file in the output directory. The annotation's and a
+question's prompts say how the script runs on this computer: with `uv run` when uv is on the agents' PATH, else with
+the Python found there. A question is told to read
 the paper with the skill's `status` and `extract` and to write to Zotero only when it asks for that. A session
 that has not seen the paper's annotations of the tool is told how many there are and, when the plugin saw them
 written, the configuration that wrote them, the agent and the time (kept in `<out dir>/applied.json`: a write whose output says it was applied, also "partial", is kept whatever the exit

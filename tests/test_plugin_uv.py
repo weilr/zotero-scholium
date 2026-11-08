@@ -238,6 +238,29 @@ SCENARIOS = r"""
     h.runner.stop();
   }
 
+  // how the script runs here: the annotation's and a question's prompts say uv run when uv is on the agent's PATH, else
+  // the Python found there (python when there is none); found by files on the PATH, with no process
+  const answered = ev({ type: 'result', subtype: 'success', is_error: false, result: 'ok', session_id: 'S2' });
+  for (const [name, opts] of Object.entries({
+    runUv: { env: { PATH: '/w/bin' }, present: ['/w/bin/uv.exe', '/w/bin/python.exe'] },
+    runPython: { env: { PATH: '/w/bin' }, present: ['/w/bin/python.exe'] },
+    runNone: { env: { PATH: '/w/bin' } },
+    runUvEnglish: { locale: 'en-US', env: { PATH: '/w/bin' }, present: ['/w/bin/uv.exe'] },
+    runPythonEnglish: { locale: 'en-US', env: { PATH: '/w/bin' }, present: ['/w/bin/python.exe'] },
+    runMac: mac({ present: ['/bin/zsh', '/opt/homebrew/bin/python3'] }),
+  })) {
+    const h = harness(Object.assign({ scripts: [[init, ...ending('完成。')], [init, answered]] }, opts));
+    h.runner.start('x');
+    const p = await h.pane(h.item1); await settle(40);
+    const pane = p.pane();
+    pane.tabAnnotate.click(); await settle(10);
+    pane.annotGo.click(); await settle(600);
+    pane.tabChat.click(); await settle(10);
+    pane.input.type('What is new here?'); pane.send.click(); await settle(400);
+    facts[name] = { prompts: h.log.stdin.slice(0, 2), processes: h.log.uvCalls.length + h.log.pyCalls.length };
+    h.runner.stop();
+  }
+
   // the skill's commands as uv runs them
   {
     const h = harness({});
@@ -328,7 +351,7 @@ def test_a_shell_whose_output_never_ends_is_given_up_after_its_time(facts):
     assert r["kills"] == 1
     s = facts["openStop"]
     assert s["stopped"] is True and s["job"] is False and s["queue"] == 0, "■ while it waits stops the run"
-    assert s["calls"] == s["killed"] == 1, "the process created meanwhile is killed at once"
+    assert s["calls"] == s["killed"] == 0, "no process is started"
 
 
 def test_a_shell_that_printed_its_path_is_not_waited_for(facts):
@@ -430,6 +453,23 @@ def test_the_failure_texts_recommend_uv_with_the_installer(facts):
     mac = facts["macTextsEnglish"]
     assert mac["noUv"] == f"uv was not found; install it with {UV_UNIX} in a terminal, then try again."
     assert UV_UNIX in mac["noPython"]
+
+
+@pytest.mark.parametrize("name, line", [
+    ("runUv", "这台电脑装了 uv：用 uv run 运行 scholium.py。"),
+    ("runPython", "这台电脑没有装 uv：用 python 运行 scholium.py。"),
+    ("runNone", "这台电脑没有装 uv：用 python 运行 scholium.py。"),
+    ("runUvEnglish", "uv is installed here: run scholium.py with uv run."),
+    ("runPythonEnglish", "uv is not installed here: run scholium.py with python."),
+    ("runMac", "这台电脑没有装 uv：用 python3 运行 scholium.py。"),
+])
+def test_the_prompts_say_how_the_script_runs_here(facts, name, line):
+    f = facts[name]
+    assert len(f["prompts"]) == 2, "an annotation and a question"
+    for prompt in f["prompts"]:
+        assert prompt.count(line) == 1
+        assert ("uv run 运行" in prompt or "with uv run" in prompt) == ("装了 uv" in line or "is installed" in line)
+    assert f["processes"] == 0, "no process to find it"
 
 
 def test_a_run_that_met_no_uv_says_so_unless_python_ran_the_script(facts):

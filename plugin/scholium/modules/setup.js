@@ -514,6 +514,14 @@ Object.assign(ScholiumRunner, {
     return this.onPath(Services.appinfo.OS === "WINNT" ? ["python.exe"] : ["python3", "python"], /[\\/]WindowsApps[\\/]?$/i);
   },
 
+  // how the skill's script runs on this computer, for the prompts: "uv run" when uv is on the agent's PATH, else the
+  // Python found there ("python" when there is none); files looked for, no process started
+  async scriptCommand() {
+    if (await this.onPath([Services.appinfo.OS === "WINNT" ? "uv.exe" : "uv"])) return "uv run";
+    const python = await this.pathPython();
+    return python ? python.split(/[\\/]/).pop().replace(/\.exe$/i, "") : "python";
+  },
+
   // uv on the agent's PATH and its version: the skill's script then runs as `uv run`, which provides Python and PyMuPDF.
   // Whether it answered
   async checkUv(say) {

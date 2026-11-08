@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The annotation's and a question's prompts say how the skill's script runs on this computer: with `uv run` when uv
+  is found, else with the Python found.
+
 ## 0.2.2 (2026-11-10)
 
 ### Added

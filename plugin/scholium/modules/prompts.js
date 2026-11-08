@@ -111,6 +111,15 @@ Object.assign(ScholiumRunner, {
                        + "and give that one to the dry run and to --apply. Never put the PDF's path, the paper's title or other metadata on a command line.";
   },
 
+  // the prompt's line on how the skill's script runs here (scriptCommand), once the run has looked it up
+  scriptLines(job) {
+    const s = job.script;
+    if (!s) return [];
+    const zh = this.zh();
+    if (s === "uv run") return [zh ? "这台电脑装了 uv：用 uv run 运行 scholium.py。" : "uv is installed here: run scholium.py with uv run."];
+    return [zh ? `这台电脑没有装 uv：用 ${s} 运行 scholium.py。` : `uv is not installed here: run scholium.py with ${s}.`];
+  },
+
   // the prompt's line of a paper in a group library: the group, which status and samples are given
   groupLines(job) {
     const group = this.groupOf(job.att.libraryID);
@@ -155,6 +164,7 @@ Object.assign(ScholiumRunner, {
         "",
         "这是从 Zotero 里一键启动的无人值守任务：不要向用户提问，不要启动子代理，由你独立完成第 1–3 步并写入 Zotero。",
         this.paperRule(this.keyOf(job.att)),
+        ...this.scriptLines(job),
         ...this.languageLines(),
         own ? `这篇论文已有 ${own} 条本工具的注释，用户已确认整篇重做（配置里设 cleanup: true）。` : "这篇论文目前没有本工具的注释。",
         ...(job.extra ? ["", "用户的附加要求：", job.extra] : []),
@@ -174,6 +184,7 @@ Object.assign(ScholiumRunner, {
       "",
       "This is an unattended task started from Zotero with one click: do not ask the user anything and do not start sub-agents; complete steps 1-3 yourself and write to Zotero.",
       this.paperRule(this.keyOf(job.att)),
+      ...this.scriptLines(job),
       ...this.languageLines(),
       own ? `The paper already carries ${own} annotations of this tool; the user confirmed a complete redo (cleanup: true in the configuration).` : "The paper carries no annotations of this tool yet.",
       ...(job.extra ? ["", "The user's extra instructions:", job.extra] : []),
@@ -201,6 +212,7 @@ Object.assign(ScholiumRunner, {
       "",
       "这是从 Zotero 里发来的无人值守任务：不要向用户提问，不要启动子代理。只回答，不写批注和笔记；用户在问题里明确要求时，才按技能的流程写入 Zotero。",
       this.paperRule(this.keyOf(job.att)),
+      ...this.scriptLines(job),
       ...this.languageLines(),
       ...this.annotationLines(job, own),
       `引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt（已有就直接读 sentences.txt）。`,
@@ -223,6 +235,7 @@ Object.assign(ScholiumRunner, {
       "This is an unattended task sent from Zotero: do not ask the user anything and do not start sub-agents. Only answer; write no annotations "
         + "and no note unless the question asks for them, and then write to Zotero as the skill describes.",
       this.paperRule(this.keyOf(job.att)),
+      ...this.scriptLines(job),
       ...this.languageLines(),
       ...this.annotationLines(job, own),
       `When you quote a sentence of the paper, put its sentence number after it as [#123] (several: [#12][#15]); the numbers come from extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt (read sentences.txt when it is there).`,

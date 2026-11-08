@@ -76,6 +76,7 @@ Object.assign(ScholiumRunner, {
       this.finish(job, false, missing);
       return { ok: false, delivered: false };
     }
+    job.script = await this.scriptCommand();   // the prompt says how the script runs here
     await IOUtils.makeDirectory(this.outDir(key), { createAncestors: true, ignoreExisting: true });
     if (this.job !== running || running.stopAsked) return this.halted(job, running);   // the plugin stopped, or ■, while the folder was prepared
     await this.writePaper(job.att, job.path, job.parentKey);
