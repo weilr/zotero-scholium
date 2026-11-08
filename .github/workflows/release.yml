@@ -13,7 +13,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: the tag names the version of the package, the tool and the plugins
         run: python scripts/check_versions.py "${{ github.ref_name }}"
       - name: build scholium.xpi (with the skill in content/skill, which the plugin installs when an agent has none)

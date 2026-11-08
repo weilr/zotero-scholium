@@ -14,8 +14,8 @@ jobs:
         os: [ubuntu-24.04, windows-latest]
         python: ["3.9", "3.12"]   # the oldest supported (requires-python) and a recent one
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
       - run: pip install -e ".[dev]"
@@ -30,8 +30,8 @@ jobs:
   xpi:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: build scholium.xpi as release.yml does, and check the plugin's files and the skill it carries
