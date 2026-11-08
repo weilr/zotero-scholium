@@ -21,7 +21,7 @@ CHOICES = {
     "zh-TW": "zh-TW", "zh-HK": "zh-TW", "zh-MO": "zh-TW", "zh-Hant": "zh-TW", "zh-Hant-TW": "zh-TW",
     "ja-JP": "ja-JP", "ja": "ja-JP", "ko-KR": "ko-KR", "ko": "ko-KR",
     "de": "de", "de-DE": "de", "de-AT": "de", "fr-FR": "fr-FR", "fr-CA": "fr-FR", "es-ES": "es-ES", "es-MX": "es-ES",
-    "ru-RU": "ru-RU", "ru": "ru-RU", "pt-BR": "pt-BR", "pt-PT": "pt-BR",
+    "ru-RU": "ru-RU", "ru": "ru-RU", "pt-BR": "pt-BR", "pt_BR": "pt-BR", "pt": "pt-BR", "pt-PT": "pt-PT", "pt-AO": "pt-PT",
 }
 # the language line of each language's prompts, and whether they are the Chinese ones
 LINES = {
@@ -152,10 +152,9 @@ def test_zotero_locale_chooses_the_language(facts):
 
 
 def test_each_language_is_a_locale_folder_and_has_a_table():
-    # every language but English and Simplified Chinese (baseTexts) has a table; pt-PT has pt-BR's settings page
-    assert set(LOCALES) == set(CHOICES.values()) | {"pt-PT"}
-    assert set(LANGS) == set(LOCALES) - {"en-US", "zh-CN", "pt-PT"}
-    assert (PLUGIN / "locale/pt-PT/scholium.ftl").read_bytes() == (PLUGIN / "locale/pt-BR/scholium.ftl").read_bytes()
+    # every language but English and Simplified Chinese (baseTexts) has a table
+    assert set(LOCALES) == set(CHOICES.values())
+    assert set(LANGS) == set(LOCALES) - {"en-US", "zh-CN"}
 
 
 def test_the_english_and_chinese_texts_render(facts):
@@ -190,12 +189,12 @@ def test_the_section_and_the_reader_button_are_in_the_language(facts, lang):
 
 # a page as a citation gives it in each language (page 2), and a number of tokens in thousands
 PAGES = {"en-US": "p.2", "zh-CN": "p.2", "zh-TW": "第\u00a02\u00a0頁", "ja-JP": "p.2", "ko-KR": "2쪽", "de": "S.\u00a02",
-         "fr-FR": "p.\u00a02", "es-ES": "p.\u00a02", "ru-RU": "с.\u00a02", "pt-BR": "p.\u00a02"}
+         "fr-FR": "p.\u00a02", "es-ES": "p.\u00a02", "ru-RU": "с.\u00a02", "pt-BR": "p.\u00a02", "pt-PT": "p.\u00a02"}
 COMMA = ["999", "550k", "1,000k", "2,568k"]
 THOUSANDS = {"en-US": COMMA, "zh-CN": COMMA, "zh-TW": COMMA, "ja-JP": COMMA, "ko-KR": COMMA,
              "de": ["999", "550k", "1.000k", "2.568k"], "fr-FR": ["999", "550k", "1\u202f000k", "2\u202f568k"],
              "es-ES": ["999", "550k", "1000k", "2568k"], "ru-RU": ["999", "550k", "1\u00a0000k", "2\u00a0568k"],
-             "pt-BR": ["999", "550k", "1.000k", "2.568k"]}
+             "pt-BR": ["999", "550k", "1.000k", "2.568k"], "pt-PT": ["999", "550k", "1000k", "2568k"]}
 
 
 @pytest.mark.parametrize("lang", ["en-US", "zh-CN"] + LANGS)
@@ -217,6 +216,23 @@ def test_the_prompts_carry_the_language_line(facts, locale):
             assert text.count(line) == 1, kind
         else:
             assert "The user's language is" not in text and "繁体中文" not in text, kind
+
+
+# words of Brazilian Portuguese that European Portuguese says otherwise (ficheiro, Lixo, eliminar, guardar, the person
+# addressed without você, "a fazer" for the gerund, numa, registo, secção, Definições, ecrã, transferir, utilizador,
+# sessão iniciada); Zotero's own label of its local API setting, which its pt-PT keeps, is left out
+BRAZILIAN = ["arquivo", "lixeira", "exclu", "salv", "você", " em uma ", " em um ", "registro", "seção", "seções", "configurações",
+             "tela", "aplicativo", "baixar", "download", "usuário", "conectad", "faça login"]
+
+
+@pytest.mark.parametrize("path", ["content/i18n/pt-PT.js", "locale/pt-PT/scholium.ftl"])
+def test_european_portuguese_has_its_own_words(path):
+    text = (PLUGIN / path).read_text(encoding="utf-8").replace(
+        "Permitir que outros aplicativos neste computador se comuniquem com o Zotero", "")
+    lower = text.lower()
+    assert [w for w in BRAZILIAN if w in lower] == []
+    gerunds = sorted(set(re.findall(r"(?i)\b\w+(?:ando|endo|indo)\b", text)) - {"quando"})
+    assert gerunds == []
 
 
 def ftl_messages(path):
