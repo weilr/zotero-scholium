@@ -44,7 +44,7 @@ PYMUPDF_MISSING = "PyMuPDF is not installed; run the script with uv run, or run:
 NO_TEXT_LAYER = "the PDF has no text layer (a scanned document); run OCR first (e.g. ocrmypdf, or Acrobat's Recognize Text), then annotate again"
 NO_TEXT_EXIT = 3
 
-__version__ = "0.2.1"
+__version__ = "0.2.2"
 
 TAG = "zotero-scholium"     # tag applied to every annotation and note created by this tool
 LEGACY_TAGS = {"zotero-marginalia", "zotero-paper-annotate"}   # tags written by earlier versions; still recognised as belonging to this tool
