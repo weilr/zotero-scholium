@@ -104,6 +104,7 @@ var ScholiumRunner = {
   codexRefused: new Set(),  // the names a thread refused as servers of config.toml, in this session
   CODEX_LIST_MS: 10000,     // the longest a run waits for the servers' list, when Codex never listed them
   CHECK_MS: 10000,          // the longest the setup check waits for a program's answer
+  MAX_OUTPUT_TOKENS: 32000, // one turn's output, thinking included, in an annotation's Claude Code runs (runClaude)
   LOGIN_PATH_MS: 5000,      // the longest the login shell is waited for when its PATH is read (loginPath)
   loginPathRead: null,      // the promise of the login shell's PATH, read once a session; "" when there is none
   cites: null,              // { key, map } the sentences of the paper whose transcript is being drawn

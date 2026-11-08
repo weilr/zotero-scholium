@@ -2900,7 +2900,8 @@ def test_claude_is_started_headless_in_the_data_directory(facts):
     call = facts["call"]
     assert call["command"] == CLAUDE
     assert call["workdir"] == "/data"
-    assert call["env"] == {"PYTHONIOENCODING": "utf-8", "SCHOLIUM_ZOTERO_PORT": "23119"} and call["append"] is True
+    assert call["env"] == {"PYTHONIOENCODING": "utf-8", "SCHOLIUM_ZOTERO_PORT": "23119", "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000"}, "an annotation's turns are capped"
+    assert call["append"] is True
     args = call["args"]
     assert args[:7] == ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "auto"]
     assert args[args.index("--add-dir") + 1] == "/home/u/.claude/skills/zotero-scholium"

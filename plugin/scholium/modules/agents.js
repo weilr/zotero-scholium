@@ -376,9 +376,13 @@ Object.assign(ScholiumRunner, {
   // Claude Code: `claude -p` with the prompt on stdin and its stream-json events on stdout
   async runClaude(claude, ctx) {
     const { job, key } = ctx;
+    const env = await this.agentEnv();
+    // a turn of an annotation or of words to its session writes at most MAX_OUTPUT_TOKENS, its thinking included, unless
+    // the user's environment sets the limit
+    if ((job.kind === "annotate" || ctx.running.annotation) && !this.env("CLAUDE_CODE_MAX_OUTPUT_TOKENS")) env.environment.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(this.MAX_OUTPUT_TOKENS);
     const proc = await this.subprocess().call(Object.assign({
       command: claude, arguments: await this.args(job), workdir: Zotero.DataDirectory.dir, stderr: "pipe",
-    }, await this.agentEnv()));
+    }, env));
     if (this.job !== ctx.running || ctx.running.stopAsked) {   // the plugin stopped, or ■, while the process was being created
       try { proc.kill(); } catch (e) {}
       ctx.current = { key, proc, cancelled: true };

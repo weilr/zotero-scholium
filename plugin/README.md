@@ -59,6 +59,8 @@ Each Claude Code run:
   user's skills stay;
 - has only the tools it uses (`--tools`): Skill, Bash, PowerShell, Read, Write, Edit, Grep and Glob, and in a
   chat also WebSearch and WebFetch;
+- in an annotation and in words to its session, writes at most 32,000 tokens in one turn, its thinking included
+  (`CLAUDE_CODE_MAX_OUTPUT_TOKENS`), unless the user's environment sets that variable;
 - logs its events, without the streaming deltas, to the conversation's log,
   `<data dir>/tmp/scholium/<attachment key>/conversations/chat-<time>.jsonl` (an annotation session's
   `annotate-claude-<time>.jsonl`); a tool's result is kept without

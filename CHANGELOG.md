@@ -13,6 +13,8 @@
 - The skill corrects all of a dry run's findings in one edit of the configuration before `--apply`.
 - The reader's eye button turns on by itself with the first annotation written, for a user who has never used it;
   from then on only the button changes it.
+- In an annotation's Claude Code runs, one turn writes at most 32,000 tokens, thinking included
+  (`CLAUDE_CODE_MAX_OUTPUT_TOKENS`), unless the user's environment sets that variable.
 
 ## 0.2.2 (2026-11-10)
 

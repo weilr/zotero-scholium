@@ -261,6 +261,30 @@ SCENARIOS = r"""
     h.runner.stop();
   }
 
+  // one turn's output in an annotation's Claude Code runs: capped unless the user's environment sets it; a question's
+  // runs and Codex are left as they are
+  const cap = o => (o.environment || {}).CLAUDE_CODE_MAX_OUTPUT_TOKENS || null;
+  for (const [name, opts] of Object.entries({ capClaude: {}, capUserSet: { env: { CLAUDE_CODE_MAX_OUTPUT_TOKENS: '64000' } } })) {
+    const h = harness(Object.assign({ scripts: [[init, ...ending('完成。')], [init, ...ending('改好了。')], [init, answered]] }, opts));
+    h.runner.start('x');
+    const p = await h.pane(h.item1); await settle(40);
+    const pane = p.pane();
+    pane.tabAnnotate.click(); await settle(10);
+    pane.annotGo.click(); await settle(600);
+    pane.input.type('第 5 页那条译文改短'); pane.send.click(); await settle(400);   // words to the annotation's session
+    pane.tabChat.click(); await settle(10);
+    pane.input.type('What is new here?'); pane.send.click(); await settle(400);
+    facts[name] = { caps: h.log.calls.map(c => cap(c.opts)), resumed: h.log.calls.map(c => c.opts.arguments.includes('--resume')) };
+    h.runner.stop();
+  }
+  {
+    const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' } });
+    h.runner.start('x');
+    await h.runner.annotate([h.item1]); await settle(600);
+    facts.capCodex = h.log.codexCalls.map(cap);
+    h.runner.stop();
+  }
+
   // the skill's commands as uv runs them
   {
     const h = harness({});
@@ -306,7 +330,7 @@ def facts(tmp_path_factory):
 def test_the_login_shells_path_goes_before_zoteros_in_each_run_and_is_read_once(facts):
     r = facts["macRuns"]
     assert r["shells"] == [["/bin/zsh", ["-ilc", "printf '%s' \"@SCHOLIUM_PATH@$PATH@SCHOLIUM_PATH@\""]]], "asked once, as a login shell"
-    env = dict(PLAIN, PATH=MERGED + ":/home/u/.local/bin")
+    env = dict(PLAIN, PATH=MERGED + ":/home/u/.local/bin", CLAUDE_CODE_MAX_OUTPUT_TOKENS="32000")
     assert r["envs"] == [env, env], "each folder once; ~/.local/bin there and added, ~/.cargo/bin not there and left out"
     assert r["append"] == [True, True]
     c = facts["macCodex"]
@@ -347,7 +371,7 @@ def test_a_shell_whose_output_never_ends_is_given_up_after_its_time(facts):
     assert o["kills"] == 1 and o["calls"] == 1 and o["timers"] == []
     r = facts["openRun"]
     assert r["before"] == {"calls": 0, "job": True}, "the run waits for the shell"
-    assert r["envs"] == [PLAIN], "then goes on with Zotero's PATH"
+    assert r["envs"] == [dict(PLAIN, CLAUDE_CODE_MAX_OUTPUT_TOKENS="32000")], "then goes on with Zotero's PATH"
     assert r["kills"] == 1
     s = facts["openStop"]
     assert s["stopped"] is True and s["job"] is False and s["queue"] == 0, "■ while it waits stops the run"
@@ -470,6 +494,14 @@ def test_the_prompts_say_how_the_script_runs_here(facts, name, line):
         assert prompt.count(line) == 1
         assert ("uv run 运行" in prompt or "with uv run" in prompt) == ("装了 uv" in line or "is installed" in line)
     assert f["processes"] == 0, "no process to find it"
+
+
+def test_an_annotations_claude_code_turns_are_capped_unless_the_user_set_it(facts):
+    c = facts["capClaude"]
+    assert c["resumed"] == [False, True, False], "the annotation, words to its session, a question"
+    assert c["caps"] == ["32000", "32000", None]
+    assert facts["capUserSet"]["caps"] == [None, None, None], "the user's own value is inherited, not replaced"
+    assert facts["capCodex"] and all(v is None for v in facts["capCodex"])
 
 
 def test_a_run_that_met_no_uv_says_so_unless_python_ran_the_script(facts):
