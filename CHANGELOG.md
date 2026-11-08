@@ -7,7 +7,7 @@
 - The annotation's and a question's prompts say how the skill's script runs on this computer: with `uv run` when uv
   is found, else with the Python found.
 - An annotation ends with one short line in the user's language; its card shows the warnings that line names in every
-  language of the plugin.
+  language of the plugin, also when it gives them as a count (剩余警告 1 条（…）, 1 remaining warning (…)).
 - Nothing asks to close and reopen the PDF after writing (the skill, its JavaScript file, the READMEs): open readers
   show the new annotations by themselves.
 - The skill corrects all of a dry run's findings in one edit of the configuration before `--apply`.

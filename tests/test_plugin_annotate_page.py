@@ -613,6 +613,15 @@ SCENARIOS = r"""
     facts.warningsTable = ['剩余警告：无', '高亮 3 条，剩余警告：无。', '剩余警告：没有', '剩余警告：无法定位 2 句', '剩余警告：没有找到第 2 页',
                            'remaining warnings: none', '30 highlights, remaining warnings: none.', 'No warnings.', 'no warnings\n剩余警告：label']
       .map(s => w.runner.warningsOf(s));
+    // a count, as agents have written it in earlier logs
+    facts.warningsCounted = [
+      '高亮 25 条（核心 12 条），页边批注 7 条，笔记《Direct Preference Optimization》，剩余警告 1 条（第 8 页译文提到 "DPO" 未出现在原句中，属提示性质，已写入）。',
+      '高亮 3 条，剩余警告2条：第 3 页译文偏长；第 5 页术语缺失。', '高亮 3 条，剩余警告 2 条。', '高亮 3 条，剩余警告 0 条。', '高亮 3 条，无剩余警告。',
+      '25 highlights (12 core), 7 margin notes, note “DPO”, 1 remaining warning (page 8: “DPO” is not in the sentence).',
+      '30 highlights, 2 remaining warnings.', '30 highlights, 0 remaining warnings.', '30 highlights, 2 remaining warnings: page 3 is long; page 5 lacks a term',
+      '30 highlights, remaining warnings: 1 (page 8 translation is advisory).', '30 highlights, remaining warnings: 0.',
+      '30 highlights, remaining warnings: 2 translation warnings on page 3',
+    ].map(s => w.runner.warningsOf('Done.\n' + s));
   }
   // an annotation's second try after a failed connection, and its continuation after the usage limit, are drawn as the
   // annotation, with its card; the failure before them has no Retry
@@ -1059,6 +1068,9 @@ def test_the_numbers_of_the_card(facts):
     assert c["unplaced"]["warnings"] == "无法定位 2 句" and c["unplaced"]["title"] == "✓ 批注完成，剩余警告：无法定位 2 句"
     assert c["elsewhere"]["warnings"] == "第 4 页“label”警告已接受"
     assert facts["warningsTable"] == ["", "", "", "无法定位 2 句", "没有找到第 2 页", "", "", "", "label"]
+    assert facts["warningsCounted"] == ['第 8 页译文提到 "DPO" 未出现在原句中，属提示性质，已写入', "第 3 页译文偏长；第 5 页术语缺失", "2 条", "", "",
+                                        "page 8: “DPO” is not in the sentence", "2", "", "page 3 is long; page 5 lacks a term",
+                                        "page 8 translation is advisory", "", "2 translation warnings on page 3"]
 
 
 def test_a_second_try_and_a_continuation_are_the_annotations(facts):

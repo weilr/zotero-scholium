@@ -243,8 +243,8 @@ WARNINGS = {"en-US": ("remaining warnings", "none"), "zh-CN": ("剩余警告", "
             "es-ES": ("advertencias pendientes", "ninguna"), "ru-RU": ("оставшиеся предупреждения", "нет"),
             "pt-BR": ("avisos restantes", "nenhum"), "pt-PT": ("avisos restantes", "nenhum")}
 CLOSING_EN = ("Your final reply is one short line in the user's language and nothing else: N highlights (M core), K margin notes, "
-              "note “title”, remaining warnings.")
-CLOSING_ZH = "最后的回复只写一行中文，不写别的：高亮 N 条（核心 M 条），页边批注 K 条，笔记《标题》，剩余警告。"
+              "note “title”, remaining warnings as “remaining warnings: …” (“remaining warnings: none” when there are none).")
+CLOSING_ZH = "最后的回复只写一行中文，不写别的：高亮 N 条（核心 M 条），页边批注 K 条，笔记《标题》，剩余警告，写成“剩余警告：…”（没有时写“剩余警告：无”）。"
 
 
 @pytest.mark.parametrize("lang", ["en-US", "zh-CN"] + LANGS)
@@ -256,9 +256,9 @@ def test_the_warnings_left_are_read_in_every_language(facts, lang):
     assert f["cards"] == {"named": f["own"][0], "none": f["own"][1]}, "the card shows them, or that none are left"
     label, none = WARNINGS[lang]
     if lang == "en-US":
-        assert f["closing"] == CLOSING_EN, "the English prompt as before"
+        assert f["closing"] == CLOSING_EN
     elif lang == "zh-CN":
-        assert f["closing"] == CLOSING_ZH, "the Chinese prompt as before"
+        assert f["closing"] == CLOSING_ZH
     elif lang == "zh-TW":
         assert f["closing"].endswith(f"剩余警告，写成“{label}：…”（没有时写“{label}：{none}”）。")
     else:

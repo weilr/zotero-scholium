@@ -1086,6 +1086,16 @@ Object.assign(ScholiumRunner, {
     const s = String(text || "").trim().split("\n").pop();
     if (/无剩余警告|没有剩余警告|剩余警告[:：]\s*(?:无|没有)(?=$|[\s。．.，,；;!！)）])|no (?:remaining )?warnings|remaining warnings:\s*none\b/i.test(s)) return "";
     const end = x => x.trim().replace(/[\s.。．!！]+$/, "");   // without the sentence's closing mark
+    // a count, as agents have written it: 剩余警告 1 条（…）, 剩余警告2条：…, 1 remaining warning (…), remaining warnings: 2 (…);
+    // the words in the brackets or after the colon, else the count
+    const counted = /剩余警告\s*[:：]?\s*(\d+)\s*条\s*(?:[（(](.*)[）)]|[:：]\s*([^。\n]+))?/.exec(s)
+      || /(\d+)\s+remaining warnings?\b\s*(?:\((.*)\)|[:：]\s*([^.\n]+))?/i.exec(s)
+      || /remaining warnings?\s*[:：]\s*(\d+)\s*(?:\((.*)\))?\s*[.。]?\s*$/i.exec(s);
+    if (counted) {
+      const n = Number(counted[1]);
+      if (!n) return "";
+      return end(counted[2] || counted[3] || "") || (/剩余警告/.test(counted[0]) ? `${n} 条` : String(n));
+    }
     const m = /剩余警告[:：]\s*([^。\n]+)|remaining warnings:\s*([^.\n]+)/i.exec(s);
     if (m) return end(m[1] || m[2]);
     const label = String(this.text("warningsLabel") || ""), none = String(this.text("warningsNone") || "").toLowerCase();

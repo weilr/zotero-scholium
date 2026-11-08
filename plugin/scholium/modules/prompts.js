@@ -120,10 +120,8 @@ Object.assign(ScholiumRunner, {
     return [zh ? `这台电脑没有装 uv：用 ${s} 运行 scholium.py。` : `uv is not installed here: run scholium.py with ${s}.`];
   },
 
-  // the closing line's part on the warnings left: the language's label and its word for none, which warningsOf reads;
-  // the English and the Simplified Chinese prompt keep their own words
+  // the closing line's part on the warnings left: the language's label and its word for none, which warningsOf reads
   warningsPart(zh) {
-    if (this.lang() === (zh ? "zh-CN" : "en-US")) return zh ? "剩余警告" : "remaining warnings";
     const label = this.text("warningsLabel"), none = this.text("warningsNone");
     return zh ? `剩余警告，写成“${label}：…”（没有时写“${label}：${none}”）`
               : `remaining warnings as “${label}: …” (“${label}: ${none}” when there are none)`;
