@@ -206,6 +206,13 @@ def test_no_write_channel_asks_to_reopen_the_pdf():
         assert not re.search(r"(?i)close and re-?open|关闭并重新打开", text)
 
 
+def test_the_skill_corrects_all_of_the_reports_findings_in_one_edit():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    skill = open(os.path.join(root, "skills", "zotero-scholium", "SKILL.md"), encoding="utf-8").read()
+    step = skill.split("### 3. Review the report, then apply", 1)[1].split("\n## ", 1)[0]
+    assert "all its findings in one edit of the configuration (or one rewrite)" in step
+
+
 def test_author_key_is_rejected(tmp_path):
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps({"pdf": "x.pdf", "item_key": "I", "attachment_key": "A", "out_dir": "o", "author": ""}), encoding="utf8")

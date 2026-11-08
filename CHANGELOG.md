@@ -9,6 +9,7 @@
 - An annotation ends with one short line in the user's language.
 - Nothing asks to close and reopen the PDF after writing (the skill, its JavaScript file, the READMEs): open readers
   show the new annotations by themselves.
+- The skill corrects all of a dry run's findings in one edit of the configuration before `--apply`.
 
 ## 0.2.2 (2026-11-10)
 

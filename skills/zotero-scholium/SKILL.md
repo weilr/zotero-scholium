@@ -63,7 +63,7 @@ Write one configuration from `examples/config.template.json`, including only req
 scholium.py --config <config.json>
 scholium.py --config <config.json> --apply
 ```
-First run without `--apply`. Review the report and correct the configuration; this is a quality check, not another request for write permission. After correcting, run `--apply` directly: it repeats every check and writes nothing while `missed`, `style_warnings` or `layout_warnings` holds a blocking finding, so a second dry run is not needed. Its outcome is the last field of its output.
+First run without `--apply`. Review the report and correct all its findings in one edit of the configuration (or one rewrite); this is a quality check, not another request for write permission. After correcting, run `--apply` directly: it repeats every check and writes nothing while `missed`, `style_warnings` or `layout_warnings` holds a blocking finding, so a second dry run is not needed. Its outcome is the last field of its output.
 
 - `missed`: unknown ids, or phrases not found (each with the closest passage, `closest`).
 - `style_warnings`: formatting, banned phrases, duplicate or overlapping highlights, text the tool already wrote on the page (`duplicate_existing`), the user's changes in Zotero that a rewrite would undo (`user_edit`), note math. `core_count` only informs. For a deliberate exception the user asked for, `--accept KIND` lets that kind through.
