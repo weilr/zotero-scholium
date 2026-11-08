@@ -238,6 +238,7 @@ var texts = h => {
     convDeleted: title => `「${title}」を削除しました`,
     undo: "元に戻す",
     citePage: p => `${p} ページ`,
+    pageRef: p => `p.${p}`,
     locate: "該当箇所へ ↗",
     retry: "再試行",
     editPrompt: "編集",

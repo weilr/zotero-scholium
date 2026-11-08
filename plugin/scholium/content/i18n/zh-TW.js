@@ -234,6 +234,7 @@ var texts = h => {
     convDeleted: title => `已刪除「${title}」`,
     undo: "復原",
     citePage: p => `第 ${p} 頁`,
+    pageRef: p => `第\u00a0${p}\u00a0頁`,
     locate: "定位 ↗",
     retry: "重試",
     editPrompt: "編輯",

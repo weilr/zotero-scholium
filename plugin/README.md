@@ -148,7 +148,7 @@ history and the annotation sessions are those of that PDF.
   agent's connection is tried again, the place in the queue and a pause for the usage limit with **Continue now**.
   Otherwise, on the Chat tab, the latest outcome of the conversation shown with its turns and tokens (the tooltip
   splits the tokens into input, cache and output); on the Annotations tab the outcome of **Delete annotations** (a
-  finished annotation's is its card). A narrow pane cuts it with an ellipsis.
+  finished annotation's is its card). A narrow pane cuts it with an ellipsis, before the chip.
 - ⋯ on the Chat tab holds **Show log** (the conversation's log file), **Personal profile ↗**, **Save as note** and
   **Settings…**; on the Annotations tab **Personal profile ↗**, **Show log**, **Delete annotations**, **Save as note**
   while it shows a session, and **Settings…**. **Save as note** makes the conversation shown a child note of the paper:

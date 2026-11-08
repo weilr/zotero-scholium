@@ -247,6 +247,7 @@ var texts = h => {
     convDeleted: title => `„${title}“ gelöscht`,
     undo: "Rückgängig",
     citePage: p => `Seite ${p}`,
+    pageRef: p => `S.\u00a0${p}`,
     locate: "Zur Stelle ↗",
     retry: "Erneut versuchen",
     editPrompt: "Bearbeiten",

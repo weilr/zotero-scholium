@@ -270,7 +270,7 @@ Object.assign(ScholiumRunner, {
 
   // a quoted passage as the section shows it, with the page's label; the page only when the reader gave one
   quoteLabel(q) {
-    return (q.page ? `p.${q.label || q.page} · ` : "") + q.text;
+    return (q.page ? `${this.text("pageRef", q.label || q.page)} · ` : "") + q.text;
   },
 
   quoteTag(q) {

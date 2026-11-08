@@ -246,6 +246,7 @@ var texts = h => {
     convDeleted: title => `Se eliminó «${title}»`,
     undo: "Deshacer",
     citePage: p => `Página ${p}`,
+    pageRef: p => `p.\u00a0${p}`,
     locate: "Localizar ↗",
     retry: "Reintentar",
     editPrompt: "Editar",

@@ -246,6 +246,7 @@ var texts = h => {
     convDeleted: title => `Conversa excluída: “${title}”`,
     undo: "Desfazer",
     citePage: p => `Página ${p}`,
+    pageRef: p => `p.\u00a0${p}`,
     locate: "Localizar ↗",
     retry: "Tentar novamente",
     editPrompt: "Editar",

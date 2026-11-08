@@ -247,6 +247,7 @@ var texts = h => {
     convDeleted: title => `Conversation « ${title} » supprimée`,
     undo: "Annuler",
     citePage: p => `Page ${p}`,
+    pageRef: p => `p.\u00a0${p}`,
     locate: "Localiser ↗",
     retry: "Réessayer",
     editPrompt: "Modifier",

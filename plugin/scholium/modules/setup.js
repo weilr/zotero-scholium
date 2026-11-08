@@ -64,9 +64,13 @@ Object.assign(ScholiumRunner, {
     return want === "steer" && this.steerable(pane) ? "steer" : "queue";
   },
 
+  // a number of tokens, in thousands from 1000 (62k), grouped as the section's language groups digits (1,000k; 1.000k in
+  // German)
   kTokens(n) {
     const v = Number(n) || 0;
-    return v < 1000 ? String(v) : Math.round(v / 1000).toLocaleString("en-US") + "k";
+    if (v < 1000) return String(v);
+    const k = Math.round(v / 1000);
+    try { return k.toLocaleString(this.lang()) + "k"; } catch (e) { return k.toLocaleString("en-US") + "k"; }
   },
 
   openSettings() {

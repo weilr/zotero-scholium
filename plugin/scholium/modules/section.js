@@ -1837,7 +1837,7 @@ Object.assign(ScholiumRunner, {
     const chip = doc.createElement("span");
     chip.className = "scholium-cite";
     chip.setAttribute("data-id", String(id));
-    chip.textContent = `p.${s.page}`;
+    chip.textContent = this.text("pageRef", s.page);
     chip.addEventListener("mouseenter", () => this.openCiteCard(chip, key, s));
     chip.addEventListener("mouseleave", () => { const pane = this.paneOf(chip); if (pane) this.citeAway(pane); });
     chip.addEventListener("click", () => { this.locate(key, s).catch(e => this.log("locate failed: " + e)); });
