@@ -79,7 +79,7 @@ Without `--verbose` the report leaves out empty lists and zero counts, `js`, `pd
 | `highlights`, `underlines`, `margin_texts`, `sticky_notes` | counts |
 | `colors` | highlights per colour |
 | `missed` | entries that could not be placed: an unknown `id`, a phrase not found (with `closest`, `similarity`, and a page `hint` when the closest passage is on a neighbouring page), an invalid summary, or an item on a rotated page, where nothing is written (`reason`) |
-| `style_warnings` | `{kind, page, text, reason}`; kinds `latex`, `math_format`, `tag`, `label`, `symbol`, `line_break`, `banned_phrase`, `duplicate`, `overlap`, `user_overlap`, `duplicate_existing`, `user_edit` (with `cleanup`: a tool's annotation the user changed in Zotero after it was written, which the configuration does not keep), `core_count` (advisory), `note_math` |
+| `style_warnings` | `{kind, page, text, reason}`; kinds `latex`, `math_format`, `tag`, `label`, `symbol`, `line_break`, `banned_phrase`, `duplicate`, `overlap`, `user_overlap`, `duplicate_existing`, `user_edit` (with `cleanup`: a tool's annotation the user changed in Zotero after it was written, which the configuration does not keep), `core_count` (advisory), `note_title` (a reading note without its `<h1>` title), `note_math` |
 | `cleanup_removes` | how many of the tool's earlier annotations a run with `cleanup: true` deletes (`null` when they could not be read) |
 | `translation_warnings` | comments with terms or numbers absent from the highlighted text, or a CJK-per-word ratio far outside the usual range |
 | `snapped` | phrases accepted at similarity ≥ 0.95 (`snap: true`) |

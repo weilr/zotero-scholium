@@ -1258,7 +1258,8 @@ def check_style(annotations, cfg, listing=None, note_html=None):
     own earlier ones excepted unless `cleanup` is false), text the tool already wrote on the same page when `cleanup` is
     false (`duplicate_existing`), the tool's annotations that the user changed in Zotero and a rewrite with `cleanup` would
     undo (`user_edit`), the number of core-coloured highlights against `core_range` (advisory: it does not
-    block --apply), and mathematics in the note (a double backslash inside a math node, LaTeX outside one).
+    block --apply), a reading note without its <h1> title (`note_title`), and mathematics in the note (a double
+    backslash inside a math node, LaTeX outside one).
     """
     warnings = []
     existing = _existing_rects(listing, keep_own=not cfg.get("cleanup", False))
@@ -1318,6 +1319,11 @@ def check_style(annotations, cfg, listing=None, note_html=None):
         if not lo <= n <= hi:
             warnings.append({"kind": "core_count", "page": None, "text": None,
                              "reason": f"{n} highlights in the core colour {core}; core_range is {lo}-{hi}"})
+    if note_html and not re.search(r"<h1[\s>]", note_html, flags=re.I):
+        title = cfg.get("note_title_prefix")
+        start = f"<h1>{title}</h1>" if title else "<h1> and the paper's title"
+        warnings.append({"kind": "note_title", "page": None, "text": "reading note",
+                         "reason": f"no <h1> title: start the note with {start}, as examples/reading_note.template.html does"})
     if note_html:
         def nwarn(reason):
             warnings.append({"kind": "note_math", "page": None, "text": "reading note", "reason": reason})

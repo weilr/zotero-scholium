@@ -186,6 +186,31 @@ def test_accept_lets_a_deliberate_exception_through_and_core_count_only_informs(
     assert keys["createdKeys"] == ["NEW1"] and "createdKeys" not in report["result"]
 
 
+def test_a_reading_note_without_its_title_is_held_back(paper, monkeypatch, capsys):
+    """A reading note without <h1> blocks --apply with note_title (the template starts with the title); --accept lets it
+    through; the sections are not checked."""
+    tmp, _ = paper
+    bare, titled = tmp / "bare.html", tmp / "titled.html"
+    bare.write_text("<p>DPO 省掉了奖励模型。</p>", encoding="utf8")
+    titled.write_text("<h1>Direct Preference Optimization</h1><p>DPO 省掉了奖励模型。</p>", encoding="utf8")
+    hl = [{"page": 1, "text": SENTENCE, "comment": "该方法提升了结果。", "core": True}]
+    conf = {"highlights": hl, "note_html": str(bare), "note_title_prefix": "Direct Preference Optimization"}
+    code, report = run(paper, monkeypatch, capsys, conf, api=Api())
+    [w] = [w for w in report["style_warnings"] if w["kind"] == "note_title"]
+    assert w["text"] == "reading note" and "<h1>Direct Preference Optimization" in w["reason"] \
+        and "examples/reading_note.template.html" in w["reason"]
+    code, report = run(paper, monkeypatch, capsys, conf, "--apply", api=Api())
+    assert report["applied"] is False and "note_title" in report["apply_error"]
+    code, report = run(paper, monkeypatch, capsys, conf, "--apply", "--accept", "note_title", api=Api())
+    assert code == 0 and report["applied"] is True
+    code, report = run(paper, monkeypatch, capsys, dict(conf, note_html=str(titled)), "--apply", api=Api())
+    assert not any(w["kind"] == "note_title" for w in report.get("style_warnings", [])) and report["applied"] is True
+    # without a note_title_prefix the message names the paper's title
+    code, report = run(paper, monkeypatch, capsys, {"highlights": hl, "note_html": str(bare)}, api=Api())
+    [w] = [w for w in report["style_warnings"] if w["kind"] == "note_title"]
+    assert "the paper's title" in w["reason"]
+
+
 @pytest.mark.parametrize("config, fragment", [
     ({"clean_up": True}, "unknown key 'clean_up' (did you mean 'cleanup'?)"),
     ({"highlights": [{"page": 1, "text": SENTENCE, "comentt": "x"}]}, "unknown key 'comentt' in highlights[0] (did you mean 'comment'?)"),

@@ -11,6 +11,8 @@
 - Nothing asks to close and reopen the PDF after writing (the skill, its JavaScript file, the READMEs): open readers
   show the new annotations by themselves.
 - The skill corrects all of a dry run's findings in one edit of the configuration before `--apply`.
+- The skill reads the reading note's template before it writes the note, and the dry run and `--apply` hold back a
+  note without its `<h1>` title (`note_title`; `--accept note_title` lets it through).
 - The reader's eye button turns on by itself with the first annotation written, for a user who has never used it;
   from then on only the button changes it.
 - In an annotation's Claude Code runs, one turn writes at most 32,000 tokens, thinking included
