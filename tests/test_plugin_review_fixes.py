@@ -2,7 +2,8 @@
 giving its wishes back, what a run says this computer lacks, the steps of the skill's commands, Codex's effort levels, Ask
 Scholium in a group library, the trash line of one note, the notes Annotate again moves to the trash, the reading note
 written with the annotations, a compaction in an annotation, a queued message's passage, Retry, the profile read again, the
-box after a send, a title renamed when its list closes, a hidden list scrolled once shown, and a reader's own section."""
+box after a send, a title renamed when its list closes, a hidden list scrolled once shown, a reader's own section, and how
+long an interrupted run worked."""
 import json
 import subprocess
 
@@ -554,6 +555,27 @@ const scenario = async (name, fn) => {
     const own = await h.pane(h.item1, { closest: inReader('TAB1') }); await settle(40);
     return { otherTook, waiting, ownTook: own.pane().quote ? own.pane().quote.text : null, keys: [other.pane().keys, own.pane().keys] };
   });
+  // a run interrupted by an update, a restart or Zotero quitting: its log ends with the end line and its duration, without
+  // a time line; the fold gives the time all the same. A time line after it wins
+  const interrupted = (later = null) => L({ type: 'scholium', subtype: 'run', agent: 'claude', user: '问题1', at: 10000 })
+    + L({ type: 'scholium', subtype: 'prompt', text: '问题1', question: true })
+    + L({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S1' })
+    + tool('Read', { file_path: 'D:/Zotero/tmp/scholium/ATT1/sentences.txt' }, 't1')
+    + answer('[1] First sentence.', false, 't1')
+    + L({ type: 'scholium', subtype: 'end', outcome: 'interrupted', text: 'The run was interrupted', duration_ms: 5000 })
+    + (later ? L({ type: 'scholium', subtype: 'time', at: later }) : '');
+  for (const [name, locale, later] of [['interruptedZh', 'zh-CN', null], ['interruptedEn', 'en-US', null], ['interruptedTimed', 'zh-CN', 17000]]) {
+    await scenario(name, async () => {
+      const h = harness({ locale, logs: { [CLAUDE_CONV]: interrupted(later) } });
+      h.runner.start('x');
+      const p = await h.pane(h.item1); await settle(60);
+      const has = (n, cls) => typeof n.className === 'string' && n.className.split(' ').includes(cls);
+      const find = (n, cls) => has(n, cls) ? n : (n.children || []).map(c => find(c, cls)).find(Boolean) || null;
+      const head = find(p.pane().list.children.at(-1), 'scholium-fold-head');
+      h.runner.stop();
+      return head ? head.textContent : null;
+    });
+  }
 
   process.stdout.write(JSON.stringify(facts));
 })().catch(e => { process.stderr.write(String(e.stack || e)); process.exit(1); });
@@ -849,3 +871,9 @@ def test_a_waiting_passage_goes_to_its_own_readers_section(facts):
     q = facts["pendingQuoteReader"]
     assert q["otherTook"] is None and q["waiting"] is True
     assert q["ownTook"] == "A passage worth asking about." and q["keys"] == [["ATT3"], ["ATT1"]]
+
+
+def test_an_interrupted_run_shows_how_long_it_worked(facts):
+    assert facts["interruptedZh"] == "已处理 5 秒 ›"
+    assert facts["interruptedEn"] == "Worked for 5s ›"
+    assert facts["interruptedTimed"] == "已处理 7 秒 ›", "a time line after the end line wins"
