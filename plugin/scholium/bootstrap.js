@@ -1,8 +1,9 @@
 /* Scholium: a minimal plugin for Zotero 7 and later.
  * Reader toggle (all versions): the eye button in the reader toolbar shows or hides annotations tagged
  * by zotero-scholium in every reader view (tab, window, item-pane preview) at once. The choice is kept
- * in the preference extensions.scholium.showAnnotations; until it is first switched on, the
- * annotations are hidden. Hiding removes them from the view only; stored items are not changed.
+ * in the preference extensions.scholium.showAnnotations; until it is first set, the annotations are
+ * hidden, and the first write of annotations sets it on. Hiding removes them from the view only;
+ * stored items are not changed.
  * One-click annotation (the Scholium section of the item pane): starts the installed Claude Code or
  * Codex in the background for the paper shown (see ScholiumRunner).
  * Endpoints, on Zotero's built-in local HTTP server (http://127.0.0.1:23119); the tool writes through them

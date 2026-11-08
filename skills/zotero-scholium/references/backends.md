@@ -29,4 +29,4 @@ Do not write to `zotero.sqlite` directly (the database is locked while Zotero is
 - Follow the user's colour rules; otherwise use the profile or default core/other levels.
 - Never delete a user's notes. `note_replace: true` moves only the tool's own earlier notes to the trash, for a redo; do not move or delete notes through the API yourself.
 - The tool does not write `annotationAuthorName`. API, plugin and generated JavaScript recognise ownership only by `zotero-scholium` or the legacy tags `zotero-marginalia`, `zotero-paper-annotate`; identical content alone never establishes ownership. The plugin's explicit `cleanup_external` option is separate.
-- Every channel writes through Zotero, so open readers show the new annotations at once; with the Scholium plugin, its eye button in the reader toolbar shows or hides the tool's annotations (hidden until it is first turned on).
+- Every channel writes through Zotero, so open readers show the new annotations at once; with the Scholium plugin, its eye button in the reader toolbar shows or hides the tool's annotations (on from the first write, unless the user turned it off).

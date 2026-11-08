@@ -21,8 +21,9 @@ The eye button at the right end of the reader toolbar shows or hides the annotat
 tool's tag `zotero-scholium` in every reader view at once: reader tabs, reader windows, and the
 attachment preview in the item pane. The choice is kept in the preference
 `extensions.scholium.showAnnotations` and applies to readers opened later and after a restart;
-until the button is first used, the annotations are hidden. Annotations that the tool writes or
-changes while a reader is open follow the current choice; an item-pane preview that is already
+until the button is first used, the annotations are hidden, and the first annotation that writes turns the
+button on (an annotation run of the plugin, or any write through its endpoint); from then on only the button
+changes it. Annotations that the tool writes or changes while a reader is open follow the current choice; an item-pane preview that is already
 showing follows on its next load.
 
 Hiding removes the annotations from the reader's view and sidebar only. The stored annotations, their

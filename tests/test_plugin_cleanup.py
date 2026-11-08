@@ -31,8 +31,13 @@ let existing = input.existing.map(a => ({
   async erase() { existing = existing.filter(item => item.key !== this.key); },
 }));
 const parent = { id: 2, key: 'PARENT01' };
+// the preferences (the reader's eye button among them) and no open reader
+const prefs = Object.assign({}, input.prefs || {});
 const attachment = { id: 1, key: 'ATTACH01', parentID: 2, getAnnotations: () => existing };
 const context = vm.createContext({ Zotero: {
+  debug() {},
+  Prefs: { get: name => prefs[name], set: (name, value) => { prefs[name] = value; } },
+  Reader: { _readers: [] },
   Libraries: { userLibraryID: 1 },
   Items: { getByLibraryAndKey: (libraryID, key) => {
     if (libraryID === 1 && key === 'PARENT01') return parent;
@@ -56,15 +61,15 @@ if (input.script) {
   applied = context.ScholiumEndpoints.apply(input.data);
 }
 applied.then(result => {
-  process.stdout.write(JSON.stringify({ result, remaining: existing.map(a => a.key), saved }));
+  process.stdout.write(JSON.stringify({ result, remaining: existing.map(a => a.key), saved, prefs }));
 }).catch(error => { console.error(error); process.exitCode = 1; });
 """
 
 
-def run_apply(data, existing, script=None):
+def run_apply(data, existing, script=None, prefs=None):
     completed = subprocess.run(
         [NODE, "-e", RUN_APPLY, str(BOOTSTRAP)],
-        input=json.dumps({"data": data, "existing": existing, "script": script}),
+        input=json.dumps({"data": data, "existing": existing, "script": script, "prefs": prefs or {}}),
         text=True,
         capture_output=True,
         check=True,
@@ -433,3 +438,17 @@ process.stdout.write(JSON.stringify(Object.keys(endpoints).filter(p => endpoints
 """
     out = json.loads(subprocess.run([NODE, "-e", script, str(BOOTSTRAP)], text=True, capture_output=True, check=True, timeout=15).stdout)
     assert out == 6
+
+
+@pytest.mark.parametrize("before, after", [(None, True), (False, False), (True, True)])
+def test_a_write_through_the_plugin_turns_the_eye_button_on_once(before, after):
+    """A write of a user who never used the reader's eye button turns it on; a choice of the user's stays."""
+    pref = "extensions.scholium.showAnnotations"
+    data = {"attachmentKey": "ATTACH01", "itemKey": "PARENT01", "tag": "zotero-scholium",
+            "annotations": [{"type": "highlight", "text": "x", "comment": "", "color": "#ffd400",
+                             "position": {"pageIndex": 0, "rects": [[1, 2, 3, 4]]}}]}
+    out = run_apply(data, [], prefs={} if before is None else {pref: before})
+    assert out["result"]["ok"] is True and out["prefs"].get(pref) is after
+    if before is None:
+        nothing = run_apply(dict(data, annotations=[]), [], prefs={})
+        assert pref not in nothing["prefs"], "nothing written: left as it was"

@@ -183,6 +183,8 @@ var ScholiumEndpoints = {
       for (const a of old) await a.erase();
     });
     if (newNote) { noteCreated = true; noteKeys.push(newNote.key); }
+    // the reader's eye button turns on with the first write of a user who never used it (ScholiumToggle.showOnce)
+    if (createdKeys.length) ScholiumToggle.showOnce().catch(e => this.log("annotations not shown: " + e));
     // (3) the earlier notes go to the trash; the new items are written whatever happens here
     let removeError;
     if (trash.length) {

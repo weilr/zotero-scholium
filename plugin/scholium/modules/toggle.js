@@ -91,10 +91,22 @@ var ScholiumToggle = {
     } catch (e) { this.log("hide failed: " + e); }
   },
 
+  async toggle() { await this.setShown(!this.shown); },
+
+  // the end of an annotation that wrote, for a user who has never used the button (the preference was never set, not
+  // false): the annotations are shown from now on, as a click shows them. Once the preference is set, the clicks decide
+  async showOnce() {
+    let set;
+    try { set = Zotero.Prefs.get(this.pref, true); } catch (e) { return false; }
+    if (set !== undefined) return false;
+    await this.setShown(true);
+    return true;
+  },
+
   // Switch every open reader and its button, and save the choice for later readers and sessions.
   // An item-pane preview that is already showing follows on its next load.
-  async toggle() {
-    this.shown = !this.shown;
+  async setShown(shown) {
+    this.shown = shown;
     try { Zotero.Prefs.set(this.pref, this.shown, true); }
     catch (e) { this.log("preference not saved: " + e); }
     const readers = Array.from(Zotero.Reader._readers || []);

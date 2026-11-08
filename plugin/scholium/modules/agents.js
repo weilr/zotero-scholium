@@ -176,6 +176,8 @@ Object.assign(ScholiumRunner, {
     else await this.runClaude(program, ctx);
     await this.appendLog(ctx, []);   // what the log could not take during the run
     this.current = null;
+    // an annotation that wrote, the first for a user who never used the reader's eye button: the annotations are shown
+    if (running.annotation && ctx.wrote) await ScholiumToggle.showOnce().catch(e => this.log("annotations not shown: " + e));
     const unfinished = this.unfinished();   // a cancelled run's, which has no end of its own
     if (this.job !== running) return;   // the plugin stopped during the run: nothing more to report
     if (unfinished) {
@@ -439,7 +441,10 @@ Object.assign(ScholiumRunner, {
             const config = event.type === "assistant" && c && c.type === "tool_use" && this.appliedConfig(String((c.input || {}).command || ""));
             if (config && c.id) ctx.applies[c.id] = config;
             const applied = event.type === "user" && c && c.type === "tool_result" && ctx.applies[c.tool_use_id];
-            if (applied && this.wrote(c.content, !c.is_error)) await this.noteApplied(key, applied, "claude", job.conv, Zotero.DataDirectory.dir);
+            if (applied && this.wrote(c.content, !c.is_error)) {
+              ctx.wrote = true;
+              await this.noteApplied(key, applied, "claude", job.conv, Zotero.DataDirectory.dir);
+            }
           }
           // the skills Claude Code loaded: without this one the run would only look for it
           if (event.type === "system" && event.subtype === "init" && Array.isArray(event.skills)
@@ -831,6 +836,7 @@ Object.assign(ScholiumRunner, {
           ctx.missing = this.missingAfter(this.shellCommand(item.command), item.aggregatedOutput, ctx.missing);
           const config = this.appliedConfig(this.shellCommand(item.command));
           if (config && this.wrote(item.aggregatedOutput, item.exitCode === 0 && item.status !== "failed")) {
+            ctx.wrote = true;
             await this.noteApplied(key, config, "codex", job.conv, item.cwd || cwd);
           }
         }

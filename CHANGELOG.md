@@ -11,6 +11,8 @@
 - Nothing asks to close and reopen the PDF after writing (the skill, its JavaScript file, the READMEs): open readers
   show the new annotations by themselves.
 - The skill corrects all of a dry run's findings in one edit of the configuration before `--apply`.
+- The reader's eye button turns on by itself with the first annotation written, for a user who has never used it;
+  from then on only the button changes it.
 
 ## 0.2.2 (2026-11-10)
 

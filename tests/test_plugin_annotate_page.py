@@ -823,6 +823,37 @@ SCENARIOS = r"""
     facts.annotStateLine = { finished, deleted: p.view('annotate').state, kind: p.view('annotate').stateKind, chat: p.view('chat').state,
                              notices: h.log.notices.length - before };
   }
+  // the reader's eye button after an annotation: a user who never set it (the preference was never set) sees the
+  // annotations from the first annotation that wrote, every open reader and button as a click switches them; a run that
+  // wrote nothing, and a choice of the user's, are left as they are
+  {
+    const out = {};
+    const fail = [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S1' }), 'STDERR:boom\n', 'EXIT:1'];
+    const silent = [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S1' }), said('停在这里。'),
+                    ev({ type: 'result', subtype: 'success', is_error: false, result: '停在这里。', session_id: 'S1' })];
+    for (const [name, pref, script] of [['neverSetWrote', undefined, SCRIPT.concat([LAST, RESULT])], ['neverSetSilent', undefined, silent],
+                                        ['neverSetFailed', undefined, fail], ['offWrote', false, SCRIPT.concat([LAST, RESULT])],
+                                        ['onWrote', true, SCRIPT.concat([LAST, RESULT])]]) {
+      const h = harness(Object.assign({ scripts: [script] }, pref === undefined ? {} : { prefs: { 'extensions.scholium.showAnnotations': pref } }));
+      h.toggle.start('scholium@test');
+      // an open reader of the paper with the eye button in its toolbar
+      const button = { attrs: {}, classList: { toggle(c, on) { button.on = on; } }, setAttribute(k, v) { button.attrs[k] = v; }, title: '',
+                       replaceChildren() {}, ownerDocument: { createElementNS: () => ({ setAttribute() {}, append() {} }) } };
+      const reader = { itemID: 'ATT1', set: [], unset: [], _iframeWindow: { document: { querySelectorAll: () => [button] } },
+                       setAnnotations: async a => { reader.set.push(a.map(x => x.key)); }, unsetAnnotations: async k => { reader.unset.push(k); } };
+      h.zotero.Reader._readers = [reader];
+      h.runner.start('x');
+      const p = await h.pane(h.item1); await settle(40);
+      const pane = p.pane();
+      pane.tabAnnotate.click(); await settle(10);
+      pane.annotGo.click(); h.att1.getAnnotations = () => [h.ann('A1', 'highlight', '#ff6666')]; await settle(600);
+      out[name] = { pref: h.store.has('extensions.scholium.showAnnotations') ? h.store.get('extensions.scholium.showAnnotations') : 'unset',
+                    shown: h.toggle.shown, set: reader.set.slice(), unset: reader.unset.slice(), pressed: button.attrs['aria-pressed'] || null, done: !h.runner.job };
+      h.runner.stop();
+      h.toggle.stop();
+    }
+    facts.eyeAfterAnnotate = out;
+  }
   process.stdout.write(JSON.stringify(facts));
 })().catch(error => { console.error(error); process.exit(1); });
 """
@@ -1114,3 +1145,14 @@ def test_the_annotation_tabs_state_line_shows_a_deletion(facts):
     assert f["finished"] == {"state": None, "note": False}, "a finished annotation shows on its card only"
     assert f["deleted"] == "已删除 2 条 Scholium 批注。" and f["kind"] == "scholium-state ok"
     assert f["chat"] is None and f["notices"] == 0
+
+
+def test_the_first_annotation_that_wrote_shows_the_annotations_once(facts):
+    e = facts["eyeAfterAnnotate"]
+    assert all(c["done"] for c in e.values())
+    assert e["neverSetWrote"] == {"pref": True, "shown": True, "set": [["A1"]], "unset": [], "pressed": "true", "done": True}, \
+        "never set: on, as a click turns it on, every open reader and button"
+    for name in ("neverSetSilent", "neverSetFailed"):
+        assert e[name] == {"pref": "unset", "shown": False, "set": [], "unset": [], "pressed": None, "done": True}, name
+    assert e["offWrote"] == {"pref": False, "shown": False, "set": [], "unset": [], "pressed": None, "done": True}, "turned off by the user: stays off"
+    assert e["onWrote"] == {"pref": True, "shown": True, "set": [], "unset": [], "pressed": None, "done": True}
