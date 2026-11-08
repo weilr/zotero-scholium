@@ -431,6 +431,9 @@ var ScholiumRunner = {
       annotDone: zh ? "✓ 批注完成" : "✓ Annotated",
       annotDoneClean: zh ? "✓ 批注完成，没有剩余警告" : "✓ Annotated, no warnings left",
       annotDoneWarn: w => zh ? `✓ 批注完成，剩余警告：${w}` : `✓ Annotated, warnings left: ${w}`,
+      // the label of the warnings left in an annotation's closing line, and its word for none (warningsPart, warningsOf)
+      warningsLabel: zh ? "剩余警告" : "remaining warnings",
+      warningsNone: zh ? "无" : "none",
       annotNone: zh ? "没有写入批注" : "No annotations written",
       annotNoneWarn: w => zh ? `没有写入批注：${w}` : `No annotations written: ${w}`,
       // the words beside the card's numbers

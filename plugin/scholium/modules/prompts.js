@@ -120,6 +120,15 @@ Object.assign(ScholiumRunner, {
     return [zh ? `这台电脑没有装 uv：用 ${s} 运行 scholium.py。` : `uv is not installed here: run scholium.py with ${s}.`];
   },
 
+  // the closing line's part on the warnings left: the language's label and its word for none, which warningsOf reads;
+  // the English and the Simplified Chinese prompt keep their own words
+  warningsPart(zh) {
+    if (this.lang() === (zh ? "zh-CN" : "en-US")) return zh ? "剩余警告" : "remaining warnings";
+    const label = this.text("warningsLabel"), none = this.text("warningsNone");
+    return zh ? `剩余警告，写成“${label}：…”（没有时写“${label}：${none}”）`
+              : `remaining warnings as “${label}: …” (“${label}: ${none}” when there are none)`;
+  },
+
   // the prompt's line of a paper in a group library: the group, which status and samples are given
   groupLines(job) {
     const group = this.groupOf(job.att.libraryID);
@@ -170,7 +179,7 @@ Object.assign(ScholiumRunner, {
         ...(job.extra ? ["", "用户的附加要求：", job.extra] : []),
         "",
         "批注写入后会自己出现在打开的 PDF 里（阅读器工具栏的眼睛按钮显示或隐藏 Scholium 的批注），不要让用户关闭再打开 PDF。",
-        "最后的回复只写一行中文，不写别的：高亮 N 条（核心 M 条），页边批注 K 条，笔记《标题》，剩余警告。",
+        `最后的回复只写一行中文，不写别的：高亮 N 条（核心 M 条），页边批注 K 条，笔记《标题》，${this.warningsPart(true)}。`,
       ].join("\n");
     }
     return [
@@ -191,7 +200,7 @@ Object.assign(ScholiumRunner, {
       ...(job.extra ? ["", "The user's extra instructions:", job.extra] : []),
       "",
       "The annotations appear in the open PDF by themselves (the eye button in the reader's toolbar shows or hides Scholium's annotations): do not tell the user to close and reopen it.",
-      "Your final reply is one short line in the user's language and nothing else: N highlights (M core), K margin notes, note “title”, remaining warnings.",
+      `Your final reply is one short line in the user's language and nothing else: N highlights (M core), K margin notes, note “title”, ${this.warningsPart(false)}.`,
     ].join("\n");
   },
 
@@ -340,7 +349,7 @@ Object.assign(ScholiumRunner, {
       "",
       this.said(job),
       "",
-      "改了批注时，结束时最后一行只写一句：改了什么，剩余警告。只回答问题时不写这一行。",
+      `改了批注时，结束时最后一行只写一句：改了什么，${this.warningsPart(true)}。只回答问题时不写这一行。`,
     ] : [
       "Below is a follow-up message about this paper and its annotations, sent from Zotero. It is still unattended: do not ask the user anything and do not start sub-agents. "
         + "Answer a question directly; to change annotations, edit the configuration as the skill describes and write it to Zotero again.",
@@ -353,7 +362,7 @@ Object.assign(ScholiumRunner, {
       "",
       this.said(job),
       "",
-      "When annotations changed, end with one line only: what changed, remaining warnings. Leave that line out when only answering.",
+      `When annotations changed, end with one line only: what changed, ${this.warningsPart(false)}. Leave that line out when only answering.`,
     ]).join("\n");
   },
 

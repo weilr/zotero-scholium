@@ -1070,12 +1070,22 @@ Object.assign(ScholiumRunner, {
   },
 
   // what the agent's closing words say of the warnings left: "" for none, the warnings, or null when they do not say. The
-  // skill's summary is the reply's last line; 无 and 没有 are "none" only on their own (无法定位 2 句 is a warning)
+  // skill's summary is the reply's last line; 无 and 没有 are "none" only on their own (无法定位 2 句 is a warning). Its
+  // English and Chinese forms, then the language's label and its word for none (warningsPart)
   warningsOf(text) {
     const s = String(text || "").trim().split("\n").pop();
     if (/无剩余警告|没有剩余警告|剩余警告[:：]\s*(?:无|没有)(?=$|[\s。．.，,；;!！)）])|no (?:remaining )?warnings|remaining warnings:\s*none\b/i.test(s)) return "";
+    const end = x => x.trim().replace(/[\s.。．!！]+$/, "");   // without the sentence's closing mark
     const m = /剩余警告[:：]\s*([^。\n]+)|remaining warnings:\s*([^.\n]+)/i.exec(s);
-    return m ? (m[1] || m[2]).trim() : null;
+    if (m) return end(m[1] || m[2]);
+    const label = String(this.text("warningsLabel") || ""), none = String(this.text("warningsNone") || "").toLowerCase();
+    const escape = x => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const own = label && new RegExp(escape(label) + "\\s*[:：]\\s*(.+)$", "i").exec(s);
+    if (!own) return null;
+    const rest = end(own[1]);
+    const lower = rest.toLowerCase();
+    if (none && (lower === none || (lower.startsWith(none) && !/[\p{L}\p{N}]/u.test(lower[none.length])))) return "";
+    return rest || null;
   },
 
   // delete the annotations tagged zotero-scholium, and move the reading notes tagged the same to the

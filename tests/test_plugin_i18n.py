@@ -118,6 +118,38 @@ SCENARIOS = r"""
                             cite: h.runner.citeNode(h.paneDoc, 'ATT1', 12, { page: 4 }).textContent,
                             k: [999, 550123, 1000000, 2567600].map(n => h.runner.kTokens(n)) };
   }
+  // the closing line in each language: the warnings it names after the language's label go on the card, its word for
+  // none leaves none; the English and Chinese forms of earlier logs are read in every language
+  facts.warnings = {};
+  const OWN = { key: 'H1', id: 'H1', isAnnotation: () => true, getTags: () => [{ tag: 'zotero-scholium' }], annotationType: 'highlight',
+                annotationColor: '#ff6666' };
+  const closing = text => [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S1' }), said(text),
+                           ev({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: 'S1', num_turns: 3 })];
+  for (const lang of ['en-US', 'zh-CN', ...LANGS]) {
+    const h0 = harness({ locale: lang });
+    const label = h0.runner.text('warningsLabel'), none = h0.runner.text('warningsNone');
+    const cap = s => s[0].toUpperCase() + s.slice(1);
+    const lines = { named: `28 x, ${label}: W3`, capital: `28 x. ${cap(label)}: W3.`, none: `28 x, ${label}: ${none}.`,
+                    noneCapital: `${cap(label)}: ${cap(none)}`, english: 'x, remaining warnings: W3', englishNone: 'x, no warnings',
+                    chinese: '高亮 28 条，剩余警告：W3', chineseNone: '高亮 28 条，无剩余警告。', silent: '28 x.' };
+    const parsed = Object.fromEntries(Object.entries(lines).map(([k, v]) => [k, h0.runner.warningsOf('Done.\n' + v)]));
+    const cards = {};
+    let prompt = null;
+    for (const k of ['named', 'none']) {
+      const h = harness({ locale: lang, scripts: [closing(lines[k])] });
+      h.runner.start('x');
+      const p = await h.pane(h.item1); await settle(40);
+      const pane = p.pane();
+      pane.tabAnnotate.click(); await settle(10);
+      pane.annotGo.click(); h.att1.getAnnotations = () => [OWN]; await settle(600);
+      const c = pane.annot.list.children.at(-1).children.find(n => typeof n.className === 'string' && n.className.startsWith('scholium-card'));
+      cards[k] = c ? c.children[0].textContent : null;
+      prompt = h.log.stdin[0] || null;
+      h.runner.stop();
+    }
+    facts.warnings[lang] = { label, none, parsed, cards, closing: prompt && prompt.split('\n').pop(),
+                             own: [h0.runner.text('annotDoneWarn', 'W3'), h0.runner.text('annotDoneClean')] };
+  }
   // the prompts: an annotation, a question, and a follow-up of that question
   const qInit = ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S1' });
   const ok = ev({ type: 'result', subtype: 'success', is_error: false, result: 'ok', session_id: 'S1' });
@@ -203,6 +235,34 @@ def test_pages_and_thousands_are_written_as_the_language_writes_them(facts, lang
     assert f["quote"] == PAGES[lang] + " · T" and f["unlabelled"] == PAGES[lang].replace("2", "3") + " · T"
     assert f["cite"] == PAGES[lang].replace("2", "4")
     assert f["k"] == THOUSANDS[lang]
+
+
+# each language's label of the warnings left in the closing line, and its word for none
+WARNINGS = {"en-US": ("remaining warnings", "none"), "zh-CN": ("剩余警告", "无"), "zh-TW": ("剩餘警告", "無"), "ja-JP": ("残りの警告", "なし"),
+            "ko-KR": ("남은 경고", "없음"), "de": ("verbleibende Warnungen", "keine"), "fr-FR": ("avertissements restants", "aucun"),
+            "es-ES": ("advertencias pendientes", "ninguna"), "ru-RU": ("оставшиеся предупреждения", "нет"),
+            "pt-BR": ("avisos restantes", "nenhum"), "pt-PT": ("avisos restantes", "nenhum")}
+CLOSING_EN = ("Your final reply is one short line in the user's language and nothing else: N highlights (M core), K margin notes, "
+              "note “title”, remaining warnings.")
+CLOSING_ZH = "最后的回复只写一行中文，不写别的：高亮 N 条（核心 M 条），页边批注 K 条，笔记《标题》，剩余警告。"
+
+
+@pytest.mark.parametrize("lang", ["en-US", "zh-CN"] + LANGS)
+def test_the_warnings_left_are_read_in_every_language(facts, lang):
+    f = facts["warnings"][lang]
+    assert (f["label"], f["none"]) == WARNINGS[lang]
+    assert f["parsed"] == {"named": "W3", "capital": "W3", "none": "", "noneCapital": "", "english": "W3", "englishNone": "",
+                           "chinese": "W3", "chineseNone": "", "silent": None}
+    assert f["cards"] == {"named": f["own"][0], "none": f["own"][1]}, "the card shows them, or that none are left"
+    label, none = WARNINGS[lang]
+    if lang == "en-US":
+        assert f["closing"] == CLOSING_EN, "the English prompt as before"
+    elif lang == "zh-CN":
+        assert f["closing"] == CLOSING_ZH, "the Chinese prompt as before"
+    elif lang == "zh-TW":
+        assert f["closing"].endswith(f"剩余警告，写成“{label}：…”（没有时写“{label}：{none}”）。")
+    else:
+        assert f["closing"].endswith(f"remaining warnings as “{label}: …” (“{label}: {none}” when there are none).")
 
 
 @pytest.mark.parametrize("locale", list(LINES))

@@ -202,6 +202,8 @@ var texts = h => {
     annotDone: "✓ 注釈完了",
     annotDoneClean: "✓ 注釈完了、警告なし",
     annotDoneWarn: w => `✓ 注釈完了、残りの警告：${w}`,
+    warningsLabel: "残りの警告",
+    warningsNone: "なし",
     annotNone: "注釈は書き込まれませんでした",
     annotNoneWarn: w => `注釈は書き込まれませんでした：${w}`,
     // the words beside the card's numbers

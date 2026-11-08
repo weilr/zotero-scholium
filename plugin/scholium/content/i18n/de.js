@@ -212,6 +212,8 @@ var texts = h => {
     annotDone: "✓ Annotiert",
     annotDoneClean: "✓ Annotiert, keine Warnungen übrig",
     annotDoneWarn: w => `✓ Annotiert, verbleibende Warnungen: ${w}`,
+    warningsLabel: "verbleibende Warnungen",
+    warningsNone: "keine",
     annotNone: "Keine Anmerkungen geschrieben",
     annotNoneWarn: w => `Keine Anmerkungen geschrieben: ${w}`,
     numHighlights: (n, c) => `${word(n, "Markierung", "Markierungen")} (${c}\u00a0zentral)`,

@@ -204,6 +204,8 @@ var texts = h => {
     annotDone: "✓ 주석 완료",
     annotDoneClean: "✓ 주석 완료, 남은 경고 없음",
     annotDoneWarn: w => `✓ 주석 완료, 남은 경고: ${w}`,
+    warningsLabel: "남은 경고",
+    warningsNone: "없음",
     annotNone: "기록된 주석 없음",
     annotNoneWarn: w => `기록된 주석 없음: ${w}`,
     // the words beside the card's numbers

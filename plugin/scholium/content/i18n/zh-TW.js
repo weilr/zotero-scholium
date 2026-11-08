@@ -198,6 +198,8 @@ var texts = h => {
     annotDone: "✓ 標註完成",
     annotDoneClean: "✓ 標註完成，沒有剩餘警告",
     annotDoneWarn: w => `✓ 標註完成，剩餘警告：${w}`,
+    warningsLabel: "剩餘警告",
+    warningsNone: "無",
     annotNone: "沒有寫入標註",
     annotNoneWarn: w => `沒有寫入標註：${w}`,
     // the words beside the card's numbers

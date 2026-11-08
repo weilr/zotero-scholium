@@ -211,6 +211,8 @@ var texts = h => {
     annotDone: "✓ Аннотировано",
     annotDoneClean: "✓ Аннотировано, предупреждений не осталось",
     annotDoneWarn: w => `✓ Аннотировано, остались предупреждения: ${w}`,
+    warningsLabel: "оставшиеся предупреждения",
+    warningsNone: "нет",
     annotNone: "Аннотации не записаны",
     annotNoneWarn: w => `Аннотации не записаны: ${w}`,
     // the words beside the card's numbers
