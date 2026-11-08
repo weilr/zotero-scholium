@@ -28,9 +28,9 @@
   a JSON `error` that says to run OCR first; the skill stops there and passes the message on, and an annotation that
   wrote nothing says so on its card.
 - **Save as note** in the ⋯ menu of the Chat tab (and of the Annotations tab while it shows a session) makes the
-  conversation a child note of the paper: its title and date, each question with its quoted passage, each answer with
-  the agent that gave it, formulas as Zotero's note editor sets them. It is tagged `scholium-chat`, so Annotate again
-  and Delete annotations leave it.
+  conversation a child note of the paper: "Scholium conversation: <the paper's title>" and the date, each question with
+  its quoted passage, each answer with the agent that gave it, formulas as Zotero's note editor sets them. It is tagged
+  `scholium-chat`, so Annotate again and Delete annotations leave it.
 - **Ask Scholium (N papers)** in the items list's context menu, for 2 to 8 papers or PDFs: the first paper's Chat tab
   opens on a new conversation with the others as removable chips above the box, and each message goes with every
   paper's `paper.json`. The conversation is kept with the first paper; its log names the others, so later messages keep
@@ -38,7 +38,7 @@
 - With Zotero in Japanese, Korean, German, French, Spanish, Russian, Portuguese or Traditional Chinese, the plugin's
   prompts give the agent that language, so the translations, margin notes, reading note and answers are written in it.
 - The Scholium section, the reader's eye button and the settings page in Traditional Chinese, Japanese, Korean,
-  German, French, Spanish, Russian and Portuguese (Brazilian wording, also for Portugal), following Zotero's language.
+  German, French, Spanish, Russian and Portuguese (Brazilian, and European for Portugal), following Zotero's language.
 
 ### Changed
 
@@ -80,6 +80,7 @@
 - The profile editor keeps the keyboard: Tab and Shift+Tab stay in it, Esc closes it wherever the focus is, and the
   focus goes back to ⋯ when it closes.
 - The settings layer opened from the keyboard starts at the model, so an arrow key no longer switches the agent.
+- A run cut short by a plugin update, by disabling the plugin or by quitting Zotero shows how long it worked.
 - After a setup check line's button ran the check again, the focus is on that line's button, or on Check.
 - Text that was too faint is readable in the light and the dark theme: the line under an answer, the queue's handle,
   the title of a card without annotations, a failed card, the active tab and links; so are the setup check's ✓ and ✗.

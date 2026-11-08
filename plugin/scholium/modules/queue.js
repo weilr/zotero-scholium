@@ -61,7 +61,7 @@ Object.assign(ScholiumRunner, {
     const first = runs.find(r => r.start > 0);
     const d = new Date(first ? first.start : Date.now());
     const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    const out = [`<h1>${esc(this.text("noteHeading", title))}</h1>`, `<p>Scholium · ${date}</p>`];
+    const out = [`<h1>${esc(this.text("noteHeading", title))}</h1>`, `<p>${date}</p>`];
     const was = this.noteTex;
     this.noteTex = true;
     try {
