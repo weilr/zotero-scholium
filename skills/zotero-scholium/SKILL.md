@@ -73,7 +73,7 @@ First run without `--apply`. Review the report and correct the configuration; th
 
 The report names each problem and what to change; reading `scholium.py`'s source is not needed.
 
-After successful apply, ask the user to close and reopen the PDF. The apply output has already read the result back: do not run `status` or `--list` after a successful write. `applied: false` names the cause in `apply_error` (`references/backends.md`). If a write partially succeeded or read-back failed, run `--list` to reconcile the stored items before retrying. Do not re-read `annotations.json` or the configuration: the comments are already in your context.
+Open readers show the new annotations by themselves (the Scholium plugin's eye button in the reader toolbar shows or hides the tool's); do not ask the user to reopen the PDF. The apply output has already read the result back: do not run `status` or `--list` after a successful write. `applied: false` names the cause in `apply_error` (`references/backends.md`). If a write partially succeeded or read-back failed, run `--list` to reconcile the stored items before retrying. Do not re-read `annotations.json` or the configuration: the comments are already in your context.
 
 Only annotations carrying the tool's current or legacy tags are ever replaced, never untagged ones with identical content. A note with the same title as an existing one gets a versioned title. Iterate by editing the configuration; never edit the generated JavaScript.
 

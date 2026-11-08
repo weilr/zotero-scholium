@@ -6,6 +6,9 @@
 
 - The annotation's and a question's prompts say how the skill's script runs on this computer: with `uv run` when uv
   is found, else with the Python found.
+- An annotation ends with one short line in the user's language.
+- Nothing asks to close and reopen the PDF after writing (the skill, its JavaScript file, the READMEs): open readers
+  show the new annotations by themselves.
 
 ## 0.2.2 (2026-11-10)
 

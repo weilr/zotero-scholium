@@ -169,7 +169,8 @@ Object.assign(ScholiumRunner, {
         own ? `这篇论文已有 ${own} 条本工具的注释，用户已确认整篇重做（配置里设 cleanup: true）。` : "这篇论文目前没有本工具的注释。",
         ...(job.extra ? ["", "用户的附加要求：", job.extra] : []),
         "",
-        "结束时最后一行只写一句：高亮 N 条（核心 M 条），页边批注 K 条，笔记《标题》，剩余警告。",
+        "批注写入后会自己出现在打开的 PDF 里（阅读器工具栏的眼睛按钮显示或隐藏 Scholium 的批注），不要让用户关闭再打开 PDF。",
+        "最后的回复只写一行中文，不写别的：高亮 N 条（核心 M 条），页边批注 K 条，笔记《标题》，剩余警告。",
       ].join("\n");
     }
     return [
@@ -189,7 +190,8 @@ Object.assign(ScholiumRunner, {
       own ? `The paper already carries ${own} annotations of this tool; the user confirmed a complete redo (cleanup: true in the configuration).` : "The paper carries no annotations of this tool yet.",
       ...(job.extra ? ["", "The user's extra instructions:", job.extra] : []),
       "",
-      "End with one line only: N highlights (M core), K margin notes, note “title”, remaining warnings.",
+      "The annotations appear in the open PDF by themselves (the eye button in the reader's toolbar shows or hides Scholium's annotations): do not tell the user to close and reopen it.",
+      "Your final reply is one short line in the user's language and nothing else: N highlights (M core), K margin notes, note “title”, remaining warnings.",
     ].join("\n");
   },
 

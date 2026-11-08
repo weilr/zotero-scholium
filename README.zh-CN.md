@@ -129,7 +129,7 @@ npx skills add weilr/zotero-scholium -g -y
 为《Direct Preference Optimization》写一篇阅读笔记
 ```
 
-完成后关闭并重新打开 PDF 即可看到结果。没装插件时，Zotero 10 首次写入会询问是否允许，选「始终允许」。
+批注写入后会自己出现在打开的 PDF 里；装了插件时，阅读器工具栏的眼睛按钮显示或隐藏它们。没装插件时，Zotero 10 首次写入会询问是否允许，选「始终允许」。
 
 <details>
 <summary>其他安装方式、更新，以及从 Scholium Bridge 升级</summary>

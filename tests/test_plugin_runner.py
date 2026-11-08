@@ -3413,7 +3413,7 @@ def test_an_empty_message_box_fits_its_placeholder(facts):
 def test_extra_instructions_and_follow_ups_continue_the_conversation(facts):
     e = facts["extra"]
     assert e["before"] == {"placeholder": ASK, "sendHidden": False, "sendDisabled": True, "sendRowHidden": False}
-    assert "用户的附加要求：\n只标注方法部分\n\n结束时" in e["prompt"] and e["cleared"] == ""
+    assert "用户的附加要求：\n只标注方法部分\n\n批注写入后" in e["prompt"] and e["cleared"] == ""
     assert e["firstLogLine"] == {"type": "scholium", "subtype": "prompt", "text": "批注这篇\n附加要求：只标注方法部分", "annotate": True,
                                  "extra": "只标注方法部分"}
     assert e["firstEntry"] == ["scholium-entry prompt", "批注这篇\n附加要求：只标注方法部分"]
@@ -3714,9 +3714,13 @@ def test_the_prompt_names_the_profile_or_the_defaults(facts):
     p = facts["profilePrompt"]
     assert "- 画像：/data/zotero-scholium/profile.md\n" in p["zh"]
     assert "- Profile: none; annotate with the defaults and do not create or change a profile\n" in p["en"]
-    assert p["en"].endswith("End with one line only: N highlights (M core), K margin notes, note “title”, remaining warnings.")
+    assert p["en"].endswith("The annotations appear in the open PDF by themselves (the eye button in the reader's toolbar shows or hides "
+                            "Scholium's annotations): do not tell the user to close and reopen it.\n"
+                            "Your final reply is one short line in the user's language and nothing else: N highlights (M core), "
+                            "K margin notes, note “title”, remaining warnings.")
     assert facts["prompt"].count("画像：没有；按默认值标注，不要生成或修改画像") == 1
-    assert "笔记《标题》" in facts["prompt"]
+    assert facts["prompt"].endswith("批注写入后会自己出现在打开的 PDF 里（阅读器工具栏的眼睛按钮显示或隐藏 Scholium 的批注），不要让用户关闭再打开 PDF。\n"
+                                    "最后的回复只写一行中文，不写别的：高亮 N 条（核心 M 条），页边批注 K 条，笔记《标题》，剩余警告。")
 
 
 def test_a_follow_up_says_how_to_change_written_annotations(facts):
@@ -3784,7 +3788,7 @@ def test_a_group_the_user_cannot_edit_and_missing_files_are_not_run(facts):
 def test_annotate_again_opens_a_session_with_the_box_as_extra_instructions(facts):
     a = facts["annotateInConversation"]
     assert a["calls"] == 2 and a["resume"] is None and a["kept"] == "" and a["conversations"] == 2
-    assert a["prompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注：") and "用户的附加要求：\n只标方法部分\n\n结束时" in a["prompt"]
+    assert a["prompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注：") and "用户的附加要求：\n只标方法部分\n\n批注写入后" in a["prompt"]
     assert a["prompts"] == ["批注这篇\n附加要求：只标方法部分"], "the annotation tab shows the new session"
 
 
@@ -3828,7 +3832,7 @@ def test_annotate_after_a_question_opens_a_session_of_its_own(facts):
     n = facts["ask"]["annotated"]
     assert n["resume"] is None and n["cleared"] == "", "a new annotation session is not given the chat"
     assert n["prompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注：")
-    assert "\n- 画像：没有；按默认值标注，不要生成或修改画像\n" in n["prompt"] and "用户的附加要求：\n重点标方法部分\n\n结束时" in n["prompt"]
+    assert "\n- 画像：没有；按默认值标注，不要生成或修改画像\n" in n["prompt"] and "用户的附加要求：\n重点标方法部分\n\n批注写入后" in n["prompt"]
     assert n["lines"] == [{"type": "scholium", "subtype": "prompt", "text": "批注这篇\n附加要求：重点标方法部分", "annotate": True, "extra": "重点标方法部分"}]
     assert n["prompts"] == ["批注这篇\n附加要求：重点标方法部分"]
     assert n["chat"] == [["这篇怎么估计后验？编辑"], True], "the question's conversation stays as it was (the question with its ✎)"

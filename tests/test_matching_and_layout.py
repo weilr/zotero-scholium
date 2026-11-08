@@ -196,6 +196,16 @@ def test_render_js_is_self_contained(tmp_path):
     assert "annotationAuthorName" not in js, "the JavaScript backend writes no author name"
 
 
+def test_no_write_channel_asks_to_reopen_the_pdf():
+    """Every channel saves through Zotero, whose open readers take the new annotations; nothing asks to reopen the PDF."""
+    cfg = dict(cli.DEFAULTS); cfg.update({"item_key": "I", "attachment_key": "A"})
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    texts = [cli.render_js(cfg, [_TEXT_ANN])] + [open(os.path.join(root, *f.split("/")), encoding="utf-8").read() for f in
+        ("skills/zotero-scholium/SKILL.md", "skills/zotero-scholium/references/backends.md", "README.md", "README.zh-CN.md")]
+    for text in texts:
+        assert not re.search(r"(?i)close and re-?open|关闭并重新打开", text)
+
+
 def test_author_key_is_rejected(tmp_path):
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps({"pdf": "x.pdf", "item_key": "I", "attachment_key": "A", "out_dir": "o", "author": ""}), encoding="utf8")

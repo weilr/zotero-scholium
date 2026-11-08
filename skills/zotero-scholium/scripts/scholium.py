@@ -2320,7 +2320,7 @@ await Zotero.DB.executeTransaction(async function () {{
 if (trash.length) await Zotero.Items.trashTx(trash);
 return "removed " + old.length + " old annotations (kept " + kept + " of yours); note: " + (NOTE_HTML ? (noteCreated ? "created" : noteSame ? "the same text exists already" : "not created") : "none") +
   (trash.length ? "; " + trash.length + " earlier notes of the tool moved to the trash" : "") +
-  "; created " + created.highlight + " highlights, " + (created.underline ? created.underline + " underlines, " : "") + created.text + " margin texts" + (created.note ? ", " + created.note + " sticky notes" : "") + ". Close and reopen the PDF to see them.";
+  "; created " + created.highlight + " highlights, " + (created.underline ? created.underline + " underlines, " : "") + created.text + " margin texts" + (created.note ? ", " + created.note + " sticky notes" : "") + ".";
 """
 
 

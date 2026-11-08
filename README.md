@@ -139,7 +139,7 @@ Highlight the key claims of "Direct Preference Optimization" with translations a
 Write a reading note for "Direct Preference Optimization"
 ```
 
-Close and reopen the PDF afterwards to see the result. Without the plugin, Zotero 10 asks once whether the tool may write: choose *Always Allow*.
+The annotations appear in an open PDF by themselves; with the plugin, the eye button in the reader toolbar shows or hides them. Without the plugin, Zotero 10 asks once whether the tool may write: choose *Always Allow*.
 
 <details>
 <summary>Other ways to install the skill, updating, and coming from Scholium Bridge</summary>
