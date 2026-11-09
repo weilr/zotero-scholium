@@ -3725,7 +3725,7 @@ def test_a_follow_up_says_how_to_change_written_annotations(facts):
 def test_claude_code_without_the_skill_stops_at_once(facts):
     n = facts["noSkill"]
     assert n["kills"] == 1 and n["state"] is None
-    assert n["last"] == ["scholium-card failed", "Claude Code 找不到 zotero-scholium 技能：在终端运行 npx skills add weilr/zotero-scholium -g -y 安装后再试（其他安装方式见 README）。重试"]
+    assert n["last"] == ["scholium-card failed", "Claude Code 找不到 zotero-scholium 技能：在终端运行 npx skills add weilr/zotero-scholium -g -y 安装后再试（其他安装方式见 README）。安装技能并重试重试"]
     assert n["end"]["subtype"] == "end" and n["end"]["outcome"] == "failed"
     assert facts["pluginSkill"]["kills"] == 0 and facts["pluginSkill"]["state"].startswith("完成"), "a plugin's skill counts"
 

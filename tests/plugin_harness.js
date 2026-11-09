@@ -635,6 +635,10 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
         log.mtimes[p] = ++log.clock;
         if (o && o.tmpPath) log.tmpPaths.push(o.tmpPath);
       },
+      write: async (p, bytes) => {
+        log.writes[p] = Buffer.from(bytes).toString('utf8');
+        log.mtimes[p] = ++log.clock;
+      },
     },
     // AddonManager: a test's own, or none
     ChromeUtils: { importESModule: url => (/AddonManager/.test(url) ? { AddonManager: addonManager } : { Subprocess }) },

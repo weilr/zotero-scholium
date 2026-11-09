@@ -506,6 +506,11 @@ var ScholiumRunner = {
   qseq: 0,                  // the number of the latest queued message
   pendingQuotes: new Map(), // attachment key -> { quote: { text, page }, at }: a passage asked about before the section was drawn
   QUOTE_MS: 30000,          // how long such a passage waits for its section
+  // the skill's files as the plugin carries them in content/skill/zotero-scholium (added when the package is built);
+  // SKILL.md is written last, so that a copy cut short is not taken for a skill
+  SKILL_FILES: ["agents/openai.yaml", "examples/config.template.json", "examples/reading_note.template.html", "references/backends.md",
+                "references/batch.md", "references/configuration.md", "references/profile.md", "references/style-zh.md",
+                "references/zotero-annotations.md", "scripts/scholium.py", "SKILL.md"],
   current: null,            // { key, proc, cancelled }
   draining: false,
   job: null,                // { title, key, libraryID, started, step } of the running paper
@@ -590,6 +595,11 @@ var ScholiumRunner = {
       noSkill: agent => zh
         ? `${this.agentName(agent)} 找不到 zotero-scholium 技能：在终端运行 npx skills add weilr/zotero-scholium -g -y 安装后再试（其他安装方式见 README）。`
         : `${this.agentName(agent)} does not find the zotero-scholium skill: install it with npx skills add weilr/zotero-scholium -g -y in a terminal, then try again (other ways in the README).`,
+      installSkill: zh ? "安装技能并重试" : "Install the skill and retry",
+      skillNotCarried: zh ? "这份插件没有带技能：在终端运行 npx skills add weilr/zotero-scholium -g -y 安装。"
+                          : "This copy of the plugin carries no skill: install it with npx skills add weilr/zotero-scholium -g -y in a terminal.",
+      skillNoHome: zh ? "找不到用户目录，技能没有装上。" : "The home folder was not found; the skill was not installed.",
+      skillFailed: msg => zh ? `技能没有装上：${msg}` : `The skill could not be installed: ${msg}`,
       notSignedIn: agent => agent === "codex"
         ? (zh ? "Codex 还没有登录：在终端运行 codex login，登录后再试。" : "Codex is not signed in: run codex login in a terminal, then try again.")
         : (zh ? "Claude Code 还没有登录：在终端运行 claude，按提示登录后再试。" : "Claude Code is not signed in: run claude in a terminal and sign in, then try again."),
@@ -944,6 +954,52 @@ var ScholiumRunner = {
       if (path) return path;
     } catch (e) {}
     return this.env("USERPROFILE") || this.env("HOME");
+  },
+
+  // the agent's folder of the user's own skills: Claude Code's (CLAUDE_CONFIG_DIR when set), Codex's (CODEX_HOME when set)
+  skillsDir(agent) {
+    const home = this.home();
+    const base = agent === "codex" ? this.env("CODEX_HOME") || (home ? PathUtils.join(home, ".codex") : "")
+      : this.env("CLAUDE_CONFIG_DIR") || (home ? PathUtils.join(home, ".claude") : "");
+    return base ? PathUtils.join(base, "skills") : "";
+  },
+
+  // the skill the plugin carries, copied into the agent's skills folder byte for byte; a zotero-scholium skill already
+  // there is left as it is. A text key: skillInstalled, skillThere, or what kept it from being installed
+  async installSkill(agent) {
+    const dir = this.skillsDir(agent);
+    if (!dir) return "skillNoHome";
+    const dest = PathUtils.join(dir, "zotero-scholium");
+    if (await this.exists(PathUtils.join(dest, "SKILL.md"))) return "skillThere";
+    const files = [];
+    try {
+      for (const rel of this.SKILL_FILES) {
+        const xhr = await Zotero.HTTP.request("GET", this.chrome + "skill/zotero-scholium/" + rel, { responseType: "arraybuffer" });
+        files.push([rel, new Uint8Array(xhr.response)]);
+      }
+    } catch (e) {
+      this.log("skill not carried: " + e);
+      return "skillNotCarried";
+    }
+    for (const [rel, bytes] of files) {
+      const path = PathUtils.join(dest, ...rel.split("/"));
+      await IOUtils.makeDirectory(PathUtils.parent(path), { createAncestors: true, ignoreExisting: true });
+      await IOUtils.write(path, bytes);
+    }
+    return "skillInstalled";
+  },
+
+  // Install the skill and retry: the run again once the skill is there; else what kept it, under the box
+  async installAndRetry(view, agent, retry) {
+    let outcome;
+    try { outcome = await this.installSkill(agent); }
+    catch (e) {
+      this.log("skill not installed: " + e);
+      if (view.pane) this.sayUnderBox(view.pane, this.text("skillFailed", String((e && e.message) || e)));
+      return;
+    }
+    if (outcome === "skillInstalled" || outcome === "skillThere") return retry();
+    if (view.pane) this.sayUnderBox(view.pane, this.text(outcome));
   },
 
   // claude.exe directly (the npm shim is a .cmd file, which cannot be started without a shell): the one set on the
@@ -1591,7 +1647,8 @@ var ScholiumRunner = {
     // the end of a run without a result of its own: cancelled, failed before a result, interrupted
     if (event.type === "scholium" && event.subtype === "end") {
       out.push(Object.assign({ kind: "final", text: String(event.text || "").trim() || this.text(event.outcome || "failed"), error: true },
-                             event.outcome === "cancelled" ? { cancelled: true } : {}));
+                             event.outcome === "cancelled" ? { cancelled: true } : {},
+                             this.AGENTS.includes(event.skill) ? { skill: event.skill } : {}));
     }
     if (event.type === "scholium" && event.subtype === "retry") out.push({ kind: "info", text: this.text("retrying") });
     // the numbers an annotation's card shows, as counted when it ended
@@ -4636,7 +4693,11 @@ var ScholiumRunner = {
     let retryable = failedLast ? [...run.lead, ...run.other].filter(e => e.kind === "final" && e.error).pop() : null;
     const line = e => {
       const n = this.entryNode(doc, e);
-      if (e === retryable) n.append(this.iconButton(doc, "retry", this.text("retry"), () => { this.retryFromView(view).catch(err => this.log("retry failed: " + err)); }));
+      if (e === retryable) {
+        const again = () => this.retryFromView(view).catch(err => this.log("retry failed: " + err));
+        if (e.skill) n.append(this.paneButton(doc, this.text("installSkill"), () => { this.installAndRetry(view, e.skill, again).catch(err => this.log("install failed: " + err)); }, "small"));
+        n.append(this.iconButton(doc, "retry", this.text("retry"), again));
+      }
       return n;
     };
     for (const e of run.lead) node.append(line(e));
@@ -4754,7 +4815,9 @@ var ScholiumRunner = {
     node.append(text);
     const extra = (run.turn && run.turn.extra) || "";
     if (view.pane && index === (view.runCount || 0) - 1 && !this.busy(view.shownKey, "annotate")) {
-      node.append(this.iconButton(doc, "retry", this.text("retry"), () => { this.annotateFromPane(view.pane, { extra }); }));
+      const again = () => { this.annotateFromPane(view.pane, { extra }); };
+      if (failure.skill) node.append(this.paneButton(doc, this.text("installSkill"), () => { this.installAndRetry(view, failure.skill, again).catch(e => this.log("install failed: " + e)); }, "small"));
+      node.append(this.iconButton(doc, "retry", this.text("retry"), again));
     }
     return node;
   },
@@ -6329,7 +6392,9 @@ var ScholiumRunner = {
         }
         message = this.text("goneStopped", agent);
       }
-      if (!(result && this.entries(result).length)) this.appendEntries(this.entries(await this.logEnd(logPath, "failed", message, started)));
+      if (!(result && this.entries(result).length)) {
+        this.appendEntries(this.entries(await this.logEnd(logPath, "failed", message, started, ctx.noSkill ? { skill: ctx.noSkill } : {})));
+      }
       // the connection failed before the agent used a tool, so nothing was written: one more try
       if (!job.retried && !ctx.acted && this.transient(message, ctx.errorInfo)) {
         const mark = { type: "scholium", subtype: "retry" };
@@ -6385,8 +6450,8 @@ var ScholiumRunner = {
 
   // the end of a run that has no result of its own (cancelled, failed before a result) as the plugin's line in the
   // log, so that the paper's history shows how it ended
-  async logEnd(logPath, outcome, text, started = 0) {
-    const mark = { type: "scholium", subtype: "end", outcome, text };
+  async logEnd(logPath, outcome, text, started = 0, extra = {}) {
+    const mark = Object.assign({ type: "scholium", subtype: "end", outcome, text }, extra);
     if (started) mark.duration_ms = Date.now() - started;
     try { await IOUtils.writeUTF8(logPath, JSON.stringify(mark) + "\n", { mode: "append" }); }
     catch (e) { this.log("end not logged: " + e); }
@@ -6538,6 +6603,7 @@ var ScholiumRunner = {
           if (event.type === "system" && event.subtype === "init" && Array.isArray(event.skills)
               && !event.skills.some(name => /(?:^|:)zotero-scholium$/.test(String(name)))) {
             ctx.failure = this.text("noSkill", "claude");
+            ctx.noSkill = "claude";
             try { proc.kill(); } catch (e) {}
           }
           if (event.type === "result") ctx.result = event;
@@ -6968,7 +7034,10 @@ var ScholiumRunner = {
       state.listAfter = quiet.listAfter;
       if (quiet.config) settings.config = quiet.config;
       const skill = job.resume ? null : await this.codexSkill(rpc, cwd);
-      if (!job.resume && !skill) throw new Error(this.text("noSkill", "codex"));
+      if (!job.resume && !skill) {
+        ctx.noSkill = "codex";
+        throw new Error(this.text("noSkill", "codex"));
+      }
       let opened = null;
       if (job.resume) {
         // a thread that Codex refuses to resume is one it no longer has: a new one goes on with the conversation; an
