@@ -18,11 +18,8 @@ jobs:
         run: python scripts/check_versions.py "${{ github.ref_name }}"
       - name: build scholium.xpi (with the skill in content/skill, which the plugin installs when an agent has none)
         run: |
-          mkdir -p plugin/scholium/content/skill
-          cp -r skills/zotero-scholium plugin/scholium/content/skill/
-          rm -rf plugin/scholium/content/skill/zotero-scholium/scripts/__pycache__
-          cd plugin/scholium
-          zip -r ../scholium.xpi manifest.json bootstrap.js prefs.js settings.xhtml settings.js content locale
+          python scripts/build_xpi.py plugin/scholium.xpi
+          python scripts/check_xpi.py plugin/scholium.xpi
       - name: write update.json for Zotero's plugin updater
         run: |
           VERSION=$(python -c "import json;print(json.load(open('plugin/scholium/manifest.json'))['version'])")

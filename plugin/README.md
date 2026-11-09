@@ -397,12 +397,13 @@ Scholium Bridge does not update to Scholium by itself.
 ## Build
 
 ```bash
-cd plugin/scholium
-zip -r ../scholium.xpi manifest.json bootstrap.js prefs.js settings.xhtml settings.js content locale
+python scripts/build_xpi.py scholium.xpi
+python scripts/check_xpi.py scholium.xpi
 ```
 
 `manifest.json`, `bootstrap.js`, `prefs.js`, `settings.xhtml`, `settings.js` and the `content/` and `locale/` folders
-must be located at the root of the archive. `prefs.js` holds the defaults of the settings page's preferences,
+are at the root of the archive, and the skill under `content/skill/zotero-scholium/`, which the plugin installs when an
+agent has none. `prefs.js` holds the defaults of the settings page's preferences,
 `settings.xhtml` and `settings.js` the page.
 `content/` holds the section's icons and its stylesheet `scholium.css`, which uses Zotero's theme variables.
 
