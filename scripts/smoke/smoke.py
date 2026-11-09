@@ -11,12 +11,19 @@ such as plugin/scholium, or a built .xpi) and a probe plugin (probe/bootstrap.js
   localapi   Annotate with Zotero's local API off: the confirmation (accepted), the pref turns on, the run starts and ends
   signedout  a "not signed in" stream from Claude Code: the plugin's sentence, not "Please run /login"
   pymupdf    a run whose tool result says PyMuPDF is missing: the card says what to install
+  reselect   after a run, another item, then the paper again: its annotation session's card is back within seconds
   apply      the skill's CLI writes through /scholium/apply (upper-case colours arrive lower-case, one note); a write
              that Zotero rejects leaves no second note
   reader     Ask Scholium in the reader's context menu puts the passage above the Chat box
   skill      Install the skill and retry (from a package that carries the skill in content/skill, or the hint without)
+  port       the agent's environment has SCHOLIUM_ZOTERO_PORT = this throwaway's port (from the fake's recorded calls)
+  adddir     the agent gets --add-dir <CLAUDE_CONFIG_DIR>/skills/zotero-scholium exactly when that folder is there (the
+             run's own, empty until the skill check installs the skill: a full run sees both cases)
   setup      the settings page's setup check, with the real claude and codex found by the plugin (this runs
              `claude auth status` and `codex app-server`, which make no model calls); a second Zotero start
+  copy       the setup check's Copy puts "Scholium <version> · Zotero <version> …" and its lines on the clipboard
+             (the system's: the text that was on it is put back)
+  scanned    the skill's extract stops on an image-only PDF with exit code 3 and the no-text-layer error (no Zotero)
 
 The user's own Zotero is never contacted: the port must not be 23119, netstat for :23119 is printed before and after,
 and only processes whose command line names this run's profile are ended. CLAUDE* variables of the calling shell are
@@ -37,8 +44,12 @@ import zipfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 USER_PORT = 23119
-FAKE_CHECKS = ["section", "localapi", "signedout", "pymupdf", "apply", "reader", "skill"]
-ALL_CHECKS = FAKE_CHECKS + ["setup"]
+PROBE_FAKE = ["section", "localapi", "signedout", "pymupdf", "reselect", "apply", "reader", "skill"]   # the probe's, fake Claude
+RUNNER_FAKE = ["port", "adddir"]   # read from the fake's recorded calls once the fake session ends
+SETUP_CHECKS = ["setup", "copy"]   # a second Zotero start, with the real programs
+CLI_CHECKS = ["scanned"]           # the skill's CLI alone, no Zotero
+FAKE_CHECKS = PROBE_FAKE + RUNNER_FAKE + CLI_CHECKS   # all that need no real claude or codex
+ALL_CHECKS = PROBE_FAKE + RUNNER_FAKE + SETUP_CHECKS + CLI_CHECKS
 PROBE_ID = "scholium-smokeprobe@test"
 HOOK = ("\n// smoke probe only: the runner and the toggle where the probe can reach them\nvar __smokeStartup = startup;\n"
         "startup = async function (data, reason) { await __smokeStartup(data, reason); "
@@ -86,6 +97,64 @@ def parse_checks(text):
     if unknown:
         raise ValueError(f"unknown check(s): {', '.join(unknown)}; known: {', '.join(ALL_CHECKS)}")
     return [c for c in ALL_CHECKS if c in names]
+
+
+def plan(checks):
+    """Which checks run where: the probe's in the fake session (with a run to record when only port/adddir are asked
+    for), the runner's after it, the setup session's (copy runs inside the setup check), the CLI's."""
+    fake = [c for c in PROBE_FAKE if c in checks]
+    after = [c for c in RUNNER_FAKE if c in checks]
+    if after and not fake:
+        fake = ["pymupdf"]   # a fake run whose call is recorded
+    setup = [c for c in SETUP_CHECKS if c in checks]
+    if setup and "setup" not in setup:
+        setup = ["setup"] + setup
+    return {"fake": fake, "after": after, "setup": setup, "cli": [c for c in CLI_CHECKS if c in checks]}
+
+
+def parse_call(text):
+    """A call the fake recorded: its script name, its environment lines (ENV NAME=value), its arguments, its input."""
+    head, _, stdin = text.partition("\n---\n")
+    lines = head.split("\n")
+    env = {}
+    rest = lines[1:]
+    while rest and rest[0].startswith("ENV "):
+        k, _, v = rest[0][4:].partition("=")
+        env[k] = v
+        rest = rest[1:]
+    return {"name": lines[0].strip(), "env": env, "args": rest, "stdin": stdin}
+
+
+def check_port_env(calls, port):
+    """Every agent run (not the model-list call) got SCHOLIUM_ZOTERO_PORT = the throwaway's port."""
+    runs = [c for c in calls if c["name"] != "MODELS"]
+    got = sorted({c["env"].get("SCHOLIUM_ZOTERO_PORT", "(not recorded)") for c in runs})
+    return bool(runs) and got == [str(port)], {"runs": len(runs), "SCHOLIUM_ZOTERO_PORT": got, "expected": str(port)}
+
+
+def check_add_dir(calls, folder, installed_at=None):
+    """Every agent run gets --add-dir <folder> (Claude Code's skill folder: <CLAUDE_CONFIG_DIR>/skills/zotero-scholium)
+    exactly when the folder was there as the run started: installed_at is when it got there (its SKILL.md, written
+    last), None when it never did; a call's "at" is when it started."""
+    runs = [c for c in calls if c["name"] != "MODELS"]
+    rows = []
+    for c in runs:
+        a = c["args"]
+        given = any(_norm(a[i + 1]) == _norm(folder) for i in range(len(a) - 1) if a[i] == "--add-dir")
+        there = installed_at is not None and c.get("at", float("inf")) >= installed_at
+        rows.append({"call": c["name"], "folder there": there, "--add-dir": given})
+    cases = sorted({r["folder there"] for r in rows})
+    return bool(runs) and all(r["folder there"] == r["--add-dir"] for r in rows), {"folder": folder, "runs": rows, "cases seen": cases}
+
+
+def read_calls(folder):
+    """The fake's recorded calls in order, each with "at": when it was written (as the call started)."""
+    out = []
+    for f in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        path = os.path.join(folder, f)
+        with open(path, encoding="utf8", errors="replace") as h:
+            out.append(dict(parse_call(h.read()), at=os.path.getmtime(path)))
+    return out
 
 
 def make_prefs(data_dir, port, locale, local_api, claude_path=None):
@@ -236,6 +305,49 @@ def make_pdf(path, pages=PDF_PAGES):
     return path
 
 
+def make_scanned_pdf(path, pages=2):
+    """A PDF whose pages are an image each and no text, as a scan without OCR (no dependencies)."""
+    image = b"\x00\x80\xff\x40"   # 2x2 grey pixels, stretched over the page
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+               ("<< /Type /Pages /Kids [%s] /Count %d >>" % (" ".join("%d 0 R" % (4 + 2 * i) for i in range(pages)), pages)).encode(),
+               b"<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 4 >>\nstream\n"
+               + image + b"\nendstream"]
+    for i in range(pages):
+        content = b"q 612 0 0 792 0 0 cm /Im1 Do Q"
+        objects.append(("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im1 3 0 R >> >> "
+                        "/Contents %d 0 R >>" % (5 + 2 * i)).encode())
+        objects.append(b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream")
+    data = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    offsets = []
+    for k, body in enumerate(objects, 1):
+        offsets.append(len(data))
+        data += b"%d 0 obj\n" % k + body + b"\nendobj\n"
+    xref = len(data)
+    data += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    for o in offsets:
+        data += b"%010d 00000 n \n" % o
+    data += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    with open(path, "wb") as f:
+        f.write(bytes(data))
+    return path
+
+
+def scanned_check(a, run):
+    """The skill's extract on an image-only PDF: exit code 3 and the no-text-layer error as JSON."""
+    os.makedirs(run, exist_ok=True)
+    pdf = make_scanned_pdf(os.path.join(run, "scanned.pdf"))
+    cmd = [sys.executable, os.path.join(HERE, "cli_child.py"), "--cli", a.cli, "--port", str(a.port), "--",
+           "extract", "--pdf", pdf, "--sentences", os.path.join(run, "sentences.json"), "--out", os.path.join(run, "sentences.txt")]
+    p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf8", errors="replace", env=make_env(os.environ, run), cwd=run, timeout=120)
+    try:
+        rep = json.loads(p.stdout)
+    except ValueError:
+        rep = {}
+    ok = p.returncode == 3 and "no text layer" in str(rep.get("error", "")) and rep.get("scanned_pages") == rep.get("pages") == 2
+    return {"check": "scanned", "pass": ok, "info": {"exit": p.returncode, "report": rep or (p.stdout + p.stderr)[-300:],
+                                                      "wrote_sentences": os.path.exists(os.path.join(run, "sentences.json"))}}
+
+
 def export_git(rev, dest):
     """plugin/scholium and skills/zotero-scholium as committed at rev, byte for byte (no CRLF from core.autocrlf), in dest."""
     import io
@@ -337,7 +449,7 @@ def apply_step(run, port, cli, env, req):
 # ---------------------------------------------------------------------------------------------------------------------
 # one Zotero start
 # ---------------------------------------------------------------------------------------------------------------------
-def run_session(a, name, checks):
+def run_session(a, name, checks, runner_checks=()):
     run = os.path.join(a.out, name)
     if os.path.exists(run):
         shutil.rmtree(run)
@@ -416,9 +528,19 @@ def run_session(a, name, checks):
         same = got == sha256s(skill)
         results["skill"]["info"]["identical"] = same
         results["skill"]["pass"] = results["skill"]["pass"] and same
+    calls = read_calls(os.path.join(dirs["fake"], "calls"))
+    if "port" in runner_checks:
+        ok, info = check_port_env(calls, a.port)
+        results["port"] = {"check": "port", "pass": ok, "info": info}
+    if "adddir" in runner_checks:   # the plugin's rule: <CLAUDE_CONFIG_DIR>/skills/zotero-scholium, the run's own here
+        folder = os.path.join(dirs["claude-config"], "skills", "zotero-scholium")
+        marker = os.path.join(folder, "SKILL.md")
+        ok, info = check_add_dir(calls, folder, os.path.getmtime(marker) if os.path.exists(marker) else None)
+        results["adddir"] = {"check": "adddir", "pass": ok, "info": info}
     errors = next((f.get("errors") for f in facts if f.get("what") == "errors"), None)
     zotero = next((f.get("zotero") for f in facts if f.get("what") == "start"), None)
-    return {"session": name, "zotero": zotero, "run": run, "results": results, "errors": errors, "ended": ended, "killed": killed,
+    return {"session": name, "checks": [c for c in ALL_CHECKS if c in a.checks_asked and (c in checks or c in runner_checks)],
+            "zotero": zotero, "run": run, "results": results, "errors": errors, "ended": ended, "killed": killed,
             "netstat": {"before": before, "after": after}, "shots": sorted(os.listdir(dirs["shots"]))}
 
 
@@ -434,7 +556,7 @@ def main(argv=None):
     ap.add_argument("--locale", default="zh-CN", choices=sorted(QUESTION))
     ap.add_argument("--git", default=None, metavar="REV",
                     help="test plugin/scholium and skills/zotero-scholium as committed at REV (e.g. HEAD), not the working tree")
-    ap.add_argument("--checks", default="all", help="all, fake, or a comma list of: " + ", ".join(ALL_CHECKS))
+    ap.add_argument("--checks", default="all", help="all, fake (all but setup and copy), or a comma list of: " + ", ".join(ALL_CHECKS))
     ap.add_argument("--out", default=None, help="the folder of the runs (default: <TEMP>/scholium-smoke/<time>)")
     ap.add_argument("--minutes", type=float, default=10, help="the longest a Zotero start may take")
     a = ap.parse_args(argv)
@@ -457,21 +579,27 @@ def main(argv=None):
     a.plugin = os.path.abspath(a.plugin)
     a.skill = os.path.abspath(a.skill) if a.skill else None
     a.cli = os.path.abspath(a.cli or os.path.join(a.skill or os.path.join(REPO, "skills", "zotero-scholium"), "scripts", "scholium.py"))
-    fake_checks = [c for c in checks if c != "setup"]
+    a.checks_asked = checks
+    where = plan(checks)
     if not os.path.isfile(a.zotero):
         ap.error(f"no Zotero at {a.zotero}")
-    if fake_checks and not (a.fake and os.path.isfile(a.fake)):
+    if where["fake"] and not (a.fake and os.path.isfile(a.fake)):
         ap.error("--fake: build fakeclaude.exe first (see scripts/smoke/README.md)")
     os.makedirs(a.out, exist_ok=True)
     sessions = []
-    if fake_checks:
-        sessions.append(run_session(a, "fake", fake_checks))
-    if "setup" in checks:
-        sessions.append(run_session(a, "setup", ["setup"]))
+    if where["cli"]:
+        before = netstat_user_port()
+        r = scanned_check(a, os.path.join(a.out, "cli"))
+        sessions.append({"session": "cli", "checks": where["cli"], "zotero": None, "run": os.path.join(a.out, "cli"), "results": {"scanned": r},
+                         "errors": None, "netstat": {"before": before, "after": netstat_user_port()}, "shots": []})
+    if where["fake"]:
+        sessions.append(run_session(a, "fake", where["fake"], where["after"]))
+    if where["setup"]:
+        sessions.append(run_session(a, "setup", where["setup"]))
     ok = True
-    print("\nRESULTS (Zotero %s, %s)" % (", ".join(sorted({str(s["zotero"]) for s in sessions})), a.locale))
+    print("\nRESULTS (Zotero %s, %s)" % (", ".join(sorted({str(s["zotero"]) for s in sessions if s["zotero"]})), a.locale))
     for s in sessions:
-        for c in [c for c in checks if (c == "setup") == (s["session"] == "setup")]:
+        for c in s["checks"]:
             r = s["results"].get(c)
             passed = bool(r and r.get("pass"))
             ok &= passed
@@ -483,7 +611,8 @@ def main(argv=None):
         if s["netstat"]["before"] != s["netstat"]["after"]:
             ok = False
             print(f"  FAIL  netstat :{USER_PORT} changed: {s['netstat']}")
-        print(f"  screenshots: {os.path.join(s['run'], 'shots')}")
+        if s["session"] != "cli":
+            print(f"  screenshots: {os.path.join(s['run'], 'shots')}")
     with open(os.path.join(a.out, "summary.json"), "w", encoding="utf8") as f:
         json.dump(sessions, f, ensure_ascii=False, indent=1)
     print(("ALL PASSED" if ok else "SOME CHECKS FAILED") + f"; details in {os.path.join(a.out, 'summary.json')}")
