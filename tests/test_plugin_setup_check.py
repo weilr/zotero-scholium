@@ -317,7 +317,7 @@ def test_claude_code_signed_out_or_not_answering(facts):
 def test_claude_code_not_found(facts):
     assert facts["claudeMissing"] == {"lines": [["claude", "bad", "Claude Code", "未找到：安装 Claude Code，或在上方指定它的程序。"]], "auth": 0,
                                       "kept": False}
-    assert facts["claudeGone"]["lines"] == [["claude", "bad", "Claude Code", "上方指定的程序不存在。"]]
+    assert facts["claudeGone"]["lines"] == [["claude", "bad", "Claude Code", "上方指定的程序不存在：改正路径，或清空以自动查找。"]]
 
 
 def test_claude_codes_answer_is_waited_for_and_killed(facts):
@@ -357,7 +357,7 @@ def test_a_codex_server_that_fails_shows_its_first_line(facts):
 def test_codex_not_found(facts):
     assert facts["codexMissing"]["lines"] == [["codex", "bad", "Codex", "未找到：安装 Codex，或在上方指定它的程序。"]]
     assert facts["codexMissing"]["servers"] == 0
-    assert facts["codexGone"]["lines"] == [["codex", "bad", "Codex", "上方指定的程序不存在。"]]
+    assert facts["codexGone"]["lines"] == [["codex", "bad", "Codex", "上方指定的程序不存在：改正路径，或清空以自动查找。"]]
 
 
 def test_a_codex_server_that_does_not_answer_is_closed(facts):
@@ -383,7 +383,7 @@ def test_the_install_button_installs_the_skill_or_says_why_not(facts):
     assert i["action"] == dict(INSTALL, agent="claude") and i["said"] is None and i["skill"] == "file SKILL.md"
     assert i["again"] == USER_SKILL
     assert facts["notCarried"] == "这份插件没有带技能：在终端运行 npx skills add weilr/zotero-scholium -g -y 安装。"
-    assert facts["noHome"] == "找不到用户目录，技能没有装上。"
+    assert facts["noHome"] == "找不到用户目录，技能没有装上：在终端运行 npx skills add weilr/zotero-scholium -g -y 安装。"
 
 
 def test_python_and_pymupdf(facts):

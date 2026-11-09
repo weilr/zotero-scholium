@@ -51,9 +51,10 @@ LEGACY_TAGS = {"zotero-marginalia", "zotero-paper-annotate"}   # tags written by
 OWN_TAGS = {TAG} | LEGACY_TAGS
 APP_NAME = "zotero-scholium"
 BASE = "http://127.0.0.1:23119"
-NOT_IN_MY_LIBRARY = "the item was not found in My Library; items in group libraries are not supported"
-LOCAL_API_OFF = ("Zotero's local API is turned off (Settings → Advanced → Allow other applications on this computer to "
-                 "communicate with Zotero)")
+NOT_IN_MY_LIBRARY = ("the item was not found in My Library; items in group libraries are not supported: check the key with "
+                     "status --query, or copy the item to My Library")
+LOCAL_API_OFF = ("Zotero's local API is turned off: turn on Settings → Advanced → Allow other applications on this computer "
+                 "to communicate with Zotero")
 
 DEFAULTS = {
     "levels": {},               # named colour levels, e.g. {"claim": "#ff6666", "method": "#ffd400"}; referenced by "level" in highlights
@@ -392,7 +393,7 @@ KINDS = ("text", "note")
 BAND_MARGIN = 6.0        # distance between a top/bottom band and the page edge (pt)
 NOTE_ICON = 22.0         # side of a sticky-note icon in the Zotero reader (pt)
 MIN_BOX_WIDTH = 30.0     # narrowest usable text box (pt)
-ROTATED_PAGE = "the page is rotated; annotations on rotated pages are not supported yet, so nothing is written there"
+ROTATED_PAGE = "the page is rotated; annotations on rotated pages are not supported yet: leave out the entries on this page"
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
@@ -1731,6 +1732,11 @@ def zotero_version():
     return h.get("X-Zotero-Version", ""), h.get("Zotero-Server-ID", "")
 
 
+def zotero_down():
+    """The error of a request that Zotero did not answer."""
+    return f"Zotero does not answer on {BASE.split('//')[-1]}; start Zotero, then run again"
+
+
 def _read_failure(status, text):
     """Why a read of the local API failed: a 404 is an item outside My Library, a 403 the local API turned off."""
     return NOT_IN_MY_LIBRARY if status == 404 else LOCAL_API_OFF if status == 403 else text[:200]
@@ -1762,7 +1768,7 @@ class LocalApi:
               file=sys.stderr, flush=True)
         s, h, t = http("POST", "/api/local/authorize", {"appName": APP_NAME}, {"Zotero-Server-ID": self.server_id}, timeout=300)
         if s != 200:
-            raise RuntimeError(f"authorization failed (HTTP {s}): {t[:200]}")
+            raise RuntimeError(f"authorization failed (HTTP {s}): {t[:200]}; run again and choose Allow in Zotero's dialog")
         d = json.loads(t)
         self.key = d["key"]
         if d.get("remember"):
@@ -1907,7 +1913,7 @@ def api_apply(cfg, out, api):
     # An item_key that is not the attachment's parent is refused before anything is written, as the plugin refuses it.
     item_key, att_key = cfg.get("item_key"), cfg["attachment_key"]
     if item_key and item_key != att_key and api.item(att_key)["data"].get("parentItem") != item_key:
-        raise RuntimeError(f"item {item_key} is not the parent of attachment {att_key}")
+        raise RuntimeError(f"item {item_key} is not the parent of attachment {att_key}; set item_key to the attachment's parent key from status")
     # Capture old owned keys before creating anything; matching text is not ownership.
     rows = api.children(cfg["attachment_key"], "annotation") if cfg.get("cleanup", False) else []
     to_delete, kept = [], 0
@@ -2063,13 +2069,14 @@ def plugin_connect(cfg):
         if s != 404:
             break
     if s == 0:
-        return None, "Zotero is not running or its local server is disabled (" + t[:80] + ")", None
+        return None, "Zotero is not running or its local server is disabled (" + t[:80] + "); start Zotero, then run again", None
     if s == 404:
         return None, "Scholium plugin is not installed (HTTP 404)", None
     if s == 401:
         return None, "token mismatch or token file not found (scholium.token in the Zotero data directory; set data_dir in the config)", None
     if not token:
-        return None, "token file not found (looked in: %s)" % ", ".join(_data_dir_candidates(cfg)), None
+        return None, ("token file not found (looked in: %s); set data_dir in the config to Zotero's data directory"
+                      % ", ".join(_data_dir_candidates(cfg))), None
     res = json.loads(t) if s == 200 else {}
     if not res.get("ok"):
         return token, {"ok": False, "error": "list failed (HTTP %s): %s" % (s, t[:200])}, base
@@ -2141,7 +2148,7 @@ var parent = Zotero.Items.getByLibraryAndKey(libraryID, ITEM_KEY);
 var att = Zotero.Items.getByLibraryAndKey(libraryID, ATT_KEY);
 if (!parent) throw new Error("item not found: " + ITEM_KEY);
 if (!att) throw new Error("attachment not found: " + ATT_KEY);
-if (ITEM_KEY !== ATT_KEY && att.parentID !== parent.id) throw new Error("item " + ITEM_KEY + " is not the parent of attachment " + ATT_KEY);
+if (ITEM_KEY !== ATT_KEY && att.parentID !== parent.id) throw new Error("item " + ITEM_KEY + " is not the parent of attachment " + ATT_KEY + "; set item_key to the attachment's parent key from status");
 
 var old = [], kept = 0;
 for (let a of (CLEANUP ? att.getAnnotations(true) : [])) {{
@@ -2257,7 +2264,7 @@ def profile_from_library(exclude_author=""):
     """Read every annotation and child note made by the user (excluding those created by this tool) and summarise the habits."""
     s, h, t = http("GET", "/api/users/0/items?itemType=annotation&limit=100000", timeout=180)
     if s != 200:
-        raise RuntimeError(f"cannot read annotations (HTTP {s}); is Zotero running?")
+        raise RuntimeError(f"cannot read annotations (HTTP {s}): {_read_failure(s, t)}" if s else zotero_down())
     rows = json.loads(t)
     own = []
     for r in rows:
@@ -2468,7 +2475,7 @@ def pick_backend(requested, cfg):
                 major = 0
             if major >= 10:
                 return "api", LocalApi(sid), f"Zotero {ver}: official local API write support"
-            why_not.append(f"Zotero {ver}: the local API is read-only before Zotero 10")
+            why_not.append(f"Zotero {ver}: the local API is read-only before Zotero 10; install the Scholium plugin")
         elif ver is not None and sid is None:
             why_not.append(LOCAL_API_OFF)
         else:
@@ -2500,7 +2507,7 @@ def _get(path):
     if s in (403, 404):
         raise RuntimeError(f"GET {path}: HTTP {s}: {_read_failure(s, t)}")
     if s != 200:
-        raise RuntimeError(f"GET {path}: HTTP {s}: {t[:160]}" if s else "Zotero does not answer on 127.0.0.1:23119; is it running?")
+        raise RuntimeError(f"GET {path}: HTTP {s}: {t[:160]}" if s else zotero_down())
     return json.loads(t)
 
 
@@ -2672,7 +2679,7 @@ def config_problems(raw):
                 near = difflib.get_close_matches(k, sorted(allowed), n=1)
                 problems.append(f"unknown key {k!r}{where}" + (f" (did you mean {near[0]!r}?)" if near else ""))
     if "author" in raw:
-        problems.append("the 'author' key is not supported")
+        problems.append("the 'author' key is not supported: remove it")
     unknown([k for k in raw if k != "author"], CONFIG_KEYS, "")
     for k in ("pdf", "item_key", "attachment_key", "out_dir"):
         if not raw.get(k):

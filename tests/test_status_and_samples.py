@@ -108,7 +108,7 @@ def test_status_lists_matching_items_and_reports_failures(zotero, capsys, monkey
     assert code == 1 and "HTTP 404: the item was not found in My Library; items in group libraries are not supported" in out["error"]
     monkeypatch.setattr(cli, "http", lambda *a, **k: (0, {}, "refused"))
     out, code = run(capsys, "status", "I1")
-    assert code == 1 and "is it running" in out["error"]
+    assert code == 1 and out["error"] == "Zotero does not answer on 127.0.0.1:23119; start Zotero, then run again"
 
 
 def test_an_attachment_outside_my_library_is_named_as_such(monkeypatch):
