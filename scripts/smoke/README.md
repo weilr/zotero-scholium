@@ -96,3 +96,133 @@ You do not need to install another version to test it. Download the official ins
 ```
 
 `tests/test_smoke_tools.py` tests the runner's pure parts without starting Zotero.
+
+# Real runs: what a change costs and writes
+
+`live.py` runs one real one-click Annotate, Claude Code through the plugin, in a throwaway Zotero, and `eval.py` scores
+it. Use them to measure a skill or plugin change before and after, the same way each time. They are for Windows: the
+watcher reads `netstat -ano` and the process table.
+
+The plugin, the skill and `.claude-plugin` are exported from git at `--git` (default `HEAD`), byte for byte, so commit
+the change first. Claude Code runs as the plugin starts it, with `--setting-sources project,local --plugin-dir <export>`
+added: the exported skill and none of your settings. It uses your Claude Code login, so your own skill folder
+(`~/.claude/skills/zotero-scholium`) is visible to the agent; that is why its script is checked (see below).
+
+## One measurement
+
+```
+python scripts/smoke/live.py --zotero "C:\Program Files\Zotero\zotero.exe" --pdf D:\papers\2305.18290.pdf --meta dpo.json --tag dpo-head
+python scripts/smoke/eval.py report %TEMP%\scholium-live\dpo-head
+```
+
+`--meta` is the item's JSON (`{"itemType": "preprint", "fields": {"title": ..., "archiveID": "arXiv:2305.18290", "DOI": ...},
+"creators": [["First", "Last"]]}`); without it the item is a preprint titled after the file. The PDF is only read: Zotero
+imports a copy into the throwaway's storage.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--zotero` | (required) | the `zotero.exe` to start with a throwaway profile |
+| `--pdf`, `--meta` | (required), none | the paper and its item |
+| `--git` | `HEAD` | the commit to run |
+| `--model`, `--effort`, `--locale` | `haiku`, `low`, `zh-CN` | the plugin's settings for the run |
+| `--extra` | `""` | instructions typed above Annotate (none: the one-click run) |
+| `--max-msgs` | 60 | the probe cancels the run after this many API messages (the agent never sees it) |
+| `--max-usd` | 1.00 | the session ends once its result lines' `total_cost_usd` passes this |
+| `--limit`, `--minutes` | 20, 30 | minutes for the agent run, and for the whole Zotero session |
+| `--chat` | `""` | a question in the Chat tab after the run |
+| `--open-reader` | off | a reader tab before and after the run, the eye button's preference never set |
+| `--from-run` | none | start from a copy of a finished run's profile and data |
+| `--claude` | npm's under APPDATA, else PATH | the real `claude` |
+| `--fake` | none | a rehearsal with the fake Claude Code above: no model is called |
+| `--port` | 23129 | the throwaway's port; 23119 is refused |
+| `--tag`, `--out` | the time, `%TEMP%\scholium-live` | the run folder `<out>\<tag>` |
+| `--config` | none | a JSON file of defaults for these options, e.g. `{"zotero": "...", "papers": "D:\\papers"}` |
+
+`eval.py report RUN...` prints a row per run: cost, tokens by kind (input, cache read, cache write, output, thinking),
+turns, wall and agent time, the reads of `sentences.txt` (offset+limit) and of the skill's other files, the reading
+note's length, `<h1>` and headings, and the closing line. `--calls` adds each tool call with the tokens it added and how
+many later messages re-read them, and the context of each API message. `--compare BASELINE.json` shows each measure
+against the baseline's run of the same paper.
+
+Exit code 0: a complete run; 1: safe but incomplete (a timeout, no result); 2: refused before Zotero started; 3: a
+safety layer stopped it.
+
+## An evaluation
+
+`evalset.json` names four arXiv papers (DPO, DDPM, ResNet, knowledge distillation) with their metadata, the PDF's URL
+and its SHA-256, and the run's settings (Haiku, low effort, zh-CN, no extra instructions). The PDFs are not in the
+repository: download each into a folder as `<arxiv id>.pdf` (or `<arxiv id>\paper.pdf`).
+
+```
+python scripts/smoke/eval.py run --zotero "C:\Program Files\Zotero\zotero.exe" --papers D:\papers --max-usd 0.50
+python scripts/smoke/eval.py score %TEMP%\scholium-live\eval-<time>\eval-dpo ... --compare <earlier>\eval.json
+```
+
+`run` starts one throwaway Zotero per paper, in turn, and writes `<out>\eval.json` (a baseline) and `eval.md`. To compare
+commits, give several: `--git v0.2.2,HEAD --repeat 2` runs them interleaved (v0.2.2, HEAD, v0.2.2, HEAD for each paper),
+tagged `eval-<paper>-<rev>-<n>`. `--only dpo,ddpm` takes some papers. No run starts once the set's result lines add up to
+`--max-usd`; each run is given what is left as its own `--max-usd`. The set stops when a run is refused or a safety
+layer stopped one.
+
+`score` prints the quality table: highlights and core, pages with highlights, highlights from the references on,
+empty comments and comments that copy the English, comment length, translation warnings at the first dry run and at
+apply, margin and sticky notes, layout warnings and overlaps, phrases not found, the reading note (length, paragraphs,
+headings, `<h1>`, the citation), dry runs and their failures, `--apply` runs, tool errors and retries. `--out NAME`
+writes NAME.json and NAME.md. A baseline names runs by their folder's name, not by a path.
+
+## What it costs
+
+A whole paper with Haiku at low effort costs about $0.02–0.03 (once $0.10, when its output ran long), the evaluation
+set about $0.15–0.20. Opus on pages 1–6 costs about $0.60. Rehearse with `--fake` first: it costs nothing.
+
+## Do not pass --max-budget-usd
+
+Claude Code shows the agent its budget on every turn, and an agent that sees it economizes: it reads less and writes
+less, so the run measures the budget, not the change. The plugin never passes it, and neither does `live.py`: the probe
+refuses a run whose arguments have it. The caps are ones the agent cannot see: `--max-msgs` (the probe counts the API
+messages in the run's log and cancels it) and `--max-usd`, from the result lines. A result line comes at the end of an
+agent run, so `--max-usd` ends a session after the run that passed it, and in a set it stops the next run from
+starting; a single run is bounded by `--max-msgs`.
+
+## Safety of a real run
+
+None of these can be turned off.
+
+- **Port:** 23119 is refused as `--port`, in the profile's prefs and in the guard. The prefs are `smoke.py`'s:
+  `extensions.zotero.firstRun2` false (no zotero.org/start in your browser), no Word or LibreOffice add-in installs, no
+  updates, no sync.
+- **Your skill script:** before a run, `~/.claude/skills/zotero-scholium/scripts/scholium.py`, if it is there, is read
+  (only read). Unless it reads `SCHOLIUM_ZOTERO_PORT`, there is no run: the agent can see that folder, and an older script
+  would write to your Zotero. The exported script is checked the same way.
+- **The agent's environment:** the probe looks at the environment the plugin gives each agent process. Unless
+  `SCHOLIUM_ZOTERO_PORT` is the throwaway's port, the run is cancelled; `live.json` records every process's value.
+- **Guard:** every Python the agents start loads `guard/sitecustomize.py` (a copy in the run, through `PYTHONPATH`). A
+  connection to 23119 goes to the throwaway's port instead and is noted in `guard\redirects.txt`. A redirect during the
+  run is a safety stop: some script did not honour the port.
+- **Chain test:** before the probe presses Annotate, the runner checks the guard (its own redirects), runs the exported
+  script's `status` through the guard and again with `python -I` and only `SCHOLIUM_ZOTERO_PORT`, and an `--apply` on a
+  chain-test item, and compares netstat :23119 before and after. If any of it fails, there is no run.
+- **Watcher:** from before Zotero starts until after it ended, netstat is read every second. Every connection with 23119
+  on either side is logged (`watch23119-all.txt`), the clients in `watch23119.txt`. A connection to 23119 from this run's
+  process tree (the runner, its Zotero and their children) ends the run's Zotero at once: `TRIPPED`, exit code 3.
+- **netstat:** :23119 before and after the session must be the same.
+- **Isolation:** as for the smoke checks: profile, data, APPDATA, TEMP and CODEX_HOME are the run's; the calling
+  shell's `CLAUDE*` variables are not passed on. A rehearsal also gets an empty `CLAUDE_CONFIG_DIR`. Only processes
+  whose command line names the run's profile are ended, and only a folder this runner made is emptied for a new run.
+
+## A live run folder
+
+```
+<out>/<tag>/
+  live.json                                 the runner's summary: ended, cost, chain test, agent env, watcher, netstat
+  export/                                   the commit's plugin, skill and .claude-plugin (Claude Code's --plugin-dir)
+  guard/  chain/                            the guard (port.txt, redirects.txt), the chain test's files
+  watch23119-all.txt  watch23119.txt        the watcher's logs
+  probe-config.json  chain-request.json  chain-done.json
+  shots/facts.json  shots/db.json           what the probe saw; the annotations and notes in the database
+  shots/prompt-1.txt  shots/conv-*.jsonl    the prompt and the conversation logs
+  data/tmp/scholium/<key>/                  the run's own folder: config.json, sentences.txt, conversations/
+  profile/  data/  appdata/  temp/  zotero-debug.txt
+```
+
+`tests/test_live_tools.py` tests the pure parts of `live.py`, `eval.py`, the guard and the live probe.

@@ -353,11 +353,12 @@ def scanned_check(a, run):
                                                       "wrote_sentences": os.path.exists(os.path.join(run, "sentences.json"))}}
 
 
-def export_git(rev, dest):
-    """plugin/scholium and skills/zotero-scholium as committed at rev, byte for byte (no CRLF from core.autocrlf), in dest."""
+def export_git(rev, dest, paths=("plugin/scholium", "skills/zotero-scholium")):
+    """These paths (plugin/scholium and skills/zotero-scholium) as committed at rev, byte for byte (no CRLF from
+    core.autocrlf), in dest."""
     import io
     import tarfile
-    data = subprocess.run(["git", "-C", REPO, "-c", "core.autocrlf=false", "archive", "--format=tar", rev, "plugin/scholium", "skills/zotero-scholium"],
+    data = subprocess.run(["git", "-C", REPO, "-c", "core.autocrlf=false", "archive", "--format=tar", rev] + list(paths),
                           capture_output=True, check=True).stdout
     if os.path.exists(dest):
         shutil.rmtree(dest)

@@ -1,0 +1,30 @@
+{
+ "about": "The evaluation set of eval.py run: one-click Annotate (no extra instructions) on each whole paper, each in its own throwaway Zotero. The PDFs are not in the repository: download each from its pdf URL into the papers folder as <arxiv>.pdf (or <arxiv>/paper.pdf); eval.py checks the SHA-256.",
+ "run": {"model": "haiku", "effort": "low", "locale": "zh-CN", "extra": "", "limit": 22, "minutes": 30, "max_msgs": 60},
+ "papers": [
+  {"name": "dpo", "arxiv": "2305.18290", "pdf": "https://arxiv.org/pdf/2305.18290v3",
+   "sha256": "92cb3a2b71362acda98a789b03d88688fd33cf5fcf13f81d2b1de30ee7d3b67a",
+   "itemType": "preprint",
+   "fields": {"title": "Direct Preference Optimization: Your Language Model is Secretly a Reward Model", "date": "2023-05-29",
+              "url": "https://arxiv.org/abs/2305.18290", "repository": "arXiv", "archiveID": "arXiv:2305.18290", "DOI": "10.48550/arXiv.2305.18290"},
+   "creators": [["Rafael", "Rafailov"], ["Archit", "Sharma"], ["Eric", "Mitchell"], ["Stefano", "Ermon"], ["Christopher D.", "Manning"], ["Chelsea", "Finn"]]},
+  {"name": "ddpm", "arxiv": "2006.11239", "pdf": "https://arxiv.org/pdf/2006.11239v2",
+   "sha256": "aee5e07a802e8dfd2a386374c94fd61d1d056cb7e1e0fec4f28e8120ff5d8505",
+   "itemType": "preprint",
+   "fields": {"title": "Denoising Diffusion Probabilistic Models", "date": "2020-06-19", "url": "https://arxiv.org/abs/2006.11239",
+              "repository": "arXiv", "archiveID": "arXiv:2006.11239", "DOI": "10.48550/arXiv.2006.11239"},
+   "creators": [["Jonathan", "Ho"], ["Ajay", "Jain"], ["Pieter", "Abbeel"]]},
+  {"name": "resnet", "arxiv": "1512.03385", "pdf": "https://arxiv.org/pdf/1512.03385v1",
+   "sha256": "1e0651b6810ecba34a3dbc5b5b0209226f889004607c1f203540a48d64e5a93a",
+   "itemType": "preprint",
+   "fields": {"title": "Deep Residual Learning for Image Recognition", "date": "2015-12-10", "url": "https://arxiv.org/abs/1512.03385",
+              "repository": "arXiv", "archiveID": "arXiv:1512.03385", "DOI": "10.48550/arXiv.1512.03385"},
+   "creators": [["Kaiming", "He"], ["Xiangyu", "Zhang"], ["Shaoqing", "Ren"], ["Jian", "Sun"]]},
+  {"name": "distill", "arxiv": "1503.02531", "pdf": "https://arxiv.org/pdf/1503.02531v1",
+   "sha256": "74e6689115c539db499f9d6153edecb364059926fd45402454f8210442444c5a",
+   "itemType": "preprint",
+   "fields": {"title": "Distilling the Knowledge in a Neural Network", "date": "2015-03-09", "url": "https://arxiv.org/abs/1503.02531",
+              "repository": "arXiv", "archiveID": "arXiv:1503.02531", "DOI": "10.48550/arXiv.1503.02531"},
+   "creators": [["Geoffrey", "Hinton"], ["Oriol", "Vinyals"], ["Jeff", "Dean"]]}
+ ]
+}
