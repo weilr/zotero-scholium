@@ -243,7 +243,7 @@ SCENARIOS = r"""
     const f = {};
     pane.more.click();
     f.logDisabled = pane.popover.node.children[0].disabled;
-    pane.popover.node.children[3].click();
+    pane.popover.node.children.at(-1).click();   // Settings…
     f.settings = [pane.popover, h.log.openedPrefs.length];
     pane.more.click();
     pane.more.click();
@@ -1218,7 +1218,7 @@ def test_the_settings_chip_and_its_layer(facts):
     assert c["open"] == {"name": "settings", "selects": True, "note": True}
     assert c["afterDropdown"] == "settings", "a choice in a select's dropdown keeps the layer"
     assert c["afterOutside"] is None and c["afterEsc"] is None
-    assert c["menu"] == ["打开日志", "个人配置 ↗", "", "设置…"] and c["oneAtATime"] == "settings"
+    assert c["menu"] == ["打开日志", "个人配置 ↗", "存为笔记", "", "设置…"] and c["oneAtATime"] == "settings"
     assert c["after"].startswith("Fable") and c["afterParts"] == ["scholium-chip-name", "scholium-chip-tail"]
     assert c["secondParts"] == ["scholium-chip-name", "scholium-chip-tail"]
     # the model is cut first; the effort, small and grey, and ▾ stay

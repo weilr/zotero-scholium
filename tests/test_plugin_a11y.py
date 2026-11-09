@@ -108,9 +108,8 @@ const winKey = (h, opts) => {
     const at = () => doc.activeElement.textContent;
     f.menu = { role: node.getAttribute('role'), items: node.children.filter(c => c.className === 'scholium-menu-item').map(c => [c.getAttribute('role'), c.textContent, !!c.disabled]),
                first: at() };
-    key(node, { key: 'ArrowDown' }); f.menu.down = at();
-    key(node, { key: 'ArrowDown' }); f.menu.down2 = at();
-    key(node, { key: 'ArrowDown' }); f.menu.round = at();
+    f.menu.downs = [];
+    for (let i = 0; i < f.menu.items.filter(i => !i[2]).length; i++) { key(node, { key: 'ArrowDown' }); f.menu.downs.push(at()); }
     key(node, { key: 'ArrowUp' }); f.menu.up = at();
     key(node, { key: 'End' }); f.menu.end = at();
     key(node, { key: 'Home' }); f.menu.home = at();
@@ -274,8 +273,9 @@ def test_the_keyboard_in_the_layers_and_the_tabs(facts):
     m = k["menu"]
     assert m["role"] == "menu" and all(r == "menuitem" for r, _, _ in m["items"])
     enabled = [text for _, text, off in m["items"] if not off]
-    assert m["first"] == enabled[0] and m["down"] == enabled[1] and m["down2"] == enabled[2]
-    assert m["round"] == enabled[0] and m["up"] == enabled[-1] and m["end"] == enabled[-1] and m["home"] == enabled[0]
+    assert len(enabled) >= 3 and m["first"] == enabled[0]
+    assert m["downs"] == enabled[1:] + enabled[:1], "↓ goes through the items and from the last to the first"
+    assert m["up"] == enabled[-1] and m["end"] == enabled[-1] and m["home"] == enabled[0]
     assert m["back"] is True
     h = k["history"]
     assert h["rows"] == 2 and h["first"] == [0, "history-open"] and h["down"] == [1, "history-open"]

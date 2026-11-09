@@ -149,8 +149,12 @@ history and the annotation sessions are those of that PDF.
   Otherwise, on the Chat tab, the latest outcome of the conversation shown with its turns and tokens (the tooltip
   splits the tokens into input, cache and output); on the Annotations tab the outcome of **Delete annotations** (a
   finished annotation's is its card). A narrow pane cuts it with an ellipsis.
-- ⋯ on the Chat tab holds **Show log** (the conversation's log file), **Personal profile ↗** and **Settings…**;
-  on the Annotations tab **Personal profile ↗**, **Show log**, **Delete annotations** and **Settings…**.
+- ⋯ on the Chat tab holds **Show log** (the conversation's log file), **Personal profile ↗**, **Save as note** and
+  **Settings…**; on the Annotations tab **Personal profile ↗**, **Show log**, **Delete annotations**, **Save as note**
+  while it shows a session, and **Settings…**. **Save as note** makes the conversation shown a child note of the paper:
+  its title and the date, each question with its quoted passage, and each answer with the agent and model that gave it,
+  formulas as Zotero's note editor sets them. The note is tagged `scholium-chat`, which Annotate again and Delete
+  annotations leave alone, and is selected in the library.
   **Settings…** opens the Scholium page of Zotero's settings.
 
 **Chat tab**
