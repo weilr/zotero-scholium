@@ -586,11 +586,17 @@ var ScholiumRunner = {
       noCodex: zh ? "找不到 Codex（codex.exe）。请在 Zotero 设置 → Scholium 里指定 Codex 程序。"
                   : "Codex (codex) was not found. Set its program in Zotero Settings → Scholium.",
       settingsOpen: zh ? "设置…" : "Settings…",
-      noSkill: agent => agent === "codex"
-        ? (zh ? "Codex 找不到 zotero-scholium 技能：请把它放进 ~/.codex/skills/（见 README）。"
-              : "Codex does not find the zotero-scholium skill: put it in ~/.codex/skills/ (see the README).")
-        : (zh ? "Claude Code 找不到 zotero-scholium 技能：请把它放进 ~/.claude/skills/（见 README）。"
-              : "Claude Code does not find the zotero-scholium skill: put it in ~/.claude/skills/ (see the README)."),
+      noSkill: agent => zh
+        ? `${this.agentName(agent)} 找不到 zotero-scholium 技能：在终端运行 npx skills add weilr/zotero-scholium -g -y 安装后再试（其他安装方式见 README）。`
+        : `${this.agentName(agent)} does not find the zotero-scholium skill: install it with npx skills add weilr/zotero-scholium -g -y in a terminal, then try again (other ways in the README).`,
+      notSignedIn: agent => agent === "codex"
+        ? (zh ? "Codex 还没有登录：在终端运行 codex login，登录后再试。" : "Codex is not signed in: run codex login in a terminal, then try again.")
+        : (zh ? "Claude Code 还没有登录：在终端运行 claude，按提示登录后再试。" : "Claude Code is not signed in: run claude in a terminal and sign in, then try again."),
+      localApiOff: zh ? "Scholium 通过 Zotero 的本地 API 读取论文，它现在是关闭的（设置 → 高级 → 允许此计算机上的其他应用程序与 Zotero 通讯）。现在打开吗？"
+                      : "Scholium reads the paper through Zotero's local API, which is turned off (Settings → Advanced → Allow other applications on this computer to communicate with Zotero). Turn it on now?",
+      pymupdfMissing: zh ? "缺少 PyMuPDF，在终端运行 pip install -U pymupdf 后再试。" : "PyMuPDF is missing; run pip install -U pymupdf in a terminal, then try again.",
+      noPython: zh ? "找不到 Python，安装 Python 3.9 或更高版本并运行 pip install -U pymupdf 后再试。"
+                   : "Python was not found; install Python 3.9 or later and run pip install -U pymupdf, then try again.",
       redoTitle: zh ? "重新批注" : "Annotate again",
       redo: (n, notes) => zh
         ? `这篇论文已有 ${n} 条 Scholium 批注。重新批注会先删除它们${notes ? `，并把 ${notes} 篇阅读笔记移到回收站` : ""}，你自己的批注和笔记不受影响。继续吗？`
@@ -1369,6 +1375,16 @@ var ScholiumRunner = {
 
   // whether a command of the tool wrote to Zotero: its output's outcome ("applied": true, or "partial" when the earlier
   // items stayed), whatever the exit code; without one in sight, whether the command succeeded
+  // what a command's output says this computer lacks for the skill (a text key); null once the skill's script ran, and
+  // `before` after any other command
+  missingAfter(command, output, failed, before) {
+    const text = typeof output === "string" ? output
+      : Array.isArray(output) ? output.map(c => (c && c.type === "text" ? c.text : "")).join("\n") : "";
+    if (text.includes("PyMuPDF is not installed")) return "pymupdfMissing";
+    if (/Python was not found|\bpython3?: (?:command )?not found|'python3?' is not recognized/i.test(text)) return "noPython";
+    return /scholium\.py/.test(String(command || "")) && !failed ? null : before;
+  },
+
   wrote(output, succeeded) {
     const text = typeof output === "string" ? output
       : Array.isArray(output) ? output.map(c => (c && c.type === "text" ? c.text : "")).join("\n") : "";
@@ -1523,7 +1539,8 @@ var ScholiumRunner = {
       out.push({ kind: "info", model: true, text: `${this.agentName(event.agent === "codex" ? "codex" : "claude")} · ${event.model || "?"}` });
     }
     const content = event.message && Array.isArray(event.message.content) ? event.message.content : [];
-    if (event.type === "assistant") {
+    // Claude Code not signed in says so in a message and in its result: the result's line says what to do
+    if (event.type === "assistant" && event.error !== "authentication_failed") {
       for (const c of content) {
         if (!c) continue;
         if (c.type === "text" && String(c.text || "").trim()) out.push({ kind: "text", text: String(c.text).trim(), error: !!event.error });
@@ -1586,7 +1603,8 @@ var ScholiumRunner = {
     // when it has no text, and not when they only say the session is gone (a new one goes on, or the end says why)
     if (event.type === "result" && (event.is_error || (event.subtype && event.subtype !== "success"))) {
       const errors = Array.isArray(event.errors) ? event.errors.map(String).join("\n") : "";
-      if (event.result || !this.gone(errors)) out.push({ kind: "final", text: String(event.result || errors || this.failureText(event.subtype)).trim(), error: true });
+      const text = String(event.result || errors || this.failureText(event.subtype)).trim();
+      if (event.result || !this.gone(errors)) out.push({ kind: "final", text: /Please run \/login\b/.test(text) ? this.text("notSignedIn", "claude") : text, error: true });
     }
     return out;
   },
@@ -5099,6 +5117,14 @@ var ScholiumRunner = {
   // queue the selected papers, each for a new annotation session of the chosen agent, behind a chat of the paper that
   // runs or waits; returns how many were queued. confirmed: asked already, no dialog; replace: the user agreed to replace
   // the paper's Scholium annotations (also by the dialog), which are deleted before the run
+  // the skill reads the paper through Zotero's local API; turned on with the user's consent, it answers the next request
+  localApiReady() {
+    if (Zotero.Prefs.get("httpServer.localAPI.enabled")) return true;
+    if (!Services.prompt.confirm(Zotero.getMainWindow(), this.text("headline"), this.text("localApiOff"))) return false;
+    Zotero.Prefs.set("httpServer.localAPI.enabled", true);
+    return true;
+  },
+
   async annotate(items, { extra = "", confirmed = false, replace = false } = {}) {
     const jobs = [];
     let found = 0, foreign = false;
@@ -5117,6 +5143,7 @@ var ScholiumRunner = {
     }
     if (!jobs.length && foreign) { Services.prompt.alert(win, this.text("headline"), this.text("myLibraryOnly")); return 0; }
     if (!jobs.length) { this.refresh(); return 0; }   // every paper is already queued or running
+    if (!this.localApiReady()) return 0;
     const own = jobs.map(j => j.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length);
     const total = own.reduce((a, b) => a + b, 0);
     const replaced = jobs.filter((j, i) => own[i] > 0).map(j => j.att);
@@ -5466,6 +5493,7 @@ var ScholiumRunner = {
     }
     const kind = opts.kind === "annotate" ? "annotate" : "chat";
     if (job.att.libraryID !== Zotero.Libraries.userLibraryID) return false;
+    if (!opts.compact && !this.localApiReady()) return false;
     // the paper's run of the other tab leaves it free; a compaction, a retry or an edited question is no message to queue
     const busy = this.busy(job.att.key, kind);
     if (busy && (opts.compact || opts.retry || opts.edited)) return false;
@@ -6147,7 +6175,7 @@ var ScholiumRunner = {
     // what the agent's run leaves: its result (as Claude Code's result event), a usage limit, the
     // conversation, the exit code and the end of stderr
     const ctx = { job, key, logPath, running, lastStep: -1, result: null, limit: null, session: job.resume || null,
-                  exitCode: null, stderr: "", current: null, applies: {}, gone: false, unlogged: [] };
+                  exitCode: null, stderr: "", current: null, applies: {}, commands: {}, missing: null, gone: false, unlogged: [] };
     if (this.job !== running) return;   // the plugin stopped while the log was written
     // ■ meanwhile: the run ends as a cancel ends it, its words in the log
     if (running.stopAsked) ctx.current = { key, proc: null, cancelled: true };
@@ -6182,8 +6210,11 @@ var ScholiumRunner = {
       // the turns and tokens of all of its runs
       if (running.annotation) {
         const spent = (await this.spentOn(key, job.conv)) || { turns: result.num_turns || 0, tokens: this.tokenCounts(result).reduce((n, [, c]) => n + c, 0) };
-        const counts = Object.assign({ type: "scholium", subtype: "counts" }, await this.countOwn(job.att),
-                                     { warnings: this.warningsOf(text), turns: spent.turns, tokens: spent.tokens, at: Date.now() });
+        const own = await this.countOwn(job.att);
+        const none = !(own.highlights || own.margin || own.notes || own.readingNotes);
+        const counts = Object.assign({ type: "scholium", subtype: "counts" }, own,
+                                     { warnings: none && ctx.missing ? this.text(ctx.missing) : this.warningsOf(text),
+                                       turns: spent.turns, tokens: spent.tokens, at: Date.now() });
         try { await IOUtils.writeUTF8(logPath, JSON.stringify(counts) + "\n", { mode: "append" }); }
         catch (e) { this.log("counts not logged: " + e); }
         this.appendEntries(this.entries(counts));
@@ -6195,7 +6226,8 @@ var ScholiumRunner = {
       return { exitCode, result, limited: true, until: limit.until || this.resetFrom(said), throttled, session };
     } else {
       const errors = result && Array.isArray(result.errors) ? result.errors.map(String).join("; ") : "";
-      message = (ctx.failure || summary || errors || ctx.stderr.trim().split("\n").pop() || this.text("exitCode", exitCode)).slice(0, 300);
+      message = (ctx.failure || (ctx.missing && this.text(ctx.missing)) || summary || errors || ctx.stderr.trim().split("\n").pop()
+                 || this.text("exitCode", exitCode)).slice(0, 300);
       // the agent no longer has the session (deleted in Codex's app, cleaned up by Claude Code): a new one goes on with
       // the conversation, given its turns; a continuation has nothing to go on with, and its end says why
       if (job.resume && (ctx.gone || this.gone(message) || (job.rewind && this.rewindRefused(message)))) {
@@ -6408,6 +6440,8 @@ var ScholiumRunner = {
           ctx.running.context = this.contextAfter(event, ctx.running.context);
           // a write to Zotero, kept with its configuration once its command wrote
           for (const c of (event.message && event.message.content) || []) {
+            if (event.type === "assistant" && c && c.type === "tool_use" && c.id) ctx.commands[c.id] = String((c.input || {}).command || "");
+            if (event.type === "user" && c && c.type === "tool_result") ctx.missing = this.missingAfter(ctx.commands[c.tool_use_id], c.content, !!c.is_error, ctx.missing);
             const config = event.type === "assistant" && c && c.type === "tool_use" && this.appliedConfig(String((c.input || {}).command || ""));
             if (config && c.id) ctx.applies[c.id] = config;
             const applied = event.type === "user" && c && c.type === "tool_result" && ctx.applies[c.tool_use_id];
@@ -6427,6 +6461,7 @@ var ScholiumRunner = {
             if (info.status === "rejected") ctx.limit = { until: info.resetsAt > 0 ? info.resetsAt * 1000 : null };
           }
           if (event.type === "assistant" && event.error === "rate_limit" && !ctx.limit) ctx.limit = { until: null };
+          if (event.type === "assistant" && event.error === "authentication_failed") ctx.failure = this.text("notSignedIn", "claude");
           if (event.type === "system" && event.subtype === "api_retry") this.reconnecting(ctx, event.attempt, event.max_retries);
           else if (["assistant", "user", "result"].includes(event.type)) this.reconnected(ctx);
           this.appendEntries(this.entries(event));
@@ -6799,6 +6834,8 @@ var ScholiumRunner = {
         ctx.running.context = this.contextAfter(msg, ctx.running.context);
         // a write to Zotero, kept with its configuration once its command wrote, in the folder it ran in
         if (msg.method === "item/completed" && item.type === "commandExecution") {
+          ctx.missing = this.missingAfter(this.shellCommand(item.command), item.aggregatedOutput,
+                                          item.exitCode !== 0 || item.status === "failed", ctx.missing);
           const config = this.appliedConfig(this.shellCommand(item.command));
           if (config && this.wrote(item.aggregatedOutput, item.exitCode === 0 && item.status !== "failed")) {
             await this.noteApplied(key, config, "codex", job.conv, item.cwd || cwd);
@@ -6835,6 +6872,7 @@ var ScholiumRunner = {
     this.refresh();
     try {
       await this.codexHello(rpc);
+      if (await this.codexSignedOut(rpc)) throw new Error(this.text("notSignedIn", "codex"));
       await this.archiveThreads(rpc);
       const model = this.modelPref("codex");
       const settings = { cwd, approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandbox: "workspace-write",
@@ -6945,6 +6983,15 @@ var ScholiumRunner = {
       this.appendEntries([ctx.compacted]);
     }
     ctx.exitCode = 0;
+  },
+
+  // Codex has no account although its provider needs one; a server that cannot say counts as signed in. Only whether
+  // there is an account is looked at
+  async codexSignedOut(rpc) {
+    try {
+      const r = await rpc.request("account/read", {});
+      return !!r && r.account === null && r.requiresOpenaiAuth === true;
+    } catch (e) { return false; }
   },
 
   // stops the run under way; one still starting, before its agent's process, stops at its next step (run)

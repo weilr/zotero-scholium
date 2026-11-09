@@ -103,6 +103,7 @@
    ```bash
    npx skills add weilr/zotero-scholium -g -y
    ```
+   `npx` 随 Node.js 安装。没有 Node.js 时，可以在 Claude Code 里用 `/plugin` 安装技能（见下方“其他安装方式”）。
 3. 下载 [`scholium.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium.xpi)，在 Zotero 中安装：工具 → 插件 → ⚙ → 从文件安装插件。
 4. 选中一篇论文，打开 **Scholium** 区块，在 **批注** 页点 **批注这篇**。想提问时，在 **对话** 页写问题发送。
 

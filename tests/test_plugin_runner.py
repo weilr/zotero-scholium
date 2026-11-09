@@ -3514,7 +3514,7 @@ def test_codex_runs_the_skill_in_a_sandbox_through_its_app_server(facts):
     r = facts["codexRun"]
     assert r["call"] == {"command": CODEX_APP, "args": ["app-server"], "workdir": "/data/tmp/scholium",
                          "env": {"PYTHONIOENCODING": "utf-8"}, "append": True}
-    assert r["methods"] == ["initialize", "initialized", "mcpServerStatus/list", "plugin/installed", "skills/list", "skills/list",
+    assert r["methods"] == ["initialize", "initialized", "account/read", "mcpServerStatus/list", "plugin/installed", "skills/list", "skills/list",
                             "skills/extraRoots/set", "thread/start", "turn/start"]
     assert r["skillLists"] == [["/data/tmp/scholium"], ["/data"]] and r["roots"] == ["/data/.agents/skills"]
     # the user's MCP servers and installed plugins stay out of the thread
@@ -3575,7 +3575,7 @@ def test_an_unchanged_log_is_parsed_once(facts):
 def test_the_agents_share_the_papers_conversations(facts):
     f = facts["codexFollowUp"]
     assert f["claudeCalls"] == 0
-    assert f["methods"] == ["initialize", "initialized", "plugin/installed", "thread/resume", "turn/start"], "the servers listed once"
+    assert f["methods"] == ["initialize", "initialized", "account/read", "plugin/installed", "thread/resume", "turn/start"], "the servers listed once"
     assert f["resume"] == {"threadId": "T1", "excludeTurns": True, "cwd": "/data/tmp/scholium", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
                            "sandbox": "workspace-write", "serviceName": "scholium", "model": "gpt-6-luna",
                            "config": {"mcp_servers": {"s": {"enabled": False}}}}
@@ -3725,7 +3725,7 @@ def test_a_follow_up_says_how_to_change_written_annotations(facts):
 def test_claude_code_without_the_skill_stops_at_once(facts):
     n = facts["noSkill"]
     assert n["kills"] == 1 and n["state"] is None
-    assert n["last"] == ["scholium-card failed", "Claude Code 找不到 zotero-scholium 技能：请把它放进 ~/.claude/skills/（见 README）。重试"]
+    assert n["last"] == ["scholium-card failed", "Claude Code 找不到 zotero-scholium 技能：在终端运行 npx skills add weilr/zotero-scholium -g -y 安装后再试（其他安装方式见 README）。重试"]
     assert n["end"]["subtype"] == "end" and n["end"]["outcome"] == "failed"
     assert facts["pluginSkill"]["kills"] == 0 and facts["pluginSkill"]["state"].startswith("完成"), "a plugin's skill counts"
 
