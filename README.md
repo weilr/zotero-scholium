@@ -60,7 +60,7 @@ English | [中文](README.zh-CN.md)
 </tr>
 </table>
 
-The agent does a dry run before writing: unmatched sentences, translations that add terms or numbers, stock phrases and overlapping highlights are reported and fixed first; a margin note without room moves to the other margin or becomes a sticky note. The skill follows the [Agent Skills](https://agentskills.io/) format, so Claude Code, Codex, Cursor and other agents can use it.
+Each write is checked first: unmatched sentences, stock phrases and overlapping highlights hold it back until they are fixed, and translations that add terms or numbers are reported; a margin note without room moves to the other margin or becomes a sticky note. The skill follows the [Agent Skills](https://agentskills.io/) format, so Claude Code, Codex, Cursor and other agents can use it.
 
 ## The Scholium section
 
@@ -165,9 +165,9 @@ The annotations appear in an open PDF by themselves; with the plugin, the eye bu
 flowchart LR
     A["PDF in Zotero"] -->|extract| B["numbered sentences"]
     B --> C["agent reads once and writes a configuration:<br/>sentence ids, translations, margin notes, reading note"]
-    C -->|dry run| D["report: missed sentences,<br/>style, translation, layout"]
-    D -->|corrections| C
-    D -->|apply| E["Zotero local API<br/>or the bundled plugin"]
+    C -->|apply| D["checks: missed sentences,<br/>style, translation, layout"]
+    D -->|held back: corrections| C
+    D -->|passed| E["Zotero local API<br/>or the bundled plugin"]
     E --> F["native annotations<br/>and a child note"]
 ```
 

@@ -60,7 +60,7 @@
 </tr>
 </table>
 
-写入前代理会先预演：没对上的句子、多出术语或数字的译文、套话、重叠的高亮都会列出来，改好再写；放不下的页边批注会换到另一侧页边，或改成便签。技能遵循 [Agent Skills](https://agentskills.io/) 规范，Claude Code、Codex、Cursor 等代理都能用。
+每次写入前都先检查：没对上的句子、套话、重叠的高亮会挡住写入，改好再写；多出术语或数字的译文会列出来；放不下的页边批注会换到另一侧页边，或改成便签。技能遵循 [Agent Skills](https://agentskills.io/) 规范，Claude Code、Codex、Cursor 等代理都能用。
 
 ## Scholium 区块
 
@@ -155,9 +155,9 @@ npx skills add weilr/zotero-scholium -g -y
 flowchart LR
     A["Zotero 中的 PDF"] -->|extract| B["编号句子"]
     B --> C["代理读一遍，写配置：<br/>句子编号、译文、页边批注、阅读笔记"]
-    C -->|预演| D["报告：未匹配、风格、<br/>译文、布局"]
-    D -->|修正| C
-    D -->|写入| E["Zotero 本地 API<br/>或随附插件"]
+    C -->|写入| D["检查：未匹配、风格、<br/>译文、布局"]
+    D -->|未通过：修正| C
+    D -->|通过| E["Zotero 本地 API<br/>或随附插件"]
     E --> F["原生注释<br/>与子笔记"]
 ```
 

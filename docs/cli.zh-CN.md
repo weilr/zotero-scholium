@@ -63,7 +63,7 @@ uv run scholium.py …                     # uv 读取脚本内嵌的元数据�
 
    `cleanup`、`note_replace`、`cleanup_external`、`snap` 和高亮的 `core` 只能是 `true` 或 `false`，`"false"` 这样的字符串会被拒绝。可选键写 `null` 表示取其默认值。`font_size` 与 `band_min_font_size` 一样，须为 4 到 36 之间的数。`note_html` 须为已存在的 HTML 文件的路径，不能直接写 HTML。颜色写作 `#rrggbb`，大小写均可，写入时转为 Zotero 要求的小写。高亮的 `comment` 是该句的译文；论文本身已是读者的语言时省略它。
 
-4. **生成、检查、写入。** 首先不带 `--apply` 运行，检查下述四类报告并修正配置，再写入。
+4. **生成、检查、写入。** 首先不带 `--apply` 运行，检查下述四类报告并修正配置，再写入。（技能直接运行 `--apply`：它做同样的检查，有阻止写入的问题时什么都不写。）
 
    ```bash
    scholium --config config.json            # 生成并报告，不写入

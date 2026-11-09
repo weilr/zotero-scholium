@@ -63,7 +63,7 @@ uv run scholium.py …                     # uv reads the script's inline metada
 
    `cleanup`, `note_replace`, `cleanup_external`, `snap` and a highlight's `core` must be `true` or `false`; a string such as `"false"` is refused. `null` for an optional key means its default. `font_size`, like `band_min_font_size`, is a number from 4 to 36. `note_html` must be the path of an existing HTML file, not the HTML itself. Colours are `#rrggbb` in either case and are written in lower case, the form Zotero takes. A highlight's `comment` is the translation of its sentence; leave it out when the paper is already in the reader's language.
 
-4. **Generate, review, and apply.** Run without `--apply` first, review all four warning fields below and correct the configuration before applying.
+4. **Generate, review, and apply.** Run without `--apply` first, review all four warning fields below and correct the configuration before applying. (The skill runs `--apply` directly: it checks the same and writes nothing while a blocking finding remains.)
 
    ```bash
    scholium --config config.json            # build and report without writing
