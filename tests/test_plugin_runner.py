@@ -91,6 +91,21 @@ SCENARIOS = r"""
                       observers: h.observers.intersection.concat(h.observers.resize).filter(o => !o.off).length };
   }
 
+  // the reader's sidenav: Zotero removes a section's button only through an open reader's item pane, so after the reader
+  // tabs closed the button stays; stopping takes it away through the sidenav's own removePane
+  {
+    const h = harness();
+    h.runner.start('x');
+    const nav = new El('item-pane-sidenav');
+    nav.id = 'zotero-context-pane-sidenav';
+    nav.removed = [];
+    nav.removePane = id => nav.removed.push(id);
+    h.zotero.getMainWindow().document.documentElement.append(nav);
+    const id = h.runner.paneID;
+    h.runner.stop();
+    facts.readerSidenav = { id, removed: nav.removed, unregistered: h.log.unregisteredSections };
+  }
+
   // the saved log of an earlier run is shown for a paper that has one
   {
     const earlier = SCRIPT.slice(0, 4).concat([LAST, RESULT]).join('');
@@ -4217,3 +4232,8 @@ def test_a_model_list_whose_output_never_ends_is_given_up_after_its_time(facts):
     assert m["during"] == {"done": False, "loading": True, "timers": [60000]}
     assert m["done"] is True and m["loading"] is False and m["models"] is None
     assert m["kills"] >= 1 and m["timers"] == []
+
+
+def test_stopping_takes_the_sections_button_out_of_the_readers_sidenav(facts):
+    s = facts["readerSidenav"]
+    assert s["id"] and s["unregistered"] == [s["id"]] and s["removed"] == [s["id"]]

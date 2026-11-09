@@ -21,6 +21,8 @@
 ### Fixed
 
 - The model list gives up after 60 s when Claude Code's output does not end, and is asked for again later.
+- Disabling, updating or removing the plugin also takes its button out of the reader's sidenav, where it stayed hidden
+  after the reader tabs were closed and could come back with a blank icon after an update.
 
 ## 0.2.2 (2026-11-10)
 

@@ -1344,6 +1344,14 @@ Object.assign(ScholiumRunner, {
     this.unsent.clear();
     for (const win of this.windows()) this.removeFromWindow(win);
     try { if (this.paneID) Zotero.ItemPaneManager.unregisterSection(this.paneID); } catch (e) {}
+    // Zotero takes a section's button out of the reader's sidenav only through an open reader's item pane: once the reader
+    // tabs are closed it stays there, hidden, and comes back with its old icon. The sidenav's own removePane takes it away
+    for (const win of this.windows()) {
+      try {
+        const nav = this.paneID && win.document.getElementById("zotero-context-pane-sidenav");
+        if (nav && typeof nav.removePane === "function") nav.removePane(this.paneID);
+      } catch (e) {}
+    }
     this.paneID = null;
     unregisterReaderListener("createViewContextMenu", this.menuHandler);
     this.menuHandler = null;
