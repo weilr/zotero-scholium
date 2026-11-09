@@ -1147,17 +1147,16 @@ Object.assign(ScholiumRunner, {
     const s = String(text || "").trim().split("\n").pop();
     if (/无剩余警告|没有剩余警告|剩余警告[:：]\s*(?:无|没有)(?=$|[\s。．.，,；;!！)）])|no (?:remaining )?warnings|remaining warnings:\s*none\b/i.test(s)) return "";
     const end = x => x.trim().replace(/[\s.。．!！]+$/, "");   // without the sentence's closing mark
-    // a count, as agents have written it: 剩余警告 1 条（…）, 剩余警告2条：…, 1 remaining warning (…), remaining warnings: 2 (…);
-    // the words in the brackets or after the colon, else the count
-    const counted = /剩余警告\s*[:：]?\s*(\d+)\s*条\s*(?:[（(](.*)[）)]|[:：]\s*([^。\n]+))?/.exec(s)
-      || /(\d+)\s+remaining warnings?\b\s*(?:\((.*)\)|[:：]\s*([^.\n]+))?/i.exec(s)
-      || /remaining warnings?\s*[:：]\s*(\d+)\s*(?:\((.*)\))?\s*[.。]?\s*$/i.exec(s);
-    if (counted) {
-      const n = Number(counted[1]);
-      if (!n) return "";
-      return end(counted[2] || counted[3] || "") || (/剩余警告/.test(counted[0]) ? `${n} 条` : String(n));
-    }
-    const m = /剩余警告[:：]\s*([^。\n]+)|remaining warnings:\s*([^.\n]+)/i.exec(s);
+    // a count, as agents have written it: 剩余警告 1 条（…）, 剩余警告2条：…, 1 remaining warning (…), remaining warnings: 2 (…)
+    // give the words in the brackets or after the colon; words right after the count (剩余警告：2 条译文提示（…）,
+    // remaining warnings: 2 translation notes (…)) give the whole remainder; else the count. A count of 0 is none
+    let m = /剩余警告\s*[:：]?\s*(\d+)\s*条\s*(?:[（(](.*)[）)]|[:：]\s*([^。\n]+)|([^\s。．.!！，,；;][^\n]*))?/.exec(s);
+    if (m) return !Number(m[1]) ? "" : m[4] ? end(`${m[1]} 条${m[4]}`) : end(m[2] || m[3] || "") || `${m[1]} 条`;
+    m = /(\d+)\s+remaining warnings?\b\s*(?:\((.*)\)|[:：]\s*([^.\n]+))?/i.exec(s);
+    if (m) return !Number(m[1]) ? "" : end(m[2] || m[3] || "") || m[1];
+    m = /remaining warnings?\s*[:：]\s*(\d+)(?:\s*\((.*)\)|\s+([A-Za-z][^\n]*))?\s*[.。]?\s*$/i.exec(s);
+    if (m) return !Number(m[1]) ? "" : m[3] ? end(`${m[1]} ${m[3]}`) : end(m[2] || "") || m[1];
+    m = /剩余警告[:：]\s*([^。\n]+)|remaining warnings:\s*([^.\n]+)/i.exec(s);
     if (m) return end(m[1] || m[2]);
     const label = String(this.text("warningsLabel") || ""), none = String(this.text("warningsNone") || "").toLowerCase();
     const escape = x => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

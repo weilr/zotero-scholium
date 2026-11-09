@@ -621,6 +621,9 @@ SCENARIOS = r"""
       '30 highlights, 2 remaining warnings.', '30 highlights, 0 remaining warnings.', '30 highlights, 2 remaining warnings: page 3 is long; page 5 lacks a term',
       '30 highlights, remaining warnings: 1 (page 8 translation is advisory).', '30 highlights, remaining warnings: 0.',
       '30 highlights, remaining warnings: 2 translation warnings on page 3',
+      // a count with words after it: the whole remainder
+      '高亮 30 条，剩余警告：2 条译文提示（第 5 页“DPO”未出现在原句中；p. 9 偏长）。', '高亮 30 条，剩余警告 2 条，已写入。',
+      '30 highlights, remaining warnings: 2 translation notes (page 8: “DPO” is not in the sentence; p. 9 is long).',
     ].map(s => w.runner.warningsOf('Done.\n' + s));
   }
   // an annotation's second try after a failed connection, and its continuation after the usage limit, are drawn as the
@@ -1070,7 +1073,9 @@ def test_the_numbers_of_the_card(facts):
     assert facts["warningsTable"] == ["", "", "", "无法定位 2 句", "没有找到第 2 页", "", "", "", "label"]
     assert facts["warningsCounted"] == ['第 8 页译文提到 "DPO" 未出现在原句中，属提示性质，已写入', "第 3 页译文偏长；第 5 页术语缺失", "2 条", "", "",
                                         "page 8: “DPO” is not in the sentence", "2", "", "page 3 is long; page 5 lacks a term",
-                                        "page 8 translation is advisory", "", "2 translation warnings on page 3"]
+                                        "page 8 translation is advisory", "", "2 translation warnings on page 3",
+                                        "2 条译文提示（第 5 页“DPO”未出现在原句中；p. 9 偏长）", "2 条",
+                                        "2 translation notes (page 8: “DPO” is not in the sentence; p. 9 is long)"]
 
 
 def test_a_second_try_and_a_continuation_are_the_annotations(facts):
