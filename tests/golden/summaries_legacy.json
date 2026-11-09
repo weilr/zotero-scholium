@@ -5,7 +5,7 @@
   "text": "patch jittering, a stabilization method",
   "comment": "translation",
   "pageLabel": "1",
-  "sortIndex": "00000|000000|00087",
+  "sortIndex": "00000|000295|00087",
   "position": {
    "pageIndex": 0,
    "rects": [
@@ -23,7 +23,7 @@
   "color": "#1a73e8",
   "comment": "summary one",
   "pageLabel": "1",
-  "sortIndex": "00000|000000|00071",
+  "sortIndex": "00000|000021|00071",
   "position": {
    "pageIndex": 0,
    "rects": [
@@ -43,7 +43,7 @@
   "color": "#1a73e8",
   "comment": "summary two, placed below the first",
   "pageLabel": "1",
-  "sortIndex": "00000|000000|00115",
+  "sortIndex": "00000|000154|00115",
   "position": {
    "pageIndex": 0,
    "rects": [
@@ -63,7 +63,7 @@
   "color": "#1a73e8",
   "comment": "a note in the right margin",
   "pageLabel": "1",
-  "sortIndex": "00000|000000|00071",
+  "sortIndex": "00000|000245|00071",
   "position": {
    "pageIndex": 0,
    "rects": [

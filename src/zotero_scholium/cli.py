@@ -45,6 +45,8 @@ OWN_TAGS = {TAG} | LEGACY_TAGS
 APP_NAME = "zotero-scholium"
 BASE = "http://127.0.0.1:23119"
 NOT_IN_MY_LIBRARY = "the item was not found in My Library; items in group libraries are not supported"
+LOCAL_API_OFF = ("Zotero's local API is turned off (Settings → Advanced → Allow other applications on this computer to "
+                 "communicate with Zotero)")
 
 DEFAULTS = {
     "levels": {},               # named colour levels, e.g. {"claim": "#ff6666", "method": "#ffd400"}; referenced by "level" in highlights
@@ -130,12 +132,13 @@ class PageIndex:
     def __init__(self, page, doc_bounds=None):
         self.page = page
         self._blocks = None
+        self._label = None
         self.W, self.H = page.rect.width, page.rect.height
         self.words = page.get_text("words")  # x0, y0, x1, y1, word, block, line, wordno
-        text, wmap = [], []
+        text, wmap, starts = [], [], {}
         for i, w in enumerate(self.words):
-            n = norm_str(w[4]); text.append(n); wmap.extend([i] * len(n))
-        self.text, self.wmap = "".join(text), wmap
+            n = norm_str(w[4]); starts[tuple(w[5:8])] = len(wmap); text.append(n); wmap.extend([i] * len(n))
+        self.text, self.wmap, self.starts = "".join(text), wmap, starts
         body = [w for w in self.words if len(w[4]) > 1 and w[1] > 40 and w[3] < self.H - 30]  # header and footer excluded
         xs0 = sorted(w[0] for w in body) or [50.0]
         xs1 = sorted(w[2] for w in body) or [self.W - 50.0]
@@ -149,6 +152,33 @@ class PageIndex:
         mid = self.W / 2
         crossing = sum(1 for w in body if w[0] < mid - 6 and w[2] > mid + 6)
         self.two_col = crossing < max(3, len(body) * 0.02)
+
+    def label(self):
+        """The page's label in the PDF ("iv", "12"), which Zotero shows as an annotation's page; its 1-based number when
+        the PDF gives the page no label."""
+        if self._label is None:
+            try:
+                self._label = self.page.get_label()
+            except Exception:
+                self._label = ""
+            self._label = self._label or str(self.page.number + 1)
+        return self._label
+
+    def offset(self, w):
+        """Offset of a word's first character in the page's text, in the order the matcher reads it: the middle field of
+        an annotation's sortIndex, at most six digits."""
+        return min(self.starts.get(tuple(w[5:8]), 0), 999999)
+
+    def offset_near(self, rect):
+        """The offset of the word closest to a rectangle in PDF space (y upward), the earliest of equally close ones; 0 on
+        a page without words. Zotero's reader sorts a box it draws by the character closest to it."""
+        x0, y0, x1, y1 = rect[0], self.H - rect[3], rect[2], self.H - rect[1]
+
+        def dist(w):
+            dx, dy = max(0.0, w[0] - x1, x0 - w[2]), max(0.0, w[1] - y1, y0 - w[3])
+            return dx * dx + dy * dy
+        best = min(self.words, key=dist, default=None)
+        return self.offset(best) if best else 0
 
     def match(self, phrase, occurrence=1):
         """Words of the `occurrence`-th appearance (1-based) of the phrase on the page."""
@@ -370,7 +400,7 @@ def normalise_summary(item, cfg, page_sizes):
     try:
         page = int(item["page"]) - 1
     except (KeyError, TypeError, ValueError):
-        raise ValueError("a summary needs a 1-based page number")
+        raise ValueError("a summary needs a 1-based page number") from None
     if page < 0 or page >= len(page_sizes):
         raise ValueError(f"page {page + 1} is outside the document ({len(page_sizes)} pages)")
     text = str(item.get("text") or "").strip()
@@ -388,16 +418,17 @@ def normalise_summary(item, cfg, page_sizes):
     color = str(item.get("color") or cfg.get("text_color") or DEFAULTS["text_color"])
     if not HEX_COLOR_RE.match(color):
         raise ValueError("color must be a #rrggbb value")
+    color = color.lower()   # in lower case, the only form Zotero takes
     try:
         font_size = float(item.get("font_size", cfg.get("font_size", DEFAULTS["font_size"])))
     except (TypeError, ValueError):
-        raise ValueError("font_size must be a number")
+        raise ValueError("font_size must be a number") from None
     if not 4 <= font_size <= 36:
         raise ValueError("font_size must lie between 4 and 36")
     try:
         min_font_size = float(cfg.get("band_min_font_size", DEFAULTS["band_min_font_size"]))
     except (TypeError, ValueError):
-        raise ValueError("band_min_font_size must be a number")
+        raise ValueError("band_min_font_size must be a number") from None
     if not 4 <= min_font_size <= 36:
         raise ValueError("band_min_font_size must lie between 4 and 36")
     rect = item.get("rect")
@@ -407,7 +438,7 @@ def normalise_summary(item, cfg, page_sizes):
         try:
             rect = [float(v) for v in rect]
         except (TypeError, ValueError):
-            raise ValueError("rect must contain four numbers")
+            raise ValueError("rect must contain four numbers") from None
         x0, y0, x1, y1 = rect
         W, H = page_sizes[page]
         if x0 < 0 or y0 < 0 or x1 > W or y1 > H or x0 >= x1 or y0 >= y1:
@@ -445,14 +476,18 @@ def existing_obstacles(listing, keep_own=False):
             continue
         pos = parse_position(a.get("position"))
         page = pos.get("pageIndex")
-        rects = [r for r in (pos.get("rects") or []) if len(r) == 4]
-        for path in pos.get("paths") or []:
-            xs, ys = path[0::2], path[1::2]
+        rects = position_rects(pos)
+        paths = pos.get("paths")
+        for path in paths if isinstance(paths, list) else []:
+            try:
+                xs, ys = [float(v) for v in path[0::2]], [float(v) for v in path[1::2]]
+            except (TypeError, ValueError):
+                continue
             if xs and ys:
                 rects.append([min(xs), min(ys), max(xs), max(ys)])
         if page is None or not rects:
             continue
-        obstacles.setdefault(int(page), []).extend([[float(v) for v in r] for r in rects])
+        obstacles.setdefault(int(page), []).extend(rects)
     return obstacles
 
 
@@ -522,8 +557,10 @@ def _intersects(rect, rects):
 def _summary_annotation(pi, sp, rect, warning=None):
     p = pi.page.number
     top = int(round(pi.H - rect[3]))
-    ann = {"type": sp["kind"], "color": sp["color"], "comment": sp["text"], "pageLabel": str(p + 1),
-           "sortIndex": f"{p:05d}|{0:06d}|{top:05d}",
+    # sorted by the start of its anchor in the page's text, else by the word closest to the box
+    offset = sp["offset"] if sp.get("offset") is not None else pi.offset_near(rect)
+    ann = {"type": sp["kind"], "color": sp["color"], "comment": sp["text"], "pageLabel": pi.label(),
+           "sortIndex": f"{p:05d}|{offset:06d}|{top:05d}",
            "position": {"pageIndex": p, "rects": [[round(v, 2) for v in rect]]}}
     if sp["kind"] == "text":
         ann["position"]["fontSize"] = sp["font_size"]
@@ -665,6 +702,7 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
             n = pi.count(" ".join(w[4] for w in ws))
             if n > 1 and not occ:                     # the box sits beside the first occurrence
                 sp["occurrences"] = n
+            sp["offset"] = pi.offset(ws[0])
             r = pi.line_rects(ws)[0]
         entries.append((sp, r))
 
@@ -678,14 +716,19 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
             mx0, mx1 = pi.margin_box(r, sp["side"])
             y_top = pi.H - r.y0 + 1
             if sp["side"] == "auto" and not pi.two_col and sp["kind"] != "note":
-                ox0, ox1 = pi.margin_box(r, "right" if mx1 <= pi.body_x0 else "left")
+                ox0, ox1 = pi.margin_box(r, "right" if mx0 < pi.W / 2 else "left")
                 if (_intersects([mx0, y_top - _box_height(sp, mx1 - mx0), mx1, y_top], margin_text)
                         and not _intersects([ox0, y_top - _box_height(sp, ox1 - ox0), ox1, y_top], margin_text)):
                     mx0, mx1, ox0, ox1 = ox0, ox1, mx0, mx1
                 if way == "other":
                     mx0, mx1 = ox0, ox1
             if sp["kind"] == "note":  # the icon hugs the text column
-                mx0, mx1 = (mx1 - NOTE_ICON, mx1) if mx1 <= pi.body_x0 else (mx0, mx0 + NOTE_ICON)
+                if mx0 < pi.W / 2:
+                    mx1 = max(4.0 + NOTE_ICON, pi.body_x0 - 4)
+                    mx0 = mx1 - NOTE_ICON
+                else:
+                    mx0 = min(pi.W - 4 - NOTE_ICON, pi.body_x1 + 4)
+                    mx1 = mx0 + NOTE_ICON
             groups.setdefault((mx0, mx1), []).append(({"y_top": y_top, "h": _box_height(sp, mx1 - mx0)}, sp, i))
         placed, taken = [], list(occupied)
         for (mx0, mx1), items in groups.items():
@@ -818,12 +861,13 @@ def build(cfg, obstacles=None):
                 missed.append(entry); continue
         rects = pi.position_rects(ws)
         top = int(round(pi.H - rects[0][3]))
-        # colour precedence: explicit "color", then named "level" (resolved through cfg["levels"]), then legacy core/other
-        color = h.get("color") or cfg.get("levels", {}).get(h.get("level", ""), None) or \
-                (cfg["core_color"] if h.get("core") else cfg["other_color"])
+        # colour precedence: explicit "color", then named "level" (resolved through cfg["levels"]), then legacy core/other;
+        # written in lower case, the only form Zotero takes
+        color = (h.get("color") or cfg.get("levels", {}).get(h.get("level", ""), None) or
+                 (cfg["core_color"] if h.get("core") else cfg["other_color"])).lower()
         ann = {"type": h.get("type", "highlight") if h.get("type") in ("highlight", "underline") else "highlight",
-               "color": color, "text": " ".join(w[4] for w in ws), "comment": h.get("comment", ""), "pageLabel": str(p + 1),
-               "sortIndex": f"{p:05d}|{0:06d}|{top:05d}", "position": {"pageIndex": p, "rects": rects}}
+               "color": color, "text": " ".join(w[4] for w in ws), "comment": h.get("comment", ""), "pageLabel": pi.label(),
+               "sortIndex": f"{p:05d}|{pi.offset(ws[0]):06d}|{top:05d}", "position": {"pageIndex": p, "rects": rects}}
         if snapped:
             ann["snapped"] = snapped
         n = pi.count(ann["text"])
@@ -1005,6 +1049,13 @@ def _text_variants(text):
     return re.sub(r"(\d)\s*(?:thousand|million|billion|trillion)\b", r"\1", alt, flags=re.I)
 
 
+def page_number(a):
+    """An annotation's page as the configuration numbers pages (1-based, as text); its pageLabel, the PDF's own label for
+    the page, is used only when it has no page index."""
+    page = parse_position(a.get("position")).get("pageIndex")
+    return str(page + 1) if isinstance(page, int) else a.get("pageLabel")
+
+
 def check_translations(annotations):
     """Heuristic fidelity check: a highlight comment must translate the highlighted span only.
 
@@ -1056,7 +1107,7 @@ def check_translations(annotations):
         elif cjk and translated >= 6 and cjk / translated < 0.8:
             reasons.append(f"comment is short for the span ({cjk / translated:.1f} characters per translated word); it may omit part of the sentence")
         if reasons:
-            warnings.append({"page": a["pageLabel"], "text": text[:80], "comment": comment[:80], "reasons": reasons})
+            warnings.append({"page": page_number(a), "text": text[:80], "comment": comment[:80], "reasons": reasons})
     return warnings
 
 
@@ -1081,7 +1132,7 @@ def _existing_rects(listing, keep_own=False):
         if not keep_own and set(a.get("tags") or []) & OWN_TAGS:
             continue
         pos = parse_position(a.get("position"))
-        rs = [[float(v) for v in r] for r in (pos.get("rects") or []) if len(r) == 4]
+        rs = position_rects(pos)
         if pos.get("pageIndex") is None or not rs:
             continue
         rects.setdefault(int(pos["pageIndex"]), []).append((a.get("key"), rs))
@@ -1181,7 +1232,7 @@ def check_style(annotations, cfg, listing=None, note_html=None):
 
     def warn(kind, a, reason):
         label = a.get("text") if a["type"] in ("highlight", "underline") else a.get("comment", "")
-        warnings.append({"kind": kind, "page": a["pageLabel"], "text": (label or "")[:60], "reason": reason})
+        warnings.append({"kind": kind, "page": page_number(a), "text": (label or "")[:60], "reason": reason})
 
     for a in annotations:
         is_mark = a["type"] in ("highlight", "underline")
@@ -1219,16 +1270,17 @@ def check_style(annotations, cfg, listing=None, note_html=None):
             if not set(old.get("tags") or []) & OWN_TAGS or not _changed_by_user(old) or any(_reproduces(a, old) for a in annotations):
                 continue
             comment = " ".join((old.get("comment") or "").split())
-            warnings.append({"kind": "user_edit", "page": old.get("pageLabel"), "text": _brief(old.get("text") or comment)[:60],
+            warnings.append({"kind": "user_edit", "page": page_number(old), "text": _brief(old.get("text") or comment)[:60],
                              "reason": f"the user changed this annotation ({old.get('key')}) in Zotero after the tool wrote it, and the "
                                        f"rewrite would undo that: keep its comment “{comment[:300]}” and colour {old.get('color')} in the "
                                        "configuration, or --accept user_edit when the user asked to change it"})
     if cfg.get("core_range"):
         lo, hi = cfg["core_range"]
-        n = sum(1 for a in marks if a["color"] == cfg["core_color"])
+        core = cfg["core_color"].lower()
+        n = sum(1 for a in marks if a["color"].lower() == core)
         if not lo <= n <= hi:
             warnings.append({"kind": "core_count", "page": None, "text": None,
-                             "reason": f"{n} highlights in the core colour {cfg['core_color']}; core_range is {lo}-{hi}"})
+                             "reason": f"{n} highlights in the core colour {core}; core_range is {lo}-{hi}"})
     if note_html:
         def nwarn(reason):
             warnings.append({"kind": "note_math", "page": None, "text": "reading note", "reason": reason})
@@ -1633,10 +1685,19 @@ def http(method, path, body=None, headers=None, timeout=60):
 
 
 def zotero_version():
+    """(Zotero's version, the local API's server ID); (None, None) when Zotero does not answer, and (version, None) when
+    its local API is turned off (HTTP 403)."""
     s, h, _ = http("GET", "/api/", timeout=8)
     if s == 0:
         return None, None
+    if s == 403:
+        return h.get("X-Zotero-Version", ""), None
     return h.get("X-Zotero-Version", ""), h.get("Zotero-Server-ID", "")
+
+
+def _read_failure(status, text):
+    """Why a read of the local API failed: a 404 is an item outside My Library, a 403 the local API turned off."""
+    return NOT_IN_MY_LIBRARY if status == 404 else LOCAL_API_OFF if status == 403 else text[:200]
 
 
 # ---------------------------------------------------------------------------
@@ -1717,7 +1778,13 @@ class LocalApi:
         q = f"?itemType={item_type}" if item_type else ""
         s, h, t = http("GET", f"/api/users/0/items/{key}/children{q}")
         if s != 200:
-            raise RuntimeError(f"failed to read children (HTTP {s}): {NOT_IN_MY_LIBRARY if s == 404 else t[:200]}")
+            raise RuntimeError(f"failed to read children (HTTP {s}): {_read_failure(s, t)}")
+        return json.loads(t)
+
+    def item(self, key):
+        s, h, t = http("GET", f"/api/users/0/items/{key}")
+        if s != 200:
+            raise RuntimeError(f"failed to read item {key} (HTTP {s}): {_read_failure(s, t)}")
         return json.loads(t)
 
     def create(self, items):
@@ -1760,9 +1827,23 @@ class LocalApi:
 def parse_position(value):
     """annotationPosition arrives as a JSON string from the local API and as an object from the plugin."""
     try:
-        return json.loads(value) if isinstance(value, str) else (value or {})
+        pos = json.loads(value) if isinstance(value, str) else value
     except ValueError:
         return {}
+    return pos if isinstance(pos, dict) else {}
+
+
+def position_rects(pos):
+    """The rectangles of a parsed position, each as four floats; an entry that is not four numbers is left out."""
+    out = []
+    rects = pos.get("rects")
+    for r in rects if isinstance(rects, list) else []:
+        try:
+            if len(r) == 4:
+                out.append([float(v) for v in r])
+        except (TypeError, ValueError):
+            pass
+    return out
 
 
 def api_list(cfg, api):
@@ -1787,6 +1868,10 @@ def api_list(cfg, api):
 
 
 def api_apply(cfg, out, api):
+    # An item_key that is not the attachment's parent is refused before anything is written, as the plugin refuses it.
+    item_key, att_key = cfg.get("item_key"), cfg["attachment_key"]
+    if item_key and item_key != att_key and api.item(att_key)["data"].get("parentItem") != item_key:
+        raise RuntimeError(f"item {item_key} is not the parent of attachment {att_key}")
     # Capture old owned keys before creating anything; matching text is not ownership.
     rows = api.children(cfg["attachment_key"], "annotation") if cfg.get("cleanup", False) else []
     to_delete, kept = [], 0
@@ -2020,6 +2105,7 @@ var parent = Zotero.Items.getByLibraryAndKey(libraryID, ITEM_KEY);
 var att = Zotero.Items.getByLibraryAndKey(libraryID, ATT_KEY);
 if (!parent) throw new Error("item not found: " + ITEM_KEY);
 if (!att) throw new Error("attachment not found: " + ATT_KEY);
+if (ITEM_KEY !== ATT_KEY && att.parentID !== parent.id) throw new Error("item " + ITEM_KEY + " is not the parent of attachment " + ATT_KEY);
 
 var old = [], kept = 0;
 for (let a of (CLEANUP ? att.getAnnotations(true) : [])) {{
@@ -2110,16 +2196,19 @@ def layout_habits(own):
         if kind not in ("text", "note"):
             continue
         pos = parse_position(d.get("annotationPosition"))
-        rects = [r for r in (pos.get("rects") or []) if len(r) == 4]
+        rects = position_rects(pos)
         if not rects:
             continue
-        x0, y0, x1, y1 = [float(v) for v in rects[0]]
+        x0, y0, x1, y1 = rects[0]
         if x1 - x0 < 250:
             sides.append("left" if (x0 + x1) / 2 < 300 else "right")
         if kind == "text":
             texts += 1
-            if pos.get("fontSize"):
-                sizes.append(float(pos["fontSize"]))
+            try:
+                if pos.get("fontSize"):
+                    sizes.append(float(pos["fontSize"]))
+            except (TypeError, ValueError):
+                pass
             if y1 >= 670 and x1 - x0 >= 250:
                 top += 1
     left = sides.count("left") / max(1, len(sides))
@@ -2328,8 +2417,8 @@ def _version(text):
 
 def pick_backend(requested, cfg):
     """Return (name, handle, reason). `auto` takes the Scholium plugin when it is recent enough, else the
-    local API on Zotero 10, else an older plugin. When `auto` falls back to the JavaScript file, the reason names
-    why each write channel was unavailable."""
+    local API on Zotero 10 when it is turned on, else an older plugin. When `auto` falls back to the JavaScript
+    file, the reason names why each write channel was unavailable."""
     plugin = plugin_connect(cfg) if requested in ("auto", "plugin") else None
     if requested == "auto" and plugin[0] and isinstance(plugin[1], dict) and _version(plugin[1].get("version")) >= PLUGIN_FIRST:
         return "plugin", plugin[0], f"Scholium plugin {plugin[1]['version']}"
@@ -2344,6 +2433,8 @@ def pick_backend(requested, cfg):
             if major >= 10:
                 return "api", LocalApi(sid), f"Zotero {ver}: official local API write support"
             why_not.append(f"Zotero {ver}: the local API is read-only before Zotero 10")
+        elif ver is not None and sid is None:
+            why_not.append(LOCAL_API_OFF)
         else:
             why_not.append("Zotero is not running or its local server is disabled")
         if requested == "api":
@@ -2370,8 +2461,8 @@ def backend_choice(value):
 def _get(path):
     """A read of the local API (Zotero 7 and later), as JSON."""
     s, _, t = http("GET", "/api/users/0" + path)
-    if s == 404:
-        raise RuntimeError(f"GET {path}: HTTP 404: {NOT_IN_MY_LIBRARY}")
+    if s in (403, 404):
+        raise RuntimeError(f"GET {path}: HTTP {s}: {_read_failure(s, t)}")
     if s != 200:
         raise RuntimeError(f"GET {path}: HTTP {s}: {t[:160]}" if s else "Zotero does not answer on 127.0.0.1:23119; is it running?")
     return json.loads(t)
@@ -2532,8 +2623,9 @@ SUMMARY_KEYS = {"id", "page", "anchor", "text", "place", "side", "kind", "color"
 
 def config_problems(raw):
     """Mistakes a run would otherwise pass over in silence or end on with a traceback: unknown keys (a misspelt
-    "cleanup" keeps its default), an unknown level, a colour that is not #rrggbb, a highlight without a sentence id or
-    a page with text, ids out of order, a highlight type other than highlight or underline, and missing required keys."""
+    "cleanup" keeps its default), an unknown level, a colour that is not #rrggbb, a switch that is not true or false, a
+    font size that is not a number, a highlight without a sentence id or a page with text, ids out of order, a highlight
+    type other than highlight or underline, and missing required keys. null for an optional key stands for its default."""
     if not isinstance(raw, dict):
         return ["the configuration must be a JSON object"]
     problems = []
@@ -2549,10 +2641,14 @@ def config_problems(raw):
     for k in ("pdf", "item_key", "attachment_key", "out_dir"):
         if not raw.get(k):
             problems.append(f"missing required key: {k}")
-    if "band_min_font_size" in raw:
-        v = raw["band_min_font_size"]
-        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 4 <= v <= 36:
-            problems.append("band_min_font_size must be a number between 4 and 36")
+    for k in ("font_size", "band_min_font_size"):
+        v = raw.get(k)
+        if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or not 4 <= v <= 36):
+            problems.append(f"{k} must be a number between 4 and 36")
+    for k in ("cleanup", "cleanup_external", "note_replace", "snap"):
+        if raw.get(k) is not None and not isinstance(raw[k], bool):
+            problems.append(f"{k} must be true or false")
+
     def whole(v, low=1):
         return isinstance(v, int) and not isinstance(v, bool) and v >= low
 
@@ -2567,7 +2663,7 @@ def config_problems(raw):
         if not colour(v):
             problems.append(f"levels: {name!r} must be a #rrggbb colour")
     for k in ("core_color", "other_color", "text_color"):
-        if k in raw and not colour(raw[k]):
+        if raw.get(k) is not None and not colour(raw[k]):
             problems.append(f"{k} must be a #rrggbb colour")
     for i, h in enumerate(raw.get("highlights") or []):
         if not isinstance(h, dict):
@@ -2589,6 +2685,8 @@ def config_problems(raw):
             problems.append(f"{at}: occurrence must be a number from 1")
         if "comment" in h and not isinstance(h["comment"], str):
             problems.append(f"{at}: comment must be text")
+        if h.get("core") is not None and not isinstance(h["core"], bool):
+            problems.append(f"{at}: core must be true or false")
         if "color" in h and not colour(h["color"]):
             problems.append(f"{at}: color must be a #rrggbb colour")
         if "level" in h and h["level"] not in levels:
@@ -2637,7 +2735,7 @@ def main(argv=None):
     problems = config_problems(raw)
     if problems:
         sys.exit("config error: " + "; ".join(problems))
-    cfg = dict(DEFAULTS); cfg.update(raw)
+    cfg = dict(DEFAULTS); cfg.update({k: v for k, v in raw.items() if v is not None})   # null keeps the default
     if pymupdf is None and not args.list:
         sys.exit(PYMUPDF_MISSING)
 
@@ -2688,12 +2786,12 @@ def main(argv=None):
               "cleanup_removes": (len(own_now) if listing else None) if cfg.get("cleanup") else 0,
               "missed": missed, "translation_warnings": check_translations(out),
               "style_warnings": check_style(out, cfg, listing, note_html),
-              "snapped": [{"page": a["pageLabel"], "text": a["text"][:60], "similarity": a["snapped"]} for a in out if a.get("snapped")],
-              "ambiguous_matches": [{"page": a["pageLabel"], "text": (a.get("text") or a.get("comment", ""))[:60], "occurrences": a["occurrences"], "used": 1} for a in out if a.get("occurrences")],
-              "layout_warnings": [{"page": a["pageLabel"], "text": a["comment"][:60], "reason": a["layout_warning"]} for a in out if a.get("layout_warning")],
-              "fitted": [{"page": a["pageLabel"], "text": a["comment"][:60], "font_size": f"{a['fitted']['from']:g} -> {a['fitted']['to']:g}"}
+              "snapped": [{"page": page_number(a), "text": a["text"][:60], "similarity": a["snapped"]} for a in out if a.get("snapped")],
+              "ambiguous_matches": [{"page": page_number(a), "text": (a.get("text") or a.get("comment", ""))[:60], "occurrences": a["occurrences"], "used": 1} for a in out if a.get("occurrences")],
+              "layout_warnings": [{"page": page_number(a), "text": a["comment"][:60], "reason": a["layout_warning"]} for a in out if a.get("layout_warning")],
+              "fitted": [{"page": page_number(a), "text": a["comment"][:60], "font_size": f"{a['fitted']['from']:g} -> {a['fitted']['to']:g}"}
                          for a in out if a.get("fitted")],
-              "as_notes": [{"page": a["pageLabel"], "text": a["comment"][:60]} for a in out if a.get("as_note")],
+              "as_notes": [{"page": page_number(a), "text": a["comment"][:60]} for a in out if a.get("as_note")],
               "existing_annotations": existing_info, "js": js_path}
     previews = [os.path.join(cfg["out_dir"], f"preview_p{p}.png") for p in cfg["preview_pages"]]
     previews = [path for path in previews if os.path.exists(path)]   # pages outside the document are not rendered
