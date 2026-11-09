@@ -127,12 +127,13 @@ var ScholiumRunner = {
   // the prompts' language: Chinese in both Chinese locales, else English
   zh() { return String(Zotero.locale || "").toLowerCase().startsWith("zh"); },
 
-  // the language of the section's texts, from Zotero's: a locale/ folder's name (pt-BR for pt-PT too), en-US for one
-  // the plugin does not have
+  // the language of the section's texts, from Zotero's: a locale/ folder's name, en-US for one the plugin does not have.
+  // Portuguese: pt-BR for Brazil's and plain pt, pt-PT for the others
   lang() {
     const locale = String(Zotero.locale || "").toLowerCase(), first = locale.split(/[-_]/)[0];
     if (first === "zh") return /^zh[-_](tw|hk|mo|hant)\b/.test(locale) ? "zh-TW" : "zh-CN";
-    return { ja: "ja-JP", ko: "ko-KR", de: "de", fr: "fr-FR", es: "es-ES", ru: "ru-RU", pt: "pt-BR" }[first] || "en-US";
+    if (first === "pt") return locale === "pt" || /^pt[-_]br\b/.test(locale) ? "pt-BR" : "pt-PT";
+    return { ja: "ja-JP", ko: "ko-KR", de: "de", fr: "fr-FR", es: "es-ES", ru: "ru-RU" }[first] || "en-US";
   },
 
   // the line that gives an agent the user's language where the prompt's own is not it (Traditional Chinese has the
@@ -141,7 +142,7 @@ var ScholiumRunner = {
     const lang = this.lang();
     if (lang === "zh-TW") return ["用户使用繁体中文：高亮的译文、页边批注、阅读笔记和回答都用繁体中文写。"];
     const name = { "ja-JP": "Japanese", "ko-KR": "Korean", de: "German", "fr-FR": "French", "es-ES": "Spanish", "ru-RU": "Russian",
-                   "pt-BR": /^pt[-_]pt/i.test(String(Zotero.locale)) ? "European Portuguese" : "Brazilian Portuguese" }[lang];
+                   "pt-BR": "Brazilian Portuguese", "pt-PT": "European Portuguese" }[lang];
     return name ? [`The user's language is ${name}: write the highlight translations, margin notes, the reading note and answers in ${name}.`] : [];
   },
 
