@@ -41,7 +41,8 @@
 - The quick start recommends uv in place of installing Python and PyMuPDF.
 - Codex is not offered the effort level max.
 - Claude Code runs get only the tools they use (`--tools`): the skill's for an annotation and its session, and WebSearch
-  and WebFetch too for a chat, which makes each message's starting context smaller.
+  and WebFetch too for a chat, which makes each message's starting context smaller. PowerShell is among them on Windows
+  only.
 - The file `extract --sentences --out` writes starts with an index of its line numbers: each page, the main text, the
   references and an appendix after them. The skill reads the main text by it and of the appendix only what the main
   text points to as essential, and finds the pages of a page limit there.
