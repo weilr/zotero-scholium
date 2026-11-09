@@ -50,7 +50,18 @@ TAG = "zotero-scholium"     # tag applied to every annotation and note created b
 LEGACY_TAGS = {"zotero-marginalia", "zotero-paper-annotate"}   # tags written by earlier versions; still recognised as belonging to this tool
 OWN_TAGS = {TAG} | LEGACY_TAGS
 APP_NAME = "zotero-scholium"
-BASE = "http://127.0.0.1:23119"
+ZOTERO_PORT = 23119   # Zotero's local server; SCHOLIUM_ZOTERO_PORT names another (the plugin passes its own Zotero's)
+
+
+def zotero_base(env=None):
+    """Zotero's local server: http://127.0.0.1:<SCHOLIUM_ZOTERO_PORT> when that is a port number (1-65535), else port
+    ZOTERO_PORT. A request's Host header is taken from it."""
+    value = str((os.environ if env is None else env).get("SCHOLIUM_ZOTERO_PORT", "")).strip()
+    port = int(value) if re.fullmatch(r"[0-9]{1,5}", value) and 1 <= int(value) <= 65535 else ZOTERO_PORT
+    return f"http://127.0.0.1:{port}"
+
+
+BASE = zotero_base()
 NOT_IN_MY_LIBRARY = ("the item was not found in My Library; items in group libraries are not supported: check the key with "
                      "status --query, or copy the item to My Library")
 LOCAL_API_OFF = ("Zotero's local API is turned off: turn on Settings → Advanced → Allow other applications on this computer "

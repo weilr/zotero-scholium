@@ -49,7 +49,7 @@ Each Claude Code run:
 
 - works in the Zotero data directory with `claude -p --output-format stream-json`, the permission
   mode `auto`, file writes pre-approved only inside `<data dir>/tmp/scholium/`, and the skill
-  directory added;
+  directory (`skills/zotero-scholium` in `CLAUDE_CONFIG_DIR`, else in `~/.claude`) added when it is there;
 - runs without the user's MCP servers and hooks (`--strict-mcp-config`, `disableAllHooks`); the
   user's skills stay;
 - logs its events, without the streaming deltas, to the conversation's log,
@@ -292,6 +292,9 @@ The Scholium page of Zotero's settings holds:
 | Codex program | a path, or **Browse…** | empty: found automatically |
 
 When a program box is empty, it shows the program found, greyed, or `Not found`. When an agent's program is not found, the message points to this page.
+
+Every process the plugin starts gets `SCHOLIUM_ZOTERO_PORT`, the port of this Zotero's local server
+(`httpServer.port`), which the skill's script uses in place of 23119.
 
 Claude Code, Codex, Python and uv are looked for on the agents' PATH, which their processes also get: on macOS and
 Linux the PATH of the user's login shell (`$SHELL`, else `/bin/zsh`, read once a session) before Zotero's, then

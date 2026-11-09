@@ -1338,10 +1338,11 @@ var ScholiumRunner = {
   },
 
   // the options of Subprocess.call for an agent's process, or a program of the setup check: Zotero's environment with
-  // Python's output in UTF-8 and the agent's PATH (agentPath) when it is not Zotero's own. Codex's: uv's cache and the
-  // Pythons uv installs in <data dir>/tmp/scholium/uv, which its sandbox may write, unless the user set where they go
+  // Python's output in UTF-8, the port of this Zotero's local server for the skill's script (zoteroPort), and the agent's
+  // PATH (agentPath) when it is not Zotero's own. Codex's: uv's cache and the Pythons uv installs in
+  // <data dir>/tmp/scholium/uv, which its sandbox may write, unless the user set where they go
   async agentEnv(codex = false) {
-    const environment = { PYTHONIOENCODING: "utf-8" };
+    const environment = { PYTHONIOENCODING: "utf-8", SCHOLIUM_ZOTERO_PORT: String(this.zoteroPort()) };
     const path = await this.agentPath();
     if (path !== this.env("PATH")) environment[this.pathName()] = path;
     if (codex) {
@@ -1350,6 +1351,13 @@ var ScholiumRunner = {
       if (!this.env("UV_PYTHON_INSTALL_DIR")) environment.UV_PYTHON_INSTALL_DIR = PathUtils.join(uv, "python");
     }
     return { environment, environmentAppend: true };
+  },
+
+  // the port of this Zotero's local server (httpServer.port), 23119 unless the user changed it
+  zoteroPort() {
+    let port = 0;
+    try { port = Number(Zotero.Prefs.get("httpServer.port")); } catch (e) {}
+    return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : 23119;
   },
 
   // the name of the PATH variable: on Windows the one the environment has (often Path), since a second spelling would be a
@@ -1707,12 +1715,14 @@ var ScholiumRunner = {
 
   outDir(key) { return PathUtils.join(Zotero.DataDirectory.dir, "tmp", "scholium", key); },
 
-  args(job) {
+  async args(job) {
     // the text arrives as it is written (stream events), and each whole message after it
     const args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
                   "--permission-mode", this.getPref("claudePermissionMode") || "auto"];
-    const home = this.home();
-    if (home) args.push("--add-dir", PathUtils.join(home, ".claude", "skills", "zotero-scholium"));
+    // the skill's folder in Claude Code's own (CLAUDE_CONFIG_DIR, else ~/.claude), when it is there
+    const skills = this.skillsDir("claude");
+    const skill = skills ? PathUtils.join(skills, "zotero-scholium") : "";
+    if (skill && (await this.exists(skill))) args.push("--add-dir", skill);
     const outRoot = PathUtils.join(Zotero.DataDirectory.dir, "tmp", "scholium").replace(/\\/g, "/");
     args.push("--allowedTools", "Skill", "Read", `Write(${outRoot}/**)`, `Edit(${outRoot}/**)`);
     // the user's MCP servers and hooks stay out of the run; their skills stay
@@ -6890,7 +6900,7 @@ var ScholiumRunner = {
   async runClaude(claude, ctx) {
     const { job, key } = ctx;
     const proc = await this.subprocess().call(Object.assign({
-      command: claude, arguments: this.args(job), workdir: Zotero.DataDirectory.dir, stderr: "pipe",
+      command: claude, arguments: await this.args(job), workdir: Zotero.DataDirectory.dir, stderr: "pipe",
     }, await this.agentEnv()));
     if (this.job !== ctx.running || ctx.running.stopAsked) {   // the plugin stopped, or ■, while the process was being created
       try { proc.kill(); } catch (e) {}

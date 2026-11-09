@@ -29,7 +29,7 @@ SCENARIOS = r"""
 
   // registration, the item pane before, during and after a run, notices, shutdown
   {
-    const h = harness({ logs: { '/data/c.json': '{}' } });   // the configuration SCRIPT applies
+    const h = harness({ logs: { '/data/c.json': '{}' }, present: ['/home/u/.claude/skills/zotero-scholium'] });   // the configuration SCRIPT applies
     const { runner, log, item1, item2, note } = h;
     runner.start('scholium@zotero-scholium');
     const sec = log.sections[0];
@@ -1070,7 +1070,7 @@ SCENARIOS = r"""
                                          c.opts.arguments[c.opts.arguments.indexOf('--effort') + 1]]);
   }
   for (const home of ['env', 'none']) {
-    const { runner, log, item1 } = harness({ home });
+    const { runner, log, item1 } = harness({ home, present: ['/profile/u/.claude/skills/zotero-scholium'] });
     await runner.annotate([item1]); await settle(300);
     const args = log.calls.length ? log.calls[0].opts.arguments : null;
     facts['home_' + home] = { calls: log.calls.length, addDir: args && args.includes('--add-dir') ? args[args.indexOf('--add-dir') + 1] : null,
@@ -2895,7 +2895,7 @@ def test_claude_is_started_headless_in_the_data_directory(facts):
     call = facts["call"]
     assert call["command"] == CLAUDE
     assert call["workdir"] == "/data"
-    assert call["env"] == {"PYTHONIOENCODING": "utf-8"} and call["append"] is True
+    assert call["env"] == {"PYTHONIOENCODING": "utf-8", "SCHOLIUM_ZOTERO_PORT": "23119"} and call["append"] is True
     args = call["args"]
     assert args[:7] == ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "auto"]
     assert args[args.index("--add-dir") + 1] == "/home/u/.claude/skills/zotero-scholium"
@@ -3513,7 +3513,7 @@ def test_codex_models_come_from_its_app_server(facts):
 def test_codex_runs_the_skill_in_a_sandbox_through_its_app_server(facts):
     r = facts["codexRun"]
     assert r["call"] == {"command": CODEX_APP, "args": ["app-server"], "workdir": "/data/tmp/scholium",
-                         "env": {"PYTHONIOENCODING": "utf-8", "UV_CACHE_DIR": "/data/tmp/scholium/uv/cache",
+                         "env": {"PYTHONIOENCODING": "utf-8", "SCHOLIUM_ZOTERO_PORT": "23119", "UV_CACHE_DIR": "/data/tmp/scholium/uv/cache",
                                  "UV_PYTHON_INSTALL_DIR": "/data/tmp/scholium/uv/python"}, "append": True}
     assert r["methods"] == ["initialize", "initialized", "account/read", "mcpServerStatus/list", "plugin/installed", "skills/list", "skills/list",
                             "skills/extraRoots/set", "thread/start", "turn/start"]

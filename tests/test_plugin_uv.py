@@ -219,7 +219,7 @@ UV_WINDOWS = 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/in
 UV_UNIX = "curl -LsSf https://astral.sh/uv/install.sh | sh"
 NVM = "/home/u/.nvm/versions/node/v22/bin"
 MERGED = f"/opt/homebrew/bin:/usr/bin:{NVM}:/bin:/usr/sbin:/sbin"
-PLAIN = {"PYTHONIOENCODING": "utf-8"}
+PLAIN = {"PYTHONIOENCODING": "utf-8", "SCHOLIUM_ZOTERO_PORT": "23119"}
 
 
 @pytest.fixture(scope="module")
