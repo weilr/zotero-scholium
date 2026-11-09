@@ -96,6 +96,29 @@ def test_own_skill_md_is_kept_and_flagged_until_acknowledged(repo, tmp_path):
     assert read(d, "scripts/scholium.py") == "print(3)\n" and read(d, "SKILL.md") == "中文版\n"
 
 
+def test_changes_to_port_are_printed_as_a_diff(repo, tmp_path):
+    d = tmp_path / "claude/zotero-scholium"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text("中文版\n", encoding="utf8")
+    assert run(repo, "--ref", "v0.0.1", "--ack", d)[0] == 0
+    code, out = run(repo, "--ref", "v0.0.2", d)
+    assert code == 1
+    diff = out[out.index("\n") + 1:]
+    assert diff.splitlines() == ["--- v0.0.1:skills/zotero-scholium/SKILL.md", "+++ v0.0.2:skills/zotero-scholium/SKILL.md",
+                                 "@@ -1 +1 @@", "-english 1", "+english 2"]
+    assert read(d, "SKILL.md") == "中文版\n"
+    code, out = run(repo, "--ref", "v0.0.2", "--ack", d)
+    assert code == 0 and "+english" not in out and len(out.splitlines()) == 1
+    code, out = run(repo, d)
+    assert code == 0 and "@@" not in out
+
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    assert run(repo, "--ref", "v0.0.1", mirror)[0] == 0
+    code, out = run(repo, "--ref", "v0.0.2", mirror)
+    assert code == 0 and "@@" not in out
+
+
 def test_local_edits_are_kept_unless_forced(repo, tmp_path):
     d = tmp_path / "mirror"
     d.mkdir()

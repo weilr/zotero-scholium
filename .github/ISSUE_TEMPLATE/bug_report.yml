@@ -1,0 +1,65 @@
+name: Bug report
+description: Something in Scholium does not work as it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, with the error message if there is one.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Select a paper in My Library
+        2. Press Annotate in the Scholium section
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup check
+      description: In Zotero Settings → Scholium → Setup check, press Check, then Copy, and paste the lines here.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: zotero
+    attributes:
+      label: Zotero version
+      description: Help → About Zotero
+      placeholder: "7.0.32"
+    validations:
+      required: true
+  - type: input
+    id: scholium
+    attributes:
+      label: Scholium version
+      description: Tools → Plugins
+      placeholder: "0.2.1"
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Claude Code or Codex version
+      description: The output of `claude --version` or `codex --version`
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Windows 11, macOS 15, Ubuntu 24.04
+    validations:
+      required: true

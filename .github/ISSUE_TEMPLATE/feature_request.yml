@@ -1,0 +1,16 @@
+name: Feature request
+description: A change or a new feature
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What you want to do
+      description: The task or the problem, as you meet it when you read or annotate papers.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How Scholium could help
+      description: Optional.

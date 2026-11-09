@@ -10,14 +10,16 @@ is kept and reported (--force overwrites it).
 
 A DIR whose SKILL.md is not a released SKILL.md keeps its own SKILL.md; a DIR without one
 receives the released SKILL.md. DIR/.scholium-sync.json records the release an own SKILL.md
-was last aligned with; when the released SKILL.md has changed since, the script names the diff
-to review and exits 1. After updating the SKILL.md, run again with --ack to record the new
-alignment.
+was last aligned with; when the released SKILL.md has changed since, the script prints the
+changes of the released SKILL.md between that release and this one as a unified diff (the own
+SKILL.md is not changed) and exits 1. After updating the SKILL.md, run again with --ack to
+record the new alignment.
 
 Exit status: 0 in sync, 1 something to review, 2 error.
 """
 
 import argparse
+import difflib
 import hashlib
 import json
 import subprocess
@@ -69,6 +71,16 @@ class Release:
             tags = self.git("tag", "--list", "v*").decode().split()
             self._released[rel] = {sha(d) for d in (self.show(t, rel) for t in tags) if d is not None}
         return self._released[rel]
+
+
+def skill_md_diff(release, aligned):
+    """The changes of the released SKILL.md from the release `aligned` to this one, as a unified diff."""
+    def lines(data):
+        return [ln if ln.endswith("\n") else ln + "\n"
+                for ln in (data or b"").replace(b"\r\n", b"\n").decode("utf8", errors="replace").splitlines(True)]
+    path = f"{SKILL}/SKILL.md"
+    return "".join(difflib.unified_diff(lines(release.show(aligned, "SKILL.md")), lines(release.files["SKILL.md"]),
+                                        f"{aligned}:{path}", f"{release.ref}:{path}"))
 
 
 def sync(release, target, ack=False, force=False):
@@ -124,6 +136,7 @@ def sync(release, target, ack=False, force=False):
     ok = not kept
     notes = [f"edited locally, kept: {', '.join(kept)} (--force overwrites)"] if kept else []
     aligned = marker.get("skill_md_ref")
+    diff = ""
     if mode == "own":
         if ack:
             aligned = release.ref
@@ -135,6 +148,7 @@ def sync(release, target, ack=False, force=False):
             ok = False
             notes.append(f"own SKILL.md follows {aligned}; the released SKILL.md has changed: "
                          f"`git diff {aligned} {release.ref} -- {SKILL}/SKILL.md`; update it, then run again with --ack")
+            diff = skill_md_diff(release, aligned)
         else:
             notes.append(f"own SKILL.md, aligned with {aligned}")
 
@@ -144,6 +158,8 @@ def sync(release, target, ack=False, force=False):
     marker_path.write_text(json.dumps(new_marker, indent=2) + "\n", encoding="utf8")
     print(f"{target}: {release.ref}, {written} written, {unchanged} unchanged, {removed} removed"
           + "".join(f"; {n}" for n in notes))
+    if diff:
+        print(diff, end="")
     return ok
 
 
@@ -155,6 +171,10 @@ def main(argv=None):
     ap.add_argument("--force", action="store_true", help="overwrite files edited locally since the last sync")
     ap.add_argument("--repo", default=str(Path(__file__).resolve().parents[1]), help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
+    for stream in (sys.stdout, sys.stderr):
+        # the diff holds characters a console's code page may lack; through a pipe or into a file it is UTF-8
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace", **({} if stream.isatty() else {"encoding": "utf-8"}))
     try:
         release = Release(args.repo, args.ref)
     except FileNotFoundError:
