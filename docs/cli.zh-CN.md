@@ -75,7 +75,7 @@ uv run scholium.py …                     # uv 读取脚本内嵌的元数据�
 
    `--backend auto`（默认）依次经 Scholium 插件、Zotero 10 的本地 API、旧版插件写入，都不可用时生成 JavaScript 文件。本地 API 关闭时转到下一个通道，报告中说明原因；经本地 API 的读取会指出打开它的设置。本地 API 和 JavaScript 文件与插件一样，在写入任何内容之前拒绝不是该附件父条目的 `item_key`。注释使用 PDF 自身的页码标签（即 Zotero 显示的页码，如 `iv`），`sortIndex` 按阅读顺序编排，Zotero 因此按正文顺序列出注释；报告中的页码仍是从 1 开始的页序号。
 
-   脚本通过 `127.0.0.1:23119` 访问 Zotero；设置了 `SCHOLIUM_ZOTERO_PORT` 时改用它指定的端口。插件启动智能体时会把它设为所在 Zotero 的端口。
+   脚本通过 `127.0.0.1:23119` 访问 Zotero；设置了 `SCHOLIUM_ZOTERO_PORT` 时改用它指定的端口（不是端口号的值会让脚本报错退出）。插件启动智能体时会把它设为所在 Zotero 的端口。
 
 [本地 API 调用示例](../examples/direct_api_example.py)以约三十行代码演示了 Zotero 10 本地 API 的基本调用，可用于其他应用。
 

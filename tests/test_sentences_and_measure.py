@@ -487,9 +487,34 @@ def test_a_scan_with_a_cover_page_or_a_footer_is_a_scan(tmp_path, capsys):
     cover = str(tmp_path / "cover.pdf")
     _scan(cover, 4, text_pages=(0,))
     assert _stopped(capsys, ["--pdf", cover])[1]["scanned_pages"] == 3
-    footer = str(tmp_path / "footer.pdf")
+    numbered = str(tmp_path / "numbered.pdf")
+    _scan(numbered, 3, footer="12")
+    assert _stopped(capsys, ["--pdf", numbered])[1]["scanned_pages"] == 3
+    footer = str(tmp_path / "footer.pdf")   # a running footer is text: no sentences remain without it
     _scan(footer, 3, footer="Downloaded from https://example.org on 12 March 2023")
-    assert _stopped(capsys, ["--pdf", footer])[1]["scanned_pages"] == 3
+    assert _stopped(capsys, ["--pdf", footer])[1]["error"] == cli.NO_TEXT_LAYER
+    js = tmp_path / "footer.json"
+    assert _stopped(capsys, ["--pdf", footer, "--sentences", str(js), "--out", str(tmp_path / "footer.txt")])[0] == 3
+    assert not js.exists()
+
+
+def test_slides_with_background_images_are_no_scan(tmp_path, capsys):
+    fp = str(tmp_path / "slides.pdf")
+    doc = pymupdf.open()
+    pix = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 160, 90), False)
+    pix.set_rect(pix.irect, (250, 250, 255))
+    for title in ("Sparse attention for long documents", "Our method reduces memory by half",
+                  "Results on three benchmarks improve", "Limitations and future work remain"):
+        page = doc.new_page(width=960, height=540)
+        page.insert_image(page.rect, pixmap=pix)   # the template's background
+        page.insert_text((60, 120), title, fontsize=36)
+        page.insert_text((60, 200), "Speaker: A. Author, 2026.", fontsize=20)
+    doc.save(fp); doc.close()
+    assert cli.scanned_pages(fp) == (4, 0)
+    js = tmp_path / "sentences.json"
+    assert cli.extract_main(["--pdf", fp, "--sentences", str(js), "--out", str(tmp_path / "sentences.txt")]) == 0
+    assert len(json.loads(js.read_text(encoding="utf8"))["sentences"]) == 4
+    assert cli.extract_main(["--pdf", fp, "--out", str(tmp_path / "slides.txt")]) == 0
 
 
 def test_a_paper_with_a_figure_page_is_no_scan(tmp_path, capsys):

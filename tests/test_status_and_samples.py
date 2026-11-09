@@ -217,6 +217,16 @@ def test_status_on_zotero_7_without_the_plugin_says_why(monkeypatch, capsys, tmp
     assert a1["annotations_error"] == "Zotero 7.0.32's local API lists no annotations; install the Scholium plugin"
 
 
+def test_status_on_zotero_7_with_a_plugin_too_old_for_the_group_says_to_update_it(monkeypatch, capsys, tmp_path):
+    _zotero7(monkeypatch, tmp_path, None)
+    old = ("the Scholium plugin installed reads and writes My Library only; update it to annotate a paper of a group "
+           "library")
+    monkeypatch.setattr(cli, "plugin_list", lambda cfg: (None, old))
+    out, code = run(capsys, "status", "A1", "--group", "777")
+    assert code == 0
+    assert out["pdfs"][0]["annotations_error"] == "Zotero 7.0.32's local API lists no annotations; " + old
+
+
 def test_status_on_zotero_10_asks_no_plugin(zotero, monkeypatch, capsys):
     # Zotero 10 lists the annotations under an attachment: a PDF without any has none, the plugin is not asked
     real = cli.http

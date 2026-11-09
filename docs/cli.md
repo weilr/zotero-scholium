@@ -75,8 +75,8 @@ uv run scholium.py …                     # uv reads the script's inline metada
 
    `--backend auto` (the default) writes through the Scholium plugin, else through the local API of Zotero 10, else through an older plugin, else into the JavaScript file. With the local API turned off it moves on to the next channel and the report says why; reads through the local API name the setting that turns it on. The local API and the JavaScript file, like the plugin, refuse an `item_key` that is not the attachment's parent before anything is written. Annotations carry the PDF's own page labels (the page numbers Zotero shows, such as `iv`), and their `sortIndex` follows the reading order, so Zotero lists them in the order of the text; the report still names pages by number, from 1.
 
-   The script reaches Zotero at `127.0.0.1:23119`, or at the port that `SCHOLIUM_ZOTERO_PORT` names; the plugin sets it
-   to its Zotero's port for the agents it starts.
+   The script reaches Zotero at `127.0.0.1:23119`, or at the port that `SCHOLIUM_ZOTERO_PORT` names (a value that is not
+   a port number stops it with an error); the plugin sets it to its Zotero's port for the agents it starts.
 
 [`examples/direct_api_example.py`](../examples/direct_api_example.py) demonstrates the underlying Zotero 10 local API calls in approximately thirty lines for use in other applications.
 

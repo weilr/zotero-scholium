@@ -36,6 +36,7 @@ user's ~/.claude or ~/.codex. Exit code 0 when every check passed.
 import argparse
 import hashlib
 import json
+import ntpath
 import os
 import re
 import shutil
@@ -211,7 +212,8 @@ def agent_dirs(appdata):
 
 
 def _norm(path):
-    return os.path.normcase(os.path.normpath(str(path).strip().strip('"'))).replace("/", "\\")
+    """A Windows path, compared without case and separator differences on any system."""
+    return ntpath.normcase(ntpath.normpath(str(path).strip().strip('"')))
 
 
 def profile_matches(cmdline, profile):

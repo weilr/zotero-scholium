@@ -157,12 +157,18 @@ def test_requests_to_zotero_pass_by_a_proxy_the_environment_names(monkeypatch):
     assert status == 200
 
 
-@pytest.mark.parametrize("value, port", [(None, 23119), ("23129", 23129), (" 23129 ", 23129), ("1", 1), ("65535", 65535),
-                                         ("0", 23119), ("65536", 23119), ("", 23119), ("abc", 23119), ("-1", 23119),
-                                         ("23129x", 23119), ("2312.9", 23119), ("²", 23119), ("123456", 23119)])
-def test_the_port_comes_from_the_environment_when_it_is_one(value, port):
+@pytest.mark.parametrize("value, port", [(None, 23119), ("", 23119), (" ", 23119), ("23129", 23129), (" 23129 ", 23129),
+                                         ("1", 1), ("65535", 65535)])
+def test_the_port_comes_from_the_environment_when_it_is_set(value, port):
     env = {} if value is None else {"SCHOLIUM_ZOTERO_PORT": value}
     assert cli.zotero_base(env) == f"http://127.0.0.1:{port}"
+
+
+@pytest.mark.parametrize("value", ["0", "65536", "99999", "abc", "-1", "23129x", ":23129", "2312.9", "²", "123456"])
+def test_a_port_that_is_no_port_number_is_an_error(value):
+    with pytest.raises(SystemExit) as stop:
+        cli.zotero_base({"SCHOLIUM_ZOTERO_PORT": value})
+    assert f'SCHOLIUM_ZOTERO_PORT is "{value}"' in str(stop.value.code) and "not a port number" in str(stop.value.code)
 
 
 def test_the_script_takes_the_port_when_it_is_loaded(tmp_path):
@@ -172,12 +178,14 @@ def test_the_script_takes_the_port_when_it_is_loaded(tmp_path):
     import sys
     code = "import sys; sys.path.insert(0, sys.argv[1]); import scholium; print(scholium.BASE)"
     skill = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skills", "zotero-scholium", "scripts")
-    run = lambda env: subprocess.run([sys.executable, "-c", code, skill], capture_output=True, text=True, check=True,
-                                     env=env, cwd=str(tmp_path), timeout=60).stdout.strip()
+    run = lambda env: subprocess.run([sys.executable, "-c", code, skill], capture_output=True, text=True,
+                                     env=env, cwd=str(tmp_path), timeout=60)
     base = {k: v for k, v in os.environ.items() if k != "SCHOLIUM_ZOTERO_PORT"}
-    assert run(dict(base, SCHOLIUM_ZOTERO_PORT="23129")) == "http://127.0.0.1:23129"
-    assert run(dict(base, SCHOLIUM_ZOTERO_PORT="99999")) == "http://127.0.0.1:23119"
-    assert run(base) == "http://127.0.0.1:23119"
+    assert run(dict(base, SCHOLIUM_ZOTERO_PORT="23129")).stdout.strip() == "http://127.0.0.1:23129"
+    assert run(base).stdout.strip() == run(dict(base, SCHOLIUM_ZOTERO_PORT="")).stdout.strip() == "http://127.0.0.1:23119"
+    wrong = run(dict(base, SCHOLIUM_ZOTERO_PORT="99999"))
+    assert wrong.returncode != 0 and not wrong.stdout and 'SCHOLIUM_ZOTERO_PORT is "99999"' in wrong.stderr
+    assert "Traceback" not in wrong.stderr
 
 
 def test_requests_name_the_chosen_port_in_their_host_header(monkeypatch):
