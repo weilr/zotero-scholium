@@ -31,6 +31,7 @@
 - Ask Scholium is offered only for PDFs in My Library, in reader tabs. A reader tab's section is the one of the PDF it
   shows.
 - Highlights carry the PDF's own page labels, and Zotero's sidebar lists them in reading order.
+- The setup check's Python lines name the Python Scholium finds, no longer Zotero's PATH.
 
 ### Fixed
 
@@ -59,6 +60,8 @@
 - Sticky notes beside a narrow left column sit next to it.
 - A paper selected again after another item shows its conversation and its annotation session again, instead of the
   Annotations tab's introduction.
+- In a Codex run, `uv run` keeps its cache and the Pythons it installs in `<data dir>/tmp/scholium/uv/`, where Codex's
+  sandbox lets it write, unless `UV_CACHE_DIR` or `UV_PYTHON_INSTALL_DIR` is set.
 
 ## 0.2.1 (2026-11-06)
 

@@ -3513,7 +3513,8 @@ def test_codex_models_come_from_its_app_server(facts):
 def test_codex_runs_the_skill_in_a_sandbox_through_its_app_server(facts):
     r = facts["codexRun"]
     assert r["call"] == {"command": CODEX_APP, "args": ["app-server"], "workdir": "/data/tmp/scholium",
-                         "env": {"PYTHONIOENCODING": "utf-8"}, "append": True}
+                         "env": {"PYTHONIOENCODING": "utf-8", "UV_CACHE_DIR": "/data/tmp/scholium/uv/cache",
+                                 "UV_PYTHON_INSTALL_DIR": "/data/tmp/scholium/uv/python"}, "append": True}
     assert r["methods"] == ["initialize", "initialized", "account/read", "mcpServerStatus/list", "plugin/installed", "skills/list", "skills/list",
                             "skills/extraRoots/set", "thread/start", "turn/start"]
     assert r["skillLists"] == [["/data/tmp/scholium"], ["/data"]] and r["roots"] == ["/data/.agents/skills"]

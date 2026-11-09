@@ -69,7 +69,9 @@ Each Codex run:
   process after the session's first Codex run;
 - runs in Codex's `workspace-write` sandbox: commands may write only inside `<data dir>/tmp/scholium/`,
   `<data dir>/zotero-scholium/` and `%APPDATA%/zotero-scholium/` (`~/.config/zotero-scholium/` on
-  macOS and Linux), and may use the network, which the skill needs for Zotero's local server;
+  macOS and Linux), and may use the network, which the skill needs for Zotero's local server; uv's cache and the
+  Pythons it installs go to `<data dir>/tmp/scholium/uv/` (`UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`) unless these
+  variables are set;
 - has Codex's automatic reviewer (`auto_review`) decide on requests beyond the sandbox; a request or
   question that reaches the plugin is declined;
 - logs Codex's notifications, without the streaming deltas, the user's message and the turn's diff, to the
@@ -290,6 +292,15 @@ The Scholium page of Zotero's settings holds:
 | Codex program | a path, or **Browse…** | empty: found automatically |
 
 When a program box is empty, it shows the program found, greyed, or `Not found`. When an agent's program is not found, the message points to this page.
+
+Claude Code, Codex, Python and uv are looked for on the agents' PATH, which their processes also get: on macOS and
+Linux the PATH of the user's login shell (`$SHELL`, else `/bin/zsh`, read once a session) before Zotero's, then
+`~/.local/bin` and `~/.cargo/bin` when they exist; on Windows Zotero's PATH and `%USERPROFILE%\.local\bin`. Claude
+Code and Codex are also looked for in their usual install folders (see the notes for plugin authors for Codex).
+
+**Setup check** lists, a line each: Zotero's local API, Claude Code and Codex (found, signed in, the skill), uv, Python
+and PyMuPDF, with a button where the plugin can fix it. The uv line gives uv's version and path, or the command that
+installs it on this system; with uv, a missing or old Python or PyMuPDF is no fault, since `uv run` provides them.
 
 While Zotero is in front, a notice in the corner of the window appears when a paper starts and when it
 ends, and closes by itself; while Zotero is in the background, a system notification reports the end
