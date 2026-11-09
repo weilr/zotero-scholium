@@ -829,10 +829,9 @@ SCENARIOS = r"""
     pane.input.type('hello'); pane.send.click(); await settle(30);
     const busy = pane.popover;
     await settle(200);
-    const g = harness();
-    g.item1.libraryID = 2;
+    const g = harness({ groups: { 2: { groupID: 777 } } });
     g.runner.start('x');
-    const q = await g.pane(g.item1);
+    const q = await g.pane(g.groupPaper(2).item);
     await settle(40);
     facts.historyLayer = { english, opened, toggled, other, busy, group: q.pane().list.children.map(c => c.textContent), groupSaved: q.pane().saved.hidden };
   }
@@ -1518,7 +1517,7 @@ def test_the_history_layer_toggles_is_placed_for_its_rows_and_goes_when_the_pape
     assert f["toggled"] is None, "the button closes its own layer"
     assert f["other"] == ["menu", True], "rows drawn late do not land in another layer"
     assert f["busy"] is None, "no layer while the paper runs"
-    assert f["group"] == ["这篇还没有运行记录。"] and f["groupSaved"] is True, "a group library's paper has no saved prompts"
+    assert f["group"] == [] and f["groupSaved"] is False, "a group library's paper has its saved prompts, as in My Library"
 
 
 @pytest.mark.parametrize("name", ["retry", "retryAfterStep"])

@@ -21,7 +21,7 @@ Sticky notes (`kind: "note"`) only when the profile shows that habit or the user
 
 ## Requirements
 
-Run `scholium.py …` below as `uv run <skill dir>/scripts/scholium.py …` from any directory when `uv` is on PATH (it brings Python and PyMuPDF), else as `python <skill dir>/scripts/scholium.py …` (if Python or PyMuPDF is missing, ask the user to install uv or run `pip install -U pymupdf`). Zotero must be running. Only items in My Library are supported, not group libraries. The write channel (the Scholium plugin when installed, else the local API on Zotero 10, a JavaScript file as fallback) is selected automatically; read `references/backends.md` only when `--apply` does not write.
+Run `scholium.py …` below as `uv run <skill dir>/scripts/scholium.py …` from any directory when `uv` is on PATH (it brings Python and PyMuPDF), else as `python <skill dir>/scripts/scholium.py …` (if Python or PyMuPDF is missing, ask the user to install uv or run `pip install -U pymupdf`). Zotero must be running. For an item in a group library, `paper.json` carries `group_id`: keep it in your configuration and give `status` and `samples` `--group <id>`. The write channel (the Scholium plugin when installed, else the local API on Zotero 10, a JavaScript file as fallback) is selected automatically; read `references/backends.md` only when `--apply` does not write.
 
 ## Workflow
 
@@ -48,7 +48,7 @@ When a launching prompt names the paper as a JSON file (`paper.json`), pass that
 If `extract` exits with code 3 (a scan without text), stop and give the user its `error` message.
 `sentences.txt` holds page markers, headings and numbered sentences by paragraph, without headers, footers, bibliography and paper checklist; its first lines give the line where each page, the main text, the references and an appendix start. Read by them: for the whole paper, the main text in full and only the appendix parts the main text calls essential; for a scope or page limit, those pages with context. Issue the reads of a long part together in one response. Do not also read the PDF or full-text cache.
 
-Extraction creates output directories and binds `sentences.json` to the PDF's SHA-256. Re-extract old caches without a fingerprint, or after replacing the PDF. If an id is reported as ambiguous, check the page's matching passages and set `occurrence` explicitly; do not guess a position.
+Extraction creates the output directories and binds `sentences.json` to the PDF's SHA-256; re-extract after the PDF is replaced. If an id is reported as ambiguous, check the page's matching passages and set `occurrence` explicitly; do not guess a position.
 
 Write one configuration from `examples/config.template.json`, including only requested outputs; unknown keys are refused. Without `cleanup` a run only adds, and text the tool already wrote on a page is refused as `duplicate_existing`. Set `cleanup: true` for a complete redo, and to change or add to annotations already written: edit the configuration they were written from, which holds the paper's whole set, and apply it whole (a separate configuration with only new entries would be deleted by the next whole rewrite). The tool's earlier annotations on the PDF are then replaced (the report's `cleanup_removes` counts them). When the reading note is rewritten too, `note_replace: true` moves the tool's earlier notes to the trash once the new one is written; the user's notes are never touched.
 

@@ -1,6 +1,6 @@
 """A past question edited with Zotero's local API off, a stopped plugin starting nothing, an annotation that did not start
 giving its wishes back, what a run says this computer lacks, the steps of the skill's commands, Codex's effort levels, Ask
-Scholium outside My Library, the trash line of one note, the notes Annotate again moves to the trash, the reading note
+Scholium in a group library, the trash line of one note, the notes Annotate again moves to the trash, the reading note
 written with the annotations, a compaction in an annotation, a queued message's passage, Retry, the profile read again, the
 box after a send, a title renamed when its list closes, a hidden list scrolled once shown, and a reader's own section."""
 import json
@@ -264,7 +264,7 @@ const scenario = async (name, fn) => {
     return r;
   });
 
-  // Ask Scholium: a PDF of My Library in a reader tab of the main window only
+  // Ask Scholium: a PDF of any library in a reader tab of the main window only
   await scenario('askMenu', async () => {
     const h = harness({});
     h.runner.start('x');
@@ -716,8 +716,8 @@ def test_codex_default_named_by_a_new_thread_outside_the_list_offers_codex_level
     assert c["before"] == CODEX_EFFORTS and c["after"] == CODEX_EFFORTS
 
 
-def test_ask_scholium_only_for_my_library_in_the_main_window(facts):
-    assert facts["askMenu"] == {"plain": 1, "group": 0, "window": 0, "windowQuery": 0, "main": 1}
+def test_ask_scholium_for_any_library_in_the_main_window_only(facts):
+    assert facts["askMenu"] == {"plain": 1, "group": 1, "window": 0, "windowQuery": 0, "main": 1}
 
 
 def test_the_deletion_question_names_one_note_in_the_singular(facts):

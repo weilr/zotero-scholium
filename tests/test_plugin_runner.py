@@ -1631,19 +1631,24 @@ SCENARIOS = r"""
     facts.resetFrom = ['约 24 分钟后重置', 'Please try again in 3 minutes.', 'try again in about 2 hours', '5 小时额度已用完', 'in 900 hours', '']
       .map(t => { const at = h.runner.resetFrom(t); return at ? Math.round((at - Date.now()) / 60000) : null; });
   }
-  // papers outside My Library, and a paper whose PDF file is missing
+  // a paper in a group library the user cannot edit, and a paper whose PDF file is missing
   {
-    const h = harness();
+    const h = harness({ groups: { 2: { groupID: 777, editable: false } } });
     h.runner.start('x');
-    const group = Object.assign({}, h.att1, { key: 'GATT', id: 'GATT', libraryID: 2 });
+    const group = h.groupPaper(2, 'GATT', 'GITEM').att;
     const p = await h.pane(group);
     const queued = await h.runner.annotate([group]);
     const missing = Object.assign({}, h.item2, { getBestAttachment: async () => Object.assign({}, h.att2, { getFilePathAsync: async () => null }) });
     await h.runner.annotate([missing]);
-    facts.otherLibrary = { state: p.view().state, annotateDisabled: p.view().annotateDisabled, queued, alerts: h.log.alerts.slice(), calls: h.log.calls.length,
-                           composerHidden: p.pane().composer.hidden, controls: [p.view().agentDisabled, p.view().historyDisabled, p.view().newChatDisabled],
-                           asked: await h.runner.send(group, '这篇讲什么？') };
-    facts.otherLibrary.askedMissing = [await h.runner.send(missing, '这篇讲什么？'), h.log.alerts.slice(facts.otherLibrary.alerts.length), h.log.calls.length];
+    p.pane().tabAnnotate.click();
+    const annot = p.view(), annotComposer = p.pane().composer.hidden;
+    p.pane().tabChat.click();
+    facts.otherLibrary = { state: annot.state, annotateDisabled: annot.annotateDisabled, queued, alerts: h.log.alerts.slice(), calls: h.log.calls.length,
+                           composer: [annotComposer, p.pane().composer.hidden], chatState: p.view().state,
+                           controls: [p.view().agentDisabled, p.view().historyDisabled] };
+    const before = h.log.alerts.length;
+    facts.otherLibrary.toAnnotation = [await h.runner.send(group, '第 5 页那条改短', { kind: 'annotate' }), h.log.alerts.slice(before), h.log.calls.length];
+    facts.otherLibrary.askedMissing = [await h.runner.send(missing, '这篇讲什么？'), h.log.alerts.slice(before + 1), h.log.calls.length];
   }
   // Annotate again opens a session of its own, with the words in the box as extra instructions
   {
@@ -3762,14 +3767,18 @@ def test_the_services_limit_waits_as_long_as_it_says(facts):
     assert facts["resetFrom"] == [24, 3, 120, None, None, None]
 
 
-def test_papers_outside_my_library_and_missing_files_are_not_run(facts):
+def test_a_group_the_user_cannot_edit_and_missing_files_are_not_run(facts):
     o = facts["otherLibrary"]
-    assert o["state"] == "Scholium 只能批注“我的文库”里的论文：把它复制到“我的文库”后再批注。" and o["annotateDisabled"] is True
+    read_only = "你在这个群组里没有编辑权限，无法写入批注。"
+    no_file = "这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）：在 Zotero 里打开它以下载，或重新链接文件后再试。"
+    assert o["state"] == read_only and o["annotateDisabled"] is True
     assert o["queued"] == 0 and o["calls"] == 0
-    assert o["alerts"] == ["Scholium 只能批注“我的文库”里的论文：把它复制到“我的文库”后再批注。", "这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）：在 Zotero 里打开它以下载，或重新链接文件后再试。"]
+    assert o["alerts"] == [read_only, no_file]
     assert facts["noPdf"]["alerts"] == ["这篇论文没有 PDF 附件：在 Zotero 里添加论文的 PDF 后再试。"]
-    assert o["composerHidden"] is True and o["controls"] == [True, True, True] and o["asked"] is False, "no message box or conversations"
-    assert o["askedMissing"] == [False, ["这篇论文的 PDF 文件不在这台电脑上（还没下载，或已被移走）：在 Zotero 里打开它以下载，或重新链接文件后再试。"], 0]
+    assert o["composer"] == [True, False] and o["chatState"] is None and o["controls"] == [False, False], \
+        "no box on the annotation tab; the chat's questions are answered"
+    assert o["toAnnotation"] == [False, [read_only], 0], "words to the annotation tab would write"
+    assert o["askedMissing"] == [False, [no_file], 0]
 
 
 def test_annotate_again_opens_a_session_with_the_box_as_extra_instructions(facts):

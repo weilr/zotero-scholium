@@ -7,6 +7,7 @@
 | `pdf` | yes | path of the PDF attachment |
 | `item_key`, `attachment_key` | yes | Zotero keys of the parent item and the attachment |
 | `out_dir` | yes | directory for generated files (`annotations.json`, `create_annotations.js`, previews); use `out/<ATTACHMENT_KEY>` to isolate papers |
+| `group_id`, `library_id` | | the item's group library (its group id) and Zotero's id of that library, as the plugin's `paper.json` gives them; without them, My Library, unless `paper.json` in `out_dir` names the same attachment's library |
 | `sentences` | | the JSON written by `extract --sentences` (default `<out_dir>/sentences.json`); needed by `id` or `ids`. Its PDF fingerprint must match the current file; re-extract legacy caches without a fingerprint or after changing the PDF |
 | `highlights[]` | | see below |
 | `summaries[]` | | see below |
@@ -58,6 +59,7 @@ A top band sits 6 pt below the page edge and moves down past a header line into 
 scholium.py status <ITEM_OR_PDF_KEY>               # the paper's PDFs, annotations and notes, before a configuration exists
 scholium.py status --query "<title words>"         # matching items
 scholium.py samples [KEY …] [--query W] [--exclude KEY] [--papers 2] [--per-kind 4]   # style examples of earlier runs
+                                                   # status and samples: --group <id> reads a group library
 scholium.py extract --pdf <pdf> [--pages N-M] [--keep-references] [--sentences sentences.json] [--out file]   # prints lines and characters
 scholium.py --config <config.json> [--verbose]     # build and report only (--verbose: every report field)
 scholium.py --config <config.json> --apply         # build, report, write, read back
