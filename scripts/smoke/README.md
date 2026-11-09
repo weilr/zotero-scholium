@@ -170,6 +170,9 @@ apply, margin and sticky notes, layout warnings and overlaps, phrases not found,
 headings, `<h1>`, the citation), dry runs and their failures, `--apply` runs, tool errors and retries. `--out NAME`
 writes NAME.json and NAME.md. A baseline names runs by their folder's name, not by a path.
 
+Committed baselines are in `baselines/`, named `<commit>-<model>-<locale>` (`.json` and `.md`, with a line of notes on
+how they were made). Compare a change with the latest: `--compare scripts/smoke/baselines/bac8a66-haiku-zh.json`.
+
 ## What it costs
 
 A whole paper with Haiku at low effort costs about $0.02–0.03 (once $0.10, when its output ran long), the evaluation
