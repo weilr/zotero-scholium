@@ -791,15 +791,17 @@ Object.assign(ScholiumRunner, {
                                    "--strict-mcp-config", "--settings", JSON.stringify({ disableAllHooks: true })],
       workdir: Zotero.DataDirectory.dir, stderr: "stdout",
     }, await this.agentEnv()));
-    const timer = setTimeout(() => { try { proc.kill(); } catch (e) {} }, 60000);
-    try {
+    // after 60 s the process is killed and the wait ends, since a child it started may keep its output open (readOutput)
+    let late = false, timer = null;
+    const deadline = new Promise(resolve => { timer = setTimeout(() => { late = true; try { proc.kill(); } catch (e) {} resolve(null); }, 60000); });
+    const read = (async () => {
       await proc.stdin.write(JSON.stringify({ type: "control_request", request_id: "scholium-models",
                                               request: { subtype: "initialize" } }) + "\n");
       await proc.stdin.close();
       let buffer = "";
       for (;;) {
         const chunk = await proc.stdout.readString();
-        if (!chunk) return null;
+        if (!chunk || late) return null;
         buffer += chunk;
         const lines = buffer.split("\n");
         buffer = lines.pop();
@@ -810,7 +812,9 @@ Object.assign(ScholiumRunner, {
           if (r && r.request_id === "scholium-models") return this.modelOptions(r.response && r.response.models);
         }
       }
-    } finally {
+    })();
+    try { return await Promise.race([read, deadline]); }
+    finally {
       clearTimeout(timer);
       try { proc.kill(); } catch (e) {}
     }

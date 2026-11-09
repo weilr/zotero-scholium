@@ -18,6 +18,10 @@
 - In an annotation's Claude Code runs, one turn writes at most 32,000 tokens, thinking included
   (`CLAUDE_CODE_MAX_OUTPUT_TOKENS`), unless the user's environment sets that variable.
 
+### Fixed
+
+- The model list gives up after 60 s when Claude Code's output does not end, and is asked for again later.
+
 ## 0.2.2 (2026-11-10)
 
 ### Added

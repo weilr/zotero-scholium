@@ -161,6 +161,19 @@ SCENARIOS = r"""
     facts.noModelList = { models: v.models, labels: v.modelLabels, efforts: v.efforts, calls: h.log.modelCalls.length, kills: h.log.modelKills };
   }
 
+  // a Claude Code whose output never ends, not even when it is killed: the model list gives up after 60 s, and is asked
+  // again later
+  {
+    const h = harness({ models: 'open' });
+    let done = false;
+    h.runner.loadModels('claude').then(() => { done = true; });
+    await settle(40);
+    const during = { done, loading: !!h.runner.modelsLoading.claude, timers: h.live() };
+    h.fire(); await settle(40);
+    facts.modelsOpen = { during, done, loading: !!h.runner.modelsLoading.claude, models: h.runner.models.claude || null,
+                         kills: h.log.modelKills, timers: h.live() };
+  }
+
   // while the section is on screen in the focused window, on the tab of the run, it replaces the notices
   {
     const h = harness();
@@ -4197,3 +4210,10 @@ def test_texts_in_each_language(facts):
     assert t["exited"] == ["Codex app-server 已退出：boom", "codex app-server exited"]
     assert t["entry"] == ["达到轮数上限"]
     assert t["links"] == [False, True, True, False], "mailto: is not followed"
+
+
+def test_a_model_list_whose_output_never_ends_is_given_up_after_its_time(facts):
+    m = facts["modelsOpen"]
+    assert m["during"] == {"done": False, "loading": True, "timers": [60000]}
+    assert m["done"] is True and m["loading"] is False and m["models"] is None
+    assert m["kills"] >= 1 and m["timers"] == []

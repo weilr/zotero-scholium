@@ -335,7 +335,8 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     async wait() { return { exitCode: this.killed ? 1 : this.exit === null ? exitCode : this.exit }; }
     kill() { log.kills++; this.killed = true; if (this.gate) this.gate(); }
   }
-  // the model list request: 'ok' answers, 'silent' ends without an answer (an older Claude Code)
+  // the model list request: 'ok' answers, 'silent' ends without an answer (an older Claude Code), 'open' gives no answer
+  // and its output never ends, not even when it is killed (a child it started holds it)
   class ModelProc {
     constructor() {
       this.chunks = [];
@@ -343,7 +344,14 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       this.killed = false;
     }
     get stdin() { return { write: async s => { log.modelStdin.push(s); }, close: async () => { log.modelStdinClosed = true; } }; }
-    get stdout() { const self = this; return { readString: async () => { await tick(); return self.killed ? '' : (self.chunks.shift() || ''); } }; }
+    get stdout() {
+      const self = this;
+      return { readString: async () => {
+        await tick();
+        if (models === 'open') return self.chunks.length ? self.chunks.shift() : new Promise(() => {});
+        return self.killed ? '' : (self.chunks.shift() || '');
+      } };
+    }
     async wait() { return { exitCode: 0 }; }
     kill() { log.modelKills++; this.killed = true; }
   }
