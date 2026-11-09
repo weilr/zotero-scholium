@@ -533,6 +533,10 @@ var ScholiumRunner = {
   qseq: 0,                  // the number of the latest queued message
   pendingQuotes: new Map(), // attachment key -> { quote: { text, page }, at }: a passage asked about before the section was drawn
   QUOTE_MS: 30000,          // how long such a passage waits for its section
+  pendingPapers: new Map(), // attachment key -> { papers, at }: the other papers of a question about several (askPapers), until
+                            // the first paper's section takes them, within QUOTE_MS
+  MAX_PAPERS: 8,            // the most papers a question asks about together
+  itemMenus: new Map(),     // main window -> { item, popup, showing }: Ask Scholium (N papers) in its items list's context menu
   // the skill's files as the plugin carries them in content/skill/zotero-scholium (added when the package is built);
   // SKILL.md is written last, so that a copy cut short is not taken for a skill
   SKILL_FILES: ["agents/openai.yaml", "examples/config.template.json", "examples/reading_note.template.html", "references/backends.md",
@@ -834,6 +838,10 @@ var ScholiumRunner = {
       tabChat: zh ? "对话" : "Chat",
       tabAnnotate: zh ? "批注" : "Annotations",
       askScholium: zh ? "问 Scholium" : "Ask Scholium",
+      askPapers: n => zh ? `问 Scholium（${n} 篇）` : `Ask Scholium (${n} papers)`,
+      papersLead: zh ? "同时问" : "Also about",
+      paperRemove: zh ? "不问这篇" : "Leave this paper out",
+      papersNoPdf: zh ? "选中的论文在这台电脑上都没有 PDF 文件。" : "None of the selected papers has a PDF file on this computer.",
       quoteRemove: zh ? "不引用这段" : "Remove the quote",
       annotEmptyTitle: zh ? "还没有批注这篇" : "Not annotated yet",
       annotOwnTitle: n => zh ? `这篇已有 ${n} 条 Scholium 批注` : `This paper carries ${plural(n, "Scholium annotation", "Scholium annotations")}`,
@@ -1600,6 +1608,23 @@ var ScholiumRunner = {
     return [this.zh() ? `- 群组文库：${group}（status 和 samples 加 --group ${group}）` : `- Group library: ${group} (give status and samples --group ${group})`];
   },
 
+  // the prompt's lines of the other papers of a question about several: each one's paper.json, and the sentence numbers
+  // kept to the first paper, whose sentences the answer's chips show
+  papersLines(job) {
+    const files = job.paperFiles || [];
+    if (!files.length) return [];
+    return this.zh() ? [
+      "这个问题同时涉及下面几篇论文。每个 paper.json 给出那篇论文的 PDF 路径、两个 key 和输出目录：按需对每篇用 --config 它的 paper.json 运行 extract，"
+        + "读它自己输出目录里的 sentences.txt。句子编号 [#123] 只用于上面这篇；引用其他论文时写论文标题和页码。",
+      ...files.map(f => `- ${f.path}（${f.title}）`),
+    ] : [
+      "The question is also about the papers below. Each paper.json gives that paper's PDF path, its two keys and its output directory: "
+        + "run extract with --config and its paper.json as needed, and read the sentences.txt in its own output directory. Sentence numbers [#123] "
+        + "are for the paper above only; for the others, name the paper and the page.",
+      ...files.map(f => `- ${f.path} (${f.title})`),
+    ];
+  },
+
   // the message itself: a follow-up in the agent's own session, a question (or a follow-up in a session the agent
   // starts), or the annotation task
   taskPrompt(job, own) {
@@ -1660,6 +1685,7 @@ var ScholiumRunner = {
       `- 论文：${paper}（PDF 的路径、两个 key 和输出目录）`,
       `- 输出目录：${outDir}`,
       job.profile ? `- 画像：${job.profile}` : "- 画像：没有；不要生成或修改画像",
+      ...this.papersLines(job),
       "",
       "这是从 Zotero 里发来的无人值守任务：不要向用户提问，不要启动子代理。只回答，不写批注和笔记；用户在问题里明确要求时，才按技能的流程写入 Zotero。",
       this.paperRule(this.keyOf(job.att)),
@@ -1679,6 +1705,7 @@ var ScholiumRunner = {
       `- Paper: ${paper} (the PDF's path, the two keys and the output directory)`,
       `- Output directory: ${outDir}`,
       job.profile ? `- Profile: ${job.profile}` : "- Profile: none; do not create or change a profile",
+      ...this.papersLines(job),
       "",
       "This is an unattended task sent from Zotero: do not ask the user anything and do not start sub-agents. Only answer; write no annotations "
         + "and no note unless the question asks for them, and then write to Zotero as the skill describes.",
@@ -1755,6 +1782,7 @@ var ScholiumRunner = {
         "下面是用户在 Zotero 里针对这篇论文发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
           + "只是提问就直接回答；用户明确要求写批注或笔记时，才按技能的流程写入 Zotero。",
         ...changed,
+        ...this.papersLines(job),
         "",
         this.said(job),
         "",
@@ -1763,6 +1791,7 @@ var ScholiumRunner = {
         "Below is a follow-up message about this paper, sent from Zotero. It is still unattended: do not ask the user anything and do not start sub-agents. "
           + "Answer a question directly; write annotations or a note only when the user asks for them, and then write to Zotero as the skill describes.",
         ...changed,
+        ...this.papersLines(job),
         "",
         this.said(job),
         "",
@@ -1775,6 +1804,7 @@ var ScholiumRunner = {
       ...(job.own ? ["改已经写入的批注或补几条时，都编辑写入它们的那份配置（它是这篇论文的全部批注），设 cleanup: true 整份重写"
                      + "（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置，否则下次整份重写时会把它们删掉。"] : []),
       ...changed,
+      ...this.papersLines(job),
       "",
       this.said(job),
       "",
@@ -1786,6 +1816,7 @@ var ScholiumRunner = {
                      + "set) and set cleanup: true, so that the whole set replaces them (and note_replace: true when the reading note changes); do not "
                      + "write a separate configuration with just new entries, which the next whole rewrite would delete."] : []),
       ...changed,
+      ...this.papersLines(job),
       "",
       this.said(job),
       "",
@@ -1866,6 +1897,17 @@ var ScholiumRunner = {
   // the paper as the agent's commands name it (--config): the PDF's path, the keys and the output folder, so that the
   // path, whose file name a shell would expand ($, a backtick), stays off command lines
   paperPath(key) { return PathUtils.join(this.outDir(key), "paper.json"); },
+
+  // a PDF's paper.json, which names it for the skill's script: the PDF's path, the two keys, the output directory and, in
+  // another library than My Library, that library
+  async writePaper(att, pdf, parentKey) {
+    const key = this.keyOf(att), paper = this.paperPath(key);
+    const group = this.groupOf(att.libraryID);
+    const library = att.libraryID && att.libraryID !== Zotero.Libraries.userLibraryID
+      ? Object.assign({ library_id: att.libraryID }, group ? { group_id: group } : {}) : {};
+    await IOUtils.writeUTF8(paper, JSON.stringify(Object.assign({ pdf, item_key: parentKey, attachment_key: att.key, out_dir: this.outDir(key) },
+                                                                library), null, 1) + "\n", { tmpPath: paper + ".tmp" });
+  },
 
   // whether a command of the tool wrote to Zotero: its output's outcome ("applied": true, or "partial" when the earlier
   // items stayed), whatever the exit code; without one in sight, whether the command succeeded
@@ -2015,10 +2057,115 @@ var ScholiumRunner = {
         doc.documentElement.append(link);
       }
     } catch (e) { this.log("stylesheet failed: " + e); }
+    this.addItemMenu(win);
+  },
+
+  // Ask Scholium (N papers) at the end of the items list's context menu, shown while 2 to MAX_PAPERS papers or PDFs are
+  // selected; one left by another copy of the plugin goes
+  addItemMenu(win) {
+    try {
+      const doc = win.document;
+      const popup = doc.getElementById("zotero-itemmenu");
+      if (!popup || this.itemMenus.has(win)) return;
+      const old = doc.getElementById("scholium-ask-papers");
+      if (old) old.remove();
+      const item = doc.createXULElement ? doc.createXULElement("menuitem")
+        : doc.createElementNS("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul", "menuitem");
+      item.id = "scholium-ask-papers";
+      item.hidden = true;
+      item.addEventListener("command", () => { this.askPapers(win, this.askable(win)).catch(e => this.log("ask papers failed: " + e)); });
+      const showing = e => {
+        if (e && e.target && e.target !== popup) return;   // a submenu's
+        const n = this.askable(win).length;
+        item.hidden = n < 2 || n > this.MAX_PAPERS;
+        if (!item.hidden) item.setAttribute("label", this.text("askPapers", n));
+      };
+      popup.addEventListener("popupshowing", showing);
+      popup.append(item);
+      this.itemMenus.set(win, { item, popup, showing });
+    } catch (e) { this.log("item menu failed: " + e); }
+  },
+
+  removeItemMenu(win) {
+    const m = this.itemMenus.get(win);
+    if (!m) return;
+    this.itemMenus.delete(win);
+    try { m.popup.removeEventListener("popupshowing", m.showing); } catch (e) {}
+    try { m.item.remove(); } catch (e) {}
+  },
+
+  // the papers (regular items) and PDFs selected in a window's items list
+  askable(win) {
+    let items = [];
+    try { items = win.ZoteroPane.getSelectedItems() || []; } catch (e) {}
+    return items.filter(i => i && ((i.isRegularItem && i.isRegularItem()) || (i.isPDFAttachment && i.isPDFAttachment())));
+  },
+
+  // a paper as a question about several keeps it: its PDF's library and key, and its title
+  paperRef(att, title) { return { library: att.libraryID || Zotero.Libraries.userLibraryID, key: att.key, title: String(title || "") }; },
+
+  paperAtt(ref) {
+    try { return ref && ref.key ? Zotero.Items.getByLibraryAndKey(ref.library || Zotero.Libraries.userLibraryID, String(ref.key)) : null; }
+    catch (e) { return null; }
+  },
+
+  // a question about several papers: the first one with a PDF is selected alone and its Chat tab opens on a new
+  // conversation, the others in a row of chips above its box (pendingPapers until its section takes them)
+  async askPapers(win, items) {
+    const papers = [];
+    for (const item of items.slice(0, this.MAX_PAPERS)) {
+      let r = null;
+      try { r = await this.resolve(item); } catch (e) {}
+      if (r && !papers.some(p => p.att === r.att)) papers.push(Object.assign(r, { item }));
+    }
+    if (!papers.length) {
+      Services.prompt.alert(win, this.text("headline"), this.text("papersNoPdf"));
+      return false;
+    }
+    const [first, ...rest] = papers;
+    const key = this.keyOf(first.att);
+    // a new conversation of the first paper, unless it answers now: the question then waits in the one under way
+    const keys = this.paneKeys(first.item);
+    if (!keys.some(k => this.busy(k, "chat"))) for (const k of keys) await this.chooseConv(k, null);
+    const others = rest.map(p => this.paperRef(p.att, p.title));
+    this.pendingPapers.set(key, { papers: others, at: Date.now() });
+    try { await win.ZoteroPane.selectItem(first.item.id); } catch (e) { this.log("paper not selected: " + e); }
+    // a section drawn already (the paper was shown before): it takes them now
+    const pane = this.paneFor(win, key);
+    if (pane && this.pendingPapers.has(key)) {
+      this.pendingPapers.delete(key);
+      this.takePapers(pane, others, key);
+      await this.showConversation(pane);
+    }
+    const shown = this.paneFor(win, key);
+    if (shown) {
+      await this.revealSection(win, shown);
+      try { shown.input.focus(); } catch (e) {}
+    }
+    return true;
+  },
+
+  // the other papers of the next question go above the section's box, on the Chat tab; the conversation shown next keeps
+  // them (showConversation)
+  takePapers(pane, papers, key) {
+    Object.assign(pane, { others: papers.slice(), othersFor: "pending", preferKey: key, tab: "chat" });
+    this.paintPane(pane);
+  },
+
+  // the pending papers of a section's PDFs, within QUOTE_MS
+  pendingPapersOf(keys) {
+    for (const k of keys) {
+      const p = this.pendingPapers.get(k);
+      if (!p) continue;
+      this.pendingPapers.delete(k);
+      if (Date.now() - p.at < this.QUOTE_MS) return { papers: p.papers, key: k };
+    }
+    return null;
   },
 
   removeFromWindow(win) {
     if (this.editor && this.editor.doc === win.document) this.closeProfile(this.editor, false);
+    this.removeItemMenu(win);
     try {
       // a newer copy that replaced this copy's sheet keeps its sheet and its labels
       const style = win.document.getElementById("scholium-style");
@@ -3064,6 +3211,10 @@ var ScholiumRunner = {
     const pending = this.pendingQuote(pane, keys);
     if (pending) { pane.quote = pending; pane.tab = "chat"; }
     else pane.quote = old && old.item === item ? old.quote || null : null;   // a quote is of the item it was chosen for
+    // the other papers of a question about several: those Ask Scholium (N papers) chose, else the ones the section had
+    const papers = this.pendingPapersOf(keys);
+    if (papers) Object.assign(pane, { others: papers.papers.slice(), othersFor: "pending", preferKey: papers.key, tab: "chat" });
+    else Object.assign(pane, old && old.item === item ? { others: old.others || [], othersFor: old.othersFor } : { others: [], othersFor: undefined });
     // below the transcript, a message box as in a chat: a question or extra instructions for a new run, or a
     // follow-up; it grows with the text
     // the saved prompts above the chat's box (paintSaved)
@@ -3092,8 +3243,9 @@ var ScholiumRunner = {
     // a question in place of a dialog, above the words
     pane.confirmRow = div("scholium-confirm");
     this.show(pane.confirmRow, false);
-    // the passage of the reader's selection that goes with the next message
+    // the passage of the reader's selection that goes with the next message, and the other papers of the conversation
     pane.quoteBox = div("scholium-quote");
+    pane.papersBox = div("scholium-papers");
     pane.sendRow = div("scholium-send-row");
     pane.hint = doc.createElement("span");
     pane.hint.className = "scholium-hint";
@@ -3113,7 +3265,7 @@ var ScholiumRunner = {
     // the annotation tab's button: Annotate, or Annotate again once the tab shows a session
     pane.annotGo = this.paneButton(doc, this.text("annotateThis"), () => { this.annotateFromPane(pane); }, "primary small");
     pane.sendRow.append(pane.hint, pane.ring, pane.send, pane.annotGo);
-    talk.append(pane.queueBox, pane.confirmRow, pane.quoteBox, pane.input, pane.sendRow);
+    talk.append(pane.queueBox, pane.confirmRow, pane.papersBox, pane.quoteBox, pane.input, pane.sendRow);
     box.append(head, line, pane.chatView, pane.annotView, pane.saved, talk);
     body.append(box);
     this.fitPane(pane);
@@ -3122,8 +3274,8 @@ var ScholiumRunner = {
     // the running paper's transcript at once; another conversation once its log is read (loadHistory)
     if (this.job && keys.includes(this.job.key)) this.showLive(pane, this.job.key, this.job.source.kind || "chat");
     this.paintPane(pane);
-    // a passage asked about before the section was drawn: the words to it go in the box
-    if (pending) { try { pane.input.focus(); } catch (e) {} }
+    // a passage or papers asked about before the section was drawn: the words to them go in the box
+    if (pending || papers) { try { pane.input.focus(); } catch (e) {} }
     this.loadModels().catch(() => {});
     // the conversation and the annotation session now: Zotero skips the async render of an item it did last when the item
     // comes back after another item's sync render; a collapsed section loads them when it is opened (watchOpen)
@@ -3876,7 +4028,9 @@ var ScholiumRunner = {
     const att = view.shownKey && this.attOf(pane.item.libraryID, view.shownKey);   // the paper of the tab's conversation
     const quote = pane.tab === "chat" ? pane.quote : null, tab = pane.tab, key = this.unsentKey(pane);
     if (typed) pane.sending = say;
-    return this.send(att || pane.item, say, { kind: pane.tab, conv: view.shownConv, before, quote })
+    // a chat's message goes with the other papers above the box
+    const papers = pane.tab === "chat" ? (pane.others || []).slice() : undefined;
+    return this.send(att || pane.item, say, { kind: pane.tab, conv: view.shownConv, before, quote, papers })
       .then(sent => {
         if (!sent) return;
         if (typed) this.clearSent(pane, tab, say, key);
@@ -4259,7 +4413,7 @@ var ScholiumRunner = {
     const turns = log.turns.map(t => Object.assign({}, t, { points: Object.assign({}, t.points), sessions: Object.assign({}, t.sessions) }));
     return { entries: log.entries.slice(), turns,
              result: log.result, question: log.question, agents: { claude: copy(log.agents.claude), codex: copy(log.agents.codex) },
-             path, id };
+             papers: (log.papers || []).map(r => Object.assign({}, r)), path, id };
   },
 
   // what readLog gives of a log, read once; null when it cannot be read. agent: whose the runs of a log without run
@@ -4281,6 +4435,7 @@ var ScholiumRunner = {
     // turn, count once the message reached the agent
     let pending = null, result = null, question = false, opened = false, reached = false, runAt = 0, runMine = false, timed = false;
     let compacting = false;   // the run is a compaction: its result is no turn's
+    let papers = null;        // the other papers of a question about several, as its latest message named them
     // where each turn starts in the text; bare: where a run line without the user's words starts
     let at = 0, bare = null;
     // a turn knows each agent's point and session at its start, which a cut before it goes back to
@@ -4346,6 +4501,7 @@ var ScholiumRunner = {
         bare = null;
         if (turns.length) Object.assign(turns[turns.length - 1], { prompted: true, annotate: !!event.annotate });
         if (event.quote && event.quote.text && turns.length) turns[turns.length - 1].quote = this.quoteOf(event.quote);
+        if (Array.isArray(event.papers)) papers = event.papers.filter(r => r && typeof r.key === "string" && r.key);
         opened = false;
       } else if (event.type !== "scholium") {
         opened = false;
@@ -4420,7 +4576,8 @@ var ScholiumRunner = {
     // stale: null when no turn it saw was answered again by another agent
     const out = a => ({ session: a.session, through: a.through, point: a.point, rewind: a.rewind ? a.rewind.point : null,
                         context: a.context, lastAt: a.lastAt, lastEnd: a.lastEnd, stale: a.stale === Infinity ? null : a.stale });
-    return { entries: entries.slice(-this.MAX_ENTRIES), turns, result, question, agents: { claude: out(agents.claude), codex: out(agents.codex) } };
+    return { entries: entries.slice(-this.MAX_ENTRIES), turns, result, question, agents: { claude: out(agents.claude), codex: out(agents.codex) },
+             papers: papers || [] };
   },
 
   // the error lines of the latest run, which a new session took over: they leave the entries
@@ -4589,6 +4746,10 @@ var ScholiumRunner = {
     const memory = !!path && path === this.transcriptPath && this.transcriptKind === "chat";
     const kept = memory && pane.live && pane.shownPath === path && this.transcript.length > 0;
     if (pane.shownPath !== path) pane.foldOpen = new Map();   // the steps a reader opened are of the conversation shown
+    // the other papers: those Ask Scholium (N papers) chose stay for the conversation shown first; another conversation
+    // has those its log records, a new one none
+    if (pane.othersFor === "pending") pane.othersFor = path;
+    else if (pane.othersFor !== path) Object.assign(pane, { others: log && Array.isArray(log.papers) ? log.papers.slice() : [], othersFor: path });
     Object.assign(pane, { shownKey: shown ? shown.key : null, shownConv: shown ? shown.id : null, shownAgent: agent, shownPath: path, live: memory,
                           history: !!log && !memory, turns: log ? log.turns.length : 0, question: !!(log && log.question),
                           context: log ? log.agents[agent].context : null, draft: null });
@@ -5722,9 +5883,39 @@ var ScholiumRunner = {
       this.paintRing(pane);
       this.paintHint(pane);
       this.paintQueue(pane);
+      this.paintPapers(pane);
       this.paintQuote(pane);
       this.fitInput(pane);
     } catch (e) {}
+  },
+
+  // the other papers of the chat's conversation, as chips above its box; ✕ leaves one out of the next messages
+  paintPapers(pane) {
+    const list = pane.tab === "chat" ? pane.others || [] : [];
+    this.show(pane.papersBox, list.length > 0);
+    // drawn again only when they change, so that ✕ keeps the focus
+    const sig = JSON.stringify(list);
+    if (pane.papersSig === sig) return;
+    pane.papersSig = sig;
+    const doc = pane.doc;
+    const lead = doc.createElement("span");
+    lead.className = "scholium-papers-lead";
+    lead.textContent = this.text("papersLead");
+    const chips = list.map(ref => {
+      const chip = doc.createElement("span");
+      chip.className = "scholium-paper";
+      const title = doc.createElement("span");
+      title.className = "scholium-paper-title";
+      title.textContent = ref.title || ref.key;
+      chip.title = ref.title || ref.key;
+      const drop = this.iconButton(doc, "close", this.text("paperRemove"), () => {
+        pane.others = (pane.others || []).filter(r => r !== ref);
+        this.paintPapers(pane);
+      });
+      chip.append(title, drop);
+      return chip;
+    });
+    pane.papersBox.replaceChildren(...(list.length ? [lead] : []), ...chips);
   },
 
   // the passage that goes with the next message, above the box of the chat tab
@@ -6296,7 +6487,9 @@ var ScholiumRunner = {
     if (busy && (opts.compact || opts.retry || opts.edited)) return false;
     Object.assign(job, { agent: (opts.retry || opts.edited) && opts.agent ? opts.agent : this.agent(), say, own: job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length,
                          kind, retry: !!opts.retry, compact: !!opts.compact, quote: opts.quote || null, rewind: opts.rewind || null,
-                         edited: !!opts.edited });
+                         edited: !!opts.edited },
+                  // the other papers of a chat's message; without them, a run takes those its conversation's log names
+                  kind === "chat" && Array.isArray(opts.papers) ? { papers: opts.papers } : {});
     // the paper is busy: the words wait in the queue of the conversation, as Codex queues a follow-up
     if (busy) {
       Object.assign(job, { qid: String(++this.qseq), conv: opts.conv || null });
@@ -6919,13 +7112,24 @@ var ScholiumRunner = {
     }
     await IOUtils.makeDirectory(this.outDir(key), { createAncestors: true, ignoreExisting: true });
     if (this.job !== running || running.stopAsked) return this.halted(job, running);   // the plugin stopped, or ■, while the folder was prepared
-    const paper = this.paperPath(key);
-    // a paper of another library than My Library names it, for the skill's script
-    const group = this.groupOf(job.att.libraryID);
-    const library = job.att.libraryID && job.att.libraryID !== Zotero.Libraries.userLibraryID
-      ? Object.assign({ library_id: job.att.libraryID }, group ? { group_id: group } : {}) : {};
-    await IOUtils.writeUTF8(paper, JSON.stringify(Object.assign({ pdf: job.path, item_key: job.parentKey, attachment_key: job.att.key, out_dir: this.outDir(key) },
-                                                                library), null, 1) + "\n", { tmpPath: paper + ".tmp" });
+    await this.writePaper(job.att, job.path, job.parentKey);
+    // the other papers of a question about several: the message's, else those the conversation's log names; each gets its
+    // paper.json as one paper does. A paper whose PDF is gone is left out
+    const refs = (job.kind || "chat") !== "chat" ? [] : Array.isArray(job.papers) ? job.papers : (log && log.papers) || [];
+    job.paperFiles = [];
+    for (const ref of refs.slice(0, this.MAX_PAPERS - 1)) {
+      const other = this.paperAtt(ref);
+      if (!other || other === job.att) continue;
+      let pdf = null;
+      try { pdf = await other.getFilePathAsync(); } catch (e) {}
+      if (!pdf) continue;
+      const parent = other.parentID ? Zotero.Items.get(other.parentID) : null;
+      const k = this.keyOf(other);
+      await IOUtils.makeDirectory(this.outDir(k), { createAncestors: true, ignoreExisting: true });
+      await this.writePaper(other, pdf, parent ? parent.key : "");
+      job.paperFiles.push({ path: this.paperPath(k), title: ref.title || (parent || other).getDisplayTitle() });
+    }
+    if (this.job !== running || running.stopAsked) return this.halted(job, running);   // the plugin stopped, or ■, meanwhile
     let made = null;   // an annotation's new session, and the agent's session before it
     if (!job.conv) {
       if (job.annotate) made = { before: (await this.index(key)).annotation[agent] || null };
@@ -6978,7 +7182,9 @@ var ScholiumRunner = {
     // the user's words, an annotation, or an automatic continuation, go into the log as the plugin's own lines; a second
     // try has them already. A question's line marks its conversation as one.
     const prompted = text => ({ type: "scholium", subtype: "prompt", text });
-    const quoted = job.quote ? { quote: job.quote } : {};
+    const quoted = Object.assign(job.quote ? { quote: job.quote } : {},
+                                 // the other papers, once a conversation has any: an empty list says they were all left out
+                                 Array.isArray(job.papers) && (job.papers.length || (log && log.papers && log.papers.length)) ? { papers: job.papers } : {});
     const mark = job.retried || job.fresh || job.logged ? null
       : job.compact ? { type: "scholium", subtype: "compact", text: job.say || "" }
       : job.annotate ? Object.assign(prompted(this.annotateWords(job)), { annotate: true, extra: job.extra || "" })
@@ -8011,7 +8217,8 @@ var ScholiumRunner = {
                           interrupted: !!j.interrupted, updated: !!j.updated, fresh: !!j.fresh, conv: j.conv || null, asking: !!j.asking,
                           logged: !!j.logged, throttled: !!j.throttled, retried: !!j.retried, retryAt: j.retryAt || 0, kind: j.kind || "chat",
                           compact: !!j.compact, qid: j.qid || null, failed: !!j.failed, quote: j.quote || null, rewind: j.rewind || null,
-                          turnAt: Number.isInteger(j.turnAt) ? j.turnAt : null, leftAt: this.leftOf(j.leftAt) });
+                          turnAt: Number.isInteger(j.turnAt) ? j.turnAt : null, leftAt: this.leftOf(j.leftAt),
+                          papers: Array.isArray(j.papers) ? j.papers : null });
     const jobs = [];
     if (running && running.source) {
       const j = running.source;
@@ -8054,7 +8261,8 @@ var ScholiumRunner = {
                            logged: !!s.logged, interrupted: !!s.interrupted, throttled: !!s.throttled, retried: !!s.retried,
                            retryAt: Number(s.retryAt) || 0, kind, compact: !!s.compact, qid, failed: !!(qid && s.failed),
                            quote: this.quoteOf(s.quote), rewind: this.pointOf(s.rewind),
-                           turnAt: Number.isInteger(s.turnAt) ? s.turnAt : null, leftAt: this.leftOf(s.leftAt) });
+                           turnAt: Number.isInteger(s.turnAt) ? s.turnAt : null, leftAt: this.leftOf(s.leftAt) },
+                    Array.isArray(s.papers) ? { papers: s.papers.filter(r => r && typeof r.key === "string" && r.key) } : {});
       if (qid) this.qseq = Math.max(this.qseq, Number(qid) || 0);
       // a copy before the paper's conversations hands over its one conversation per agent, which became that agent's
       // first: a paper interrupted there has its turn in that log; an annotation not begun starts a session of its own
@@ -8142,6 +8350,7 @@ var ScholiumRunner = {
     unregisterReaderListener("createViewContextMenu", this.menuHandler);
     this.menuHandler = null;
     this.pendingQuotes.clear();
+    this.pendingPapers.clear();
     this.prefPaneID = null;
     if (Zotero.Scholium === this.settingsApi) delete Zotero.Scholium;   // a newer copy's stays
     this.settingsApi = null;

@@ -159,7 +159,7 @@ history and the annotation sessions are those of that PDF.
 
 **Chat tab**
 
-- **＋** starts a new conversation (its first message starts it). **🕘** lists the conversations of the PDF by day
+- **＋** starts a new conversation (its first message starts it). The clock lists the conversations of the PDF by day
   (today, yesterday, the previous 7 and 30 days, older), titled by their first message, the one shown highlighted: a
   click opens one, ✎ renames it (Enter keeps the new title, Esc the old one), 🗑 deletes it (**Undo** brings it back for
   six seconds; every Codex thread the conversation used is archived at the next Codex run once the six seconds end or
@@ -261,6 +261,13 @@ history and the annotation sessions are those of that PDF.
   agent that the user quotes that passage of page N, counted in the PDF as in `sentences.txt` and the citation chips,
   with the page's label where it differs; the box and the transcript show the label, the transcript above the user's
   words. The section drawn for another item has no quote.
+- Asking about several papers: with 2 to 8 papers or PDFs selected in the items list, its context menu offers **Ask
+  Scholium (N papers)**. It selects the first paper alone and opens its Chat tab on a new conversation (the one under
+  way while the paper answers), with the other papers as chips above the box; ✕ on a chip leaves that paper out of the
+  next messages. A message goes with every paper's `paper.json`, written as for one paper, and a line of the prompt
+  lists them; sentence numbers stay those of the first paper. The conversation is the first paper's, and its log names
+  the other papers with each message, so that later messages, a retry and the section drawn again keep them. Questions
+  only: the Annotations tab has no chips.
 - Context ring: beside the round button, a ring whose arc is the share of the model's context window that the
   chosen agent's session of the conversation took up in its latest request (orange from 80%), none while the chosen
   agent has no session of the conversation; its tooltip gives the share used and
@@ -276,7 +283,9 @@ history and the annotation sessions are those of that PDF.
   and the transcript keeps "Context compacted automatically".
 - Keyboard: the context ring can be focused, and Enter or Space opens its layer. The settings, ⋯, history, context and
   queued-message layers take the focus when they are opened from the keyboard; Esc or Tab out closes one, and Esc gives
-  the focus back to its button. The tabs carry `aria-selected`. Focus rings use Zotero's accent colour.
+  the focus back to its button. The tabs carry `aria-selected`, and ← → Home End choose one (only the chosen one is a
+  Tab stop); ↑ ↓ Home End move through the ⋯ menus and the history. The settings layer starts at the model. Focus rings
+  use Zotero's accent colour; text in the accent colours has theme colours of its own that keep 4.5:1.
 - **Personal profile ↗** opens the annotation profile `<data dir>/zotero-scholium/profile.md`, which
   every run follows, in an editor over the Zotero window: the Markdown text as it is on the left, and
   on the right a preview that formats it as it is typed and follows its scrolling; colour codes such

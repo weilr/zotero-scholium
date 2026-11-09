@@ -81,7 +81,8 @@ the Claude Code or Codex installed on your computer on the paper shown.
 
 **Chat tab**
 
-- Ask about the paper, or right-click a passage selected in the reader and choose **Ask Scholium**.
+- Ask about the paper, or right-click a passage selected in the reader and choose **Ask Scholium**. With 2 to 8
+  papers selected in the items list, **Ask Scholium (N papers)** in its context menu asks about them together.
 - Answers cite the paper's sentences as page chips (`p.4`): hover shows the sentence, a click finds it in the PDF.
 - Claude Code and Codex share the paper's conversations: switch the agent and the next message goes to it. **＋** starts
   a conversation, the clock lists the earlier ones, and **Save as note** in the ⋯ menu keeps the one shown as a note

@@ -751,7 +751,7 @@ def facts(tmp_path_factory):
 
 def test_each_agent_has_its_own_session_of_a_conversation(facts):
     a = facts["agents"]
-    assert a["keys"] == ["agents", "entries", "id", "path", "question", "result", "turns"]
+    assert a["keys"] == ["agents", "entries", "id", "papers", "path", "question", "result", "turns"]
     m = a["mix"]
     assert m["claude"] == {"session": "S1", "through": 2, "point": {"uuid": "u3"}, "rewind": None, "used": 31, "lastAt": 1003}
     assert m["codex"] == {"session": "T1", "through": 1, "point": {"turnId": "K2"}, "rewind": None, "used": 1000, "lastAt": 1002}

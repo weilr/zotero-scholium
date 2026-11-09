@@ -1106,6 +1106,13 @@
 .scholium-quote { display: flex; align-items: flex-start; gap: 4px; border-inline-start: 3px solid var(--accent-blue); padding: 2px 6px;
   background: var(--fill-quinary); border-radius: 0 4px 4px 0; font-size: 11.5px; }
 .scholium-quote-text { flex: 1; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* the other papers of a question about several: a row of chips above the box, each with its ✕ */
+.scholium-papers { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-size: 11.5px; }
+.scholium-papers-lead { color: var(--fill-secondary); }
+.scholium-paper { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; border: var(--material-border-quarternary);
+  border-radius: 12px; padding-inline-start: 8px; background: var(--fill-quinary); }
+.scholium-paper-title { min-width: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scholium-paper .scholium-button.glyph { width: 18px; height: 18px; }
 .scholium-prompt-quote { border-inline-start: 3px solid var(--fill-quarternary); padding-inline-start: 6px; color: var(--fill-secondary);
   font-size: 11.5px; margin-bottom: 3px; }
 
