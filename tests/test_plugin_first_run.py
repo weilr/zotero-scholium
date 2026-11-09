@@ -141,12 +141,18 @@ def test_codex_without_an_account_stops_before_its_thread(facts):
     assert facts["codexSignedIn"]["kept"] is False, "the account's details are not kept"
 
 
+UV_WINDOWS = 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"'
+NO_PYMUPDF = f"缺少 PyMuPDF，安装 uv（在终端运行 {UV_WINDOWS}）或运行 pip install -U pymupdf 后再试。"
+
+
 def test_missing_pymupdf_or_python_is_named_on_the_empty_card(facts):
-    assert facts["noPymupdf"] == {"cls": "scholium-card none", "title": "没有写入批注：缺少 PyMuPDF，在终端运行 pip install -U pymupdf 后再试。"}
-    assert facts["noPython"]["title"] == "没有写入批注：找不到 Python，安装 Python 3.9 或更高版本并运行 pip install -U pymupdf 后再试。"
+    assert facts["noPymupdf"] == {"cls": "scholium-card none", "title": "没有写入批注：" + NO_PYMUPDF}
+    assert facts["noPython"]["title"] == (f"没有写入批注：找不到 Python，安装 uv（在终端运行 {UV_WINDOWS}），"
+                                          "或安装 Python 3.9 或更高版本并运行 pip install -U pymupdf 后再试。")
     assert facts["windowsAlias"]["title"] == facts["noPython"]["title"]
     assert facts["pipOnly"]["title"] == facts["noPymupdf"]["title"], "a failed pip install leaves it missing"
-    assert facts["noPymupdfEnglish"]["title"] == "No annotations written: PyMuPDF is missing; run pip install -U pymupdf in a terminal, then try again."
+    assert facts["noPymupdfEnglish"]["title"] == (f"No annotations written: PyMuPDF is missing; install uv (run {UV_WINDOWS} in a terminal) "
+                                                  "or run pip install -U pymupdf, then try again.")
 
 
 def test_the_skills_script_running_afterwards_clears_it(facts):
@@ -154,4 +160,4 @@ def test_the_skills_script_running_afterwards_clears_it(facts):
 
 
 def test_a_failed_run_names_what_is_missing(facts):
-    assert "缺少 PyMuPDF，在终端运行 pip install -U pymupdf 后再试。" in facts["failedQuestion"]
+    assert NO_PYMUPDF in facts["failedQuestion"]

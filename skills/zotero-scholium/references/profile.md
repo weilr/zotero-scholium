@@ -1,6 +1,6 @@
 # The annotation profile
 
-The profile lives in the Zotero data directory at `<Zotero data dir>/zotero-scholium/profile.md`; `python <skill dir>/scripts/scholium.py profile --path` prints that path; with `--json` it also gives the data directory, whether the file exists, and a profile left at the pre-0.1.0 location in the user configuration directory, which the next `profile --from-library` migrates.
+The profile lives in the Zotero data directory at `<Zotero data dir>/zotero-scholium/profile.md`; `scholium.py profile --path` prints that path; with `--json` it also gives the data directory, whether the file exists, and a profile left at the pre-0.1.0 location in the user configuration directory, which the next `profile --from-library` migrates.
 
 ## Precedence, lowest to highest
 
@@ -13,7 +13,7 @@ The profile lives in the Zotero data directory at `<Zotero data dir>/zotero-scho
 - If `profile.md` exists, read it in full: the learned sections first, then the user's rules, resolving conflicts in favour of the rules.
 - If it does not exist, derive one before writing anything:
   ```bash
-  python <skill dir>/scripts/scholium.py profile --from-library
+  scholium.py profile --from-library
   ```
   Complete the `___` placeholders with an interpretation of the statistics (for example, "yellow = terms; comments are one-line glossary entries"), present the completed draft to the user in a few lines, and ask them to confirm or correct it. Record their corrections, in their own words, in the `## User's rules (always win)` section; re-running the profile command preserves that section.
 - Every later correction by the user (for example, "do not use blue" or "comments should be translations") is added to the same section, so that the next paper starts from it.

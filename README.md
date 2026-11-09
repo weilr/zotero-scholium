@@ -101,7 +101,14 @@ Every detail is in [plugin/README.md](plugin/README.md).
 
 ## Quick start
 
-You need Zotero 7 or later, and Python 3.9+ with PyMuPDF (`pip install pymupdf`).
+You need Zotero 7 or later, and [uv](https://docs.astral.sh/uv/) (recommended: it brings Python and PyMuPDF on first use; one command installs it) or Python 3.9+ with PyMuPDF (`pip install pymupdf`):
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh                                     # macOS, Linux (or brew install uv)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"   # Windows
+```
+
+In China, set the environment variable `UV_DEFAULT_INDEX` to a mirror such as `https://pypi.tuna.tsinghua.edu.cn/simple`.
 
 ### One click in Zotero
 

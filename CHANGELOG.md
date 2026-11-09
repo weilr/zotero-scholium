@@ -10,12 +10,23 @@
   as it is.
 - A **Setup check** on the settings page: Zotero's local API, Claude Code and Codex (found, signed in, the skill), Python
   and PyMuPDF, with a button where the plugin can fix it.
+- The skill's script carries inline metadata (PEP 723): with uv, `uv run scholium.py …` brings Python and PyMuPDF on
+  first use. The skill runs the script that way when uv is on PATH, else with `python` as before.
+- The setup check has a uv line with the install command for the system. With uv, a missing Python or PyMuPDF is no
+  fault.
 
 ### Changed
 
 - A paper already in the user's language gets highlights without comments.
 - When Claude Code or Codex is not signed in, or PyMuPDF or Python is missing, the section says what to run. Codex
   without an account stops at once instead of retrying for a minute.
+- A missing PyMuPDF or Python is answered with installing uv, or `pip install -U pymupdf`; a run that found no uv says
+  how to install it.
+- On macOS and Linux, Claude Code and Codex get the PATH of the user's login shell before Zotero's, read once a session,
+  so that programs installed with Homebrew, nvm, conda or uv are found when Zotero was started from the Dock or a
+  desktop menu. The plugin looks for Claude Code, Codex, Python and uv on that PATH. uv's install folders
+  (`~/.local/bin`, and `~/.cargo/bin` outside Windows) are added when they exist and are missing.
+- The quick start recommends uv in place of installing Python and PyMuPDF.
 - Codex is not offered the effort level max.
 - Ask Scholium is offered only for PDFs in My Library, in reader tabs. A reader tab's section is the one of the PDF it
   shows.

@@ -231,6 +231,8 @@ API_OFF = "已关闭，Scholium 读不到论文：点“打开”，或在 设�
 SKILL_MISSING = "未找到：点“安装”，或在终端运行 npx skills add weilr/zotero-scholium -g -y。"
 INSTALL = {"label": "安装", "kind": "skill"}
 USER_SKILL = ["claudeSkill", "ok", "Claude Code 的技能", "已找到：/home/u/.claude/skills/zotero-scholium"]
+UV_WINDOWS = 'powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"'
+NO_UV = f"未找到。推荐安装：uv 会自行提供 Python 和 PyMuPDF。在终端运行 {UV_WINDOWS} 安装。"
 CODEX_SKILL = ["codexSkill", "ok", "Codex 的技能", "已找到：/data/.agents/skills/zotero-scholium"]
 
 
@@ -242,6 +244,7 @@ def test_everything_there_is_a_tick_each_in_order(facts):
         USER_SKILL,
         ["codex", "ok", "Codex", "已登录。"],
         CODEX_SKILL,
+        ["uv", "unknown", "uv", NO_UV],
         ["python", "ok", "Python", f"3.12.1：{PY}（{ON_PATH}）"],
         ["pymupdf", "ok", "PyMuPDF", "已安装 1.24.10"],
     ]
@@ -271,6 +274,7 @@ def test_english(facts):
         ["claudeSkill", "ok", "Claude Code's skill", "Found: /home/u/.claude/skills/zotero-scholium"],
         ["codex", "ok", "Codex", "Signed in."],
         ["codexSkill", "ok", "Codex's skill", "Found: /data/.agents/skills/zotero-scholium"],
+        ["uv", "unknown", "uv", f"Not found. Recommended: uv provides Python and PyMuPDF by itself; install it with {UV_WINDOWS} in a terminal."],
         ["python", "ok", "Python", f"3.12.1 at {PY} ({on_path})"],
         ["pymupdf", "ok", "PyMuPDF", "Installed: 1.24.10"],
     ]
@@ -299,7 +303,7 @@ def test_claude_codes_answer_is_waited_for_and_killed(facts):
     assert c["during"] == {"ids": ["localApi"], "kills": 0}, "the lines come as each check ends"
     assert c["lines"] == [["claude", "unknown", "Claude Code", "登录状态未知（claude auth status 没有回答）。"]]
     assert c["kills"] == 1
-    assert c["ids"] == ["localApi", "claude", "claudeSkill", "codex", "codexSkill", "python", "pymupdf"], "the rest goes on"
+    assert c["ids"] == ["localApi", "claude", "claudeSkill", "codex", "codexSkill", "uv", "python", "pymupdf"], "the rest goes on"
 
 
 def test_codex_signed_out_or_with_a_provider_of_its_own(facts):
@@ -378,7 +382,7 @@ def test_the_windows_store_alias_is_passed_over(facts):
 
 def test_python_is_waited_for_and_killed(facts):
     p = facts["pythonHeld"]
-    assert p["during"] == {"ids": ["localApi", "claude", "claudeSkill", "codex", "codexSkill"], "kills": 0}
+    assert p["during"] == {"ids": ["localApi", "claude", "claudeSkill", "codex", "codexSkill", "uv"], "kills": 0}
     assert p["lines"] == [["python", "unknown", "Python", f"{PY} 没有报出版本（{ON_PATH}）"]]
     assert p["kills"] == 1
 
@@ -393,12 +397,13 @@ def test_the_settings_page_shows_the_lines_as_they_come(facts):
         ["✗", "Claude Code 的技能", SKILL_MISSING, "[安装]"],
         ["✓", "Codex", "已登录。"],
         ["✓", "Codex 的技能", "已找到：/data/.agents/skills/zotero-scholium"],
+        ["–", "uv", NO_UV],
     ]
     assert p["ended"]["disabled"] is False
-    assert p["ended"]["rows"][5:] == [["–", "Python", f"{PY} 没有报出版本（{ON_PATH}）"]]
+    assert p["ended"]["rows"][6:] == [["–", "Python", f"{PY} 没有报出版本（{ON_PATH}）"]]
     a = p["again"]
-    assert a["disabled"] is False and a["checks"] == 1 and len(a["rows"]) == 7, "a second press checks again in place of the lines"
-    assert a["rows"][5:] == [["✓", "Python", f"3.12.1：{PY}（{ON_PATH}）"], ["✓", "PyMuPDF", "已安装 1.24.10"]]
+    assert a["disabled"] is False and a["checks"] == 1 and len(a["rows"]) == 8, "a second press checks again in place of the lines"
+    assert a["rows"][6:] == [["✓", "Python", f"3.12.1：{PY}（{ON_PATH}）"], ["✓", "PyMuPDF", "已安装 1.24.10"]]
 
 
 def test_the_settings_pages_buttons_fix_and_check_again(facts):
