@@ -13,6 +13,7 @@ pip install -e ".[dev]"
 pytest                                      # tests use a synthetic PDF; no third-party content
 python scripts/check_skill_script_sync.py   # the skill bundles a copy of cli.py that must stay identical
 python scripts/check_versions.py [vX.Y.Z]   # one version in the package, the tool and the plugins (and the tag)
+python scripts/bump_version.py X.Y.Z        # a release: the version into those files, CHANGELOG's Unreleased named after it (--date)
 python scripts/check_skill_frontmatter.py   # SKILL.md front matter must be strict YAML
 python scripts/measure_context.py           # token size of the skill files (--pdf: and of a paper's extraction; --max-skill-tokens: the CI limit)
 python scripts/session_usage.py FILE...     # model calls and tokens of Codex rollouts or Claude Code transcripts
