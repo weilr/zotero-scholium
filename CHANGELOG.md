@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.2.2 (unreleased)
+
+### Added
+
+- When Zotero's local API is turned off, Annotate, a question or an edited question asks once whether to turn it on.
+- When the agent does not find the zotero-scholium skill, the failure offers **Install the skill and retry**: the plugin
+  copies the skill it carries into Claude Code's or Codex's skills folder and runs again. A skill already there is left
+  as it is.
+- A **Setup check** on the settings page: Zotero's local API, Claude Code and Codex (found, signed in, the skill), Python
+  and PyMuPDF, with a button where the plugin can fix it.
+
+### Changed
+
+- A paper already in the user's language gets highlights without comments.
+- When Claude Code or Codex is not signed in, or PyMuPDF or Python is missing, the section says what to run. Codex
+  without an account stops at once instead of retrying for a minute.
+- Codex is not offered the effort level max.
+- Ask Scholium is offered only for PDFs in My Library, in reader tabs. A reader tab's section is the one of the PDF it
+  shows.
+- Highlights carry the PDF's own page labels, and Zotero's sidebar lists them in reading order.
+
+### Fixed
+
+- Annotate again on one PDF of a paper no longer moves to the trash the reading note of another PDF of it that is being
+  annotated or waits.
+- A write that fails no longer leaves a new reading note behind.
+- Colours given in upper case are written in lower case, which Zotero requires.
+- An edited question keeps its Undo while a dialog is open.
+- A stopped or updated plugin starts no run, and a queued message is handed over to the new copy.
+- An annotation that does not start gives its extra instructions back to the box. One stopped after its session was
+  made leaves no empty session.
+- Edit on a queued message keeps its quoted passage. Retry goes to the conversation shown when it was pressed.
+- Words typed while a message is on its way stay in the box, and the same message entered twice is sent once.
+- A conversation title being renamed is kept when the history closes.
+- A conversation drawn while its tab was hidden opens at its end.
+- An automatic compaction during an annotation shows its line.
+- The profile editor works again after a failed read.
+- The step shown while sentences are extracted is no longer the dry run.
+- `"cleanup": "false"` and other values that are not true or false for a boolean key are refused instead of read as
+  true. `null` for an optional key stands for its default.
+- The local API and the JavaScript file refuse an `item_key` that is not the attachment's parent.
+- With Zotero's local API turned off, the tool falls back to the other write channels.
+- Annotation positions that are not numbers no longer stop a run or the profile.
+- Sticky notes beside a narrow left column sit next to it.
+
 ## 0.2.1 (2026-11-06)
 
 ### Changed
