@@ -2,11 +2,10 @@
 and the Python Scholium finds with its PyMuPDF, a line each as its check ends; a button fixes what the plugin can fix
 and checks again."""
 import re
-from pathlib import Path
 
 import pytest
 
-from plugin_harness import BOOTSTRAP, NODE, run_scenarios
+from plugin_harness import NODE, plugin_source, run_scenarios
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
@@ -468,5 +467,5 @@ def test_the_settings_page_has_the_check():
 
 
 def skill_files():
-    named = re.search(r"SKILL_FILES: \[(.*?)\]", Path(BOOTSTRAP).read_text(encoding="utf8"), re.S).group(1)
+    named = re.search(r"SKILL_FILES: \[(.*?)\]", plugin_source(), re.S).group(1)
     return re.findall(r'"([^"]+)"', named)

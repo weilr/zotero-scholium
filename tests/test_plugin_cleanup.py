@@ -2,11 +2,13 @@
 
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
 import pytest
 
+from plugin_harness import LOAD_PLUGIN, PLUGIN
 from zotero_scholium import cli
 
 
@@ -14,7 +16,7 @@ BOOTSTRAP = Path(__file__).resolve().parents[1] / "plugin/scholium/bootstrap.js"
 NODE = shutil.which("node")
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
-RUN_APPLY = r"""
+RUN_APPLY = LOAD_PLUGIN + r"""
 const fs = require('node:fs');
 const vm = require('node:vm');
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
@@ -50,7 +52,7 @@ let applied;
 if (input.script) {
   applied = vm.runInContext('(async function () {\n' + input.script + '\n})()', context);
 } else {
-  vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+  loadPlugin(context, process.argv[1]);
   applied = context.ScholiumEndpoints.apply(input.data);
 }
 applied.then(result => {
@@ -121,7 +123,7 @@ def test_cleanup_uses_ownership_tags_only(options, remaining, removed, kept):
 
 
 def test_the_listing_names_the_plugins_version():
-    script = r"""
+    script = LOAD_PLUGIN + r"""
 const fs = require('node:fs');
 const vm = require('node:vm');
 const attachment = { id: 1, key: 'ATTACH01', parentID: null, getAnnotations: () => [] };
@@ -131,7 +133,7 @@ const context = vm.createContext({
             debug() {}, DataDirectory: { dir: 'D' }, Utilities: { randomString: () => 'x'.repeat(40) }, Server: { Endpoints: {} } },
   PathUtils: { join: (...p) => p.join('/') }, IOUtils: { exists: async () => false, writeUTF8: async () => {} },
 });
-vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+loadPlugin(context, process.argv[1]);
 // startup gives the endpoints the version of the manifest it was installed with
 context.startup({ id: manifest.applications.zotero.id, version: manifest.version, rootURI: '' })
   .then(() => context.ScholiumEndpoints.list({ attachmentKey: 'ATTACH01' }))
@@ -208,7 +210,7 @@ def test_generated_js_writes_the_text_of_underlines():
     assert "1 underlines" in output["result"]
 
 
-RUN_NOTES = r"""
+RUN_NOTES = LOAD_PLUGIN + r"""
 const fs = require('node:fs');
 const vm = require('node:vm');
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
@@ -241,7 +243,7 @@ let applied;
 if (input.script) {
   applied = vm.runInContext('(async function () {\n' + input.script + '\n})()', context);
 } else {
-  vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+  loadPlugin(context, process.argv[1]);
   applied = context.ScholiumEndpoints.apply(input.data);
 }
 applied.then(result => { process.stdout.write(JSON.stringify({ result, created, trashed })); })
@@ -330,7 +332,7 @@ def test_the_plugin_refuses_a_note_for_another_item(item_key, fragment):
 
 def test_the_new_copy_of_an_update_is_told_to_take_over():
     """Zotero starts the new copy of an update with ADDON_INSTALL or ADDON_UPGRADE; a start of Zotero hands nothing over."""
-    script = r"""
+    script = LOAD_PLUGIN + r"""
 const fs = require('node:fs');
 const vm = require('node:vm');
 const context = vm.createContext({
@@ -339,7 +341,7 @@ const context = vm.createContext({
   PathUtils: { join: (...p) => p.join('/') }, IOUtils: { exists: async () => false, writeUTF8: async () => {} },
   setTimeout: () => 0, clearTimeout() {},
 });
-vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+loadPlugin(context, process.argv[1]);
 const started = [];
 context.ScholiumRunner.start = (id, update) => { started.push(update); };
 (async () => {
@@ -351,15 +353,55 @@ context.ScholiumRunner.start = (id, update) => { started.push(update); };
     assert out == [False, False, True, True, True]
 
 
+def test_startup_loads_the_modules_once_in_order_as_zotero_loads_bootstrap():
+    """bootstrap.js holds no object of its own: startup() first loads modules/ into its scope, in the order of MODULES,
+    past the script cache (as Zotero loads bootstrap.js); a start after a disable, in the scope Zotero kept, loads
+    nothing again and keeps the objects."""
+    script = r"""
+const fs = require('node:fs'), path = require('node:path'), url = require('node:url'), vm = require('node:vm');
+const loads = [], started = [];
+const context = vm.createContext({
+  Zotero: { initializationPromise: Promise.resolve(), debug() {}, DataDirectory: { dir: 'D' }, Utilities: { randomString: () => 'x'.repeat(40) },
+            Server: { Endpoints: {} } },
+  PathUtils: { join: (...p) => p.join('/') }, IOUtils: { exists: async () => false, writeUTF8: async () => {} },
+  setTimeout: () => 0, clearTimeout() {},
+  Services: { scriptloader: { loadSubScriptWithOptions: (u, o) => {
+    loads.push([u, o.target === vm.runInContext('globalThis', context), o.ignoreCache]);
+    vm.runInContext(fs.readFileSync(url.fileURLToPath(u), 'utf8'), context);
+    // the runner's start and stop, once the last module has added them
+    if (u.endsWith('/agents.js')) Object.assign(context.ScholiumRunner, { start: (id, update) => started.push(update), stop() {} });
+  } } },
+});
+vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+const before = [typeof context.ScholiumEndpoints, typeof context.ScholiumToggle, typeof context.ScholiumRunner];
+const root = url.pathToFileURL(path.dirname(process.argv[1])).href + '/';
+(async () => {
+  await context.startup({ id: 'x', version: '0.2.1', rootURI: root }, 1);
+  const objects = [context.ScholiumEndpoints, context.ScholiumToggle, context.ScholiumRunner];
+  context.shutdown({}, 4);
+  await context.startup({ id: 'x', version: '0.2.1', rootURI: root }, 3);
+  const kept = [context.ScholiumEndpoints, context.ScholiumToggle, context.ScholiumRunner].every((o, i) => o === objects[i]);
+  process.stdout.write(JSON.stringify({ before, root, loads, kept, started, kinds: objects.map(o => typeof o) }));
+})();
+"""
+    out = json.loads(subprocess.run([NODE, "-e", script, str(BOOTSTRAP)], text=True, capture_output=True, check=True, timeout=15).stdout)
+    names = re.findall(r'"([^"]+)"', re.search(r"var MODULES = \[(.*?)\];", BOOTSTRAP.read_text(encoding="utf8"), re.S).group(1))
+    assert sorted(names) == sorted(p.name for p in (PLUGIN / "modules").iterdir())
+    assert names[:3] == ["endpoints.js", "toggle.js", "runner.js"], "the objects before the modules that add to them"
+    assert out["before"] == ["undefined"] * 3 and out["kinds"] == ["object"] * 3
+    assert out["loads"] == [[out["root"] + "modules/" + n, True, True] for n in names], "once, in order, into its scope"
+    assert out["kept"] and out["started"] == [False, False]
+
+
 def test_a_copy_that_stops_leaves_the_new_copys_endpoints():
     """During an update the new copy may register its endpoints before the old copy stops."""
-    script = r"""
+    script = LOAD_PLUGIN + r"""
 const fs = require('node:fs');
 const vm = require('node:vm');
 const endpoints = {};
 const copy = () => {
   const context = vm.createContext({ Zotero: { Server: { Endpoints: endpoints }, debug() {} } });
-  vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+  loadPlugin(context, process.argv[1]);
   return context.ScholiumEndpoints;
 };
 const old = copy(), fresh = copy();
@@ -376,12 +418,12 @@ process.stdout.write(JSON.stringify({ kept, left: Object.keys(endpoints).length 
 
 def test_after_an_update_the_endpoints_an_older_copy_removed_come_back():
     """A copy before 0.1.9 removes the endpoints whoever registered them; it may stop after the new copy started."""
-    script = r"""
+    script = LOAD_PLUGIN + r"""
 const fs = require('node:fs');
 const vm = require('node:vm');
 const endpoints = {}, later = [];
 const context = vm.createContext({ Zotero: { Server: { Endpoints: endpoints }, debug() {} }, setTimeout: f => later.push(f), clearTimeout() {} });
-vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+loadPlugin(context, process.argv[1]);
 const plugin = context.ScholiumEndpoints;
 plugin.register();
 plugin.keep();

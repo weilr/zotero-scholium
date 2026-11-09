@@ -1881,8 +1881,8 @@ def test_a_queued_annotation_message_counts_the_annotations_when_it_goes(facts):
 
 
 def test_the_queue_strings_follow_codex():
-    from plugin_harness import BOOTSTRAP
-    src = BOOTSTRAP.read_text(encoding="utf-8")
+    from plugin_harness import plugin_source
+    src = plugin_source()
     for en in ["Queue paused because you interrupted", "Submit without interrupting the model", "Edit message", "Turn off queueing",
                "This queued message could not be sent · Retry, edit, or delete it to continue the queue", "Clear queue", "Send message",
                "Delete queued message", "Sending"]:

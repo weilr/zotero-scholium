@@ -439,13 +439,27 @@ python scripts/build_xpi.py scholium.xpi
 python scripts/check_xpi.py scholium.xpi
 ```
 
-`manifest.json`, `bootstrap.js`, `prefs.js`, `settings.xhtml`, `settings.js` and the `content/` and `locale/` folders
-are at the root of the archive, and the skill under `content/skill/zotero-scholium/`, which the plugin installs when an
-agent has none. `prefs.js` holds the defaults of the settings page's preferences,
-`settings.xhtml` and `settings.js` the page.
+`manifest.json`, `bootstrap.js`, `prefs.js`, `settings.xhtml`, `settings.js` and the `content/`, `locale/` and `modules/`
+folders are at the root of the archive, and the skill under `content/skill/zotero-scholium/`, which the plugin installs
+when an agent has none. `bootstrap.js` starts and stops the plugin; at its start it loads the files of `modules/`, in
+this order, and those after `runner.js` add their methods to `ScholiumRunner`:
+
+| Module | Holds |
+|---|---|
+| `endpoints.js` | `ScholiumEndpoints`: the write endpoints and their token |
+| `toggle.js` | `ScholiumToggle`: the reader toggle |
+| `runner.js` | `ScholiumRunner`: its state and constants, the log, the languages and the section's texts in English and Simplified Chinese |
+| `setup.js` | the preferences, the agent, model and effort chosen, finding Claude Code, Codex, uv and Python, installing the skill, the setup check |
+| `prompts.js` | a paper's PDF, key and library, the prompts, the agents' arguments, `paper.json` and `applied.json`, the words of the steps |
+| `section.js` | the items list's menu, log events as display entries, the Scholium section's frame, layers and settings chip, the profile editor, Markdown and formulas, citations and links |
+| `conversations.js` | the message box and the queued messages, conversations and their logs, the history, saved prompts, the transcript and the state line |
+| `queue.js` | Save as note, notices, Annotate, editing a question, sending, the queue and the pauses for usage limits, the end of a run |
+| `agents.js` | a run, Claude Code and Codex, cancelling, deleting the tool's annotations, the runner's start, hand-over and stop |
+
+`prefs.js` holds the defaults of the settings page's preferences, `settings.xhtml` and `settings.js` the page.
 `content/` holds the section's icons and its stylesheet `scholium.css`, which uses Zotero's theme variables.
 `content/i18n/` holds the section's texts in each language but English and Simplified Chinese (those are in
-`bootstrap.js`), one file per folder of `locale/`, which holds the settings page's Fluent files.
+`modules/runner.js`), one file per folder of `locale/`, which holds the settings page's Fluent files.
 
 ## Notes for plugin authors
 
@@ -462,6 +476,12 @@ version in the package name. Zotero keeps the stylesheets of a chrome address af
 installed over a running copy, so under a fixed address the section would get the previous version's
 stylesheet. The profile editor is built in the main window's page, like the section, rather than in a
 window of its own.
+
+`startup()` loads the modules into `bootstrap.js`'s own scope, once per scope, with
+`Services.scriptloader.loadSubScriptWithOptions(rootURI + "modules/…", { target: globalThis, ignoreCache: true })`, as
+Zotero loads `bootstrap.js`: a plugin installed over a running copy keeps the files' addresses, and the script cache
+would give the previous version's code. Zotero keeps the scope of a disabled plugin, and a start after enabling it
+keeps the objects of the first.
 
 Codex is looked for in the Codex app's own folders (`%LOCALAPPDATA%\OpenAI\Codex\bin\*\codex.exe`,
 renamed with each update), in the native binary inside npm's `@openai/codex` package (npm's `codex`

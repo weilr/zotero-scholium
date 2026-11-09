@@ -7,7 +7,7 @@ import subprocess
 
 import pytest
 
-from plugin_harness import NODE, run_scenarios
+from plugin_harness import LOAD_PLUGIN, NODE, run_scenarios
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
@@ -132,7 +132,7 @@ def test_a_group_whose_files_cannot_be_edited_is_left_alone(facts):
     assert f["alerts"] == [READ_ONLY, READ_ONLY]
 
 
-ENDPOINTS = r"""
+ENDPOINTS = LOAD_PLUGIN + r"""
 const fs = require('node:fs');
 const vm = require('node:vm');
 const saved = [];
@@ -149,7 +149,7 @@ const context = vm.createContext({ Zotero: {
   DB: { executeTransaction: async callback => callback() },
   Item: class { constructor(type) { this.type = type; } setTags() {} async save() { this.key = 'NEW' + (saved.length + 1); saved.push(this); } },
 } });
-vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);
+loadPlugin(context, process.argv[1]);
 const E = context.ScholiumEndpoints;
 const outcome = p => p.then(r => ({ ok: r.ok, key: r.attachmentKey || null, created: r.createdKeys || null }), e => ({ error: e.message }));
 const ann = { type: 'highlight', text: 'x', comment: '', color: '#ffd400', position: { pageIndex: 0, rects: [[1, 2, 3, 4]] } };

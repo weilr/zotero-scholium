@@ -3,8 +3,9 @@
     python scripts/check_xpi.py scholium.xpi
 
 The package must hold manifest.json, bootstrap.js, prefs.js, settings.xhtml, settings.js, content/scholium.css, the
-icons, every locale's scholium.ftl, every other top-level entry of plugin/scholium, and no __pycache__; every file that
-SKILL_FILES in its bootstrap.js lists must be under content/skill/zotero-scholium/ and identical to
+icons, every locale's scholium.ftl, every other top-level entry of plugin/scholium, and no __pycache__; every module
+that MODULES in its bootstrap.js lists must be in modules/, which holds no other file; every file that SKILL_FILES in
+bootstrap.js and its modules lists must be under content/skill/zotero-scholium/ and identical to
 skills/zotero-scholium/, and every file of skills/zotero-scholium/ must be listed there. Prints the manifest's version.
 
 Exit status: 0 the package is complete, 1 problems (listed), 2 error.
@@ -25,6 +26,12 @@ def skill_files(skill):
     """Files of the skill in the working tree, as paths relative to it."""
     return {p.relative_to(skill).as_posix() for p in skill.rglob("*")
             if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"}
+
+
+def modules(files):
+    """The modules bootstrap.js loads from modules/, in its order (its MODULES)."""
+    m = re.search(rb"var MODULES = \[(.*?)\];", files.get("bootstrap.js", b""), re.S)
+    return [s.decode() for s in re.findall(rb'"([^"]+)"', m.group(1))] if m else []
 
 
 def problems(files, repo):
@@ -49,10 +56,18 @@ def problems(files, repo):
     except ValueError as e:
         out.append(f"manifest.json: not JSON ({e})")
 
-    m = re.search(rb"SKILL_FILES:\s*\[(.*?)\]", files.get("bootstrap.js", b""), re.S)
+    loaded = modules(files)
+    if "bootstrap.js" in files and not loaded:
+        out.append("bootstrap.js: no MODULES list")
+    out += [f"missing modules/{n}" for n in loaded if "modules/" + n not in files]
+    out += [f"{n} is not in MODULES, so the plugin does not load it" for n in sorted(files)
+            if n.startswith("modules/") and n[len("modules/"):] not in loaded]
+
+    code = b"\n".join(files.get(n, b"") for n in ["bootstrap.js"] + ["modules/" + n for n in loaded])
+    m = re.search(rb"SKILL_FILES:\s*\[(.*?)\]", code, re.S)
     listed = [s.decode() for s in re.findall(rb'"([^"]+)"', m.group(1))] if m else []
     if "bootstrap.js" in files and not listed:
-        out.append("bootstrap.js: no SKILL_FILES list")
+        out.append("bootstrap.js and its modules: no SKILL_FILES list")
     skill = repo / "skills" / "zotero-scholium"
     for rel in listed:
         name, src = SKILL_AT + rel, skill / rel
@@ -87,7 +102,8 @@ def main(argv=None):
     manifest = json.loads(files["manifest.json"])
     skill = sum(1 for n in files if n.startswith(SKILL_AT))
     locales = ", ".join(sorted(n.split("/")[1] for n in files if re.fullmatch(r"locale/[^/]+/scholium\.ftl", n)))
-    print(f"{args.xpi}: {manifest.get('name')} {manifest.get('version')}, {len(files)} files; "
+    loaded = len(modules(files))
+    print(f"{args.xpi}: {manifest.get('name')} {manifest.get('version')}, {len(files)} files; modules: {loaded}; "
           f"skill: {skill} files, identical to skills/zotero-scholium; locales: {locales}")
     return 0
 

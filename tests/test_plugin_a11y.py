@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from plugin_harness import NODE, PLUGIN, css_rules, run_scenarios
+from plugin_harness import NODE, PLUGIN, css_rules, plugin_source, run_scenarios
 
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
@@ -299,7 +299,7 @@ def test_history_is_a_monochrome_icon():
     svg = (PLUGIN / "content" / "history16.svg").read_text(encoding="utf8")
     assert 'viewBox="0 0 16 16"' in svg and 'stroke="context-stroke"' in svg and "fill=\"none\"" in svg
     assert 'url("history16.svg")' in css_rules()[".glyph.history .scholium-glyph"]
-    assert "🕘" not in (PLUGIN / "bootstrap.js").read_text(encoding="utf8")
+    assert "🕘" not in plugin_source()
 
 
 def test_the_setup_check_gives_the_focus_back(facts):

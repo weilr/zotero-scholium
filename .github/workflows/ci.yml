@@ -25,7 +25,8 @@ jobs:
       - run: python scripts/measure_context.py --max-skill-tokens 3000
       - run: pytest -q
       - name: syntax-check the plugin
-        run: node --check plugin/scholium/bootstrap.js
+        shell: bash
+        run: for f in plugin/scholium/bootstrap.js plugin/scholium/modules/*.js; do node --check "$f" || exit 1; done
   xpi:
     runs-on: ubuntu-24.04
     steps:
