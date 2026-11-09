@@ -776,7 +776,7 @@ Object.assign(ScholiumRunner, {
         this.models[agent] = models;
         for (const pane of this.panes.values()) this.fillSelects(pane);
       }
-    } catch (e) { this.log("model list failed: " + e); }
+    } catch (e) { this.log("model list failed: " + ((e && e.message) || JSON.stringify(e))); }
     finally { this.modelsLoading[agent] = false; }
   },
 
