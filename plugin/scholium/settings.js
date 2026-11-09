@@ -10,14 +10,27 @@
   // the setup check: a line per check as it ends (its mark, its name, a sentence, and its action's button); an action
   // done runs the check again, one not done shows why in place of the sentence
   const MARKS = { ok: "✓", bad: "✗", unknown: "–" };
-  const COLOURS = { ok: "var(--accent-green)", bad: "var(--accent-red)", unknown: "var(--fill-secondary)" };
+  // the marks' green and red at least 3:1 on the page's ground, in the light and the dark theme
+  const COLOURS = { light: { ok: "#1d8746", bad: "#c42131" }, dark: { ok: "#4cd27f", bad: "#ff7b84" } };
+  const dark = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  const marks = [];   // [mark, state] of the lines shown
+  const paintMark = (mark, state) => {
+    const colour = COLOURS[dark && dark.matches ? "dark" : "light"][state] || "var(--fill-secondary)";
+    mark.setAttribute("style", "color: " + colour + "; font-weight: 600; min-width: 1.2em");
+  };
+  if (dark && typeof dark.addEventListener === "function") dark.addEventListener("change", () => { for (const [m, s] of marks) paintMark(m, s); });
   let checking = false, again = false, shown = [];
+  // the control that gets the focus back once the check that an action ran has ended: that line's button if it is there
+  // again, else Check
+  let refocus = null, buttons = new Map();
   const lineNode = line => {
     const row = document.createXULElement("hbox");
-    row.setAttribute("align", "baseline");
+    // a line with a button: the button in the middle of the line's height, as its words
+    row.setAttribute("align", line.action ? "center" : "baseline");
     const mark = document.createXULElement("label");
     mark.textContent = MARKS[line.state] || MARKS.unknown;
-    mark.setAttribute("style", "color: " + (COLOURS[line.state] || COLOURS.unknown) + "; font-weight: 600; min-width: 1.2em");
+    paintMark(mark, line.state);
+    marks.push([mark, line.state]);
     const name = document.createXULElement("label");
     name.textContent = line.label;
     name.setAttribute("style", "font-weight: 600");
@@ -34,14 +47,17 @@
         button.disabled = true;
         let said = null;
         try { said = await plugin.fix(line.action); } catch (e) { said = String((e && e.message) || e); }
-        if (!said) { check(); return; }
+        if (!said) { refocus = line.id; check(); return; }
         text.textContent = line.text = said;   // Copy gives the line as shown
         button.remove();
+        focusCheck();
       });
+      buttons.set(line.id, button);
       row.append(button);
     }
     return row;
   };
+  const focusCheck = () => { try { document.getElementById("scholium-check-run")?.focus(); } catch (e) {} };
   // the button is disabled while the check runs; an action done meanwhile runs it again once it ends. Copy shows once a
   // check has ended
   const check = async () => {
@@ -59,12 +75,19 @@
         again = false;
         box.replaceChildren();
         shown = [];
+        marks.length = 0;
+        buttons = new Map();
         await plugin.setupCheck(line => { shown.push(line); box.append(lineNode(line)); }).catch(() => {});
       } while (again);
     } finally {
       checking = false;
       run.disabled = false;
       if (copy && plugin.copy) copy.hidden = !shown.length;
+      if (refocus !== null) {
+        const button = buttons.get(refocus);
+        refocus = null;
+        if (button) { try { button.focus(); } catch (e) {} } else focusCheck();
+      }
     }
   };
   // the lines shown, with the versions, as plain text on the clipboard; the button says Copied for a moment

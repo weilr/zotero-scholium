@@ -60,6 +60,15 @@
 
 ### Fixed
 
+- The profile editor keeps the keyboard: Tab and Shift+Tab stay in it, Esc closes it wherever the focus is, and the
+  focus goes back to ⋯ when it closes.
+- The settings layer opened from the keyboard starts at the model, so an arrow key no longer switches the agent.
+- After a setup check line's button ran the check again, the focus is on that line's button, or on Check.
+- Text that was too faint is readable in the light and the dark theme: the line under an answer, the queue's handle,
+  the title of a card without annotations, a failed card, the active tab and links; so are the setup check's ✓ and ✗.
+- ⋯, Send, Stop and a queued message's ⋯ have names for screen readers. History is an icon like the buttons beside it.
+- The tabs follow ← and →; the menus and the history follow ↑, ↓, Home and End.
+- The setup check's buttons sit in the middle of their line, and a failed card's buttons side by side.
 - Annotate again on one PDF of a paper no longer moves to the trash the reading note of another PDF of it that is being
   annotated or waits.
 - A write that fails no longer leaves a new reading note behind.

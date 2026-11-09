@@ -2360,8 +2360,33 @@ var ScholiumRunner = {
     pane.popover = { name, node, anchor, off, took: false };
     this.placePopover(pane);
     if (focus === "layer") node.setAttribute("tabindex", "-1");
-    this.focusLayer(pane, focus === "layer" ? node : focus ? this.firstControl(node) : null);
+    // `focus` may also name the control that takes it
+    this.focusLayer(pane, focus === "layer" ? node : focus && typeof focus === "object" ? focus : focus ? this.firstControl(node) : null);
     return node;
+  },
+
+  // ↓ and ↑, Home and End move the focus among a layer's items, as in a menu; `items` gives each item's control and the
+  // element it belongs to (its row). The keys of a text box are its own
+  arrowKeys(pane, node, items) {
+    node.addEventListener("keydown", e => {
+      if (e.isComposing || !["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+      if (e.target && ["input", "textarea", "select"].includes(e.target.localName)) return;
+      const list = items().filter(([b]) => b && !b.disabled && !b.hidden);
+      if (!list.length) return;
+      const a = pane.doc.activeElement;
+      const at = list.findIndex(([, own]) => !!a && (own === a || (typeof own.contains === "function" && own.contains(a))));
+      const step = e.key === "ArrowDown" ? 1 : -1;
+      const to = e.key === "Home" ? 0 : e.key === "End" ? list.length - 1
+        : at < 0 ? (step > 0 ? 0 : list.length - 1) : (at + step + list.length) % list.length;
+      e.preventDefault();
+      e.stopPropagation();
+      try { list[to][0].focus(); } catch (err) {}
+    });
+  },
+
+  // the menu items of a layer, for arrowKeys
+  menuItems(node) {
+    return () => [...(node.children || [])].filter(c => c && c.className === "scholium-menu-item").map(b => [b, b]);
   },
 
   // the focus into the open layer, which gives it back to its button when it closes
@@ -2565,24 +2590,30 @@ var ScholiumRunner = {
     return label;
   },
 
+  // opened from the keyboard, the focus goes to the model, not to the agent, whose select an arrow key would switch at
+  // once; Shift+Tab reaches the agent
   openSettingsLayer(pane, focus = false) {
     const doc = pane.doc;
+    const target = focus ? [pane.model, pane.effort].find(s => !s.disabled && !s.hidden) || true : false;
     this.openPopover(pane, "settings", pane.chip, node => {
       const note = doc.createElement("div");
       note.className = "scholium-note";
       note.textContent = this.text("agentSwitchNote");
       node.append(this.paneField(doc, this.text("paneAgent"), pane.agent), note, this.paneField(doc, this.text("paneModel"), pane.model),
                   this.paneField(doc, this.text("paneEffort"), pane.effort));
-    }, { focus });
+    }, { focus: target });
   },
 
   // the ⋯ menu; each item closes the layer first
   openMoreMenu(pane, focus = false) {
     const doc = pane.doc;
     this.openPopover(pane, "menu", pane.more, node => {
+      node.setAttribute("role", "menu");
+      this.arrowKeys(pane, node, this.menuItems(node));
       const item = (label, run, disabled = false) => {
         const b = doc.createElement("button");
         b.className = "scholium-menu-item";
+        b.setAttribute("role", "menuitem");
         b.textContent = label;
         b.disabled = disabled;
         b.addEventListener("click", () => { this.closePopover(pane); run(); });
@@ -2591,7 +2622,7 @@ var ScholiumRunner = {
       const sep = doc.createElement("div");
       sep.className = "scholium-menu-sep";
       if (pane.tab === "annotate") {
-        node.append(item(this.text("profileOpen"), () => { this.openProfile(doc); }),
+        node.append(item(this.text("profileOpen"), () => { this.openProfile(doc, pane.more); }),
                     item(this.text("logButton"), () => { this.revealLog(pane.annot.shownPath); }, !pane.annot.shownPath),
                     // the PDF the section shows, as its conversations
                     item(this.text("deleteThis"), () => {
@@ -2602,7 +2633,7 @@ var ScholiumRunner = {
         return;
       }
       node.append(item(this.text("logButton"), () => { this.revealLog(pane.shownPath); }, !pane.shownPath),
-                  item(this.text("profileOpen"), () => { this.openProfile(doc); }), sep,
+                  item(this.text("profileOpen"), () => { this.openProfile(doc, pane.more); }), sep,
                   item(this.text("settingsOpen"), () => { this.openSettings(); }));
     }, { focus });
   },
@@ -2954,14 +2985,22 @@ var ScholiumRunner = {
       dot.className = "scholium-tab-dot";
       b.append(doc.createTextNode(label), dot);
       b.addEventListener("click", () => { this.setTab(pane, kind); });
+      // ← and →, Home and End choose the other tab and take the focus to it; Tab reaches the chosen one only (paintPane)
+      b.addEventListener("keydown", e => {
+        if (e.isComposing || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) return;
+        e.preventDefault();
+        const to = e.key === "Home" ? "chat" : e.key === "End" ? "annotate" : kind === "chat" ? "annotate" : "chat";
+        if (to !== pane.tab) this.setTab(pane, to);
+        try { (to === "chat" ? pane.tabChat : pane.tabAnnotate).focus(); } catch (err) {}
+      });
       return [b, dot];
     };
     [pane.tabChat, pane.tabChatDot] = tab("chat", this.text("tabChat"));
     [pane.tabAnnotate, pane.tabAnnotateDot] = tab("annotate", this.text("tabAnnotate"));
     pane.newChat = this.iconButton(doc, "add", this.text("newChat"), () => { this.newChat(pane).catch(e => this.log("new chat failed: " + e)); });
-    pane.historyButton = this.paneButton(doc, "🕘", e => { this.toggleHistory(pane, this.byKeyboard(e)).catch(err => this.log("history failed: " + err)); }, "quiet icon");
-    pane.historyButton.title = this.text("historyButton");
-    pane.historyButton.setAttribute("aria-label", this.text("historyButton"));
+    pane.historyButton = this.iconButton(doc, "history", this.text("historyButton"), e => {
+      this.toggleHistory(pane, this.byKeyboard(e)).catch(err => this.log("history failed: " + err));
+    });
     pane.chip = doc.createElement("button");
     pane.chip.className = "scholium-chip";
     this.paintChip(pane);
@@ -2972,6 +3011,8 @@ var ScholiumRunner = {
     pane.more.className = "scholium-icon";
     pane.more.textContent = "⋯";
     pane.more.title = this.text("moreTitle");
+    pane.more.setAttribute("aria-label", this.text("moreTitle"));
+    pane.more.setAttribute("aria-haspopup", "menu");
     pane.more.addEventListener("click", e => {
       if (!this.closePopover(pane, "menu")) this.openMoreMenu(pane, this.byKeyboard(e));
     });
@@ -3100,14 +3141,15 @@ var ScholiumRunner = {
   profilePath() { return PathUtils.join(Zotero.DataDirectory.dir, "zotero-scholium", "profile.md"); },
 
   // the profile's editor: a sheet over the Zotero window of the button, one at a time. It is part of
-  // the window's own page, like the section, so it needs no page or window of its own.
-  openProfile(doc) {
+  // the window's own page, like the section, so it needs no page or window of its own. `opener` gets the focus back when
+  // it closes (else the element that had it)
+  openProfile(doc, opener = null) {
     try {
       if (this.editor) {
         this.editor.input.focus();
         return this.editor;
       }
-      return this.renderProfileEditor(doc);
+      return this.renderProfileEditor(doc, opener);
     } catch (e) {
       this.log("profile editor failed: " + e);
       return null;
@@ -3115,7 +3157,7 @@ var ScholiumRunner = {
   },
 
   // the editor: profile.md as it is, in a plain text box; the file keeps its line ends
-  renderProfileEditor(doc) {
+  renderProfileEditor(doc, opener = null) {
     const win = doc.defaultView;
     const el = (tag, cls, text) => {
       const e = doc.createElement(tag);
@@ -3124,11 +3166,12 @@ var ScholiumRunner = {
       return e;
     };
     const ed = { doc, win, path: this.profilePath(), disk: null, eol: "\n", dirty: false, readFailed: false, message: null,
-                 before: doc.activeElement };
+                 before: opener || doc.activeElement };
     ed.root = el("div", "scholium-sheet-backdrop");
     ed.root.id = "scholium-profile-sheet";
-    const sheet = el("div", "scholium-sheet");
+    const sheet = ed.sheet = el("div", "scholium-sheet");
     sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-modal", "true");
     sheet.setAttribute("aria-label", this.text("profileTitle"));
     const head = el("div", "scholium-editor-head");
     const path = el("div", "scholium-editor-path", ed.path);
@@ -3152,13 +3195,15 @@ var ScholiumRunner = {
     ed.save = this.paneButton(doc, this.text("profileSave"), () => {
       this.saveProfile(ed).then(ok => { if (ok) this.closeProfile(ed, false); });
     }, "primary");
+    ed.cancel = this.paneButton(doc, this.text("profileCancel"), () => { this.closeProfile(ed); });
     const foot = el("div", "scholium-editor-foot");
-    foot.append(ed.status, el("span", "scholium-spacer"),
-                this.paneButton(doc, this.text("profileCancel"), () => { this.closeProfile(ed); }), ed.save);
+    foot.append(ed.status, el("span", "scholium-spacer"), ed.cancel, ed.save);
     sheet.append(head, panes, foot);
     ed.root.append(sheet);
-    // the sheet's keys stay in the sheet
-    sheet.addEventListener("keydown", e => {
+    // the sheet's keys stay in the sheet: Esc closes it, Ctrl+S saves, Tab and Shift+Tab go round its controls. The
+    // window hears them first, so they work wherever the focus is while the sheet is open (a click on the backdrop)
+    ed.onKey = e => {
+      if (e.isComposing) return;
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
@@ -3167,8 +3212,10 @@ var ScholiumRunner = {
         e.preventDefault();
         e.stopPropagation();
         this.saveProfile(ed);
-      }
-    });
+      } else if (e.key === "Tab" && !e.ctrlKey && !e.altKey && !e.metaKey) this.sheetTab(ed, e);
+    };
+    sheet.addEventListener("keydown", ed.onKey);
+    win.addEventListener("keydown", ed.onKey, true);
     // back in Zotero from another program: the file as it is now, unless it is being edited here
     ed.onFocus = () => { if (!ed.dirty) this.loadProfile(ed); };
     win.addEventListener("focus", ed.onFocus);
@@ -3224,10 +3271,25 @@ var ScholiumRunner = {
     return !ed.dirty || Services.prompt.confirm(ed.win, this.text("profileTitle"), this.text("profileDiscard"));
   },
 
+  // Tab from the sheet's last control goes to its first, Shift+Tab from its first to its last; from outside the sheet
+  // either goes into it. The links of the preview are on the way
+  sheetTab(ed, e) {
+    const links = typeof ed.preview.querySelectorAll === "function" ? [...ed.preview.querySelectorAll(".scholium-link[tabindex]")] : [];
+    const items = [ed.input, ...links, ed.cancel, ed.save].filter(n => n && !n.disabled);
+    if (!items.length) return;
+    const a = ed.doc.activeElement;
+    const first = items[0], last = items[items.length - 1];
+    if (a && items.includes(a) && a !== (e.shiftKey ? first : last)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try { (e.shiftKey ? last : first).focus(); } catch (err) {}
+  },
+
   // unsaved changes are kept unless the user lets them go; on shutdown and when the window closes, without asking
   closeProfile(ed, ask = true) {
     if (ask && !this.mayCloseProfile(ed)) return false;
     try { ed.win.removeEventListener("focus", ed.onFocus); } catch (e) {}
+    try { ed.win.removeEventListener("keydown", ed.onKey, true); } catch (e) {}
     ed.root.remove();
     if (this.editor === ed) this.editor = null;
     try { if (ed.before && ed.before.isConnected) ed.before.focus(); } catch (e) {}
@@ -3909,8 +3971,10 @@ var ScholiumRunner = {
     pane.send.className = "scholium-round " + (stop ? "stop" : "send");
     pane.send.textContent = stop ? "■" : "↑";
     pane.send.disabled = !stop && !text;
-    pane.send.title = this.text(stop ? "stopTip" : compactNot ? "compactNotNow" : !pane.busy ? "sendTip"
-      : this.followUpFor(pane) === "steer" ? "steerTip" : "queueTip");
+    // its name is what it does; its tooltip says so too, or why /compact cannot go now
+    const does = stop ? "stopTip" : !pane.busy ? "sendTip" : this.followUpFor(pane) === "steer" ? "steerTip" : "queueTip";
+    pane.send.title = this.text(compactNot ? "compactNotNow" : does);
+    pane.send.setAttribute("aria-label", this.text(does));
   },
 
   // the messages waiting in the conversation the tab shows, in the box above its text, as Codex shows them: a line while
@@ -3998,6 +4062,9 @@ var ScholiumRunner = {
     }
     const remove = this.iconButton(doc, "trash", this.text("queuedRemove"), () => this.removeQueued(pane, job.qid));
     const more = this.paneButton(doc, "⋯", e => this.queuedMenu(pane, job, more, this.byKeyboard(e)), "quiet");
+    more.title = this.text("moreTitle");
+    more.setAttribute("aria-label", this.text("moreTitle"));
+    more.setAttribute("aria-haspopup", "menu");
     row.append(first, remove, more);
     return row;
   },
@@ -4005,9 +4072,12 @@ var ScholiumRunner = {
   // a queued message's ⋯: back to the box to edit, or no queueing from now on (Steer instead, where the agent takes it)
   queuedMenu(pane, job, anchor, focus = false) {
     this.openPopover(pane, "queued", anchor, node => {
+      node.setAttribute("role", "menu");
+      this.arrowKeys(pane, node, this.menuItems(node));
       const item = (label, run, disabled = false) => {
         const b = pane.doc.createElement("button");
         b.className = "scholium-menu-item";
+        b.setAttribute("role", "menuitem");
         b.textContent = label;
         b.disabled = disabled;
         b.addEventListener("click", () => { this.closePopover(pane); run(); });
@@ -4795,7 +4865,11 @@ var ScholiumRunner = {
 
   async toggleHistory(pane, focus = false) {
     if (this.closePopover(pane, "history")) return;
-    const node = this.openPopover(pane, "history", pane.historyButton, () => {});
+    // ↓ and ↑ go from row to row: to its title, or to Undo of one deleted a moment ago
+    const node = this.openPopover(pane, "history", pane.historyButton, n => {
+      this.arrowKeys(pane, n, () => [...(n.children || [])].filter(r => r && /^scholium-history-row/.test(r.className))
+        .map(r => [[...(r.children || [])].find(c => c && c.localName === "button"), r]));
+    });
     await this.renderHistory(pane);
     // opened from the keyboard, the focus goes to the first row once the rows are there, unless it went elsewhere meanwhile
     const doc = pane.doc, a = doc.activeElement;
@@ -5595,6 +5669,8 @@ var ScholiumRunner = {
       pane.tabAnnotate.className = "scholium-tab" + (tab === "annotate" ? " on" : "");
       pane.tabChat.setAttribute("aria-selected", String(tab === "chat"));
       pane.tabAnnotate.setAttribute("aria-selected", String(tab === "annotate"));
+      pane.tabChat.setAttribute("tabindex", tab === "chat" ? "0" : "-1");
+      pane.tabAnnotate.setAttribute("tabindex", tab === "annotate" ? "0" : "-1");
       this.show(pane.tabChatDot, tab !== "chat" && this.busyKind(pane, "chat"));
       this.show(pane.tabAnnotateDot, tab !== "annotate" && this.busyKind(pane, "annotate"));
       this.show(pane.newChat, tab === "chat");
