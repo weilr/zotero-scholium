@@ -68,6 +68,10 @@
 
 ### Fixed
 
+- `status` and `samples` count a PDF's annotations on Zotero 7 to 9 too, whose local API lists none under an
+  attachment: they ask the Scholium plugin then; without the plugin, `status` says so in place of the counts.
+- `--backend api` on Zotero 7 to 9 says that their local API is read-only and to install the Scholium plugin, instead of
+  that Zotero is not running.
 - The profile editor keeps the keyboard: Tab and Shift+Tab stay in it, Esc closes it wherever the focus is, and the
   focus goes back to ⋯ when it closes.
 - The settings layer opened from the keyboard starts at the model, so an arrow key no longer switches the agent.
