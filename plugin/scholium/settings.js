@@ -11,7 +11,7 @@
   // done runs the check again, one not done shows why in place of the sentence
   const MARKS = { ok: "✓", bad: "✗", unknown: "–" };
   const COLOURS = { ok: "var(--accent-green)", bad: "var(--accent-red)", unknown: "var(--fill-secondary)" };
-  let checking = false, again = false;
+  let checking = false, again = false, shown = [];
   const lineNode = line => {
     const row = document.createXULElement("hbox");
     row.setAttribute("align", "baseline");
@@ -35,38 +35,56 @@
         let said = null;
         try { said = await plugin.fix(line.action); } catch (e) { said = String((e && e.message) || e); }
         if (!said) { check(); return; }
-        text.textContent = said;
+        text.textContent = line.text = said;   // Copy gives the line as shown
         button.remove();
       });
       row.append(button);
     }
     return row;
   };
-  // the button is disabled while the check runs; an action done meanwhile runs it again once it ends
+  // the button is disabled while the check runs; an action done meanwhile runs it again once it ends. Copy shows once a
+  // check has ended
   const check = async () => {
     if (checking) { again = true; return; }
     const plugin = Zotero.Scholium;
     const run = document.getElementById("scholium-check-run");
     const box = document.getElementById("scholium-check-lines");
+    const copy = document.getElementById("scholium-check-copy");
     if (!plugin || !plugin.setupCheck || !run || !box) return;
     checking = true;
     run.disabled = true;
+    if (copy) copy.hidden = true;
     try {
       do {
         again = false;
         box.replaceChildren();
-        await plugin.setupCheck(line => { box.append(lineNode(line)); }).catch(() => {});
+        shown = [];
+        await plugin.setupCheck(line => { shown.push(line); box.append(lineNode(line)); }).catch(() => {});
       } while (again);
     } finally {
       checking = false;
       run.disabled = false;
+      if (copy && plugin.copy) copy.hidden = !shown.length;
     }
+  };
+  // the lines shown, with the versions, as plain text on the clipboard; the button says Copied for a moment
+  let copiedTimer = null;
+  const copyLines = async () => {
+    const plugin = Zotero.Scholium;
+    const copy = document.getElementById("scholium-check-copy");
+    if (!plugin || !plugin.copy || !copy || !shown.length) return;
+    try { await plugin.copy(shown); } catch (e) { return; }
+    if (!document.l10n) return;
+    document.l10n.setAttributes(copy, "scholium-check-copied");
+    clearTimeout(copiedTimer);
+    copiedTimer = setTimeout(() => { document.l10n.setAttributes(copy, "scholium-check-copy"); }, 1500);
   };
   const wire = () => {
     document.getElementById("scholium-claude-browse")?.addEventListener("command", () => { browse("claudePath", "scholium-settings-claude"); });
     document.getElementById("scholium-codex-browse")?.addEventListener("command", () => { browse("codexPath", "scholium-settings-codex"); });
     const plugin = typeof Zotero !== "undefined" ? Zotero.Scholium : null;
     if (plugin && plugin.setupCheck) document.getElementById("scholium-check-run")?.addEventListener("command", () => { check(); });
+    if (plugin && plugin.copy) document.getElementById("scholium-check-copy")?.addEventListener("command", () => { copyLines(); });
     // the boxes' grey text: the program the plugin finds by itself, or that it finds none
     for (const [id, agent] of [["scholium-claude-path", "claude"], ["scholium-codex-path", "codex"]]) {
       const input = document.getElementById(id);

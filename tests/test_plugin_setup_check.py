@@ -165,7 +165,8 @@ SCENARIOS = r"""
 
   // the settings page: settings.js on the page's markup, with the plugin's API
   const page = h => {
-    const els = { 'scholium-check-run': new El('button'), 'scholium-check-lines': new El('vbox') };
+    const els = { 'scholium-check-run': new El('button'), 'scholium-check-lines': new El('vbox'),
+                  'scholium-check-copy': Object.assign(new El('button'), { hidden: true }) };
     let onLoad = null;
     const document = { getElementById: id => els[id] || null, createXULElement: tag => new El(tag),
                        addEventListener: (t, f, capture) => { if (t === 'load' && capture) onLoad = f; } };
@@ -175,7 +176,7 @@ SCENARIOS = r"""
     const run = els['scholium-check-run'], box = els['scholium-check-lines'];
     const wiredBefore = (run.listeners.command || []).length;
     onLoad({ target: { classList: { contains: c => c === 'scholium-settings' } } });
-    return { run, wiredBefore, press: () => run.fire('command'),
+    return { run, wiredBefore, press: () => run.fire('command'), copy: els['scholium-check-copy'],
              rows: () => box.children.map(r => r.children.map(c => (c.tagName === 'button' ? '[' + c.getAttribute('label') + ']' : c.textContent))),
              button: label => box.children.find(r => r.children[1].textContent === label).children.find(c => c.tagName === 'button') };
   };
@@ -210,6 +211,27 @@ SCENARIOS = r"""
     const calls = h.log.authCalls.length;
     p.button('Claude Code 的技能').fire('command'); await settle(300);
     facts.pageNotCarried = { row: p.rows().find(r => r[1] === 'Claude Code 的技能'), checks: h.log.authCalls.length - calls };
+    p.copy.fire('command'); await settle(20);
+    facts.pageNotCarried.copied = h.log.copied.slice();
+    h.runner.stop();
+  }
+  // Copy: hidden until a check has ended and while one runs; then the lines shown, with the versions and the system
+  for (const [name, locale, os] of [['copy', 'zh-CN', 'Windows 11 26200'], ['copyEnglish', 'en-US', null]]) {
+    const py = { [PY]: 'HOLD' };
+    const h = harness(good({ locale, present: [PY], python: py }));
+    h.runner.start('x');
+    h.runner.version = '0.2.2';
+    h.zotero.version = '10.0.7';
+    if (os) h.zotero.getOSVersion = async () => os;
+    const p = page(h);
+    const before = p.copy.hidden, wired = (p.copy.listeners.command || []).length;
+    p.press(); await settle(800);
+    const during = p.copy.hidden;
+    py[PY] = '3.12.1\n1.24.10\n';
+    h.fire(); await settle(300);
+    const after = p.copy.hidden;
+    p.copy.fire('command'); await settle(20);
+    facts[name] = { before, wired, during, after, rows: p.rows(), copied: h.log.copied.slice() };
     h.runner.stop();
   }
   process.stdout.write(JSON.stringify(facts));
@@ -419,6 +441,19 @@ def test_the_settings_pages_buttons_fix_and_check_again(facts):
     assert n["checks"] == 0
 
 
+def test_copy_gives_the_lines_shown_with_the_versions(facts):
+    c = facts["copy"]
+    assert c["wired"] == 1 and c["before"] is True and c["during"] is True and c["after"] is False
+    lines = [f"{r[0]} {r[1]}: {r[2]}" for r in c["rows"]]
+    assert c["copied"] == ["\n".join(["Scholium 0.2.2 · Zotero 10.0.7 · Windows 11 26200"] + lines)]
+    assert lines[0] == "✓ 本地 API: " + API_ON and lines[5].startswith("– uv: ")
+    e = facts["copyEnglish"]
+    assert e["copied"][0].split("\n")[:2] == ["Scholium 0.2.2 · Zotero 10.0.7 · WINNT", "✓ Local API: " + e["rows"][0][2]], \
+        "without Zotero.getOSVersion, the system's name"
+    n = facts["pageNotCarried"]
+    assert "✗ Claude Code 的技能: 这份插件没有带技能：" in n["copied"][0], "a line as it is shown after a button"
+
+
 def test_the_settings_page_has_the_check():
     from plugin_harness import PLUGIN
     src = (PLUGIN / "settings.xhtml").read_text(encoding="utf8")
@@ -427,6 +462,9 @@ def test_the_settings_page_has_the_check():
     en = (PLUGIN / "locale/en-US/scholium.ftl").read_text(encoding="utf8")
     assert "scholium-check = 环境检查\n" in zh and "scholium-check-run =\n    .label = 检查\n" in zh
     assert "scholium-check = Setup check\n" in en and "scholium-check-run =\n    .label = Check\n" in en
+    assert '<button id="scholium-check-copy" data-l10n-id="scholium-check-copy" hidden="true"/>' in src
+    assert "scholium-check-copy =\n    .label = 复制\n" in zh and "scholium-check-copied =\n    .label = 已复制\n" in zh
+    assert "scholium-check-copy =\n    .label = Copy\n" in en and "scholium-check-copied =\n    .label = Copied\n" in en
 
 
 def skill_files():
