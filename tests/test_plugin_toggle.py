@@ -155,7 +155,8 @@ class ReaderManager {
 function boot(locale, prefs = {}, Reader = new ReaderManager()) {
   const store = new Map(Object.entries(prefs));
   const full = name => { if (!name.startsWith('extensions.scholium.')) throw Error('unexpected preference ' + name); };
-  const context = vm.createContext({ Zotero: {
+  // Services: the button's words are the runner's texts, which name the system's uv installer
+  const context = vm.createContext({ Services: { appinfo: { OS: 'WINNT' } }, Zotero: {
     debug() {}, locale, version: '10.0.7', Reader, Items: { get: id => attachments.get(id) || null },
     Prefs: {
       get(name, global) { if (!global) throw Error('expected a full preference name'); full(name); return store.get(name); },
