@@ -1,5 +1,9 @@
 """What a first run on a new computer meets: Zotero's local API turned off (one confirmation turns it on), the agent
-not signed in, PyMuPDF or Python missing. Each ends with what to do, in the section's language."""
+not signed in, PyMuPDF or Python missing, a scanned PDF without a text layer. Each ends with what to do, in the
+section's language."""
+import json
+from pathlib import Path
+
 import pytest
 
 from plugin_harness import NODE, run_scenarios
@@ -97,14 +101,37 @@ SCENARIOS = r"""
     facts.noPymupdfEnglish = card(p);
     h.runner.stop();
   }
+  // a scanned PDF: extract's error (SCAN_OUT, the script's own) on the card of an annotation that wrote nothing
+  for (const [name, locale] of [['scan', 'zh-CN'], ['scanEnglish', 'en-US']]) {
+    const h = harness({ locale, script: [init, tool('Bash', { command: extract }, 't1'), answer('Exit code 3\n' + SCAN_OUT, true, 't1'),
+                                         ...ending('Stopped: the PDF is a scan.')] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1); await settle(40);
+    p.annotate(); await settle(500);
+    facts[name] = card(p);
+    h.runner.stop();
+  }
+  {
+    const h = harness({});
+    const m = (c, o) => h.runner.missingAfter(c, o, null);
+    facts.scanSeen = { codex: m('uv run C:/skills/scholium.py extract --config paper.json', SCAN_OUT),
+                       source: m('Get-Content C:/skills/scholium.py', SOURCE), skill: m('cat C:/skills/SKILL.md', SKILL) };
+  }
   process.stdout.write(JSON.stringify(facts));
 })().catch(e => { process.stderr.write(String(e.stack || e)); process.exit(1); });
 """
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 @pytest.fixture(scope="module")
 def facts(tmp_path_factory):
-    return run_scenarios(SCENARIOS, tmp_path_factory)
+    from zotero_scholium import cli
+    out = json.dumps({"error": cli.NO_TEXT_LAYER, "pages": 4, "scanned_pages": 4}, ensure_ascii=False, indent=1)
+    texts = {"SCAN_OUT": out, "SOURCE": (ROOT / "skills/zotero-scholium/scripts/scholium.py").read_text(encoding="utf8"),
+             "SKILL": (ROOT / "skills/zotero-scholium/SKILL.md").read_text(encoding="utf8")}
+    return run_scenarios("".join(f"const {k} = {json.dumps(v)};\n" for k, v in texts.items()) + SCENARIOS, tmp_path_factory)
 
 
 API_OFF = ("Scholium 通过 Zotero 的本地 API 读取论文，它现在是关闭的（设置 → 高级 → 允许此计算机上的其他应用程序与 Zotero 通讯）。"
@@ -161,3 +188,11 @@ def test_the_skills_script_running_afterwards_clears_it(facts):
 
 def test_a_failed_run_names_what_is_missing(facts):
     assert NO_PYMUPDF in facts["failedQuestion"]
+
+
+def test_a_scanned_pdf_says_to_run_ocr_first(facts):
+    assert facts["scan"] == {"cls": "scholium-card none", "title": "没有写入批注：这个 PDF 没有文字层（扫描件）：先做 OCR 文字识别"
+                                                                  "（例如 ocrmypdf，或 Acrobat 的“识别文本”），再批注。"}
+    assert facts["scanEnglish"]["title"] == ("No annotations written: The PDF has no text layer (a scanned document): run OCR on it "
+                                             "first (e.g. ocrmypdf, or Acrobat's Recognize Text), then annotate again.")
+    assert facts["scanSeen"] == {"codex": "noTextLayer", "source": None, "skill": None}, "only extract's error, not the words in the script or the skill"

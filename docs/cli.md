@@ -32,6 +32,8 @@ uv run scholium.py …                     # uv reads the script's inline metada
    scholium extract --pdf paper.pdf --sentences out/sentences.json --out out/sentences.txt
    ```
 
+   A PDF without a text layer (a scan without OCR) stops `extract` with exit code 3 and a JSON `error` that says to run OCR first.
+
 3. **Write a configuration file.** A complete template is provided in [`skills/zotero-scholium/examples/config.template.json`](../skills/zotero-scholium/examples/config.template.json).
 
    ```json

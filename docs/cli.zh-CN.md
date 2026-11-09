@@ -32,6 +32,8 @@ uv run scholium.py …                     # uv 读取脚本内嵌的元数据�
    scholium extract --pdf paper.pdf --sentences out/sentences.json --out out/sentences.txt
    ```
 
+   没有文字层的 PDF（未做 OCR 的扫描件）会让 `extract` 以退出码 3 停下，并输出 JSON `error`，提示先做 OCR。
+
 3. **编写配置文件。** 完整模板见[配置模板](../skills/zotero-scholium/examples/config.template.json)。
 
    ```json

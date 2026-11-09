@@ -617,6 +617,8 @@ var ScholiumRunner = {
       noPython: zh ? `找不到 Python，安装 uv（在终端运行 ${uvInstall}），或安装 Python 3.9 或更高版本并运行 pip install -U pymupdf 后再试。`
                    : `Python was not found; install uv (run ${uvInstall} in a terminal), or install Python 3.9 or later and run pip install -U pymupdf, then try again.`,
       noUv: zh ? `找不到 uv，在终端运行 ${uvInstall} 安装后再试。` : `uv was not found; install it with ${uvInstall} in a terminal, then try again.`,
+      noTextLayer: zh ? "这个 PDF 没有文字层（扫描件）：先做 OCR 文字识别（例如 ocrmypdf，或 Acrobat 的“识别文本”），再批注。"
+                      : "The PDF has no text layer (a scanned document): run OCR on it first (e.g. ocrmypdf, or Acrobat's Recognize Text), then annotate again.",
       // the setup check of the settings page: each line's name, its sentence, and its button
       checkLabel: id => ({ localApi: zh ? "本地 API" : "Local API", claude: "Claude Code", claudeSkill: zh ? "Claude Code 的技能" : "Claude Code's skill",
                            codex: "Codex", codexSkill: zh ? "Codex 的技能" : "Codex's skill", uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,
@@ -1778,6 +1780,8 @@ var ScholiumRunner = {
     if (/Python was not found|\bpython3?: (?:command )?not found|command not found: python3?\b|'python3?' is not recognized/i.test(text)) return "noPython";
     // uv missing, as bash or sh, zsh, fish, PowerShell or cmd say it
     if (/\buv: (?:command )?not found|command not found: uv\b|Unknown command: uv\b|'uv' is not recognized/i.test(text)) return "noUv";
+    // extract's error for a scan without OCR, as JSON (the script's source holds it in another form)
+    if (/"error":\s*"the PDF has no text layer/.test(text)) return "noTextLayer";
     return /scholium\.py\b|(?:^|[\s;&|("'])scholium\s/.test(command) ? null : before;
   },
 
