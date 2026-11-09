@@ -361,14 +361,14 @@ def test_the_paper_is_handed_over_in_paper_json_not_on_a_command_line(facts):
     assert "D:/Zotero/storage/ATT1/paper.pdf" not in prompt, "the PDF's path only in paper.json"
     assert f"- 论文：{PAPER}（PDF 的路径、两个 key 和输出目录）" in prompt
     assert (f"{PAPER} 是插件的文件，只读，不要修改：只有 extract（代替 --pdf）和 --list 用 --config {PAPER}。"
-            f"你的配置另写一个文件，放在输出目录里（如 {OUT}/config.json），从 {PAPER} 的四个键写起，试运行和 --apply 都用它。"
+            f"你的配置另写一个文件，放在输出目录里（如 {OUT}/config.json），从 {PAPER} 的四个键写起，--apply 用它。"
             "不要把 PDF 路径、论文标题或其他题录写进命令行。") in prompt
     en = facts["paperEn"]
     assert "D:/Zotero/storage/ATT1/paper.pdf" not in en
     assert f"- Paper: {PAPER} (the PDF's path, the two keys and the output directory)" in en
     assert (f"{PAPER} is the plugin's and read-only; do not edit it. Only extract (in place of --pdf) and --list take --config {PAPER}. "
             f"Write your configuration to a file of your own in the output directory (e.g. {OUT}/config.json), starting from the four keys "
-            f"of {PAPER}, and give that one to the dry run and to --apply. Never put the PDF's path, the paper's title or other metadata "
+            f"of {PAPER}, and give that one to --apply. Never put the PDF's path, the paper's title or other metadata "
             "on a command line.") in en
     assert f"list them with --config {PAPER} --list --full." in en
     assert f"the numbers come from extract --config {PAPER} --sentences {OUT}/sentences.json --out {OUT}/sentences.txt" in en

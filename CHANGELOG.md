@@ -10,7 +10,8 @@
   language of the plugin, also when it gives them as a count (剩余警告 1 条（…）, 1 remaining warning (…)).
 - Nothing asks to close and reopen the PDF after writing (the skill, its JavaScript file, the READMEs): open readers
   show the new annotations by themselves.
-- The skill corrects all of a dry run's findings in one edit of the configuration before `--apply`.
+- The skill runs `--apply` without a separate dry run: what it holds back is corrected in one edit of the configuration
+  before it runs again.
 - The skill reads the reading note's template before it writes the note, and the dry run and `--apply` hold back a
   note without its `<h1>` title (`note_title`; `--accept note_title` lets it through).
 - The reader's eye button turns on by itself with the first annotation written, for a user who has never used it;
@@ -22,7 +23,7 @@
 
 - The model list gives up after 60 s when Claude Code's output does not end, and is asked for again later.
 - Disabling, updating or removing the plugin also takes its button out of the reader's sidenav, where it stayed hidden
-  after the reader tabs were closed and could come back with a blank icon after an update.
+  after the reader tabs were closed.
 
 ## 0.2.2 (2026-11-10)
 

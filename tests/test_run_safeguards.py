@@ -186,6 +186,23 @@ def test_accept_lets_a_deliberate_exception_through_and_core_count_only_informs(
     assert keys["createdKeys"] == ["NEW1"] and "createdKeys" not in report["result"]
 
 
+def test_apply_without_a_dry_run_reports_what_it_holds_back_and_what_it_wrote(paper, monkeypatch, capsys):
+    """--apply run first: when it holds back, its output carries the findings as a dry run's report does, and nothing is
+    written; after a write, the advisory translation warnings are in its output."""
+    hl = [{"page": 1, "text": SENTENCE, "comment": "该方法在 5 个基准上提升了结果，而且非常显著，远超所有已有方法和基线。", "core": True},
+          {"page": 1, "text": "no such sentence anywhere", "comment": "不存在。"}]
+    api = Api()
+    code, dry = run(paper, monkeypatch, capsys, {"highlights": hl}, api=api)
+    code, held = run(paper, monkeypatch, capsys, {"highlights": hl}, "--apply", api=api)
+    assert code == 2 and held["applied"] is False and "could not be located" in held["apply_error"] and api.n == 0
+    for field in ("missed", "translation_warnings"):
+        assert held[field] == dry[field] and held[field], field
+    assert list(held)[-2:] == ["applied", "apply_error"], "the outcome comes last"
+    code, wrote = run(paper, monkeypatch, capsys, {"highlights": hl[:1]}, "--apply", api=api)
+    assert code == 0 and wrote["applied"] is True and api.n == 1
+    assert wrote["translation_warnings"] and wrote["translation_warnings"][0]["page"] == "1"
+
+
 def test_a_reading_note_without_its_title_is_held_back(paper, monkeypatch, capsys):
     """A reading note without <h1> blocks --apply with note_title (the template starts with the title); --accept lets it
     through; the sections are not checked."""

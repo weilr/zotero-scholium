@@ -3836,7 +3836,7 @@ def test_a_question_starts_a_conversation_that_answers_without_annotating(facts)
         "这是从 Zotero 里发来的无人值守任务：不要向用户提问，不要启动子代理。只回答，不写批注和笔记；用户在问题里明确要求时，才按技能的流程写入 Zotero。",
         "/data/tmp/scholium/ATT1/paper.json 是插件的文件，只读，不要修改：只有 extract（代替 --pdf）和 --list 用 --config "
         "/data/tmp/scholium/ATT1/paper.json。你的配置另写一个文件，放在输出目录里（如 /data/tmp/scholium/ATT1/config.json），"
-        "从 /data/tmp/scholium/ATT1/paper.json 的四个键写起，试运行和 --apply 都用它。不要把 PDF 路径、论文标题或其他题录写进命令行。",
+        "从 /data/tmp/scholium/ATT1/paper.json 的四个键写起，--apply 用它。不要把 PDF 路径、论文标题或其他题录写进命令行。",
         "这台电脑没有装 uv：用 python 运行 scholium.py。",
         "这篇论文目前没有本工具的批注。",
         "引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --config /data/tmp/scholium/ATT1/paper.json "

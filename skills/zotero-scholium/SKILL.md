@@ -57,13 +57,12 @@ Write one configuration from `examples/config.template.json`, including only req
 - `note_html`: the reading note.
 - Take banned phrases and the expected number of core highlights from the profile's rules (`banned_phrases`, `core_range`); adjust or omit `core_range` for a limited scope. `sentences` is the JSON written above (default `<out_dir>/sentences.json`). Other fields (colour levels, underlines, sticky notes, placement): `references/configuration.md`, only when the task needs one.
 
-### 3. Review the report, then apply
+### 3. Apply, then review the report
 
 ```bash
-scholium.py --config <config.json>
 scholium.py --config <config.json> --apply
 ```
-First run without `--apply`. Review the report and correct all its findings in one edit of the configuration (or one rewrite); this is a quality check, not another request for write permission. After correcting, run `--apply` directly: it repeats every check and writes nothing while `missed`, `style_warnings` or `layout_warnings` holds a blocking finding, so a second dry run is not needed. Its outcome is the last field of its output.
+Run `--apply` directly; its report is a quality check, not another request for write permission. While `missed`, `style_warnings` or `layout_warnings` holds a blocking finding it writes nothing: correct all of them in one edit of the configuration (or one rewrite) and run it again. After a write, correct an advisory `translation_warnings` entry only when it shows a real mistranslation, then apply again with `cleanup: true`. The outcome is the last field of the output.
 
 - `missed`: unknown ids, or phrases not found (each with the closest passage, `closest`).
 - `style_warnings`: formatting, banned phrases, duplicate or overlapping highlights, text the tool already wrote on the page (`duplicate_existing`), the user's changes in Zotero that a rewrite would undo (`user_edit`), a note without its `<h1>` title (`note_title`), note math. `core_count` only informs. For a deliberate exception the user asked for, `--accept KIND` lets that kind through.

@@ -104,11 +104,11 @@ Object.assign(ScholiumRunner, {
     // paper.json of another library than My Library also names it (library_id, and group_id for a group)
     const n = /_g\d+$/.test(key) ? 6 : /_l\d+$/.test(key) ? 5 : 4;
     return this.zh() ? `${paper} 是插件的文件，只读，不要修改：只有 extract（代替 --pdf）和 --list 用 --config ${paper}。`
-                       + `你的配置另写一个文件，放在输出目录里（如 ${own}），从 ${paper} 的${"四五六"[n - 4]}个键写起，试运行和 --apply 都用它。`
+                       + `你的配置另写一个文件，放在输出目录里（如 ${own}），从 ${paper} 的${"四五六"[n - 4]}个键写起，--apply 用它。`
                        + "不要把 PDF 路径、论文标题或其他题录写进命令行。"
                      : `${paper} is the plugin's and read-only; do not edit it. Only extract (in place of --pdf) and --list take --config ${paper}. `
                        + `Write your configuration to a file of your own in the output directory (e.g. ${own}), starting from the ${["four", "five", "six"][n - 4]} keys of ${paper}, `
-                       + "and give that one to the dry run and to --apply. Never put the PDF's path, the paper's title or other metadata on a command line.";
+                       + "and give that one to --apply. Never put the PDF's path, the paper's title or other metadata on a command line.";
   },
 
   // the prompt's line on how the skill's script runs here (scriptCommand), once the run has looked it up

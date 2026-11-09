@@ -209,8 +209,9 @@ def test_no_write_channel_asks_to_reopen_the_pdf():
 def test_the_skill_corrects_all_of_the_reports_findings_in_one_edit():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     skill = open(os.path.join(root, "skills", "zotero-scholium", "SKILL.md"), encoding="utf-8").read()
-    step = skill.split("### 3. Review the report, then apply", 1)[1].split("\n## ", 1)[0]
-    assert "all its findings in one edit of the configuration (or one rewrite)" in step
+    step = skill.split("### 3. Apply, then review the report", 1)[1].split("\n## ", 1)[0]
+    assert "correct all of them in one edit of the configuration (or one rewrite) and run it again" in step
+    assert "scholium.py --config <config.json>\n" not in step, "no separate dry run"
 
 
 def test_the_skill_reads_the_note_template_where_it_writes_the_configuration():
