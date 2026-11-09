@@ -9,7 +9,12 @@ pip install pymupdf
 pip install .                            # provides the `scholium` command
 ```
 
-Inside the skill the same file is `skills/zotero-scholium/scripts/scholium.py`; `python scholium.py …` takes the same arguments.
+Inside the skill the same file is `skills/zotero-scholium/scripts/scholium.py`. It takes the same arguments and runs in two ways:
+
+```bash
+python scholium.py …                     # with Python and PyMuPDF installed
+uv run scholium.py …                     # uv reads the script's inline metadata (PEP 723) and fetches Python and PyMuPDF
+```
 
 ## Steps
 
@@ -51,6 +56,8 @@ Inside the skill the same file is `skills/zotero-scholium/scripts/scholium.py`; 
 
    Include only the requested output types. Use a separate `out_dir` for each paper, such as `out/<ATTACHMENT_KEY>`, and place its sentence and note files there. Set `cleanup: true` only for a complete redo; without it a run only adds (added notes, margin remarks, a selected scope). For a redo with a reading note, `note_replace: true` moves the tool's earlier notes to the trash.
 
+   `cleanup`, `note_replace`, `cleanup_external`, `snap` and a highlight's `core` must be `true` or `false`; a string such as `"false"` is refused. `null` for an optional key means its default. `font_size`, like `band_min_font_size`, is a number from 4 to 36. `note_html` must be the path of an existing HTML file, not the HTML itself. Colours are `#rrggbb` in either case and are written in lower case, the form Zotero takes. A highlight's `comment` is the translation of its sentence; leave it out when the paper is already in the reader's language.
+
 4. **Generate, review, and apply.** Run without `--apply` first, review all four warning fields below and correct the configuration before applying.
 
    ```bash
@@ -60,6 +67,8 @@ Inside the skill the same file is `skills/zotero-scholium/scripts/scholium.py`; 
    ```
 
    Every run writes `annotations.json`, a fallback `create_annotations.js`, and `preview_p<N>.png` for the pages in `preview_pages` (none by default), and reports `missed` entries (each with the closest passage found on the page), `style_warnings`, `translation_warnings`, `layout_warnings`, and the PDF's hash before and after. `--apply` refuses to write while `missed`, `style_warnings` (other than `core_count`) or `layout_warnings` is non-empty (`--accept KIND`, `--allow-missed`, `--allow-warnings`). A margin note without room takes the other margin of a one-column page, or else becomes a sticky note; a top or bottom band without room is set smaller, down to 8 pt, and without room even then becomes a sticky note.
+
+   `--backend auto` (the default) writes through the Scholium plugin, else through the local API of Zotero 10, else through an older plugin, else into the JavaScript file. With the local API turned off it moves on to the next channel and the report says why; reads through the local API name the setting that turns it on. The local API and the JavaScript file, like the plugin, refuse an `item_key` that is not the attachment's parent before anything is written. Annotations carry the PDF's own page labels (the page numbers Zotero shows, such as `iv`), and their `sortIndex` follows the reading order, so Zotero lists them in the order of the text; the report still names pages by number, from 1.
 
 [`examples/direct_api_example.py`](../examples/direct_api_example.py) demonstrates the underlying Zotero 10 local API calls in approximately thirty lines for use in other applications.
 
