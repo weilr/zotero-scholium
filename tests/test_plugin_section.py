@@ -1229,6 +1229,9 @@ def test_the_settings_chip_and_its_layer(facts):
     assert c["none"] == [True, ""]
     rules = css_rules()
     assert "display: flex" in rules[".scholium-chip"] and "align-items: center" in rules[".scholium-chip"]
+    # the state line beside it is cut first; the chip only beyond 70% of the line
+    assert "flex-shrink: 0" in rules[".scholium-chip"] and "max-width: 70%" in rules[".scholium-chip"]
+    assert "min-width: 0" in rules[".scholium-line .scholium-state"]
     assert "flex: none" in rules[".scholium-chip-tail"]
     assert "color: var(--fill-secondary)" in rules[".scholium-chip-effort"]
     name = rules[".scholium-chip-name"]

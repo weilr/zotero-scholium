@@ -240,6 +240,7 @@ var texts = h => {
     convDeleted: title => `“${title}” 삭제됨`,
     undo: "실행 취소",
     citePage: p => `${p}페이지`,
+    pageRef: p => `${p}쪽`,
     locate: "위치로 이동 ↗",
     retry: "다시 시도",
     editPrompt: "편집",

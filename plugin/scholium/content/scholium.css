@@ -133,9 +133,11 @@
   min-width: 100%;
 }
 
-/* the model is cut first; the effort, small and grey, and ▾ stay */
+/* the state line beside it is cut before it, which is cut only beyond 70% of the line: then the model is cut first; the
+   effort, small and grey, and ▾ stay */
 .scholium-chip {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 4px;
   min-width: 0;

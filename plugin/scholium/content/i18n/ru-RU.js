@@ -247,6 +247,7 @@ var texts = h => {
     convDeleted: title => `Беседа «${title}» удалена`,
     undo: "Отменить",
     citePage: p => `Стр. ${p}`,
+    pageRef: p => `с.\u00a0${p}`,
     locate: "Показать ↗",
     retry: "Повторить",
     editPrompt: "Редактировать",

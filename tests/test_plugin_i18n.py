@@ -110,6 +110,14 @@ SCENARIOS = r"""
     };
     h.runner.stop();
   }
+  // the page of a quote and of a cited sentence, and a number of tokens, as each language writes them
+  facts.numbers = {};
+  for (const lang of ['en-US', 'zh-CN', ...LANGS]) {
+    const h = harness({ locale: lang });
+    facts.numbers[lang] = { quote: h.runner.quoteLabel({ text: 'T', page: '2', label: '2' }), unlabelled: h.runner.quoteLabel({ text: 'T', page: '3' }),
+                            cite: h.runner.citeNode(h.paneDoc, 'ATT1', 12, { page: 4 }).textContent,
+                            k: [999, 550123, 1000000, 2567600].map(n => h.runner.kTokens(n)) };
+  }
   // the prompts: an annotation, a question, and a follow-up of that question
   const qInit = ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S1' });
   const ok = ev({ type: 'result', subtype: 'success', is_error: false, result: 'ok', session_id: 'S1' });
@@ -178,6 +186,24 @@ def test_the_section_and_the_reader_button_are_in_the_language(facts, lang):
     assert f["button"] == f["ownButton"]
     assert f["english"] == [], "English texts shown where the language has its own"
     assert f["loads"] == 1   # the table is loaded once
+
+
+# a page as a citation gives it in each language (page 2), and a number of tokens in thousands
+PAGES = {"en-US": "p.2", "zh-CN": "p.2", "zh-TW": "第\u00a02\u00a0頁", "ja-JP": "p.2", "ko-KR": "2쪽", "de": "S.\u00a02",
+         "fr-FR": "p.\u00a02", "es-ES": "p.\u00a02", "ru-RU": "с.\u00a02", "pt-BR": "p.\u00a02"}
+COMMA = ["999", "550k", "1,000k", "2,568k"]
+THOUSANDS = {"en-US": COMMA, "zh-CN": COMMA, "zh-TW": COMMA, "ja-JP": COMMA, "ko-KR": COMMA,
+             "de": ["999", "550k", "1.000k", "2.568k"], "fr-FR": ["999", "550k", "1\u202f000k", "2\u202f568k"],
+             "es-ES": ["999", "550k", "1000k", "2568k"], "ru-RU": ["999", "550k", "1\u00a0000k", "2\u00a0568k"],
+             "pt-BR": ["999", "550k", "1.000k", "2.568k"]}
+
+
+@pytest.mark.parametrize("lang", ["en-US", "zh-CN"] + LANGS)
+def test_pages_and_thousands_are_written_as_the_language_writes_them(facts, lang):
+    f = facts["numbers"][lang]
+    assert f["quote"] == PAGES[lang] + " · T" and f["unlabelled"] == PAGES[lang].replace("2", "3") + " · T"
+    assert f["cite"] == PAGES[lang].replace("2", "4")
+    assert f["k"] == THOUSANDS[lang]
 
 
 @pytest.mark.parametrize("locale", list(LINES))

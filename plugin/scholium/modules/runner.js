@@ -466,6 +466,8 @@ var ScholiumRunner = {
       convDeleted: title => zh ? `已删除「${title}」` : `Deleted “${title}”`,
       undo: zh ? "撤销" : "Undo",
       citePage: p => zh ? `第 ${p} 页` : `Page ${p}`,
+      // a page as a citation gives it: the quoted passage's and a cited sentence's chip
+      pageRef: p => `p.${p}`,
       locate: zh ? "定位 ↗" : "Locate ↗",
       retry: zh ? "重试" : "Retry",
       editPrompt: zh ? "编辑" : "Edit",
