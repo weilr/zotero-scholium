@@ -287,13 +287,13 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                    home = 'dirsvc', eraseFails = false, logs = {}, models = 'ok', claudeAt = CLAUDE, scripts = [], readFails = false,
                    writeFails = false, codex = {}, logTimes = {}, notes = [], secondPdf = false, failLogWrites = null, stdinFails = false, holdDirs = false,
                    unreadable = [], unremovable = [], addonManager = null, env = {}, present = [], dirs = {}, auth = 'in', python = {},
-                   os = 'WINNT', shell = null, uv = {}, groups = {} } = {}) {
+                   os = 'WINNT', shell = null, uv = {}, groups = {}, scriptRuns = null } = {}) {
   const log = { calls: [], stdin: [], notices: [], alerts: [], confirms: [], kills: 0, menus: [], unregistered: [], listeners: [],
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
                 ftl: [], tabs: [], selected: [], opened: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
                 prefPanes: [], openedPrefs: [], madeDirs: [], trashed: [], versionCalls: [], codexCalls: [], codexProcs: [], codexKills: 0, codexTurns: 0, steers: [],
                 mtimes: Object.assign({}, logTimes), clock: Date.now(), copied: [], removed: [], threads: 0, tmpPaths: [], reads: [], readerOpened: [], navigated: [], finds: [],
-                authCalls: [], pyCalls: [], checkKills: 0, shellCalls: [], shellKills: 0, uvCalls: [] };
+                authCalls: [], pyCalls: [], checkKills: 0, shellCalls: [], shellKills: 0, uvCalls: [], scriptCalls: [], scriptKills: 0 };
   const co = Object.assign({ versions: CODEX_VERSIONS, scripts: [], skillAt: '/data', fail: null, failMessage: '' }, codex);
   // the files there are: Claude Code, Codex's copies, and a test's own (present)
   const files = new Set((claudeExists ? [claudeAt] : []).concat(Object.keys(co.versions), present));
@@ -484,12 +484,26 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
   // output that then never ends, { fails } when it does not start, or null for a failing one); uv --version (uv: the
   // output of each program path)
   class ShellProc extends OutProc { kill() { log.shellKills++; this.killed = true; if (this.gate) this.gate(); } }
+  class ScriptProc extends OutProc { kill() { log.scriptKills++; this.killed = true; if (this.gate) this.gate(); } }
   const Subprocess = {
     call: async opts => {
       if (opts.arguments[0] === '-ilc') {
         log.shellCalls.push(opts);
         if (shell && shell.fails) throw Error(shell.fails);
         return new ShellProc(typeof shell === 'string' ? [shell, 0] : shell && 'open' in shell ? [shell.open, 0, true] : ['', 1]);
+      }
+      // the skill's script run by the plugin itself (scriptRuns: { status, extract } each [its output, its exit code], 'HOLD'
+      // until it is killed or 'OPEN' never ending; text: what extract writes to its --out); none answers nothing
+      const at = opts.arguments.findIndex(a => /scholium\.py$/.test(String(a)));
+      if (at >= 0) {
+        log.scriptCalls.push(opts);
+        const sub = opts.arguments[at + 1], how = (scriptRuns || {})[sub];
+        const proc = new ScriptProc(how === 'HOLD' || how === 'OPEN' ? [how, 0] : how || ['', 1]);
+        if (sub === 'extract' && Array.isArray(how) && how[1] === 0) {
+          const o = opts.arguments.indexOf('--out');
+          if (o >= 0) log.writes[opts.arguments[o + 1]] = (scriptRuns && scriptRuns.text) || 'Index (line numbers of this file)\nmain text: lines 7-9\n';
+        }
+        return proc;
       }
       if (/(?:^|\/)uv(?:\.exe)?$/.test(opts.command)) { log.uvCalls.push(opts); return new OutProc(opts.command in uv ? [uv[opts.command], 0] : ['', 1]); }
       if (opts.arguments[0] === '--version') { log.versionCalls.push(opts.command); return new VersionProc(opts.command); }

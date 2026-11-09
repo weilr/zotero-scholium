@@ -12,6 +12,8 @@
   show the new annotations by themselves.
 - The skill runs `--apply` without a separate dry run: what it holds back is corrected in one edit of the configuration
   before it runs again.
+- A new annotation's `status` and `extract` are run by the plugin before the agent starts, and given to it in the
+  prompt; a scanned PDF ends the run there, without an agent.
 - The skill reads the reading note's template before it writes the note, and the dry run and `--apply` hold back a
   note without its `<h1>` title (`note_title`; `--accept note_title` lets it through).
 - The reader's eye button turns on by itself with the first annotation written, for a user who has never used it;

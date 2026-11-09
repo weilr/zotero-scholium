@@ -1568,9 +1568,9 @@ Object.assign(ScholiumRunner, {
       const more = doc.createElement("span");
       more.className = "scholium-fold-more";
       more.textContent = " " + this.text("details") + (open ? " ⌄" : " ›");
-      head.append(this.workingNode(view, this.compactingNow(run) ? "compactingFor" : "workingFor"), more);
+      head.append(this.workingNode(view, this.liveKey(run)), more);
     } else if (live) {
-      head.append(this.workingNode(view, this.compactingNow(run) ? "compactingFor" : "workingFor"));
+      head.append(this.workingNode(view, this.liveKey(run)));
       if (open) head.append(doc.createTextNode(" ⌄"));
     } else {
       head.textContent = this.workedText(run) + (open ? " ⌄" : " ›");
@@ -1607,6 +1607,11 @@ Object.assign(ScholiumRunner, {
     span.textContent = this.text(key, this.durationWords(this.elapsed()));
     view.liveTime = { node: span, key };
     return span;
+  },
+
+  // the words of a run under way: the PDF read before the agent starts (preRun), a compaction, or the agent's work
+  liveKey(run) {
+    return this.job && this.job.preRun ? "preRun" : this.compactingNow(run) ? "compactingFor" : "workingFor";
   },
 
   // whether the agent compacts its context now, in a run under way: its last compaction line is the start of one

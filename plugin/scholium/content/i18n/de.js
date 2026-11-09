@@ -96,6 +96,7 @@ var texts = h => {
     working: "In Bearbeitung",
     workingFor: d => `In Bearbeitung seit ${d}`,
     workedPlain: "Bearbeitet",
+    preRun: "PDF wird gelesen…",
     profileOpen: "Persönliches Profil ↗",
     profileTitle: "Persönliches Profil",
     profileAbout: "Jeder Lauf folgt diesem Profil. Wird es erneut aus der Bibliothek abgeleitet, werden nur die Statistiken oben neu geschrieben; die Abschnitte Interpretation und User's rules bleiben erhalten.",

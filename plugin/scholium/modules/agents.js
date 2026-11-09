@@ -76,7 +76,8 @@ Object.assign(ScholiumRunner, {
       this.finish(job, false, missing);
       return { ok: false, delivered: false };
     }
-    job.script = await this.scriptCommand();   // the prompt says how the script runs here
+    job.scriptRun = await this.scriptProgram();   // the prompt says how the script runs here
+    job.script = job.scriptRun.name;
     await IOUtils.makeDirectory(this.outDir(key), { createAncestors: true, ignoreExisting: true });
     if (this.job !== running || running.stopAsked) return this.halted(job, running);   // the plugin stopped, or ■, while the folder was prepared
     await this.writePaper(job.att, job.path, job.parentKey);
@@ -171,7 +172,11 @@ Object.assign(ScholiumRunner, {
                   exitCode: null, stderr: "", current: null, applies: {}, commands: {}, missing: null, gone: false, unlogged: [] };
     if (this.job !== running) return;   // the plugin stopped while the log was written
     // ■ meanwhile: the run ends as a cancel ends it, its words in the log
-    if (running.stopAsked) ctx.current = { key, proc: null, cancelled: true };
+    // a new annotation's status and extract, run here before the agent starts (preRun)
+    job.pre = !running.stopAsked && job.annotate && !job.say && !job.compact ? await this.preRun(job, ctx) : null;
+    if (this.job !== running) return;   // the plugin stopped meanwhile
+    if (running.stopAsked || (job.pre && job.pre.cancelled)) ctx.current = { key, proc: null, cancelled: true };
+    else if (job.pre && job.pre.scanned) this.scannedEnd(ctx);
     else if (agent === "codex") await this.runCodex(program, ctx);
     else await this.runClaude(program, ctx);
     await this.appendLog(ctx, []);   // what the log could not take during the run
@@ -371,6 +376,59 @@ Object.assign(ScholiumRunner, {
     if (!ctx.running.retry) return;
     ctx.running.retry = null;
     this.refresh();
+  },
+
+  // an annotation's first steps, run by the plugin before the agent starts, with the command its prompt names
+  // (scriptProgram), the agent's environment and the paper's output folder: `status <item key> [--group ID]` within
+  // PRE_STATUS_MS, then `extract` within PRE_EXTRACT_MS, by the skill's script the agent runs (skillScript). { status (its
+  // JSON, minified), lines (of sentences.txt) } when both ran; { scanned } for a PDF without a text layer (extract's exit
+  // code 3); { cancelled } after ■; null otherwise, and the agent runs them itself. The live line says the PDF is read
+  async preRun(job, ctx) {
+    const runner = job.scriptRun || {}, script = runner.command ? await this.skillScript(job.agent) : null;
+    if (!script) return null;
+    const key = this.keyOf(job.att), out = this.outDir(key), running = ctx.running;
+    const env = await this.agentEnv(job.agent === "codex");
+    const group = this.groupOf(job.att.libraryID);
+    const run = async (args, ms) => {
+      if (running.stopAsked || this.job !== running) return null;
+      const proc = await this.subprocess().call(Object.assign({ command: runner.command, arguments: runner.prefix.concat([script], args),
+                                                                 workdir: out }, env));
+      this.current = ctx.current = { key, proc, cancelled: false };
+      try { return await this.readOutput(proc, ms); }
+      finally { this.current = null; }
+    };
+    running.preRun = true;
+    this.settleRun();
+    try {
+      const status = await run(["status", job.parentKey].concat(group ? ["--group", String(group)] : []), this.PRE_STATUS_MS);
+      if (ctx.current && ctx.current.cancelled) return { cancelled: true };
+      let json = null;
+      try { json = status && !status.late && status.exitCode === 0 ? JSON.stringify(JSON.parse(status.out)) : null; } catch (e) {}
+      if (!json) return null;
+      const txt = PathUtils.join(out, "sentences.txt");
+      const extract = await run(["extract", "--config", this.paperPath(key), "--sentences", PathUtils.join(out, "sentences.json"), "--out", txt],
+                                this.PRE_EXTRACT_MS);
+      if (ctx.current && ctx.current.cancelled) return { cancelled: true };
+      if (!extract || extract.late) return null;
+      if (extract.exitCode === 3) return { scanned: true };
+      if (extract.exitCode !== 0) return null;
+      const text = await IOUtils.readUTF8(txt);
+      return { status: json, lines: text.split(/\r?\n/).length - (/\n$/.test(text) ? 1 : 0) };
+    } catch (e) {
+      this.log("pre-run failed: " + e);
+      return null;
+    } finally {
+      running.preRun = false;
+      this.settleRun();
+    }
+  },
+
+  // a scanned PDF found by the pre-run: the run ends as an agent's does that found it, with the card that says so
+  scannedEnd(ctx) {
+    ctx.current = { key: ctx.key, proc: null, cancelled: false };
+    ctx.exitCode = 0;
+    ctx.missing = "noTextLayer";
+    ctx.result = { type: "result", subtype: "success", is_error: false, result: this.text("noTextLayer"), num_turns: 0 };
   },
 
   // Claude Code: `claude -p` with the prompt on stdin and its stream-json events on stdout

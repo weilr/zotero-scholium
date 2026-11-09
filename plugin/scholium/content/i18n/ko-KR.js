@@ -92,6 +92,7 @@ var texts = h => {
     working: "작업 중",
     workingFor: d => `${d} 동안 작업 중`,
     workedPlain: "작업 완료",
+    preRun: "PDF 읽는 중…",
     profileOpen: "개인 프로필 ↗",
     profileTitle: "개인 프로필",
     profileAbout: "모든 주석 작업은 이 프로필을 따릅니다. 라이브러리를 다시 분석하면 맨 위의 통계만 새로 쓰고, Interpretation과 User's rules 섹션은 그대로 둡니다.",

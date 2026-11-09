@@ -97,8 +97,11 @@ and no profile is created), and are told not to ask questions or start sub-agent
 PDF's path. It is the plugin's and read-only: only `extract` (in place of `--pdf`) and `--list` take it with
 `--config`, and the agent writes its own configuration to another file in the output directory. The annotation's and a
 question's prompts say how the script runs on this computer: with `uv run` when uv is on the agents' PATH, else with
-the Python found there. A question is told to read
-the paper with the skill's `status` and `extract` and to write to Zotero only when it asks for that. A session
+the Python found there. Before a new annotation's agent starts, the plugin runs the skill's `status` and `extract` itself
+with that command, the agent's environment and the skill's script the agent finds (the section's live line says "Reading
+the PDF…", and ■ stops them); the prompt then gives their results, and a scanned PDF ends the run there with its card.
+When either fails or does not end in 60 s (`extract`: 180 s), or no skill is found, the agent runs them.
+A question is told to read the paper with the skill's `status` and `extract` and to write to Zotero only when it asks for that. A session
 that has not seen the paper's annotations of the tool is told how many there are and, when the plugin saw them
 written, the configuration that wrote them, the agent and the time (kept in `<out dir>/applied.json`: a write whose output says it was applied, also "partial", is kept whatever the exit
 code; one whose configuration is not found or is `paper.json` removes the kept file); a

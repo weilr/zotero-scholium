@@ -96,6 +96,7 @@ var texts = h => {
     working: "Выполняется",
     workingFor: d => `Выполняется ${d}`,
     workedPlain: "Выполнено",
+    preRun: "Чтение PDF…",
     profileOpen: "Личный профиль ↗",
     profileTitle: "Личный профиль",
     profileAbout: "Каждый запуск следует этому профилю. Если заново построить его по библиотеке, перезапишется только статистика в начале; разделы Interpretation и User's rules сохранятся.",

@@ -91,6 +91,7 @@ var texts = h => {
     working: "処理中",
     workingFor: d => `処理中 ${d}`,
     workedPlain: "処理済み",
+    preRun: "PDF を読み込み中…",
     profileOpen: "個人プロファイル ↗",
     profileTitle: "個人プロファイル",
     profileAbout: "注釈を付けるたびに、このプロファイルに従います。ライブラリから作り直すと先頭の統計だけが書き換えられ、Interpretation と User's rules の 2 つのセクションはそのまま残ります。",

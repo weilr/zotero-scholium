@@ -127,6 +127,17 @@ Object.assign(ScholiumRunner, {
               : `remaining warnings as “${label}: …” (“${label}: ${none}” when there are none)`;
   },
 
+  // the prompt's lines of the status and extract the plugin ran before the agent (preRun): the agent goes on from them
+  preRunLines(job) {
+    const p = job.pre;
+    if (!p || !p.status) return [];
+    const txt = PathUtils.join(this.outDir(this.keyOf(job.att)), "sentences.txt");
+    return this.zh() ? ["插件已经运行了 status（第 1 步）和 extract（第 2 步），不要再运行它们：", `- status 的输出：${p.status}`,
+                        `- extract 写好了 ${txt}（${p.lines} 行，开头几行是索引）和同一目录的 sentences.json`]
+                     : ["The plugin has already run status (step 1) and extract (step 2); do not run them again:", `- status output: ${p.status}`,
+                        `- extract wrote ${txt} (${p.lines} lines; its first lines are the index) and sentences.json beside it`];
+  },
+
   // the prompt's line of a paper in a group library: the group, which status and samples are given
   groupLines(job) {
     const group = this.groupOf(job.att.libraryID);
@@ -172,6 +183,7 @@ Object.assign(ScholiumRunner, {
         "这是从 Zotero 里一键启动的无人值守任务：不要向用户提问，不要启动子代理，由你独立完成第 1–3 步并写入 Zotero。",
         this.paperRule(this.keyOf(job.att)),
         ...this.scriptLines(job),
+        ...this.preRunLines(job),
         ...this.languageLines(),
         own ? `这篇论文已有 ${own} 条本工具的注释，用户已确认整篇重做（配置里设 cleanup: true）。` : "这篇论文目前没有本工具的注释。",
         ...(job.extra ? ["", "用户的附加要求：", job.extra] : []),
@@ -193,6 +205,7 @@ Object.assign(ScholiumRunner, {
       "This is an unattended task started from Zotero with one click: do not ask the user anything and do not start sub-agents; complete steps 1-3 yourself and write to Zotero.",
       this.paperRule(this.keyOf(job.att)),
       ...this.scriptLines(job),
+      ...this.preRunLines(job),
       ...this.languageLines(),
       own ? `The paper already carries ${own} annotations of this tool; the user confirmed a complete redo (cleanup: true in the configuration).` : "The paper carries no annotations of this tool yet.",
       ...(job.extra ? ["", "The user's extra instructions:", job.extra] : []),

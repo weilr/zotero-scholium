@@ -88,6 +88,7 @@ var texts = h => {
     working: "處理中",
     workingFor: d => `處理中 ${d}`,
     workedPlain: "已處理",
+    preRun: "正在讀取 PDF…",
     profileOpen: "個人設定檔 ↗",
     profileTitle: "個人設定檔",
     profileAbout: "每次標註都依照這份個人設定檔。重新統計文獻庫只會改寫開頭的統計，Interpretation 和 User's rules 兩節保持不變。",

@@ -95,6 +95,7 @@ var texts = h => {
     working: "Processando",
     workingFor: d => `Processando há ${d}`,
     workedPlain: "Processado",
+    preRun: "Lendo o PDF…",
     profileOpen: "Perfil pessoal ↗",
     profileTitle: "Perfil pessoal",
     profileAbout: "Cada execução segue este perfil. Gerá-lo novamente a partir da biblioteca reescreve só as estatísticas do início; as seções Interpretation e User's rules são mantidas.",

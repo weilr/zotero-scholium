@@ -105,6 +105,8 @@ var ScholiumRunner = {
   CODEX_LIST_MS: 10000,     // the longest a run waits for the servers' list, when Codex never listed them
   CHECK_MS: 10000,          // the longest the setup check waits for a program's answer
   MAX_OUTPUT_TOKENS: 32000, // one turn's output, thinking included, in an annotation's Claude Code runs (runClaude)
+  PRE_STATUS_MS: 60000,     // the longest the pre-run's status is waited for (preRun)
+  PRE_EXTRACT_MS: 180000,   // and its extract
   LOGIN_PATH_MS: 5000,      // the longest the login shell is waited for when its PATH is read (loginPath)
   loginPathRead: null,      // the promise of the login shell's PATH, read once a session; "" when there is none
   cites: null,              // { key, map } the sentences of the paper whose transcript is being drawn
@@ -304,6 +306,7 @@ var ScholiumRunner = {
       working: zh ? "正在处理" : "Working",
       workingFor: d => zh ? `正在处理 ${d}` : `Working for ${d}`,
       workedPlain: zh ? "已处理" : "Worked",
+      preRun: zh ? "正在读取 PDF…" : "Reading the PDF…",
       profileOpen: zh ? "个人配置 ↗" : "Personal profile ↗",
       profileTitle: zh ? "个人配置" : "Personal profile",
       profileAbout: zh ? "每次批注都遵循这份个人配置。重新统计文库只改写开头的统计，Interpretation 和 User's rules 两节保持不变。"

@@ -310,11 +310,11 @@ Object.assign(ScholiumRunner, {
     }
   },
 
-  // a process's standard output { out, late }, read until it ends and the process exits, until done(out) holds, or until
+  // a process's standard output { out, late, exitCode }, read until it ends and the process exits, until done(out) holds, or until
   // ms pass (late): the process is then killed and the reading ends, since a child it started may keep its output open.
   // After done(out), a process that has not exited by then is still killed at that time
   async readOutput(proc, ms, done = null) {
-    let late = false, ended = false, timer = null, out = "";
+    let late = false, ended = false, timer = null, out = "", exitCode = null;
     const deadline = new Promise(resolve => { timer = setTimeout(() => { late = true; try { proc.kill(); } catch (e) {} resolve(); }, ms); });
     const read = (async () => {
       try { await proc.stdin.close(); } catch (e) {}
@@ -325,7 +325,8 @@ Object.assign(ScholiumRunner, {
         out += s;
         if (done && done(out)) return;
       }
-      await proc.wait();
+      const r = await proc.wait();
+      exitCode = r && typeof r.exitCode === "number" ? r.exitCode : null;
       ended = true;
     })();
     try { await Promise.race([read, deadline]); }
@@ -333,7 +334,7 @@ Object.assign(ScholiumRunner, {
       if (ended || late) clearTimeout(timer);
       else proc.wait().then(() => clearTimeout(timer), () => {});
     }
-    return { out, late };
+    return { out, late, exitCode };
   },
 
   // Claude Code: the program a run uses and whether it is signed in (only loggedIn of `claude auth status` is read), then
@@ -516,10 +517,34 @@ Object.assign(ScholiumRunner, {
 
   // how the skill's script runs on this computer, for the prompts: "uv run" when uv is on the agent's PATH, else the
   // Python found there ("python" when there is none); files looked for, no process started
-  async scriptCommand() {
-    if (await this.onPath([Services.appinfo.OS === "WINNT" ? "uv.exe" : "uv"])) return "uv run";
+  async scriptCommand() { return (await this.scriptProgram()).name; },
+
+  // the same with the program to start: { name, command (null when there is none), prefix (its arguments before the
+  // script's path) }
+  async scriptProgram() {
+    const uv = await this.onPath([Services.appinfo.OS === "WINNT" ? "uv.exe" : "uv"]);
+    if (uv) return { name: "uv run", command: uv, prefix: ["run"] };
     const python = await this.pathPython();
-    return python ? python.split(/[\\/]/).pop().replace(/\.exe$/i, "") : "python";
+    return { name: python ? python.split(/[\\/]/).pop().replace(/\.exe$/i, "") : "python", command: python, prefix: [] };
+  },
+
+  // the skill's script the agent runs: in the skill folder Claude Code finds (claudeSkillDir), or for Codex in its skills
+  // folder, ~/.agents/skills or the data directory's .agents/skills; null when none holds SKILL.md and scripts/scholium.py
+  async skillScript(agent) {
+    let dirs = [];
+    if (agent === "codex") {
+      const home = this.home();
+      dirs = [this.skillsDir("codex"), home ? PathUtils.join(home, ".agents", "skills") : "", PathUtils.join(Zotero.DataDirectory.dir, ".agents", "skills")]
+        .filter(Boolean).map(d => PathUtils.join(d, "zotero-scholium"));
+    } else {
+      const dir = await this.claudeSkillDir();
+      if (dir) dirs = [dir];
+    }
+    for (const dir of dirs) {
+      const script = PathUtils.join(dir, "scripts", "scholium.py");
+      if ((await this.exists(PathUtils.join(dir, "SKILL.md"))) && (await this.exists(script))) return script;
+    }
+    return null;
   },
 
   // uv on the agent's PATH and its version: the skill's script then runs as `uv run`, which provides Python and PyMuPDF.
