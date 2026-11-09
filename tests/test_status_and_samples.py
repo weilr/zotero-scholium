@@ -108,6 +108,7 @@ def test_status_lists_matching_items_and_reports_failures(zotero, capsys, monkey
     assert code == 1 and ("HTTP 404: the item was not found in My Library: check the key with status --query; for an item in a "
                           "group library, give its group (status and samples --group ID, group_id in the configuration)") in out["error"]
     monkeypatch.setattr(cli, "http", lambda *a, **k: (0, {}, "refused"))
+    monkeypatch.setattr(cli, "BASE", cli.zotero_base({}))   # the default port, which the message names (no request is made)
     out, code = run(capsys, "status", "I1")
     assert code == 1 and out["error"] == "Zotero does not answer on 127.0.0.1:23119; start Zotero, then run again"
 

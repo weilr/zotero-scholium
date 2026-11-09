@@ -19,6 +19,8 @@ python scripts/session_usage.py FILE...     # model calls and tokens of Codex ro
 python scripts/sync_local_skills.py DIR...  # after a release: install it into local skill directories (keeps an own SKILL.md; exit 1: review, --ack)
 ```
 
+Tests run with `SCHOLIUM_ZOTERO_PORT=9` and cannot connect to port 23119 (`tests/conftest.py`).
+
 After changing `src/zotero_scholium/cli.py`, run `python scripts/sync_skill_script.py` to update the copy in the skill.
 
 ## Building the plugin
