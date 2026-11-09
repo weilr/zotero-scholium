@@ -239,6 +239,52 @@ const winKey = (h, opts) => {
     }
     facts.check = out;
   }
+
+  // ✕ on a paper's chip: its words name the paper; the focus goes to the next chip's ✕, else the previous one's, else
+  // the box. ✕ on the quote, and on the quote of a question being edited, gives the focus to the box
+  for (const locale of ['zh-CN', 'en-US']) {
+    const h = harness({ locale });
+    h.runner.start('x');
+    const p = await h.pane(h.item1); await settle(40);
+    const pane = p.pane();
+    focusDoc = h.paneDoc;
+    h.runner.takePapers(pane, [{ library: 1, key: 'ATT2', title: 'Paper A' }, { library: 1, key: 'ATT3', title: 'Paper B' },
+                               { library: 1, key: 'ATT4', title: 'Paper C' }], 'ATT1');
+    const drops = () => pane.papersBox.children.slice(1).map(c => c.children.find(n => n.tagName === 'button'));
+    const at = () => { const i = drops().indexOf(h.paneDoc.activeElement); return i >= 0 ? labelOf(drops()[i]) : h.paneDoc.activeElement === pane.input ? 'input' : 'other'; };
+    const f = { labels: drops().map(labelOf), titles: drops().map(b => b.title) };
+    drops()[0].click(); await settle(5);
+    f.first = at();
+    drops()[1].click(); await settle(5);
+    f.last = at();
+    drops()[0].click(); await settle(5);
+    f.none = [at(), pane.papersBox.hidden];
+    pane.quote = h.runner.quoteOf({ text: 'A passage.', page: 2, label: '2' });
+    h.runner.paintPane(pane);
+    h.paneDoc.activeElement = null;
+    pane.quoteBox.children[1].click(); await settle(5);
+    f.quote = [at(), pane.quoteBox.hidden, pane.quote];
+    facts['drop_' + locale] = f;
+    h.runner.stop();
+  }
+  {
+    const conv = 'claude-20261001-120000';
+    const quoted = turn(1, 1000).replace('"question":true', '"question":true,"quote":{"text":"A passage.","page":2,"label":"2"}');
+    const h = harness({ logs: { [DIR + conv + '.jsonl']: quoted, [DIR + 'index.json']: JSON.stringify({ chat: conv, titles: {}, annotation: {} }) } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1); await settle(60);
+    const pane = p.pane();
+    focusDoc = h.paneDoc;
+    const said = () => pane.list.children[0].children[0];
+    said().children.find(c => /edit-prompt/.test(c.className || '')).click();
+    const box = said();
+    const q = box.children.find(c => c.className === 'scholium-prompt-quote');
+    const input = box.children.find(c => c.tagName === 'textarea');
+    h.paneDoc.activeElement = null;
+    q.children[1].click();
+    facts.editQuote = { label: labelOf(q.children[1]), removed: !box.children.includes(q), focus: h.paneDoc.activeElement === input };
+    h.runner.stop();
+  }
   process.stdout.write(JSON.stringify(facts));
 })().catch(e => { process.stderr.write(String(e.stack || e)); process.exit(1); });
 """
@@ -293,6 +339,20 @@ def test_every_symbol_button_has_a_name(facts, locale, more, send, stop, queue, 
     assert f["queue"][0] == queue, "a message while the paper runs is queued: the button's name says so"
     assert f["queued"] == ["⋯", more, more]
     assert f["history"] == ["scholium-button quiet glyph history", "", history, history]
+
+
+@pytest.mark.parametrize("locale, words", [("zh-CN", "不问《{}》"), ("en-US", "Leave out “{}”")])
+def test_a_chips_cross_names_its_paper_and_passes_the_focus_on(facts, locale, words):
+    f = facts["drop_" + locale]
+    assert f["labels"] == [words.format(t) for t in ("Paper A", "Paper B", "Paper C")] and f["titles"] == f["labels"]
+    assert f["first"] == words.format("Paper B"), "the next chip's ✕"
+    assert f["last"] == words.format("Paper B"), "the last one gone: the previous chip's ✕"
+    assert f["none"] == ["input", True], "none left: the box"
+    assert f["quote"] == ["input", True, None]
+
+
+def test_the_cross_of_an_edited_questions_quote_gives_the_focus_to_its_box(facts):
+    assert facts["editQuote"] == {"label": "不引用这段", "removed": True, "focus": True}
 
 
 def test_history_is_a_monochrome_icon():

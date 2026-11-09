@@ -152,9 +152,9 @@ history and the annotation sessions are those of that PDF.
 - ⋯ on the Chat tab holds **Show log** (the conversation's log file), **Personal profile ↗**, **Save as note** and
   **Settings…**; on the Annotations tab **Personal profile ↗**, **Show log**, **Delete annotations**, **Save as note**
   while it shows a session, and **Settings…**. **Save as note** makes the conversation shown a child note of the paper:
-  its title and the date, each question with its quoted passage, and each answer with the agent and model that gave it,
-  formulas as Zotero's note editor sets them. The note is tagged `scholium-chat`, which Annotate again and Delete
-  annotations leave alone, and is selected in the library.
+  the heading “Scholium conversation: <paper title>” and the date, each question with its quoted passage, and each
+  answer with the agent and model that gave it, formulas as Zotero's note editor sets them. The note is tagged
+  `scholium-chat`, which Annotate again and Delete annotations leave alone, and is selected in the library.
   **Settings…** opens the Scholium page of Zotero's settings.
 
 **Chat tab**
@@ -316,7 +316,8 @@ Every process the plugin starts gets `SCHOLIUM_ZOTERO_PORT`, the port of this Zo
 (`httpServer.port`), which the skill's script uses in place of 23119.
 
 Claude Code, Codex, Python and uv are looked for on the agents' PATH, which their processes also get: on macOS and
-Linux the PATH of the user's login shell (`$SHELL`, else `/bin/zsh`, read once a session) before Zotero's, then
+Linux the PATH of the user's login shell (`$SHELL`, else `/bin/zsh`, read once a session; not used when the shell has
+not printed it after 5 s) before Zotero's, then
 `~/.local/bin` and `~/.cargo/bin` when they exist; on Windows Zotero's PATH and `%USERPROFILE%\.local\bin`. Claude
 Code and Codex are also looked for in their usual install folders (see the notes for plugin authors for Codex).
 

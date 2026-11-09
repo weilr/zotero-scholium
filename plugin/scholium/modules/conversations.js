@@ -1921,7 +1921,8 @@ Object.assign(ScholiumRunner, {
     } catch (e) {}
   },
 
-  // the other papers of the chat's conversation, as chips above its box; ✕ leaves one out of the next messages
+  // the other papers of the chat's conversation, as chips above its box; ✕ leaves one out of the next messages and gives
+  // the focus to the next chip's ✕, else the previous one's, else the box
   paintPapers(pane) {
     const list = pane.tab === "chat" ? pane.others || [] : [];
     this.show(pane.papersBox, list.length > 0);
@@ -1933,24 +1934,30 @@ Object.assign(ScholiumRunner, {
     const lead = doc.createElement("span");
     lead.className = "scholium-papers-lead";
     lead.textContent = this.text("papersLead");
-    const chips = list.map(ref => {
+    const drops = [];
+    const chips = list.map((ref, i) => {
       const chip = doc.createElement("span");
       chip.className = "scholium-paper";
       const title = doc.createElement("span");
       title.className = "scholium-paper-title";
       title.textContent = ref.title || ref.key;
       chip.title = ref.title || ref.key;
-      const drop = this.iconButton(doc, "close", this.text("paperRemove"), () => {
+      const drop = this.iconButton(doc, "close", this.text("paperRemove", ref.title || ref.key), () => {
         pane.others = (pane.others || []).filter(r => r !== ref);
         this.paintPapers(pane);
+        const left = pane.paperDrops || [];
+        try { (left[Math.min(i, left.length - 1)] || pane.input).focus(); } catch (e) {}
       });
+      drops.push(drop);
       chip.append(title, drop);
       return chip;
     });
+    pane.paperDrops = drops;
     pane.papersBox.replaceChildren(...(list.length ? [lead] : []), ...chips);
   },
 
-  // the passage that goes with the next message, above the box of the chat tab
+  // the passage that goes with the next message, above the box of the chat tab; ✕ takes it away and gives the focus to
+  // the box
   paintQuote(pane) {
     const q = pane.tab === "chat" ? pane.quote : null;
     this.show(pane.quoteBox, !!q);
@@ -1961,7 +1968,11 @@ Object.assign(ScholiumRunner, {
     const text = pane.doc.createElement("span");
     text.className = "scholium-quote-text";
     text.textContent = this.quoteLabel(q);
-    const drop = this.iconButton(pane.doc, "close", this.text("quoteRemove"), () => { pane.quote = null; this.paintQuote(pane); });
+    const drop = this.iconButton(pane.doc, "close", this.text("quoteRemove"), () => {
+      pane.quote = null;
+      this.paintQuote(pane);
+      try { pane.input.focus(); } catch (e) {}
+    });
     pane.quoteBox.replaceChildren(text, drop);
   },
 

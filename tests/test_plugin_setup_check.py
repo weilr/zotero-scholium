@@ -72,6 +72,12 @@ SCENARIOS = r"""
     const r = await run(good({ auth: 'HOLD' }), async (seen, h) => { during = { ids: seen.map(l => l.id), kills: h.log.checkKills }; h.fire(); });
     facts.claudeHeld = { during, lines: of(r, 'claude'), kills: r.h.log.checkKills, ids: r.lines.map(l => l[0]) };
   }
+  // its output never ends, not even when it is killed (a child it started holds it): the check ends after CHECK_MS all the same
+  {
+    let during = null;
+    const r = await run(good({ auth: 'OPEN' }), async (seen, h) => { during = { ids: seen.map(l => l.id), timers: h.live() }; h.fire(); });
+    facts.claudeOpen = { during, lines: of(r, 'claude'), kills: r.h.log.checkKills, ids: r.lines.map(l => l[0]) };
+  }
 
   // Codex
   const codexCases = {
@@ -325,6 +331,12 @@ def test_claude_codes_answer_is_waited_for_and_killed(facts):
     assert c["lines"] == [["claude", "unknown", "Claude Code", "登录状态未知（claude auth status 没有回答）。"]]
     assert c["kills"] == 1
     assert c["ids"] == ["localApi", "claude", "claudeSkill", "codex", "codexSkill", "uv", "python", "pymupdf"], "the rest goes on"
+
+
+def test_claude_codes_answer_whose_output_never_ends_is_given_up(facts):
+    c = facts["claudeOpen"]
+    assert c["during"] == {"ids": ["localApi"], "timers": [10000]}
+    assert c["lines"] == facts["claudeHeld"]["lines"] and c["kills"] == 1 and c["ids"] == facts["claudeHeld"]["ids"]
 
 
 def test_codex_signed_out_or_with_a_provider_of_its_own(facts):

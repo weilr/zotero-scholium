@@ -129,7 +129,7 @@ def test_the_first_papers_chat_opens_with_the_others_as_chips(facts):
     f = facts["ask"]
     assert f["selected"] == ["ITEM1"] and f["tab"] == "chat" and f["focused"] is True
     assert f["others"] == [{"library": 1, "key": "ATT2", "title": "Paper ITEM2"}]
-    assert f["chips"] == ["同时问", "Paper ITEM2不问这篇"] and f["annotChips"] is None
+    assert f["chips"] == ["同时问", "Paper ITEM2不问《Paper ITEM2》"] and f["annotChips"] is None
 
 
 def test_the_question_goes_with_every_papers_paper_json(facts):
@@ -141,7 +141,7 @@ def test_the_question_goes_with_every_papers_paper_json(facts):
     assert any("同时涉及下面几篇论文" in l and "[#123] 只用于上面这篇" in l for l in prompt)
     assert "- /data/tmp/scholium/ATT2/paper.json（Paper ITEM2）" in prompt
     assert first["logged"] == [[{"library": 1, "key": "ATT2", "title": "Paper ITEM2"}]], "the log names the other papers"
-    assert first["chips"] == ["同时问", "Paper ITEM2不问这篇"] and first["convs"] == 1, "one conversation, the first paper's"
+    assert first["chips"] == ["同时问", "Paper ITEM2不问《Paper ITEM2》"] and first["convs"] == 1, "one conversation, the first paper's"
 
 
 def test_later_messages_keep_the_papers(facts):
@@ -149,7 +149,7 @@ def test_later_messages_keep_the_papers(facts):
     assert s["resumed"] is True and s["convs"] == 1
     assert "- /data/tmp/scholium/ATT2/paper.json（Paper ITEM2）" in s["prompt"]
     assert s["logged"][-1] == [{"library": 1, "key": "ATT2", "title": "Paper ITEM2"}]
-    assert facts["ask"]["redrawn"] == ["同时问", "Paper ITEM2不问这篇"], "the conversation shown again shows its papers"
+    assert facts["ask"]["redrawn"] == ["同时问", "Paper ITEM2不问《Paper ITEM2》"], "the conversation shown again shows its papers"
 
 
 def test_a_paper_left_out_stays_out(facts):
@@ -164,10 +164,10 @@ def test_english_and_a_paper_without_its_pdf(facts):
     assert any(l.startswith("The question is also about the papers below.") for l in e["prompt"])
     assert "- /data/tmp/scholium/ATT3/paper.json (Second PDF)" in e["prompt"]
     assert not any("ATT2" in l for l in e["prompt"]), "a paper whose PDF is gone is left out"
-    assert e["chips"] == ["Also about", "Paper ITEM2Leave this paper out", "Second PDFLeave this paper out"]
+    assert e["chips"] == ["Also about", "Paper ITEM2Leave out “Paper ITEM2”", "Second PDFLeave out “Second PDF”"]
 
 
 def test_a_section_drawn_already_takes_the_papers(facts):
     d = facts["drawn"]
-    assert d["chips"] == ["同时问", "Paper ITEM2不问这篇"] and d["pending"] == 0 and d["tab"] == "chat"
+    assert d["chips"] == ["同时问", "Paper ITEM2不问《Paper ITEM2》"] and d["pending"] == 0 and d["tab"] == "chat"
     assert facts["none"] == {"returned": False, "alerts": ["选中的论文在这台电脑上都没有 PDF 文件。"]}
