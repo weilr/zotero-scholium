@@ -219,7 +219,8 @@ None of these can be turned off.
   guard/  chain/                            the guard (port.txt, redirects.txt), the chain test's files
   watch23119-all.txt  watch23119.txt        the watcher's logs
   probe-config.json  chain-request.json  chain-done.json
-  shots/facts.json  shots/db.json           what the probe saw; the annotations and notes in the database
+  shots/facts.json  shots/db.json           what the probe saw (with the click, and the live line's words and step each
+                                            time they change); the annotations and notes in the database
   shots/prompt-1.txt  shots/conv-*.jsonl    the prompt and the conversation logs
   data/tmp/scholium/<key>/                  the run's own folder: config.json, sentences.txt, conversations/
   profile/  data/  appdata/  temp/  zotero-debug.txt

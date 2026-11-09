@@ -53,6 +53,18 @@ async function finalReply(att) {
   }
   return out;
 }
+// the live line's words and the running state's step ("step i/n ...", the tooltip's), each time they change (digits aside)
+async function sampleLive(box, until) {
+  let last = null;
+  while (!until()) {
+    let words = "", title = "";
+    try { const w = box && box.querySelector(".scholium-working"); words = w ? txt(w) : ""; } catch (e) {}
+    try { title = R().job ? R().runningTitle() : ""; } catch (e) {}
+    const key = (words + " | " + title).replace(/\d+/g, "#");
+    if (key !== last) { last = key; line("live", { words, title }); }
+    await delay(500);
+  }
+}
 // the run's API messages so far: the distinct assistant message ids in its annotation logs
 async function apiMessages(att) {
   const ids = new Set();
@@ -186,6 +198,9 @@ async function main() {
     await showTab(box, "annot");
     if (CFG.extra) typeIn(q(box, ".scholium-input"), CFG.extra);
     await delay(400);
+    line("clicked", {});
+    let sampled = false;
+    const sampler = sampleLive(box, () => sampled);
     await realClick(annotGo(box));
     const s = await started(30000);
     line("started", { started: !!s });
@@ -199,6 +214,8 @@ async function main() {
       if (!stopped && await stopAsked()) { line("stop", { reason: "usd" }); try { r.cancel(); } catch (e) {} stopped = "usd"; }
       await delay(3000);
     }
+    sampled = true;
+    await sampler;
     await delay(3000);
     line("ended", { seconds: Math.round((Date.now() - t0run) / 1000), stopped, messages: await apiMessages(D.att) });
     line("card", { cards: cards(box), title: txt(q(box, ".scholium-card-title")), nums: qa(box, ".scholium-card-nums > div").map(txt), usage: txt(q(box, ".scholium-card-usage")) });

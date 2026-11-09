@@ -204,6 +204,13 @@ def test_the_probe_cancels_a_run_given_a_budget_or_another_port():
     assert "chain-request.json" in probe and "if (!chainOk)" in probe
 
 
+def test_the_probe_records_the_click_and_the_live_line():
+    probe = open(os.path.join(SMOKE, "probe", "live.js"), encoding="utf8").read()
+    assert probe.index('line("clicked"') < probe.index("await realClick(annotGo(box))")   # the pre-run's time: click to Claude Code's args
+    assert 'line("live", { words, title })' in probe and ".scholium-working" in probe and "runningTitle()" in probe
+    assert "sampled = true;\n    await sampler;" in probe   # the sampler ends with the run
+
+
 # ---- the probe ----
 def assembled():
     with open(os.path.join(SMOKE, "probe", "bootstrap.js"), encoding="utf8") as f1, open(os.path.join(SMOKE, "probe", "live.js"), encoding="utf8") as f2:
