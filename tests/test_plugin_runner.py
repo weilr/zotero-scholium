@@ -3833,7 +3833,7 @@ def test_annotate_after_a_question_opens_a_session_of_its_own(facts):
         "an annotation that starts shows on its own tab, its dot on the state line"
     c = facts["askThenCodex"]
     assert c["claudeCalls"] == 1 and c["threads"] == ["thread/start"] and c["conversations"] == 2, "Codex starts a conversation of its own"
-    assert c["text"] == "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论、页边批注、阅读笔记，按画像和默认值。"
+    assert c["text"] == "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论（论文本身是中文时不加评论）、页边批注、阅读笔记，按画像和默认值。"
     assert c["entries"][0] == "批注这篇" and c["entries"][-1] == CODEX_CARD[1][:30] and "这篇怎么估计后验？" not in c["entries"]
     assert c["placeholder"] == follow
 
@@ -3917,7 +3917,7 @@ def test_conversations_of_earlier_versions_and_the_history_given(facts):
     assert h["boundary"] == [False, True], "excerpts from the eleventh exchange on"
     a = facts["annotateAgain"]
     assert a == {"conversations": 2, "threads": ["thread/start"], "runs": ["批注这篇"],
-                 "text": "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论、页边批注、阅读笔记，按画像和默认值。"}
+                 "text": "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论（论文本身是中文时不加评论）、页边批注、阅读笔记，按画像和默认值。"}
     f = facts["handedFollowUp"]
     assert f["handed"] == ["S1", "AdLN的作用是什么", True, True] and f["resumed"] is True
     assert f["prompt"].startswith("下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。") and "AdLN的作用是什么" in f["prompt"]
@@ -4071,7 +4071,7 @@ def test_a_question_and_its_annotation_go_on_after_a_limit_and_an_update(facts):
                              "prompt": "使用 zotero-scholium 技能读下面这篇论文（status 给出题录，extract 给出正文），回答用户在 Zotero 里提的问题。",
                              "resume": False}
     assert u["annotateSent"] == {"handed": [False, True, "", None, False],
-                                 "prompt": "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论、页边批注、阅读笔记，按画像和默认值。",
+                                 "prompt": "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论（论文本身是中文时不加评论）、页边批注、阅读笔记，按画像和默认值。",
                                  "resume": False}
     assert u["annotateAnswered"] == {"handed": [False, False, "", "Q1", True], "prompt": "插件更新打断了上面的任务。请从中断的地方继续完成，规则不变。",
                                      "resume": True}

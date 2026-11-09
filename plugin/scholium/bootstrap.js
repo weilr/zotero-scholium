@@ -1129,7 +1129,7 @@ var ScholiumRunner = {
     if (job.say) return this.questionPrompt(job, own);
     if (this.zh()) {
       return [
-        "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论、页边批注、阅读笔记，按画像和默认值。",
+        "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论（论文本身是中文时不加评论）、页边批注、阅读笔记，按画像和默认值。",
         "",
         `- 条目 key：${job.parentKey}`,
         `- 附件 key：${job.att.key}`,
@@ -1146,7 +1146,7 @@ var ScholiumRunner = {
       ].join("\n");
     }
     return [
-      "Use the zotero-scholium skill to annotate the whole paper below: key-sentence highlights with translation comments, margin notes, and a reading note, following the profile and the defaults.",
+      "Use the zotero-scholium skill to annotate the whole paper below: key-sentence highlights with translation comments (none when the paper is already in the user's language), margin notes, and a reading note, following the profile and the defaults.",
       "",
       `- Item key: ${job.parentKey}`,
       `- Attachment key: ${job.att.key}`,

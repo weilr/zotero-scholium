@@ -31,7 +31,7 @@ English | [中文](README.zh-CN.md)
 <td><img src="docs/images/f-highlights.webp" alt="A paragraph with yellow, red and green highlights"></td>
 </tr>
 <tr>
-<td><b>A translation for every highlight</b><br>Each highlight's comment translates its sentence, and the sidebar shows the two together.</td>
+<td><b>A translation for every highlight</b><br>Each highlight's comment translates its sentence, and the sidebar shows the two together. A paper already in your language gets highlights without comments.</td>
 <td><img src="docs/images/f-translations.webp" alt="Two highlight cards in the sidebar, each with the English sentence and its Chinese translation"></td>
 </tr>
 <tr>

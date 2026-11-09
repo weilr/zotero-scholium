@@ -31,7 +31,7 @@
 <td><img src="docs/images/f-highlights.webp" alt="一段带黄、红、绿三色高亮的正文"></td>
 </tr>
 <tr>
-<td><b>每条高亮附译文</b><br>高亮的评论就是这句话的译文，侧栏里原句和译文上下对照。</td>
+<td><b>每条高亮附译文</b><br>高亮的评论就是这句话的译文，侧栏里原句和译文上下对照。论文本身是你的语言时，高亮不加评论。</td>
 <td><img src="docs/images/f-translations.webp" alt="侧栏里的两张高亮卡片，各有英文原句和中文译文"></td>
 </tr>
 <tr>
