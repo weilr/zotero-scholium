@@ -133,7 +133,7 @@ def test_the_chat_menu_saves_the_conversation_as_a_child_note(facts):
 
 def test_the_notes_html(facts):
     html = facts["chat_zh-CN"]["saved"][0]["html"]
-    assert html.startswith("<h1>Scholium 对话：Paper ITEM1</h1>\n<p>Scholium · 2026-11-01</p>")
+    assert html.startswith("<h1>Scholium 对话：Paper ITEM1</h1>\n<p>2026-11-01</p>")
     # the question with its quoted passage, escaped, and its line breaks
     assert "<blockquote><p>p.3 · A &lt;quoted&gt; passage.</p></blockquote>\n<p><strong>问：</strong> 问题1<br>第二行</p>" in html
     # the answer: who gave it, then its Markdown as the transcript sets it
