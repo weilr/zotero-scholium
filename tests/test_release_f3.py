@@ -81,7 +81,7 @@ const all = n => [n, ...((n && n.children) || []).filter(c => c && c.tagName).fl
     h.runner.pendingQuotes.clear();
     fire('ATT1', {}, { primaryViewSelectionPopup: passage('In the first view.', '3'), secondaryViewSelectionPopup: passage('In the second view.', '5') }, false)[0].onCommand();
     await settle(30);
-    const secondary = h.runner.pendingQuotes.get('ATT1');
+    const secondary = (h.runner.pendingQuotes.get('ATT1') || {}).quote;
     // Zotero 10's view: cleared, then drawn again
     const ten = { cleared: 0, rendered: 0 };
     fire('ATT1', { clearSelection() { ten.cleared++; }, _render() { ten.rendered++; } })[0].onCommand();

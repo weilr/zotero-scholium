@@ -442,7 +442,7 @@ def test_codex_mcp_server_names_are_kept_and_no_run_waits_long_for_them(facts):
 def test_codex_default_model_is_named_once_a_thread_ran_it(facts):
     d = facts["codexDefault"]
     assert d["asked"] == ["initialize", "initialized", "model/list"]
-    assert d["before"] == "Codex 默认" and d["effortsBefore"] == ["low", "medium", "high", "xhigh", "max"], "no model named before"
+    assert d["before"] == "Codex 默认" and d["effortsBefore"] == ["low", "medium", "high", "xhigh"], "no model named before; Codex has no max"
     assert d["after"] == "Codex 默认（GPT-6-Astra）" and d["pref"] == "gpt-6-astra", "the one a new thread ran"
     assert d["efforts"] == ["low", "medium", "high", "xhigh", "max", "ultra"], "its levels"
     assert d["next"] == "Codex 默认（GPT-6-Astra）"
