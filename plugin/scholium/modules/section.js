@@ -201,11 +201,12 @@ Object.assign(ScholiumRunner, {
     if (event.type === "scholium" && event.subtype === "continue") {
       out.push({ kind: "info", text: this.text(event.reason === "update" ? "continuedUpdate" : event.reason === "throttle" ? "continuedThrottle" : "continued") });
     }
-    // the end of a run without a result of its own: cancelled, failed before a result, interrupted
+    // the end of a run without a result of its own: cancelled, failed before a result, interrupted; with how long it ran
     if (event.type === "scholium" && event.subtype === "end") {
       out.push(Object.assign({ kind: "final", text: String(event.text || "").trim() || this.text(event.outcome || "failed"), error: true },
                              event.outcome === "cancelled" ? { cancelled: true } : {},
-                             this.AGENTS.includes(event.skill) ? { skill: event.skill } : {}));
+                             this.AGENTS.includes(event.skill) ? { skill: event.skill } : {},
+                             Number.isFinite(event.duration_ms) && event.duration_ms >= 0 ? { duration: event.duration_ms } : {}));
     }
     if (event.type === "scholium" && event.subtype === "retry") out.push({ kind: "info", text: this.text("retrying") });
     // the numbers an annotation's card shows, as counted when it ended

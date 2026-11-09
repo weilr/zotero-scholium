@@ -173,8 +173,9 @@ history and the annotation sessions are those of that PDF.
 - The user's words are a bubble on the right. While a run goes on, one blue line says "Working for 12s" (「正在处理 12 秒」)
   with a light sweeping across it (the sweep stops when the system asks for reduced motion), and the answer appears as
   it is written; once the answer is there, the steps fold into "Worked for 24s ›" (「已处理 24 秒 ›」), which opens them as
-  Claude Code shows them; a run without steps shows "Worked for 24s" without ›. Every finished run shows it, except one
-  that was interrupted or stopped while it waited for a usage limit or a second try, which shows "Worked ›"
+  Claude Code shows them; a run without steps shows "Worked for 24s" without ›. Every finished run shows it, an
+  interrupted one with the duration its log's end line gives, except one stopped while it waited for a usage limit or a
+  second try, which shows "Worked ›"
   (「已处理 ›」) when it has steps and nothing otherwise. The steps are: each tool call with its command or file, and the
   first lines of each result (errors in red).
   A fold opened or closed by hand stays so. Under an answer, a line gives the agent, the model and the time it ended,

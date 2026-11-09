@@ -1376,6 +1376,8 @@ Object.assign(ScholiumRunner, {
       if (!run || (e.kind === "prompt" && !bare)) open(0);
       bare = false;
       run.last = e;
+      // a run's end line gives how long it ran, for a run whose log has no time line after it (an interrupted one)
+      if (e.kind === "final" && e.duration >= 0 && run.start > 0 && !run.end) run.end = run.start + e.duration;
       if (e.kind === "prompt") run.prompt = run.turn = e;
       else if (e.kind === "tool" || e.kind === "result") { run.steps.push(...run.answer, e); run.answer = []; }
       else if (e.kind === "text") run.answer.push(e);
