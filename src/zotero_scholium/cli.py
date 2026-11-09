@@ -1926,9 +1926,10 @@ def api_apply(cfg, out, api):
     result = {"ok": False, "backend": "api", "removed": 0, "kept": kept,
               "noteCreated": False, "notesTrashed": 0, "created": {},
               "createdKeys": [], "noteKeys": [], "failed": []}
-    victims = []
-    # (1) Child note: old notes stay until all new content has been created; then, with note_replace, the tool's
-    #     earlier notes go to the trash. A tool note with the same text is not written again.
+    victims, note = [], None
+    # (1) Child note: the local API has no transaction, so it is written after every annotation was accepted (3); old
+    #     notes stay until then, and with note_replace the tool's earlier notes then go to the trash. A tool note with
+    #     the same text is not written again.
     if cfg.get("note_html") and cfg.get("item_key"):
         html = read_text(cfg["note_html"])
         prefix = cfg.get("note_title_prefix") or cfg.get("note_title") or ""
@@ -1943,12 +1944,7 @@ def api_apply(cfg, out, api):
         else:
             titles = [note_title_from_html(c["data"].get("note", "")) for c in existing if c not in victims]
             html, _ = version_note(html, prefix, titles)
-            keys, failed = api.create([{"itemType": "note", "parentItem": cfg["item_key"], "note": html, "tags": [{"tag": TAG}]}])
-            result["noteKeys"] = keys
-            result["noteCreated"] = not failed and len(keys) == 1
-            if not result["noteCreated"]:
-                result["failed"] = failed or [{"message": "note creation returned no unique item key"}]
-                return result
+            note = {"itemType": "note", "parentItem": cfg["item_key"], "note": html, "tags": [{"tag": TAG}]}
     # (2) annotations
     items = []
     for a in out:
@@ -1969,6 +1965,20 @@ def api_apply(cfg, out, api):
     for a in out:
         counts[a["type"]] = counts.get(a["type"], 0) + 1
     result["created"] = counts
+    # (3) the note; when it is not written, the new annotations are removed again, so that a failed write leaves nothing
+    if note:
+        keys, failed = api.create([note])
+        result["noteKeys"] = keys
+        result["noteCreated"] = not failed and len(keys) == 1
+        if not result["noteCreated"]:
+            result["failed"] = failed or [{"message": "note creation returned no unique item key"}]
+            try:
+                if created_keys or keys:
+                    api.delete(created_keys + keys)
+                result.update(createdKeys=[], noteKeys=[], created={}, undone="the new annotations were removed again, since the note was not written")
+            except Exception as e:
+                result["undoError"] = f"the new annotations stay, since removing them failed: {e}; run --list before running again"
+            return result
     # Do not remove earlier work if either creation call failed.
     try:   # the new items are written; a failure here leaves earlier ones in place
         result["removed"] = api.delete(to_delete) if to_delete else 0

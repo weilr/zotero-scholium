@@ -48,6 +48,8 @@
 - Annotate again on one PDF of a paper no longer moves to the trash the reading note of another PDF of it that is being
   annotated or waits.
 - A write that fails no longer leaves a new reading note behind.
+- Through Zotero 10's local API, the reading note is written after every annotation was accepted, so annotations that
+  are refused leave no new note; a note that is refused takes the new annotations back.
 - Colours given in upper case are written in lower case, which Zotero requires.
 - An edited question keeps its Undo while a dialog is open.
 - A stopped or updated plugin starts no run, and a queued message is handed over to the new copy.
