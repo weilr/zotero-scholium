@@ -32,6 +32,7 @@ uv run scholium.py …                     # uv 读取脚本内嵌的元数据�
    scholium extract --pdf paper.pdf --sentences out/sentences.json --out out/sentences.txt
    ```
 
+   文件开头是行号索引：每页从哪一行开始；找得到时，还有正文在哪一行结束、参考文献和其后的附录从哪一行开始。
    没有文字层的 PDF（未做 OCR 的扫描件）会让 `extract` 以退出码 3 停下，并输出 JSON `error`，提示先做 OCR。
 
 3. **编写配置文件。** 完整模板见[配置模板](../skills/zotero-scholium/examples/config.template.json)。
@@ -68,7 +69,7 @@ uv run scholium.py …                     # uv 读取脚本内嵌的元数据�
    scholium --config config.json --list     # 各类型/颜色数量、非本工具的注释、笔记标题（--full：全部输出）
    ```
 
-   每次运行都生成 `annotations.json`、备用的 `create_annotations.js` 以及 `preview_pages` 所列页面的 `preview_p<N>.png`（默认不生成），并报告 `missed`（附该页上最接近的原句）、`style_warnings`、`translation_warnings`、`layout_warnings` 以及运行前后 PDF 的哈希。`missed`、`style_warnings`（`core_count` 除外）或 `layout_warnings` 不为空时 `--apply` 不写入（`--accept KIND`、`--allow-missed`、`--allow-warnings`）。页边批注放不下时，单栏页面先换到另一侧页边，仍放不下则改为便签；页首或页尾的文字放不下时自动缩小字号，最小 8 pt，仍放不下则改为便签。
+   每次运行都生成 `annotations.json`、备用的 `create_annotations.js` 以及 `preview_pages` 所列页面的 `preview_p<N>.png`（默认不生成），并报告 `missed`（附该页上最接近的原句）、`style_warnings`、`translation_warnings`、`layout_warnings` 以及运行前后 PDF 的哈希；没有内容的字段（包括未变的 PDF 的哈希）不列出，加 `--verbose` 时全部列出。`missed`、`style_warnings`（`core_count` 除外）或 `layout_warnings` 不为空时 `--apply` 不写入（`--accept KIND`、`--allow-missed`、`--allow-warnings`）。页边批注放不下时，单栏页面先换到另一侧页边，仍放不下则改为便签；页首或页尾的文字放不下时自动缩小字号，最小 8 pt，仍放不下则改为便签。
 
    `--backend auto`（默认）依次经 Scholium 插件、Zotero 10 的本地 API、旧版插件写入，都不可用时生成 JavaScript 文件。本地 API 关闭时转到下一个通道，报告中说明原因；经本地 API 的读取会指出打开它的设置。本地 API 和 JavaScript 文件与插件一样，在写入任何内容之前拒绝不是该附件父条目的 `item_key`。注释使用 PDF 自身的页码标签（即 Zotero 显示的页码，如 `iv`），`sortIndex` 按阅读顺序编排，Zotero 因此按正文顺序列出注释；报告中的页码仍是从 1 开始的页序号。
 

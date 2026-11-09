@@ -52,6 +52,8 @@ Each Claude Code run:
   directory (`skills/zotero-scholium` in `CLAUDE_CONFIG_DIR`, else in `~/.claude`) added when it is there;
 - runs without the user's MCP servers and hooks (`--strict-mcp-config`, `disableAllHooks`); the
   user's skills stay;
+- has only the tools it uses (`--tools`): Skill, Bash, PowerShell, Read, Write, Edit, Grep and Glob, and in a
+  chat also WebSearch and WebFetch;
 - logs its events, without the streaming deltas, to the conversation's log,
   `<data dir>/tmp/scholium/<attachment key>/conversations/chat-<time>.jsonl` (an annotation session's
   `annotate-claude-<time>.jsonl`); a tool's result is kept without

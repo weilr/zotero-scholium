@@ -87,7 +87,7 @@ def test_invalid_cache_blocks_ids_before_matching_or_applying(tmp_path, capsys, 
         cli.main(["--config", str(path), "--apply", "--ignore-existing", "--backend", "js"])
     report = json.loads(capsys.readouterr().out)
     assert exc.value.code == 2 and report["applied"] is False
-    assert report["highlights"] == 0
+    assert "highlights" not in report, "none"
     assert "extract --sentences" in report["missed"][0]["reason"]
     assert "fallback" not in report, "invalid caches must block before backend selection"
 

@@ -121,7 +121,7 @@ def test_apply_is_blocked_by_style_warnings_and_reports_pdf_hash(tmp_path, capsy
            "highlights": [{"page": 1, "text": "Foundation models have transformed language processing.", "comment": "基础模型 $x$"}]}
     cp = tmp_path / "config.json"; json.dump(cfg, open(cp, "w", encoding="utf8"))
     with pytest.raises(SystemExit) as e:
-        cli.main(["--config", str(cp), "--apply", "--backend", "js", "--ignore-existing"])
+        cli.main(["--config", str(cp), "--apply", "--backend", "js", "--ignore-existing", "--verbose"])
     rep = json.loads(capsys.readouterr().out)
     assert e.value.code == 2 and rep["applied"] is False and "style warnings" in rep["apply_error"]
     assert rep["pdf_sha256"]["unchanged"] is True and len(rep["pdf_sha256"]["before"]) == 64
@@ -130,7 +130,10 @@ def test_apply_is_blocked_by_style_warnings_and_reports_pdf_hash(tmp_path, capsy
     with pytest.raises(SystemExit) as e:
         cli.main(["--config", str(cp), "--apply", "--backend", "js", "--ignore-existing"])
     rep = json.loads(capsys.readouterr().out)
-    assert rep["style_warnings"] == [] and rep["backend"] == "js" and rep["applied"] is False and "fallback" in rep
+    assert "style_warnings" not in rep and rep["backend"] == "js" and rep["applied"] is False and "fallback" in rep
+    assert "pdf_sha256" not in rep and "js" not in rep and rep["fallback"].endswith("create_annotations.js"), \
+        "the hashes of an unchanged PDF and the file's path twice are left out"
+    assert rep["backend_reason"], "a write that did not happen says why"
 
 
 def test_extract_main_writes_numbered_listing_and_json(tmp_path, capsys):
@@ -139,12 +142,91 @@ def test_extract_main_writes_numbered_listing_and_json(tmp_path, capsys):
     cli.extract_main(["--pdf", str(fp), "--out", str(out), "--sentences", str(js)])
     assert "sentences" in capsys.readouterr().out
     listing = out.read_text(encoding="utf8"); data = json.load(open(js, encoding="utf8"))
-    assert listing.startswith("--- p.1 ---") and "1 | " in listing
+    assert listing.startswith("Index (line numbers of this file)\n") and "1 | " in listing
+    assert listing.split("\n\n", 1)[1].startswith("--- p.1 ---"), "the listing follows the index"
     assert data["pdf"] == str(fp) and data["sentences"][0]["id"] == 1
     cli.extract_main(["--pdf", str(fp), "--out", str(out), "--sentences", str(js), "--pages", "2"])
     part = out.read_text(encoding="utf8"); capsys.readouterr()
     first_id = int(next(ln for ln in part.split("\n") if " | " in ln).split(" | ")[0])
-    assert part.startswith("--- p.2 ---") and "--- p.1 ---" not in part and first_id > 1, "ids keep counting over the whole document"
+    assert part.split("\n\n", 1)[1].startswith("--- p.2 ---") and "--- p.1 ---" not in part and first_id > 1, \
+        "ids keep counting over the whole document"
+    assert "pages: p.2 4\n" in part, "the index covers the pages listed"
+
+
+def _paper_with_appendix(path, before_refs=None):
+    """Two pages of main text, the references, an appendix of two sections; optionally a main-text section called like an
+    appendix before the references."""
+    pages = [[("1 Introduction", 13), ("The method improves the result on every benchmark.", 10)],
+             [("2 Method", 13), ("Each element is encoded independently of the others.", 10)]
+             + ([(before_refs, 13), ("These runs repeat the main experiment twice.", 10)] if before_refs else []),
+             [("References", 13), ("[1] A. Author. A paper. 2020.", 9)],
+             [("Appendix A Proofs", 13), ("The proof of the first theorem follows here.", 10)],
+             [("B Further results", 13), ("More ablations are shown in this table.", 10)]]
+    doc = pymupdf.open()
+    for lines in pages:
+        page = doc.new_page(width=612, height=792)
+        for i, (text, size) in enumerate(lines):
+            page.insert_text((72, 100 + 30 * i), text, fontsize=size)
+    doc.save(str(path)); doc.close()
+    return str(path)
+
+
+def _index(text):
+    """The index of a listing file as {name: value} and the file's lines."""
+    lines = text.split("\n")
+    head = lines[:lines.index("")]
+    assert head[0] == "Index (line numbers of this file)"
+    return dict(line.split(": ", 1) for line in head[1:]), lines
+
+
+def test_the_listing_file_starts_with_an_index_of_its_lines(tmp_path, capsys):
+    fp = _paper_with_appendix(tmp_path / "paper.pdf")
+    js, out = tmp_path / "sentences.json", tmp_path / "sentences.txt"
+    cli.extract_main(["--pdf", fp, "--sentences", str(js), "--out", str(out)])
+    text = out.read_text(encoding="utf8")
+    index, lines = _index(text)
+    assert index == {"main text": "lines 7-15", "references": "line 16 (p.3)", "appendix": "from line 19 (p.4)",
+                     "pages": "p.1 7, p.2 11, p.3 15, p.4 18, p.5 22"}
+    for part in index["pages"].split(", "):
+        page, line = part[2:].split(" ")
+        assert lines[int(line) - 1] == f"--- p.{page} ---", part
+    assert lines[15] == "[references removed]" and lines[18] == "## Appendix A Proofs"
+    assert lines[6:15][2].startswith("1 | The method improves") and lines[14] == "--- p.3 ---", \
+        "the main text ends before the references"
+    items = cli.extract_sentences(fp)
+    assert text.split("\n\n", 1)[1] == cli.render_sentences(items), "the listing after the index is unchanged"
+    # on standard output there is no index
+    capsys.readouterr()
+    cli.extract_main(["--pdf", fp, "--sentences", str(js)])
+    assert capsys.readouterr().out.startswith("--- p.1 ---")
+
+
+def test_the_index_with_the_references_kept_and_without_them(tmp_path, capsys):
+    fp = _paper_with_appendix(tmp_path / "paper.pdf")
+    js, out = tmp_path / "sentences.json", tmp_path / "sentences.txt"
+    cli.extract_main(["--pdf", fp, "--sentences", str(js), "--out", str(out), "--keep-references"])
+    index, lines = _index(out.read_text(encoding="utf8"))
+    ref = int(index["references"].split()[1])
+    assert lines[ref - 1] == "## References" and index["references"].endswith("(p.3)")
+    assert lines[int(index["appendix"].split()[2]) - 1] == "## Appendix A Proofs"
+    # a paper without references: the pages only
+    doc = pymupdf.open()
+    for i in range(2):
+        doc.new_page(width=612, height=792).insert_text((72, 100), f"Page {i + 1} says that the method improves the result.", fontsize=10)
+    plain = tmp_path / "plain.pdf"; doc.save(str(plain)); doc.close()
+    cli.extract_main(["--pdf", str(plain), "--sentences", str(js), "--out", str(out)])
+    index, lines = _index(out.read_text(encoding="utf8"))
+    assert index == {"pages": "p.1 4, p.2 7"} and lines[3] == "--- p.1 ---" and lines[6] == "--- p.2 ---"
+
+
+@pytest.mark.parametrize("heading", ["Supplementary experiments", "Appendix of results"])
+def test_a_section_called_like_an_appendix_before_the_references_is_main_text(tmp_path, capsys, heading):
+    fp = _paper_with_appendix(tmp_path / "paper.pdf", before_refs=heading)
+    js, out = tmp_path / "sentences.json", tmp_path / "sentences.txt"
+    cli.extract_main(["--pdf", fp, "--sentences", str(js), "--out", str(out)])
+    index, lines = _index(out.read_text(encoding="utf8"))
+    assert f"## {heading}" in lines[:int(index["references"].split()[1])]
+    assert lines[int(index["appendix"].split()[2]) - 1] == "## Appendix A Proofs", "the appendix is the one after the references"
     assert json.load(open(js, encoding="utf8"))["sentences"][0]["id"] == 1, "the JSON covers the whole document"
 
 

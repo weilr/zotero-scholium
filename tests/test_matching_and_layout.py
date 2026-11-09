@@ -629,12 +629,12 @@ def test_the_report_lists_bands_set_smaller_and_bands_turned_into_notes(tmp_path
             pass
         return json.loads(capsys.readouterr().out)
     report = report_of(cfg)
-    assert report["layout_warnings"] == [] and report["fitted"][0]["font_size"].startswith("9 -> ") and report["as_notes"] == []
+    assert "layout_warnings" not in report and report["fitted"][0]["font_size"].startswith("9 -> ") and "as_notes" not in report
     long = " ".join(words)
     cfg["summaries"][0]["text"] = long
     report = report_of(cfg, "--apply", "--backend", "js")
-    assert report["as_notes"] == [{"page": "1", "text": long[:60]}] and report["sticky_notes"] == 1 and report["margin_texts"] == 0
-    assert report["layout_warnings"] == [] and report["backend"] == "js", "a band turned into a note does not block --apply"
+    assert report["as_notes"] == [{"page": "1", "text": long[:60]}] and report["sticky_notes"] == 1 and "margin_texts" not in report
+    assert "layout_warnings" not in report and report["backend"] == "js", "a band turned into a note does not block --apply"
 
 
 def _crowded_first_page(pg):
@@ -950,7 +950,8 @@ def test_extract_marks_a_rotated_page(tmp_path, capsys):
     assert "--- p.1 ---\nPage 1 says" in text and "--- p.2 (rotated: not annotatable) ---\nPage 2 says" in text
     cli.extract_main(["--pdf", str(fp), "--sentences", str(tmp_path / "s.json"), "--out", str(tmp_path / "s.txt")])
     listing = (tmp_path / "s.txt").read_text(encoding="utf8")
-    assert listing.startswith("--- p.1 ---\n") and "--- p.2 (rotated: not annotatable) ---\n3 | Page 2 says" in listing
+    assert listing.split("\n\n", 1)[1].startswith("--- p.1 ---\n") and "--- p.2 (rotated: not annotatable) ---\n3 | Page 2 says" in listing
+    assert "pages: p.1 4, p.2 8\n" in listing, "the index names the rotated page's start too"
 
 
 def test_duplicate_sentence_reports_occurrences(tmp_path):
@@ -1099,7 +1100,7 @@ def test_a_margin_box_turned_into_a_sticky_note_does_not_block_apply(tmp_path, c
     with pytest.raises(SystemExit):
         cli.main(["--config", str(cp), "--apply", "--backend", "js", "--ignore-existing"])
     rep = json.loads(capsys.readouterr().out)
-    assert rep["layout_warnings"] == [] and rep["as_notes"] == [{"page": "1", "text": BAND_SENTENCE[:60]}]
+    assert "layout_warnings" not in rep and rep["as_notes"] == [{"page": "1", "text": BAND_SENTENCE[:60]}]
     assert rep["sticky_notes"] == 1 and rep["backend"] == "js"
 
 
