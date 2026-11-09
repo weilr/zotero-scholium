@@ -101,25 +101,25 @@ Every detail is in [plugin/README.md](plugin/README.md).
 
 ## Quick start
 
-You need Zotero 7 or later with its local API turned on (Settings → Advanced → *Allow other applications on this computer to communicate with Zotero*), and Python 3.9+ with PyMuPDF (`pip install pymupdf`).
+You need Zotero 7 or later, and Python 3.9+ with PyMuPDF (`pip install pymupdf`).
 
 ### One click in Zotero
 
 1. Install [Claude Code](https://claude.com/claude-code) or [Codex](https://github.com/openai/codex) and sign in.
-2. Install the skill for it:
-   ```bash
-   npx skills add weilr/zotero-scholium -g -y
-   ```
-   `npx` comes with Node.js. Without it, install the skill from inside Claude Code with `/plugin` (see *Other ways* below),
-   or let the plugin do it: when the agent does not find the skill, the Scholium section offers **Install the skill and retry**.
-3. Download [`scholium.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium.xpi) and install it in Zotero: Tools → Plugins → ⚙ → Install Plugin From File.
-4. Select a paper, open the **Scholium** section and press **Annotate** on its **Annotations** tab. To ask about the paper, type the question on its **Chat** tab and send it.
+2. Download [`scholium.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium.xpi) and install it in Zotero: Tools → Plugins → ⚙ → Install Plugin From File.
+3. Select a paper, open the **Scholium** section and press **Annotate** on its **Annotations** tab. To ask about the paper, type the question on its **Chat** tab and send it.
 
-Zotero Settings → Scholium → **Setup check** shows what is missing and how to fix it.
+The first run asks to turn on Zotero's local API, and offers **Install the skill and retry** when the agent does not have the skill. Zotero Settings → Scholium → **Setup check** shows what is missing and how to fix it.
 
 ### From your agent
 
-Install the skill as above and ask in the conversation:
+Install the skill:
+
+```bash
+npx skills add weilr/zotero-scholium -g -y
+```
+
+`npx` comes with Node.js; Claude Code can also install it with `/plugin` (see below). Turn on Zotero's local API (Settings → Advanced → *Allow other applications on this computer to communicate with Zotero*), then ask in the conversation:
 
 ```
 Annotate "Direct Preference Optimization" in my Zotero library
@@ -143,7 +143,7 @@ Close and reopen the PDF afterwards to see the result. Without the plugin, Zoter
 
 **Updating:** `npx skills update zotero-scholium`, or `/plugin update zotero-scholium@zotero-scholium`. The plugin updates itself through Zotero's add-on updater.
 
-**From Scholium Bridge (0.1.9 or earlier):** Scholium Bridge does not update to Scholium by itself. Install Scholium as in step 3: it removes Scholium Bridge and keeps its settings and conversations; a run under way in Scholium Bridge stops, and its queued messages are not kept.
+**From Scholium Bridge (0.1.9 or earlier):** Scholium Bridge does not update to Scholium by itself. Install Scholium as in step 2: it removes Scholium Bridge and keeps its settings and conversations; a run under way in Scholium Bridge stops, and its queued messages are not kept.
 
 </details>
 
