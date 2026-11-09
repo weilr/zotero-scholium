@@ -99,6 +99,8 @@ the Claude Code or Codex installed on your computer on the paper shown.
 - When an agent reaches its usage limit, only its runs pause, and they go on by themselves after the reset.
 - A Scholium page in Zotero's settings holds the send shortcut, the follow-up behavior, the context ring and the paths
   of Claude Code and Codex.
+- The plugin follows Zotero's language: English, Simplified Chinese, Traditional Chinese, Japanese, Korean, German,
+  French, Spanish, Russian or Portuguese, and the agent writes the translations, notes and answers in it.
 
 Every detail is in [plugin/README.md](plugin/README.md).
 

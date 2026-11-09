@@ -37,7 +37,7 @@
 - With Zotero in Japanese, Korean, German, French, Spanish, Russian, Portuguese or Traditional Chinese, the plugin's
   prompts give the agent that language, so the translations, margin notes, reading note and answers are written in it.
 - The Scholium section, the reader's eye button and the settings page in Traditional Chinese, Japanese, Korean,
-  German, French and Spanish, following Zotero's language.
+  German, French, Spanish, Russian and Portuguese (Brazilian wording, also for Portugal), following Zotero's language.
 
 ### Changed
 
