@@ -19,9 +19,9 @@ English | [中文](README.zh-CN.md)
 
 </div>
 
-<img src="docs/images/hero.webp" alt="A one-click run in Zotero: the extra instructions typed on the Scholium section's Annotations tab, Annotate pressed, the highlights appearing on the page while the agent works, the result card with the numbers counted in Zotero, then the paper with red, green and yellow highlights, purple underlines, blue margin notes and sticky notes, and the translations in the sidebar" width="100%">
+<img src="docs/images/hero-en.webp" alt="A one-click run in Zotero: the Annotations tab opened from the Chat tab, &quot;Pages 1-3 only.&quot; typed as the extra instructions, Annotate pressed, the agent working while the highlights and margin notes appear on page 2, the result card with the numbers counted in Zotero, then the paper with red and yellow highlights and blue margin notes beside the annotation list" width="100%">
 
-<sub>One run of Claude Code (Opus 5.5) on <i>Direct Preference Optimization</i> (CC BY 4.0) with the profile shown below, sped up (it took three and a half minutes). The chat and the profile below come from the same run; the other examples, from an earlier run with that profile.</sub>
+<sub>One run of Claude Code (Opus 5.5) on the first three pages of <i>Direct Preference Optimization</i> (CC BY 4.0) with the default settings, sped up (it took a little over a minute). The paper is in English, the language of this Zotero, so its highlights carry no comments; the examples below come from an earlier run that translated them into Chinese. The chat below asks about the same annotated paper.</sub>
 
 ## Annotations
 
@@ -67,7 +67,7 @@ The agent does a dry run before writing: unmatched sentences, translations that 
 The plugin adds a **Scholium** section to Zotero's item pane, in the library and beside the PDF in the reader. It runs
 the Claude Code or Codex installed on your computer on the paper shown.
 
-<img src="docs/images/f-pane.webp" alt="A passage of page 2 selected and right-clicked, Ask Scholium chosen in the menu: the passage quoted above the Chat tab's box, the question sent, the answer citing the paper's sentences as page chips, a chip's card with Locate, and the cited sentence found on page 4" width="100%">
+<img src="docs/images/f-pane-en.webp" alt="A sentence of page 2 selected and right-clicked, Ask Scholium chosen in the menu: the sentence quoted above the Chat tab's box, the question sent, the answer citing the paper's sentences as page chips, a chip's card with Locate, and the cited sentence found and flashed on page 6" width="100%">
 
 **Annotations tab**
 
