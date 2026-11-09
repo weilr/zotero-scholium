@@ -191,6 +191,8 @@ def test_accept_lets_a_deliberate_exception_through_and_core_count_only_informs(
     ({"highlights": [{"page": 1, "text": SENTENCE, "type": "squiggly"}]}, "highlights[0]: type must be highlight or underline"),
     ({"summaries": [{"page": 1, "place": "top", "text": "t", "fontsize": 9}]}, "unknown key 'fontsize' in summaries[0] (did you mean 'font_size'?)"),
     ({"author": "Me"}, "the 'author' key is not supported"),
+    ({"note_html": "<h1>Note</h1><p>text</p>"}, "note_html must be the path of an existing HTML file, not the HTML itself"),
+    ({"note_html": "no/such/note.html"}, "note_html must be the path of an existing HTML file, not the HTML itself"),
     ({"band_min_font_size": 0}, "band_min_font_size must be a number between 4 and 36"),
     ({"band_min_font_size": "8"}, "band_min_font_size must be a number between 4 and 36"),
     ({"highlights": [{"page": 0, "text": SENTENCE}]}, "highlights[0]: give id, ids, or a 1-based page with text"),

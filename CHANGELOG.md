@@ -40,6 +40,8 @@
 - The step shown while sentences are extracted is no longer the dry run.
 - `"cleanup": "false"` and other values that are not true or false for a boolean key are refused instead of read as
   true. `null` for an optional key stands for its default.
+- A `note_html` that holds the HTML itself, or names no file, is refused with a configuration error instead of a
+  traceback.
 - The local API and the JavaScript file refuse an `item_key` that is not the attachment's parent.
 - With Zotero's local API turned off, the tool falls back to the other write channels.
 - Annotation positions that are not numbers no longer stop a run or the profile.

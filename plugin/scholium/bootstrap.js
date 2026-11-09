@@ -777,8 +777,8 @@ var ScholiumRunner = {
       quoteRemove: zh ? "不引用这段" : "Remove the quote",
       annotEmptyTitle: zh ? "还没有批注这篇" : "Not annotated yet",
       annotOwnTitle: n => zh ? `这篇已有 ${n} 条 Scholium 批注` : `This paper carries ${plural(n, "Scholium annotation", "Scholium annotations")}`,
-      annotEmptyBody: zh ? "高亮重点句并附译文，加页边批注和阅读笔记。"
-                         : "Highlights key sentences with translations, adds margin notes and a reading note.",
+      annotEmptyBody: zh ? "高亮重点句（外文论文附译文），加页边批注和阅读笔记。"
+                         : "Highlights key sentences (translated when the paper is in another language), adds margin notes and a reading note.",
       annotExtraHint: zh ? "附加要求（可不填），例如：只批注第 3–5 页" : "Extra instructions (optional), e.g. only pages 3–5",
       annotFollowUpHint: zh ? "接着这次批注修改，例如：第 5 页那条译文改短" : "Continue this annotation, e.g. shorten the translation on page 5",
       redoInline: (n, notes) => zh ? `重新批注会先删除这篇的 ${n} 条 Scholium 批注${notes ? `，${notes} 篇阅读笔记移到回收站` : ""}（你自己的不动）。`
