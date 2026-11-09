@@ -1168,7 +1168,7 @@ def test_the_settings_page_controls_show_their_words():
     root = ET.fromstring("<root xmlns='%s' xmlns:html='%s'>%s</root>" % (ns["x"], ns["h"], src))
     controls = {"{%s}%s" % (ns["x"], t) for t in ("menuitem", "radio", "checkbox", "button")}
     labelled = [el.get("data-l10n-id") for el in root.iter() if el.tag in controls]
-    assert len(labelled) == 8
+    assert len(labelled) == 9
     picker = re.findall(r'"(scholium-settings-[a-z-]+)"', (PLUGIN / "settings.js").read_text(encoding="utf8"))
     assert picker == ["scholium-settings-claude", "scholium-settings-codex", "scholium-settings-not-found"]
     for locale in ("en-US", "zh-CN"):

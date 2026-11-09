@@ -284,14 +284,16 @@ const CONTENT = require('node:path').join(require('node:path').dirname(process.a
 function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, exitCode = 0, script = null, claudeExists = true, gateFirst = false,
                    home = 'dirsvc', eraseFails = false, logs = {}, models = 'ok', claudeAt = CLAUDE, scripts = [], readFails = false,
                    writeFails = false, codex = {}, logTimes = {}, notes = [], secondPdf = false, failLogWrites = null, stdinFails = false, holdDirs = false,
-                   unreadable = [], unremovable = [], addonManager = null } = {}) {
+                   unreadable = [], unremovable = [], addonManager = null, env = {}, present = [], dirs = {}, auth = 'in', python = {} } = {}) {
   const log = { calls: [], stdin: [], notices: [], alerts: [], confirms: [], kills: 0, menus: [], unregistered: [], listeners: [],
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
                 ftl: [], tabs: [], selected: [], opened: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
                 prefPanes: [], openedPrefs: [], madeDirs: [], trashed: [], versionCalls: [], codexCalls: [], codexProcs: [], codexKills: 0, codexTurns: 0, steers: [],
-                mtimes: Object.assign({}, logTimes), clock: Date.now(), copied: [], removed: [], threads: 0, tmpPaths: [], reads: [], readerOpened: [], navigated: [], finds: [] };
+                mtimes: Object.assign({}, logTimes), clock: Date.now(), copied: [], removed: [], threads: 0, tmpPaths: [], reads: [], readerOpened: [], navigated: [], finds: [],
+                authCalls: [], pyCalls: [], checkKills: 0 };
   const co = Object.assign({ versions: CODEX_VERSIONS, scripts: [], skillAt: '/data', fail: null, failMessage: '' }, codex);
-  const files = new Set((claudeExists ? [claudeAt] : []).concat(Object.keys(co.versions)));
+  // the files there are: Claude Code, Codex's copies, and a test's own (present)
+  const files = new Set((claudeExists ? [claudeAt] : []).concat(Object.keys(co.versions), present));
   // 97-character chunks split JSON lines; 'WAIT' holds the stream open until the process is killed; 'STDERR:…' is what
   // the run writes to stderr and 'EXIT:n' its exit code
   const entriesFor = (n) => scripts[n] || (n === 0 && gateFirst ? SCRIPT.concat(['WAIT']) : script || SCRIPT.concat([LAST, RESULT]));
@@ -349,10 +351,33 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     async wait() { return { exitCode: 0 }; }
     kill() {}
   }
+  // a short command of the setup check: claude auth status (auth: 'in' or 'out' as Claude Code answers, with details the
+  // plugin must not keep; 'fail' ends without an answer) and python -c (python: the output of each program path; none for
+  // one that answers nothing). 'HOLD' holds it until it is killed
+  const AUTH = {
+    in: ['{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","email":"someone@example.com","orgId":"org-1","subscriptionType":"max"}\n', 0],
+    out: ['{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}\n', 1],
+    fail: ['', 1],
+    HOLD: ['HOLD', 0],
+  };
+  class OutProc {
+    constructor([out, exit]) { this.out = out === 'HOLD' ? null : [out]; this.exit = exit; this.killed = false; this.gate = null; }
+    get stdin() { return { write: async () => {}, close: async () => {} }; }
+    get stdout() {
+      return { readString: async () => {
+        await tick();
+        if (!this.out && !this.killed) await new Promise(r => { this.gate = r; });
+        return this.killed || !this.out ? '' : this.out.shift() || '';
+      } };
+    }
+    async wait() { return { exitCode: this.killed ? 1 : this.exit }; }
+    kill() { log.checkKills++; this.killed = true; if (this.gate) this.gate(); }
+  }
   // codex app-server: answers each request as Codex does; turn/start plays the next script, in
   // 97-character chunks; 'WAIT' holds the turn until it is interrupted or the server is killed
+  // co.stderr: what it writes to stderr
   class CodexProc {
-    constructor() { this.out = []; this.sent = []; this.killed = false; this.wake = null; log.codexProcs.push(this); }
+    constructor() { this.out = []; this.sent = []; this.killed = false; this.wake = null; this.errOut = co.stderr || ''; log.codexProcs.push(this); }
     emit(lines) {
       for (const line of lines) {
         if (line === 'WAIT') break;
@@ -434,14 +459,20 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
         return this.killed ? '' : this.out.shift();
       } };
     }
-    get stderr() { return { readString: async () => '' }; }
+    get stderr() { return { readString: async () => { const s = this.errOut; this.errOut = ''; return s; } }; }
     async wait() { return { exitCode: this.killed ? 1 : 0 }; }
     kill() { log.codexKills++; this.killed = true; if (this.wake) { const w = this.wake; this.wake = null; w(); } }
   }
   const Subprocess = {
     call: async opts => {
       if (opts.arguments[0] === '--version') { log.versionCalls.push(opts.command); return new VersionProc(opts.command); }
-      if (opts.arguments[0] === 'app-server') { log.codexCalls.push(opts); return new CodexProc(); }
+      if (opts.arguments[0] === 'app-server') {
+        log.codexCalls.push(opts);
+        if (co.startFails) throw Error(co.startFails);   // a program that does not start
+        return new CodexProc();
+      }
+      if (opts.arguments[0] === 'auth') { log.authCalls.push(opts); return new OutProc(AUTH[auth]); }
+      if (opts.arguments[0] === '-c') { log.pyCalls.push(opts); return new OutProc(opts.command in python ? [python[opts.command], 0] : ['', 1]); }
       if (opts.arguments.includes('--input-format')) { log.modelCalls.push(opts); return new ModelProc(); }
       const p = new Proc(); log.calls.push({ opts, proc: p }); return p;
     },
@@ -569,7 +600,8 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
     Services: {
       prompt: { alert: (w, t, m) => log.alerts.push(m),
                 confirm: (w, t, m) => { log.confirms.push(m); return Array.isArray(confirm) ? confirm.shift() : confirm; } },
-      env: { get: n => (n === 'APPDATA' ? '/appdata' : n === 'LOCALAPPDATA' ? '/localappdata' : n === 'USERPROFILE' && home === 'env' ? '/profile/u' : '') },
+      // env: a test's own variables, PATH for one
+      env: { get: n => (n in env ? env[n] : n === 'APPDATA' ? '/appdata' : n === 'LOCALAPPDATA' ? '/localappdata' : n === 'USERPROFILE' && home === 'env' ? '/profile/u' : '') },
       dirsvc: { get: (key, iface) => {
         if (home !== 'dirsvc' || key !== 'Home' || iface !== NSIFILE) throw Error('NS_ERROR_FAILURE');
         return { path: '/home/u' };
@@ -605,7 +637,9 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
       exists: async p => files.has(p) || p in log.writes,
       // holdDirs: a run's output folder is made once log.releaseDir() is called
       makeDirectory: async p => { log.madeDirs.push(p); if (holdDirs && /\/tmp\/scholium\/\w+$/.test(p)) await new Promise(r => { log.releaseDir = r; }); },
+      // dirs: a test's own folders and what each holds
       getChildren: async p => {
+        if (p in dirs) return dirs[p].slice();
         if (p === CODEX_BIN) return [CODEX_BIN + '/h0', CODEX_BIN + '/h1'];
         const inside = Object.keys(log.writes).filter(f => f.startsWith(p + '/') && !f.slice(p.length + 1).includes('/'));
         if (!inside.length) throw Error('NotFoundError');

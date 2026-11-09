@@ -26,3 +26,7 @@ scholium-settings-program-desc = 留空则自动查找
 scholium-settings-not-found = 未找到
 scholium-settings-browse =
     .label = 浏览…
+scholium-check = 环境检查
+scholium-check-desc = 检查 Scholium 需要的环境：Zotero 本地 API、Claude Code 和 Codex 及技能、Python 和 PyMuPDF
+scholium-check-run =
+    .label = 检查

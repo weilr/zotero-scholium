@@ -115,6 +115,8 @@ You need Zotero 7 or later with its local API turned on (Settings → Advanced �
 3. Download [`scholium.xpi`](https://github.com/weilr/zotero-scholium/releases/latest/download/scholium.xpi) and install it in Zotero: Tools → Plugins → ⚙ → Install Plugin From File.
 4. Select a paper, open the **Scholium** section and press **Annotate** on its **Annotations** tab. To ask about the paper, type the question on its **Chat** tab and send it.
 
+Zotero Settings → Scholium → **Setup check** shows what is missing and how to fix it.
+
 ### From your agent
 
 Install the skill as above and ask in the conversation:
