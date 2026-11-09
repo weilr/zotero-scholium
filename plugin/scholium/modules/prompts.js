@@ -432,6 +432,7 @@ Object.assign(ScholiumRunner, {
     if (!/\bscholium(?:\.py)?\b/.test(cmd)) return null;
     if (/--apply\b/.test(cmd)) return "applying";
     if (/\bscholium(?:\.py)?["']?\s+extract\b/.test(cmd)) return "extract";
+    if (/\bscholium(?:\.py)?["']?\s+(?:status|samples|profile)\b/.test(cmd)) return null;   // with --config too
     if (/--list\b/.test(cmd)) return null;
     if (/--config(?:[\s=]|$)/.test(cmd)) return "dryRun";
     return null;
@@ -573,7 +574,8 @@ Object.assign(ScholiumRunner, {
   runningTitle() {
     if (this.job.source && this.job.source.compact) return this.text("compactingState", this.duration(this.elapsed()));
     const retry = this.job.retry;
-    const step = (this.job.asking ? this.text("working") : this.stepText(this.job.step)) + (retry ? " · " + this.text("reconnecting", retry.attempt, retry.max) : "");
+    const step = (this.job.asking ? this.text("working") : this.job.preRun && !this.STEPS.includes(this.job.step) ? this.text("preRun") : this.stepText(this.job.step))
+      + (retry ? " · " + this.text("reconnecting", retry.attempt, retry.max) : "");
     return this.text("running", step, this.duration(this.elapsed()));
   },
 

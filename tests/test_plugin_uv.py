@@ -299,6 +299,10 @@ SCENARIOS = r"""
       status: s('uv run C:/skills/scholium.py status ITEM1'),
       uvConfigFile: s('uv run --config-file uv.toml C:/skills/scholium.py status ITEM1'),
       uvConfigFileDryRun: s('uv run --config-file uv.toml C:/skills/scholium.py --config c.json'),
+      statusConfig: s('python C:/skills/scholium.py status K9AVSL6I --config C:/o/paper.json'),
+      samplesConfig: s('uv run C:/skills/scholium.py samples --exclude K9AVSL6I --config c.json'),
+      profileConfig: s('python "C:/skills/scholium.py" profile --from-library --config c.json'),
+      extractConfig: s('python C:/skills/scholium.py extract --config C:/o/paper.json --sentences s.json'),
     };
     facts.applied = {
       quoted: h.runner.appliedConfig('uv run /s/scholium.py --config "/o/my config.json" --apply'),
@@ -512,7 +516,8 @@ def test_a_run_that_met_no_uv_says_so_unless_python_ran_the_script(facts):
 
 def test_the_skills_commands_run_by_uv_are_recognised(facts):
     assert facts["steps"] == {"extract": "extract", "extractQuoted": "extract", "dryRun": "dryRun", "dryRunEquals": "dryRun",
-                              "apply": "applying", "list": None, "status": None, "uvConfigFile": None, "uvConfigFileDryRun": "dryRun"}
+                              "apply": "applying", "list": None, "status": None, "uvConfigFile": None, "uvConfigFileDryRun": "dryRun",
+                              "statusConfig": None, "samplesConfig": None, "profileConfig": None, "extractConfig": "extract"}
     assert facts["applied"] == {"quoted": "/o/my config.json", "afterUvOption": "c.json", "dryRun": None}
     assert facts["claudeStep"] == "applying" and facts["codexStep"] == "extract"
 

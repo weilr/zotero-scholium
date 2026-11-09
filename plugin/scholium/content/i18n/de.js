@@ -134,7 +134,6 @@ var texts = h => {
     extract: "Sätze werden extrahiert",
     reading: "Paper wird gelesen",
     writing: "Anmerkungen werden verfasst",
-    dryRun: "Prüfung (Probelauf)",
     applying: "Speichern in Zotero",
     done: "fertig",
     failed: "fehlgeschlagen",

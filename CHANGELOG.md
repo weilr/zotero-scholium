@@ -24,6 +24,8 @@
 ### Fixed
 
 - The model list gives up after 60 s when Claude Code's output does not end, and is asked for again later.
+- The state line's step: a `status`, `samples` or `profile` command with `--config` is no longer taken for the dry
+  run, the steps count the flow without a dry run (five), and the plugin's own `status` and `extract` show as theirs.
 - Disabling, updating or removing the plugin also takes its button out of the reader's sidenav, where it stayed hidden
   after the reader tabs were closed.
 

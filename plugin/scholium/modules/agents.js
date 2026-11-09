@@ -398,6 +398,7 @@ Object.assign(ScholiumRunner, {
       finally { this.current = null; }
     };
     running.preRun = true;
+    this.refresh();
     this.settleRun();
     try {
       const status = await run(["status", job.parentKey].concat(group ? ["--group", String(group)] : []), this.PRE_STATUS_MS);
@@ -405,6 +406,7 @@ Object.assign(ScholiumRunner, {
       let json = null;
       try { json = status && !status.late && status.exitCode === 0 ? JSON.stringify(JSON.parse(status.out)) : null; } catch (e) {}
       if (!json) return null;
+      this.advance(ctx, "extract");   // the agent's steps go on after it
       const txt = PathUtils.join(out, "sentences.txt");
       const extract = await run(["extract", "--config", this.paperPath(key), "--sentences", PathUtils.join(out, "sentences.json"), "--out", txt],
                                 this.PRE_EXTRACT_MS);
@@ -419,6 +421,7 @@ Object.assign(ScholiumRunner, {
       return null;
     } finally {
       running.preRun = false;
+      this.refresh();
       this.settleRun();
     }
   },

@@ -76,7 +76,7 @@ var ScholiumRunner = {
   RETRY_MS: 10 * 60000,     // the wait when the agent names no reset time
   NET_RETRY_MS: 30000,      // the wait before the second try of a run whose connection failed
   pref: "extensions.scholium.",
-  STEPS: ["skill", "extract", "reading", "writing", "dryRun", "applying"],
+  STEPS: ["skill", "extract", "reading", "writing", "applying"],   // a dry run, when an agent does one, is no step
   // a conversation given to a new session of its agent: beyond HISTORY_FROM exchanges, the latest HISTORY_WHOLE whole and the
   // earlier ones as excerpts of the user's words and of the answer
   HISTORY_FROM: 10,
@@ -349,7 +349,6 @@ var ScholiumRunner = {
       extract: zh ? "提取句子" : "extracting sentences",
       reading: zh ? "通读论文" : "reading the paper",
       writing: zh ? "撰写批注" : "writing the annotations",
-      dryRun: zh ? "预演检查" : "checking (dry run)",
       applying: zh ? "写入 Zotero" : "writing to Zotero",
       done: zh ? "完成" : "done",
       failed: zh ? "失败" : "failed",

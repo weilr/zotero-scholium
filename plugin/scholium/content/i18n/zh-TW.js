@@ -119,7 +119,6 @@ var texts = h => {
     extract: "擷取句子",
     reading: "通讀論文",
     writing: "撰寫標註",
-    dryRun: "預演檢查",
     applying: "寫入 Zotero",
     done: "完成",
     failed: "失敗",

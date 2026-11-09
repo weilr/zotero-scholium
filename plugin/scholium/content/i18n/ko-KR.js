@@ -126,7 +126,6 @@ var texts = h => {
     extract: "문장 추출 중",
     reading: "논문 읽는 중",
     writing: "주석 작성 중",
-    dryRun: "점검 중(시험 실행)",
     applying: "Zotero에 기록 중",
     done: "완료",
     failed: "실패",

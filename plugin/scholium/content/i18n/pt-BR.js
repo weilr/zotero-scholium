@@ -132,7 +132,6 @@ var texts = h => {
     extract: "extraindo frases",
     reading: "lendo o artigo",
     writing: "escrevendo as anotações",
-    dryRun: "verificando (simulação)",
     applying: "gravando no Zotero",
     done: "concluído",
     failed: "falhou",

@@ -14,6 +14,7 @@ SCENARIOS = r"""
 const SKILL = '/home/u/.claude/skills/zotero-scholium';
 const SCRIPT_PY = SKILL + '/scripts/scholium.py';
 const STATUS = '{\n "item": {\n  "key": "ITEM1",\n  "title": "Paper ITEM1"\n },\n "attachments": []\n}\n';
+const STATUS_RAW = STATUS;
 const init = ev({ type: 'system', subtype: 'init', model: 'claude-opus-5-5', session_id: 'S1', skills: ['zotero-scholium'] });
 const ending = text => [said(text), ev({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: 'S1', num_turns: 3 })];
 const has = (n, cls) => typeof n.className === 'string' && n.className.split(' ').includes(cls);
@@ -56,6 +57,26 @@ const card = pane => {
     const during = { agent: h.log.calls.length, timers: h.live(), live: head ? head.textContent : null, reading: h.runner.text('preRun') };
     h.fire(); await settle(600);
     facts.timeout = { during, agent: h.log.calls.length, prompt: h.log.stdin[0] || null, calls: h.log.scriptCalls.length };
+    h.runner.stop();
+  }
+  // the tooltip while status runs, then while extract runs, then once the agent goes on from them
+  {
+    const h = harness(base({ scriptRuns: { status: 'HOLD', extract: 'HOLD' },
+                             scripts: [[init, tool('Read', { file_path: '/data/tmp/scholium/ATT1/sentences.txt' }, 'r1'), answer('x', false, 'r1'), 'WAIT']] }));
+    h.runner.start('x');
+    const { p } = await annotate(h); await settle(100);
+    const steps = [p.view().stateTitle];
+    h.log.scriptCalls.length;   // status holds: release it as if it answered
+    const statusProc = h.runner.current.proc;
+    statusProc.out = [STATUS_RAW]; statusProc.exit = 0; if (statusProc.gate) statusProc.gate(); await settle(100);
+    steps.push(p.view().stateTitle);
+    const extractProc = h.runner.current.proc;
+    extractProc.out = ['412 sentences\n']; extractProc.exit = 0; if (extractProc.gate) extractProc.gate();
+    h.log.writes['/data/tmp/scholium/ATT1/sentences.txt'] = 'a\nb\n';
+    await settle(300);
+    steps.push(p.view().stateTitle);
+    facts.steps = { steps, agent: h.log.calls.length, reading: h.runner.text('preRun') };
+    h.runner.cancel(); await settle(200);
     h.runner.stop();
   }
   // ■ while status runs: it is killed and no agent starts
@@ -157,3 +178,11 @@ def test_a_group_paper_gives_status_its_group(facts):
 def test_a_question_and_a_missing_skill_run_nothing_before_the_agent(facts):
     assert facts["question"] == {"calls": 0, "agent": 1}
     assert facts["noSkill"] == {"calls": 0, "agent": 1}
+
+
+def test_the_live_lines_steps_follow_the_pre_run(facts):
+    s = facts["steps"]
+    during_status, during_extract, agent = s["steps"]
+    assert during_status.startswith(s["reading"] + " · 已用 "), "status: what is happening, not the agent's start"
+    assert during_extract.startswith("第 2/5 步 提取句子 · 已用 ")
+    assert s["agent"] == 1 and agent.startswith("第 3/5 步 通读论文 · 已用 "), "the agent goes on after status and extract"

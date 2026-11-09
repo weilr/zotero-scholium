@@ -123,7 +123,6 @@ var texts = h => {
     extract: "文の抽出",
     reading: "論文の通読",
     writing: "注釈の作成",
-    dryRun: "確認（ドライラン）",
     applying: "Zotero への書き込み",
     done: "完了",
     failed: "失敗",

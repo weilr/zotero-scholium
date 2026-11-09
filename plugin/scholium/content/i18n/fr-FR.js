@@ -133,7 +133,6 @@ var texts = h => {
     extract: "extraction des phrases",
     reading: "lecture de l'article",
     writing: "rédaction des annotations",
-    dryRun: "vérification (essai à blanc)",
     applying: "écriture dans Zotero",
     done: "terminé",
     failed: "échec",
