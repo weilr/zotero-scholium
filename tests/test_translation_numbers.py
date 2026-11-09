@@ -36,6 +36,9 @@ def translation_warnings(source, translated):
     ("The whole MP-­3 took 8 min.", "整个 MP-4 用时 8 min。"),
     ("It uses a 2.4-GHz access point.", "它使用 2.4 MHz 接入点。"),
     ("Values of 10-20 ms.", "取值 10-20 s。"),
+    ("Models with up to 6B parameters.", "最多 6 亿参数的模型。"),
+    ("The dataset has 1.5M examples.", "数据集有 15 万个样例。"),
+    ("Llama-7B is small.", "Llama-70B 很小。"),
 ])
 def test_warns_when_translation_changes_number_meaning(source, translated):
     warnings = translation_warnings(source, translated)
@@ -71,6 +74,14 @@ def test_warns_when_translation_changes_number_meaning(source, translated):
     ("Phase MP‑1 maps the area.", "阶段 MP-1 绘制该区域地图。"),
     ("It uses a 2.4-GHz access point.", "它使用 2.4 GHz 接入点。"),
     ("A 5‑ms delay.", "5 ms 的延迟。"),
+    # a magnitude as a capital suffix or a word, and the same value with 万 or 亿
+    ("Models with up to 6B parameters.", "最多 60 亿参数的模型。"),
+    ("The dataset has 1.5M examples.", "数据集有 150 万个样例。"),
+    ("We train for 10K steps.", "训练 1 万步。"),
+    ("Models with 6 billion parameters.", "参数为 60 亿的模型。"),
+    ("GPT-3 has 175B parameters.", "GPT-3 有 1750 亿参数。"),
+    ("A 7B model.", "一个 7B 模型。"),
+    ("Llama-7B is small.", "Llama-7B 很小。"),
 ])
 def test_accepts_equivalent_numeric_notation(source, translated):
     assert translation_warnings(source, translated) == []
@@ -150,6 +161,6 @@ def test_percent_written_out_matches_the_sign():
 
 
 def test_a_warning_quotes_the_number_as_the_comment_writes_it():
-    warnings = translation_warnings("The model has 175B parameters in total.", "该模型共有 1750 亿个参数，训练了 100 轮。")
+    warnings = translation_warnings("The model has many parameters in total.", "该模型共有 1750 亿个参数，训练了 100 轮。")
     reason = warnings[0]["reasons"][0]
     assert "1750 亿" in reason and "100" in reason and "E+" not in reason

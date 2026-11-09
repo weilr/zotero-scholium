@@ -983,6 +983,7 @@ def build(cfg, obstacles=None):
 
 CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
 INVISIBLE_RE = re.compile("[\u00ad\u200b]")   # soft hyphen, zero-width space
+MAGNITUDES = {"K": "thousand", "M": "million", "B": "billion"}
 NUMBER_RE = re.compile(
     r"(?<![A-Za-z0-9_.])(?P<value>[+−-]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)"
     r"(?:[eE][+-]?\d+)?)"
@@ -1004,6 +1005,9 @@ def _tokens(s, origin=None):
     s = re.sub("[‐‑‒]", "-", INVISIBLE_RE.sub("", s))
     s = re.sub(r"(\d)(?:st|nd|rd|th)\b", r"\1", s)                 # 20th -> 20
     s = re.sub(r"(\d)\s?[x×](?![A-Za-z0-9])", r"\1 ", s)            # 2-3x -> 2-3 (a factor, "2–3 倍")
+    # a magnitude as a capital suffix is the number with its word, read before the case is lowered: 6B is 6 billion (60 亿),
+    # 1.5M is 1.5 million (150 万); not inside a name (Llama-7B)
+    s = re.sub(r"(?<![A-Za-z0-9_.\-])(\d+(?:\.\d+)?)([KMB])(?![A-Za-z0-9])", lambda m: f"{m[1]} {MAGNITUDES[m[2]]}", s)
     toks = set()
     for m in re.finditer(r"([A-Za-z]+)-\s+([A-Za-z]{2,})", s):
         toks.update(part.lower() for part in m.groups() if len(part) >= 3)
