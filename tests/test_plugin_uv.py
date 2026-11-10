@@ -515,8 +515,8 @@ def test_a_run_that_met_no_uv_says_so_unless_python_ran_the_script(facts):
 
 
 def test_the_skills_commands_run_by_uv_are_recognised(facts):
-    assert facts["steps"] == {"extract": "extract", "extractQuoted": "extract", "dryRun": "dryRun", "dryRunEquals": "dryRun",
-                              "apply": "applying", "list": None, "status": None, "uvConfigFile": None, "uvConfigFileDryRun": "dryRun",
+    assert facts["steps"] == {"extract": "extract", "extractQuoted": "extract", "dryRun": None, "dryRunEquals": None,
+                              "apply": "applying", "list": None, "status": None, "uvConfigFile": None, "uvConfigFileDryRun": None,
                               "statusConfig": None, "samplesConfig": None, "profileConfig": None, "extractConfig": "extract"}
     assert facts["applied"] == {"quoted": "/o/my config.json", "afterUvOption": "c.json", "dryRun": None}
     assert facts["claudeStep"] == "applying" and facts["codexStep"] == "extract"

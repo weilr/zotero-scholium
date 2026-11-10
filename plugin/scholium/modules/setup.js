@@ -525,12 +525,9 @@ Object.assign(ScholiumRunner, {
     return this.onPath(Services.appinfo.OS === "WINNT" ? ["python.exe"] : ["python3", "python"], /[\\/]WindowsApps[\\/]?$/i);
   },
 
-  // how the skill's script runs on this computer, for the prompts: "uv run" when uv is on the agent's PATH, else the
-  // Python found there ("python" when there is none); files looked for, no process started
-  async scriptCommand() { return (await this.scriptProgram()).name; },
-
-  // the same with the program to start: { name, command (null when there is none), prefix (its arguments before the
-  // script's path) }
+  // how the skill's script runs on this computer, for the prompts and the pre-run: { name ("uv run" when uv is on the
+  // agent's PATH, else the Python found there, "python" when there is none), command (null when there is none), prefix
+  // (its arguments before the script's path) }; files looked for, no process started
   async scriptProgram() {
     const uv = await this.onPath([Services.appinfo.OS === "WINNT" ? "uv.exe" : "uv"]);
     if (uv) return { name: "uv run", command: uv, prefix: ["run"] };

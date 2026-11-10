@@ -719,7 +719,7 @@ def test_the_scholium_command_running_afterwards_clears_it_though_it_failed(fact
 
 def test_the_step_of_each_command_of_the_skills_script(facts):
     assert facts["commandStep"] == {"extractConfig": "extract", "extractQuoted": "extract", "extract": "extract", "list": None,
-                                    "listFull": None, "apply": "applying", "dryRun": "dryRun", "console": "dryRun", "other": None}
+                                    "listFull": None, "apply": "applying", "dryRun": None, "console": None, "other": None}
 
 
 CODEX_EFFORTS = ["low", "medium", "high", "xhigh"]

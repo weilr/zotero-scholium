@@ -111,7 +111,7 @@ Object.assign(ScholiumRunner, {
                        + "and give that one to --apply. Never put the PDF's path, the paper's title or other metadata on a command line.";
   },
 
-  // the prompt's line on how the skill's script runs here (scriptCommand), once the run has looked it up
+  // the prompt's line on how the skill's script runs here (scriptProgram), once the run has looked it up
   scriptLines(job) {
     const s = job.script;
     if (!s) return [];
@@ -421,8 +421,7 @@ Object.assign(ScholiumRunner, {
       const input = c.input || {};
       const cmd = String(input.command || "");
       const file = String(input.file_path || "");
-      if (c.name === "Skill") step = "skill";
-      else if (this.commandStep(cmd)) step = this.commandStep(cmd);
+      if (this.commandStep(cmd)) step = this.commandStep(cmd);
       else if (c.name === "Read" && /sentences\.txt$/i.test(file)) step = "reading";
       else if ((c.name === "Write" || c.name === "Edit") && /scholium/i.test(file.replace(/\\/g, "/"))) step = "writing";
     }
@@ -430,15 +429,11 @@ Object.assign(ScholiumRunner, {
   },
 
   // the step of a command of the tool (scholium.py run by python or by uv run, or the scholium command), the furthest when
-  // one line holds several: a write to Zotero, a dry run, extracting sentences. --config is the script's option, not uv's
-  // --config-file
+  // one line holds several: a write to Zotero, extracting sentences; other commands (status, a dry run) are no step
   commandStep(cmd) {
     if (!/\bscholium(?:\.py)?\b/.test(cmd)) return null;
     if (/--apply\b/.test(cmd)) return "applying";
     if (/\bscholium(?:\.py)?["']?\s+extract\b/.test(cmd)) return "extract";
-    if (/\bscholium(?:\.py)?["']?\s+(?:status|samples|profile)\b/.test(cmd)) return null;   // with --config too
-    if (/--list\b/.test(cmd)) return null;
-    if (/--config(?:[\s=]|$)/.test(cmd)) return "dryRun";
     return null;
   },
 
@@ -538,7 +533,6 @@ Object.assign(ScholiumRunner, {
     const cmd = String(item.command || "");
     if (this.commandStep(cmd)) return this.commandStep(cmd);
     if (/sentences\.txt/i.test(cmd)) return "reading";
-    if (/SKILL\.md/.test(cmd)) return "skill";
     return null;
   },
 

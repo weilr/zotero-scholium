@@ -3243,8 +3243,8 @@ def test_the_plugin_carries_katex_and_its_license():
 
 
 def test_steps_and_notice_openings(facts):
-    assert facts["steps"] == {"claude": ["applying", "applying", "dryRun", "extract", None],
-                              "codex": ["applying", "applying", "dryRun", "extract", "skill"]}
+    assert facts["steps"] == {"claude": ["applying", "applying", None, "extract", None],
+                              "codex": ["applying", "applying", None, "extract", None]}
     assert facts["openings"] == ["print(1)", "页 · 条数", "结论", "粗体 开头", ""]
 
 

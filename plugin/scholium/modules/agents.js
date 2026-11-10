@@ -1016,7 +1016,6 @@ Object.assign(ScholiumRunner, {
             await rpc.request("turn/steer", { threadId: thread, expectedTurnId: state.turn, input: [{ type: "text", text, text_elements: [] }] });
           };
           this.deliver(ctx);   // the turn has the prompt
-          if (skill) this.advance(ctx, "skill");
           if (ctx.current.cancelled) stop();
           await over;
         }
