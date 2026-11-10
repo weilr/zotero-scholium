@@ -13,8 +13,8 @@
   show the new annotations by themselves.
 - The skill runs `--apply` without a separate dry run: what it holds back is corrected in one edit of the configuration
   before it runs again.
-- A one-click annotation is told not to pass `--accept` but to correct what `--apply` holds back; words to its session
-  may let a finding through only when they ask for that exception.
+- A one-click annotation is told not to pass `--accept`, `--allow-warnings` or `--allow-missed` but to correct what
+  `--apply` holds back; words to its session may let a finding through only when they ask for that exception.
 - A new annotation's `status` and `extract` are run by the plugin before the agent starts, and given to it in the
   prompt; a scanned PDF ends the run there, without an agent.
 - The skill reads the reading note's template before it writes the note, and the dry run and `--apply` hold back a

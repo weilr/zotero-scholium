@@ -3455,7 +3455,7 @@ def test_extra_instructions_and_follow_ups_continue_the_conversation(facts):
     assert f["prompt"].startswith("下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
                                   "只是提问就直接回答；要改批注时按技能的流程修改配置，再写入 Zotero。")
     assert f["prompt"].endswith("\n\n第 5 页那条译文改短\n\n" + CLOSING)
-    assert f["prompt"].count("\n除非用户的话要求这个例外，否则不要用 --accept：把报告里的问题改掉。\n") == 1
+    assert f["prompt"].count("\n除非用户的话要求这个例外，否则不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。\n") == 1
     assert f["prompts"] == ["批注这篇\n附加要求：只标注方法部分", "第 5 页那条译文改短"]
     assert f["entries"] == 2 * (2 + len(TRANSCRIPT)), "each run: the user's words, the transcript, the annotation's card or when the follow-up ended"
     assert f["markers"] == f["prompts"] and f["inits"] == 2 and f["cards"] == 1 and f["times"] == 1
@@ -3750,8 +3750,8 @@ def test_the_prompt_names_the_profile_or_the_defaults(facts):
                             "K margin notes, note “title”, remaining warnings as “remaining warnings: …” (“remaining warnings: none” when there are none).")
     assert facts["prompt"].count("画像：没有；按默认值标注，不要生成或修改画像") == 1
     # a one-click annotation has no user to ask for an exception
-    assert p["zh"].count("\n不要用 --accept：把报告里的问题改掉。\n") == 1
-    assert p["en"].count("\nDo not pass --accept: correct the findings instead.\n") == 1
+    assert p["zh"].count("\n不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。\n") == 1
+    assert p["en"].count("\nDo not pass --accept, --allow-warnings or --allow-missed: correct the findings instead.\n") == 1
     assert facts["prompt"].endswith("批注写入后会自己出现在打开的 PDF 里（阅读器工具栏的眼睛按钮显示或隐藏 Scholium 的批注），不要让用户关闭再打开 PDF。\n"
                                     "最后的回复只写一行中文，不写别的：高亮 N 条（核心 M 条），页边批注 K 条，笔记《标题》，剩余警告，写成“剩余警告：…”（没有时写“剩余警告：无”）。")
 

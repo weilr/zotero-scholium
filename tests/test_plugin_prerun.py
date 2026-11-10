@@ -178,10 +178,10 @@ SCRIPT_PY = "/home/u/.claude/skills/zotero-scholium/scripts/scholium.py"
 STATUS = '{"item":{"key":"ITEM1","title":"Paper ITEM1"},"attachments":[]}'
 STATUS_ARGS = ["run", SCRIPT_PY, "status", "ITEM1"]
 EXTRACT_ARGS = ["run", SCRIPT_PY, "extract", "--config", OUT + "/paper.json", "--sentences", OUT + "/sentences.json", "--out", OUT + "/sentences.txt"]
-ZH_LINES = ("插件已经运行了 status（第 1 步）和 extract（第 2 步），不要再运行它们：\n"
+ZH_LINES = ("插件已经运行了 status（第 1 步）和 extract（第 2 步），不要再运行它们（用户的附加要求需要 extract 的其他选项时除外）：\n"
             f"- status 的输出：{STATUS}\n"
             f"- extract 写好了 {OUT}/sentences.txt（2 行，开头几行是索引）和同一目录的 sentences.json\n")
-EN_LINES = ("The plugin has already run status (step 1) and extract (step 2); do not run them again:\n"
+EN_LINES = ("The plugin has already run status (step 1) and extract (step 2); do not run them again unless the user's extra instructions need other extract options:\n"
             f"- status output: {STATUS}\n"
             f"- extract wrote {OUT}/sentences.txt (2 lines; its first lines are the index) and sentences.json beside it\n")
 

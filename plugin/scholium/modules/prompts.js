@@ -132,9 +132,9 @@ Object.assign(ScholiumRunner, {
     const p = job.pre;
     if (!p || !p.status) return [];
     const txt = PathUtils.join(this.outDir(this.keyOf(job.att)), "sentences.txt");
-    return this.zh() ? ["插件已经运行了 status（第 1 步）和 extract（第 2 步），不要再运行它们：", `- status 的输出：${p.status}`,
+    return this.zh() ? ["插件已经运行了 status（第 1 步）和 extract（第 2 步），不要再运行它们（用户的附加要求需要 extract 的其他选项时除外）：", `- status 的输出：${p.status}`,
                         `- extract 写好了 ${txt}（${p.lines} 行，开头几行是索引）和同一目录的 sentences.json`]
-                     : ["The plugin has already run status (step 1) and extract (step 2); do not run them again:", `- status output: ${p.status}`,
+                     : ["The plugin has already run status (step 1) and extract (step 2); do not run them again unless the user's extra instructions need other extract options:", `- status output: ${p.status}`,
                         `- extract wrote ${txt} (${p.lines} lines; its first lines are the index) and sentences.json beside it`];
   },
 
@@ -184,7 +184,7 @@ Object.assign(ScholiumRunner, {
         this.paperRule(this.keyOf(job.att)),
         ...this.scriptLines(job),
         ...this.preRunLines(job),
-        "不要用 --accept：把报告里的问题改掉。",
+        "不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。",
         ...this.languageLines(),
         own ? `这篇论文已有 ${own} 条本工具的注释，用户已确认整篇重做（配置里设 cleanup: true）。` : "这篇论文目前没有本工具的注释。",
         ...(job.extra ? ["", "用户的附加要求：", job.extra] : []),
@@ -207,7 +207,7 @@ Object.assign(ScholiumRunner, {
       this.paperRule(this.keyOf(job.att)),
       ...this.scriptLines(job),
       ...this.preRunLines(job),
-      "Do not pass --accept: correct the findings instead.",
+      "Do not pass --accept, --allow-warnings or --allow-missed: correct the findings instead.",
       ...this.languageLines(),
       own ? `The paper already carries ${own} annotations of this tool; the user confirmed a complete redo (cleanup: true in the configuration).` : "The paper carries no annotations of this tool yet.",
       ...(job.extra ? ["", "The user's extra instructions:", job.extra] : []),
@@ -357,7 +357,7 @@ Object.assign(ScholiumRunner, {
       ...this.languageLines(),
       ...(job.own ? ["改已经写入的批注或补几条时，都编辑写入它们的那份配置（它是这篇论文的全部批注），设 cleanup: true 整份重写"
                      + "（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置，否则下次整份重写时会把它们删掉。"] : []),
-      "除非用户的话要求这个例外，否则不要用 --accept：把报告里的问题改掉。",
+      "除非用户的话要求这个例外，否则不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。",
       ...changed,
       ...this.papersLines(job),
       "",
@@ -371,7 +371,7 @@ Object.assign(ScholiumRunner, {
       ...(job.own ? ["To change annotations already written or to add a few, edit the configuration they were written from (it holds the paper's whole "
                      + "set) and set cleanup: true, so that the whole set replaces them (and note_replace: true when the reading note changes); do not "
                      + "write a separate configuration with just new entries, which the next whole rewrite would delete."] : []),
-      "Do not pass --accept unless the user's message asks for that exception: correct the findings instead.",
+      "Do not pass --accept, --allow-warnings or --allow-missed unless the user's message asks for that exception: correct the findings instead.",
       ...changed,
       ...this.papersLines(job),
       "",
