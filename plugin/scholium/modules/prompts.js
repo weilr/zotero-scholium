@@ -164,12 +164,14 @@ Object.assign(ScholiumRunner, {
     if (!files.length) return [];
     return this.zh() ? [
       "这个问题同时涉及下面几篇论文。每个 paper.json 给出那篇论文的 PDF 路径、两个 key 和输出目录：按需对每篇用 --config 它的 paper.json 运行 extract，"
-        + "读它自己输出目录里的 sentences.txt。句子编号 [#123] 只用于上面这篇；引用其他论文时写论文标题和页码。",
+        + "读它自己输出目录里的 sentences.txt。句子编号 [#123] 只用于上面这篇，引用它的原句时每次都写成 [#123]，不要写成“第 29 句”；"
+        + "引用其他论文时写论文标题和页码（可加“第 N 句”），不用 [#…]。",
       ...files.map(f => `- ${f.path}（${f.title}${f.sentences ? "；sentences.txt 已写好" : f.scanned ? "；扫描件，没有文字层" : ""}）`),
     ] : [
       "The question is also about the papers below. Each paper.json gives that paper's PDF path, its two keys and its output directory: "
         + "run extract with --config and its paper.json as needed, and read the sentences.txt in its own output directory. Sentence numbers [#123] "
-        + "are for the paper above only; for the others, name the paper and the page.",
+        + "are for the paper above only: quote its sentences with [#123] every time, never as “sentence 29”; for the others, name the paper and "
+        + "the page (and, if you like, “sentence N”), without [#…].",
       ...files.map(f => `- ${f.path} (${f.title}${f.sentences ? "; sentences.txt is there" : f.scanned ? "; a scan without a text layer" : ""})`),
     ];
   },
@@ -253,7 +255,10 @@ Object.assign(ScholiumRunner, {
       ...this.questionPreLines(job),
       ...this.languageLines(),
       ...this.annotationLines(job, own),
-      `引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt（已有就直接读 sentences.txt）。`,
+      (job.paperFiles || []).length
+        ? "引用上面这篇论文的原句时，每次都在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]），只有这种格式会显示为引用；"
+          + `编号来自 extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt（已有就直接读 sentences.txt）。`
+        : `引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt（已有就直接读 sentences.txt）。`,
       "",
       later ? "用户的新消息：" : "用户的问题：",
       this.said(job),
@@ -277,7 +282,10 @@ Object.assign(ScholiumRunner, {
       ...this.questionPreLines(job),
       ...this.languageLines(),
       ...this.annotationLines(job, own),
-      `When you quote a sentence of the paper, put its sentence number after it as [#123] (several: [#12][#15]); the numbers come from extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt (read sentences.txt when it is there).`,
+      (job.paperFiles || []).length
+        ? "When you quote a sentence of the paper above, always put its sentence number after it as [#123] (several: [#12][#15]); only that form "
+          + `shows as a citation. The numbers come from extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt (read sentences.txt when it is there).`
+        : `When you quote a sentence of the paper, put its sentence number after it as [#123] (several: [#12][#15]); the numbers come from extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt (read sentences.txt when it is there).`,
       "",
       later ? "The user's new message:" : "The user's question:",
       this.said(job),

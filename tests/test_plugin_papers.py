@@ -106,6 +106,22 @@ const promptLines = text => String(text).split('\n').filter(l => /paper\.json|�
     facts.none = { returned: none, alerts: h.log.alerts.slice() };
     h.runner.stop();
   }
+  // the citation format: one paper's question, and a question about two, in Chinese and in English
+  for (const locale of ['zh-CN', 'en-US']) {
+    const prompts = {};
+    for (const both of [false, true]) {
+      const h = harness({ locale });
+      h.runner.start('x');
+      const p = await h.pane(h.item1); await settle(40);
+      const pane = p.pane();
+      if (both) h.runner.takePapers(pane, [{ library: 1, key: 'ATT2', title: 'Paper ITEM2' }], 'ATT1');
+      pane.input.type('Compare them.');
+      pane.send.click(); await settle(400);
+      prompts[both ? 'two' : 'one'] = String(h.log.stdin[0] || '').split('\n');
+      h.runner.stop();
+    }
+    facts['cite_' + locale] = prompts;
+  }
   process.stdout.write(JSON.stringify(facts));
 })().catch(e => { process.stderr.write(String(e.stack || e)); process.exit(1); });
 """
@@ -171,3 +187,33 @@ def test_a_section_drawn_already_takes_the_papers(facts):
     d = facts["drawn"]
     assert d["chips"] == ["同时问", "Paper ITEM2不问《Paper ITEM2》"] and d["pending"] == 0 and d["tab"] == "chat"
     assert facts["none"] == {"returned": False, "alerts": ["选中的论文在这台电脑上都没有 PDF 文件。"]}
+
+
+OUT = "/data/tmp/scholium/ATT1"
+EXTRACT = f"extract --config {OUT}/paper.json --sentences {OUT}/sentences.json --out {OUT}/sentences.txt"
+CITE = {
+    "zh-CN": {
+        "one": f"引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 {EXTRACT}（已有就直接读 sentences.txt）。",
+        "two": f"引用上面这篇论文的原句时，每次都在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]），只有这种格式会显示为引用；"
+               f"编号来自 {EXTRACT}（已有就直接读 sentences.txt）。",
+        "papers": "句子编号 [#123] 只用于上面这篇，引用它的原句时每次都写成 [#123]，不要写成“第 29 句”；引用其他论文时写论文标题和页码"
+                  "（可加“第 N 句”），不用 [#…]。",
+    },
+    "en-US": {
+        "one": f"When you quote a sentence of the paper, put its sentence number after it as [#123] (several: [#12][#15]); the numbers come "
+               f"from {EXTRACT} (read sentences.txt when it is there).",
+        "two": f"When you quote a sentence of the paper above, always put its sentence number after it as [#123] (several: [#12][#15]); only "
+               f"that form shows as a citation. The numbers come from {EXTRACT} (read sentences.txt when it is there).",
+        "papers": "Sentence numbers [#123] are for the paper above only: quote its sentences with [#123] every time, never as “sentence 29”; "
+                  "for the others, name the paper and the page (and, if you like, “sentence N”), without [#…].",
+    },
+}
+
+
+@pytest.mark.parametrize("locale", ["zh-CN", "en-US"])
+def test_a_question_about_several_papers_cites_the_first_papers_sentences_as_firmly(facts, locale):
+    prompts, want = facts["cite_" + locale], CITE[locale]
+    assert want["one"] in prompts["one"] and want["two"] not in prompts["one"], "one paper's question: as before"
+    assert want["two"] in prompts["two"] and want["one"] not in prompts["two"]
+    papers = [line for line in prompts["two"] if want["papers"] in line]
+    assert len(papers) == 1 and papers[0].endswith(want["papers"])

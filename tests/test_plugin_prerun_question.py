@@ -67,7 +67,7 @@ const askBoth = async (h, popup) => {
   {
     const h = harness(base({ scriptRuns: { extract: 'OPEN' } }));
     h.runner.start('x');
-    const p = await ask(h); await settle(100);
+    const p = await ask(h); await settle(300);
     const last = p.pane().list.children.at(-1);
     const head = last && find(last, 'scholium-fold-head');
     const during = { agent: h.log.calls.length, timers: h.live(), live: head ? head.textContent : null, title: p.view().stateTitle,
@@ -80,7 +80,7 @@ const askBoth = async (h, popup) => {
   {
     const h = harness(base({ scriptRuns: { extract: 'HOLD' } }));
     h.runner.start('x');
-    await ask(h); await settle(100);
+    await ask(h); await settle(300);
     const stopped = h.runner.cancel(); await settle(300);
     facts.stopped = { stopped, kills: h.log.scriptKills, agent: h.log.calls.length, job: !!h.runner.job, calls: h.log.scriptCalls.length };
     h.runner.stop();
@@ -130,11 +130,11 @@ const askBoth = async (h, popup) => {
     let now = 1e12;
     const real = CtxDate.now;
     CtxDate.now = () => now;
-    await askBoth(h, menu); await settle(100);
+    await askBoth(h, menu); await settle(300);
     const first = h.live();
     now += 100000;   // the first extract took 100 s
     const proc = h.runner.current.proc;
-    proc.out = ['x']; proc.exit = 0; h.log.writes['/data/tmp/scholium/ATT1/sentences.txt'] = 'a\nb\n'; proc.gate(); await settle(100);
+    proc.out = ['x']; proc.exit = 0; h.log.writes['/data/tmp/scholium/ATT1/sentences.txt'] = 'a\nb\n'; proc.gate(); await settle(300);
     const second = h.live();
     CtxDate.now = real;
     h.runner.cancel(); await settle(200);
@@ -189,7 +189,8 @@ def test_a_scanned_pdf_ends_the_question_before_any_agent_with_a_message(facts, 
 
 def test_an_extract_that_never_ends_is_given_up_and_left_to_the_agent(facts):
     t = facts["timeout"]
-    assert t["during"]["agent"] == 0 and 180000 in t["during"]["timers"]
+    # the time left of the 180 s, less the milliseconds spent before the extract started
+    assert t["during"]["agent"] == 0 and any(179000 < ms <= 180000 for ms in t["during"]["timers"])
     assert t["during"]["live"] and t["during"]["reading"] in t["during"]["live"], "the live line says the PDF is being read"
     assert t["during"]["title"].startswith(t["during"]["reading"] + " · "), "and so does the state line's tooltip"
     assert t["agent"] == 1 and "插件已经运行了 extract" not in t["prompt"]
