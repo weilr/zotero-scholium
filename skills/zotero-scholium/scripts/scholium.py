@@ -1345,6 +1345,44 @@ def check_style(annotations, cfg, listing=None, note_html=None):
     return warnings
 
 
+def check_cleanup(annotations, cfg, listing, config_path):
+    """With cleanup: true, the tool's annotations the cleanup would delete that this configuration does not account for:
+    neither created (or replaced) by the configuration file's last write, which out_dir/applied_keys.json records with
+    the file's path, nor held again by the new set (on the same page a highlight or underline with the same text, a
+    margin or sticky note with the same comment, or one of the same kind over it). Written by another configuration, they
+    would be lost: one `cleanup_other` finding names them, and --accept cleanup_other lets a complete redo the user asked
+    for through."""
+    if not cfg.get("cleanup", False) or not listing:
+        return []
+    try:
+        record = json.loads(read_text(os.path.join(cfg["out_dir"], "applied_keys.json")))
+    except (OSError, ValueError):
+        record = None
+    same = lambda p: os.path.normcase(os.path.abspath(p))
+    mine = set()
+    if isinstance(record, dict) and isinstance(record.get("config"), str) and same(record["config"]) == same(config_path):
+        mine = set(record.get("createdKeys") or []) | set(record.get("replacedKeys") or [])
+
+    def held(old):
+        pos = parse_position(old.get("position"))
+        mark = old.get("type") in ("highlight", "underline")
+        body = _brief(old.get("text") if mark else old.get("comment"))
+        return any(a["position"]["pageIndex"] == pos.get("pageIndex") and (a["type"] in ("highlight", "underline")) == mark
+                   and ((body and _listed_as(a.get("text") if mark else a.get("comment"), body))
+                        or any(_overlaps(r, pos.get("rects") or []) for r in a["position"].get("rects") or []))
+                   for a in annotations)
+    other = [a for a in listing.get("annotations", []) if set(a.get("tags") or []) & OWN_TAGS and a.get("key") not in mine and not held(a)]
+    if not other:
+        return []
+    pages = sorted({page_number(a) for a in other if page_number(a)}, key=lambda p: (len(p), p))
+    keys = [a.get("key") for a in other]
+    return [{"kind": "cleanup_other", "page": None, "text": f"{len(other)} annotations",
+             "reason": f"cleanup: true would delete {len(other)} of the tool's annotations that this configuration did not write "
+                       f"(page {', '.join(pages[:12])}; {', '.join(keys[:8])}{', …' if len(keys) > 8 else ''}): to keep them, add them "
+                       "to this configuration (--list --full shows them), or do not rewrite with cleanup and let an advisory warning "
+                       "stay; for a complete redo the user asked for, --accept cleanup_other"}]
+
+
 def compact_listing(listing):
     """Counts and the other annotations of a listing; the tool's own annotations are counted only."""
     anns = listing.get("annotations", [])
@@ -3039,7 +3077,7 @@ def main(argv=None):
               "colors": dict(collections.Counter(a["color"] for a in out if a["type"] in ("highlight", "underline"))),
               "cleanup_removes": (len(own_now) if listing else None) if cfg.get("cleanup") else 0,
               "missed": missed, "translation_warnings": check_translations(out),
-              "style_warnings": check_style(out, cfg, listing, note_html),
+              "style_warnings": check_style(out, cfg, listing, note_html) + check_cleanup(out, cfg, listing, args.config),
               "snapped": [{"page": page_number(a), "text": a["text"][:60], "similarity": a["snapped"]} for a in out if a.get("snapped")],
               "ambiguous_matches": [{"page": page_number(a), "text": (a.get("text") or a.get("comment", ""))[:60], "occurrences": a["occurrences"], "used": 1} for a in out if a.get("occurrences")],
               "layout_warnings": [{"page": page_number(a), "text": a["comment"][:60], "reason": a["layout_warning"]} for a in out if a.get("layout_warning")],
@@ -3088,8 +3126,10 @@ def main(argv=None):
             if res is not None:
                 report["result"] = res
                 if res.get("createdKeys") or res.get("noteKeys"):   # the keys go to a file; the report keeps counts
+                    # with the configuration that wrote them and the tool's annotations its cleanup replaced (check_cleanup)
                     keys_path = os.path.join(cfg["out_dir"], "applied_keys.json")
-                    json.dump({"createdKeys": res.get("createdKeys", []), "noteKeys": res.get("noteKeys", [])},
+                    json.dump({"config": os.path.abspath(args.config), "createdKeys": res.get("createdKeys", []),
+                               "replacedKeys": [a["key"] for a in own_now] if cfg.get("cleanup") else [], "noteKeys": res.get("noteKeys", [])},
                               open(keys_path, "w", encoding="utf8"), indent=1)
                     report["result"] = dict({k: v for k, v in res.items() if k not in ("createdKeys", "noteKeys")}, keys=keys_path)
             if res and res.get("ok"):

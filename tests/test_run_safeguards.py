@@ -338,7 +338,7 @@ def test_a_redo_is_not_applied_without_reading_the_attachment(paper, monkeypatch
     assert code == 2 and report["applied"] is False and "backend" not in report
     assert "--ignore-existing cannot be combined with cleanup: true" in report["apply_error"]
     assert api.n == 0 and api.deleted == [], "nothing was written or removed"
-    code, report = run(paper, monkeypatch, capsys, {"highlights": hl, "cleanup": True}, "--apply", api=api)
+    code, report = run(paper, monkeypatch, capsys, {"highlights": hl, "cleanup": True}, "--apply", "--accept", "cleanup_other", api=api)
     assert code == 0 and report["applied"] is True and api.deleted == ["OWN1"]
     code, report = run(paper, monkeypatch, capsys, {"highlights": hl}, "--apply", "--ignore-existing", api=Api())
     assert code == 0 and report["applied"] is True, "without cleanup --ignore-existing still writes"

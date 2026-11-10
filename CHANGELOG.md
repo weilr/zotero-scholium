@@ -42,6 +42,10 @@
   plugin cache the highest version of the skill is taken, not an orphaned one.
 - A PDF without a parent item gets the pre-run too (`status` is given the attachment's key).
 - A scanned PDF's notice gives the whole message, as an error; it said "Done".
+- `--apply` with `cleanup: true` no longer deletes annotations of the tool that its configuration did not write (another
+  configuration's, or those an add-only write was added to): it holds them back as `cleanup_other`, and
+  `--accept cleanup_other` lets a complete redo through. The skill applies again after correcting a translation only
+  when its configuration holds the paper's whole set. `applied_keys.json` names the configuration.
 
 ## 0.2.2 (2026-11-10)
 

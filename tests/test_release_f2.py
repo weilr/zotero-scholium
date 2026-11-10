@@ -329,7 +329,7 @@ def test_misses_still_fail_a_dry_run_a_refused_write_and_a_partial_one(tmp_path,
         def delete(self, keys):
             raise RuntimeError("delete failed (HTTP 500): busy")
     api = FailingDelete([annotation("OWN", ["zotero-scholium"], text="Old result.")])
-    code, report = run_main(tmp_path, monkeypatch, capsys, api, args=("--allow-missed",), cleanup=True, highlights=MISSED)
+    code, report = run_main(tmp_path, monkeypatch, capsys, api, args=("--allow-missed", "--accept", "cleanup_other"), cleanup=True, highlights=MISSED)
     assert code == 2 and report["applied"] == "partial", "the earlier items are still there"
 
 

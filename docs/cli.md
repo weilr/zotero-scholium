@@ -57,7 +57,7 @@ uv run scholium.py …                     # uv reads the script's inline metada
    }
    ```
 
-   Include only the requested output types. Use a separate `out_dir` for each paper, such as `out/<ATTACHMENT_KEY>`, and place its sentence and note files there. Set `cleanup: true` only for a complete redo; without it a run only adds (added notes, margin remarks, a selected scope). For a redo with a reading note, `note_replace: true` moves the tool's earlier notes to the trash.
+   Include only the requested output types. Use a separate `out_dir` for each paper, such as `out/<ATTACHMENT_KEY>`, and place its sentence and note files there. Set `cleanup: true` only for a complete redo; without it a run only adds (added notes, margin remarks, a selected scope). A cleanup that would delete annotations of the tool that this configuration did not write is held back (`cleanup_other`) unless `--accept cleanup_other` is given. For a redo with a reading note, `note_replace: true` moves the tool's earlier notes to the trash.
 
    For an item in a group library, add `"group_id": <the group's id>` (the plugin's `paper.json` carries it), and give `status` and `samples` `--group <id>`.
 

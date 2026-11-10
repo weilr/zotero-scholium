@@ -269,7 +269,7 @@ def test_a_failed_removal_after_writing_is_reported_as_partial(tmp_path, monkeyp
         def delete(self, keys):
             raise RuntimeError("delete failed (HTTP 500): busy")
     api = FailingDelete([annotation("OWN", ["zotero-scholium"], text="Old result.")])
-    code, report = run_main(tmp_path, monkeypatch, capsys, api, args=(), cleanup=True)
+    code, report = run_main(tmp_path, monkeypatch, capsys, api, args=("--accept", "cleanup_other"), cleanup=True)
     assert code == 2 and report["applied"] == "partial" and list(report)[-1] == "apply_error"
     assert report["result"]["created"] == {"highlight": 1} and report["result"]["removeError"] == "delete failed (HTTP 500): busy"
     assert "removing the earlier ones failed: delete failed (HTTP 500): busy" in report["apply_error"]

@@ -186,7 +186,8 @@ Object.assign(ScholiumRunner, {
         ...this.preRunLines(job),
         "不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。",
         ...this.languageLines(),
-        own ? `这篇论文已有 ${own} 条本工具的注释，用户已确认整篇重做（配置里设 cleanup: true）。` : "这篇论文目前没有本工具的注释。",
+        // the user confirmed a redo, and the plugin could not delete them first: they may be another configuration's
+        own ? `这篇论文已有 ${own} 条本工具的注释，用户已确认整篇重做：配置里设 cleanup: true；--apply 报告 cleanup_other 时加 --accept cleanup_other（上面不要用 --accept 的唯一例外）。` : "这篇论文目前没有本工具的注释。",
         ...(job.extra ? ["", "用户的附加要求：", job.extra] : []),
         "",
         "批注写入后会自己出现在打开的 PDF 里（阅读器工具栏的眼睛按钮显示或隐藏 Scholium 的批注），不要让用户关闭再打开 PDF。",
@@ -209,7 +210,7 @@ Object.assign(ScholiumRunner, {
       ...this.preRunLines(job),
       "Do not pass --accept, --allow-warnings or --allow-missed: correct the findings instead.",
       ...this.languageLines(),
-      own ? `The paper already carries ${own} annotations of this tool; the user confirmed a complete redo (cleanup: true in the configuration).` : "The paper carries no annotations of this tool yet.",
+      own ? `The paper already carries ${own} annotations of this tool; the user confirmed a complete redo: set cleanup: true in the configuration, and when --apply reports cleanup_other, pass --accept cleanup_other (the one exception to the rule on --accept above).` : "The paper carries no annotations of this tool yet.",
       ...(job.extra ? ["", "The user's extra instructions:", job.extra] : []),
       "",
       "The annotations appear in the open PDF by themselves (the eye button in the reader's toolbar shows or hides Scholium's annotations): do not tell the user to close and reopen it.",
