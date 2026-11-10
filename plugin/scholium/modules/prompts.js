@@ -184,6 +184,7 @@ Object.assign(ScholiumRunner, {
         this.paperRule(this.keyOf(job.att)),
         ...this.scriptLines(job),
         ...this.preRunLines(job),
+        "不要用 --accept：把报告里的问题改掉。",
         ...this.languageLines(),
         own ? `这篇论文已有 ${own} 条本工具的注释，用户已确认整篇重做（配置里设 cleanup: true）。` : "这篇论文目前没有本工具的注释。",
         ...(job.extra ? ["", "用户的附加要求：", job.extra] : []),
@@ -206,6 +207,7 @@ Object.assign(ScholiumRunner, {
       this.paperRule(this.keyOf(job.att)),
       ...this.scriptLines(job),
       ...this.preRunLines(job),
+      "Do not pass --accept: correct the findings instead.",
       ...this.languageLines(),
       own ? `The paper already carries ${own} annotations of this tool; the user confirmed a complete redo (cleanup: true in the configuration).` : "The paper carries no annotations of this tool yet.",
       ...(job.extra ? ["", "The user's extra instructions:", job.extra] : []),
@@ -355,6 +357,7 @@ Object.assign(ScholiumRunner, {
       ...this.languageLines(),
       ...(job.own ? ["改已经写入的批注或补几条时，都编辑写入它们的那份配置（它是这篇论文的全部批注），设 cleanup: true 整份重写"
                      + "（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置，否则下次整份重写时会把它们删掉。"] : []),
+      "除非用户的话要求这个例外，否则不要用 --accept：把报告里的问题改掉。",
       ...changed,
       ...this.papersLines(job),
       "",
@@ -368,6 +371,7 @@ Object.assign(ScholiumRunner, {
       ...(job.own ? ["To change annotations already written or to add a few, edit the configuration they were written from (it holds the paper's whole "
                      + "set) and set cleanup: true, so that the whole set replaces them (and note_replace: true when the reading note changes); do not "
                      + "write a separate configuration with just new entries, which the next whole rewrite would delete."] : []),
+      "Do not pass --accept unless the user's message asks for that exception: correct the findings instead.",
       ...changed,
       ...this.papersLines(job),
       "",
