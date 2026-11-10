@@ -34,6 +34,9 @@
   the plugin's own `status` and `extract` show as theirs.
 - Disabling, updating or removing the plugin also takes its button out of the reader's sidenav, where it stayed hidden
   after the reader tabs were closed.
+- The card's remaining warnings: a period inside a warning (Fig. 3, p. 9) no longer cuts it short, a warning that
+  starts with the language's word for none (keine Übersetzung für S. 3) is kept, 0 and 无（…） are none, and Traditional
+  Chinese counts (剩餘警告 2 條（…）) are read.
 
 ## 0.2.2 (2026-11-10)
 

@@ -1141,31 +1141,44 @@ Object.assign(ScholiumRunner, {
   },
 
   // what the agent's closing words say of the warnings left: "" for none, the warnings, or null when they do not say. The
-  // skill's summary is the reply's last line; 无 and 没有 are "none" only on their own (无法定位 2 句 is a warning). Its
-  // English and Chinese forms, then the language's label and its word for none (warningsPart)
+  // skill's summary is the reply's last line, and the warnings are its remainder after the label (a period inside them, as
+  // in "Fig. 3", does not end them). Its English and Chinese forms, then the language's label and its word for none
+  // (warningsPart)
   warningsOf(text) {
     const s = String(text || "").trim().split("\n").pop();
-    if (/无剩余警告|没有剩余警告|剩余警告[:：]\s*(?:无|没有)(?=$|[\s。．.，,；;!！)）])|no (?:remaining )?warnings|remaining warnings:\s*none\b/i.test(s)) return "";
     const end = x => x.trim().replace(/[\s.。．!！]+$/, "");   // without the sentence's closing mark
+    const label = String(this.text("warningsLabel") || ""), none = String(this.text("warningsNone") || "").toLowerCase();
+    // none: a word for none on its own (无法定位 2 句 and "keine Übersetzung für S. 3" are warnings), with an aside in
+    // brackets or after a comma (无（全部修正）, "none, all fixed"), or followed by the label's own word ("aucun
+    // avertissement"); a count of 0
+    const stems = label.toLowerCase().split(/\s+/).filter(w => w.length >= 4).map(w => w.slice(0, 4));
+    const nothing = rest => {
+      const core = end(String(rest).toLowerCase().replace(/\s*[(（][^)）]*[)）]\s*[.。]?$/, ""));
+      if (/^0(?:\s*[条條件个個개])?$/.test(core)) return true;
+      return ["无", "無", "没有", "沒有", "none", none].filter(Boolean).some(w => {
+        if (!core.startsWith(w)) return false;
+        const after = core.slice(w.length);
+        if (!after || /^\s*[，,；;]/.test(after)) return true;
+        const word = /^\s+(\p{L}+)$/u.exec(after);
+        return !!word && stems.includes(word[1].slice(0, 4));
+      });
+    };
     // a count, as agents have written it: 剩余警告 1 条（…）, 剩余警告2条：…, 1 remaining warning (…), remaining warnings: 2 (…)
     // give the words in the brackets or after the colon; words right after the count (剩余警告：2 条译文提示（…）,
     // remaining warnings: 2 translation notes (…)) give the whole remainder; else the count. A count of 0 is none
-    let m = /剩余警告\s*[:：]?\s*(\d+)\s*条\s*(?:[（(](.*)[）)]|[:：]\s*([^。\n]+)|([^\s。．.!！，,；;][^\n]*))?/.exec(s);
-    if (m) return !Number(m[1]) ? "" : m[4] ? end(`${m[1]} 条${m[4]}`) : end(m[2] || m[3] || "") || `${m[1]} 条`;
-    m = /(\d+)\s+remaining warnings?\b\s*(?:\((.*)\)|[:：]\s*([^.\n]+))?/i.exec(s);
+    let m = /剩[余餘]警告\s*[:：]?\s*(\d+)\s*([条條])\s*(?:[（(](.*)[）)]|[:：]\s*([^\n]+)|([^\s。．.!！，,；;][^\n]*))?/.exec(s);
+    if (m) return !Number(m[1]) ? "" : m[5] ? end(`${m[1]} ${m[2]}${m[5]}`) : end(m[3] || m[4] || "") || `${m[1]} ${m[2]}`;
+    m = /(\d+)\s+remaining warnings?\b\s*(?:\((.*)\)|[:：]\s*([^\n]+))?/i.exec(s);
     if (m) return !Number(m[1]) ? "" : end(m[2] || m[3] || "") || m[1];
     m = /remaining warnings?\s*[:：]\s*(\d+)(?:\s*\((.*)\)|\s+([A-Za-z][^\n]*))?\s*[.。]?\s*$/i.exec(s);
     if (m) return !Number(m[1]) ? "" : m[3] ? end(`${m[1]} ${m[3]}`) : end(m[2] || "") || m[1];
-    m = /剩余警告[:：]\s*([^。\n]+)|remaining warnings:\s*([^.\n]+)/i.exec(s);
-    if (m) return end(m[1] || m[2]);
-    const label = String(this.text("warningsLabel") || ""), none = String(this.text("warningsNone") || "").toLowerCase();
+    m = /剩[余餘]警告\s*[:：]\s*([^\n]+)|remaining warnings\s*[:：]\s*([^\n]+)/i.exec(s);
+    if (m) return nothing(m[1] || m[2]) ? "" : end(m[1] || m[2]);
+    if (/[无無]剩[余餘]警告|[没沒]有剩[余餘]警告|no (?:remaining )?warnings/i.test(s)) return "";
     const escape = x => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const own = label && new RegExp(escape(label) + "\\s*[:：]\\s*(.+)$", "i").exec(s);
     if (!own) return null;
-    const rest = end(own[1]);
-    const lower = rest.toLowerCase();
-    if (none && (lower === none || (lower.startsWith(none) && !/[\p{L}\p{N}]/u.test(lower[none.length])))) return "";
-    return rest || null;
+    return nothing(own[1]) ? "" : end(own[1]) || null;
   },
 
   // delete the annotations tagged zotero-scholium, and move the reading notes tagged the same to the
