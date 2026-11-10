@@ -228,6 +228,24 @@ def test_a_reading_note_without_its_title_is_held_back(paper, monkeypatch, capsy
     assert "the paper's title" in w["reason"]
 
 
+@pytest.mark.parametrize("html, reason", [
+    ("<p>No title.</p>", "no <h1> title"),
+    ('<H1 class="title">T</H1><p>x</p>', None),
+    ("\n\n  <!-- generated -->\n<h1>T</h1>", None),
+    ('<div data-schema-version="9"><h1>T</h1></div>', None),
+    ('﻿<div data-schema-version="9">\n<!-- x --> <h1>T</h1></div>', None),
+    ("<p>intro</p><h1>T</h1>", "no <h1> title"),
+    ("<!-- <h1>old</h1> --><p>x</p>", "no <h1> title"),
+    ("<h2>Method</h2><p>x</p>", "no <h1> title"),
+    ("<p><strong>T</strong></p>", "no <h1> title"),
+    ("   \n", "the reading note is empty"),
+    ("<!-- nothing -->", "the reading note is empty"),
+])
+def test_the_note_starts_with_its_title(html, reason):
+    found = [w["reason"] for w in cli.check_style([], dict(cli.DEFAULTS), None, html) if w["kind"] == "note_title"]
+    assert (found[0].split(":")[0] if found else None) == reason
+
+
 @pytest.mark.parametrize("config, fragment", [
     ({"clean_up": True}, "unknown key 'clean_up' (did you mean 'cleanup'?)"),
     ({"highlights": [{"page": 1, "text": SENTENCE, "comentt": "x"}]}, "unknown key 'comentt' in highlights[0] (did you mean 'comment'?)"),

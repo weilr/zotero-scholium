@@ -46,6 +46,10 @@
   configuration's, or those an add-only write was added to): it holds them back as `cleanup_other`, and
   `--accept cleanup_other` lets a complete redo through. The skill applies again after correcting a translation only
   when its configuration holds the paper's whole set. `applied_keys.json` names the configuration.
+- The translation check quotes a number with a K, M or B suffix as the comment writes it (13B, not 13 billion), and
+  takes a model's name and its size with a hyphen or a space as one name (Llama-7B, Llama 7B).
+- `note_title` holds back a reading note that does not start with its `<h1>` (one after an introduction or inside a
+  comment no longer counts) and an empty one.
 
 ## 0.2.2 (2026-11-10)
 

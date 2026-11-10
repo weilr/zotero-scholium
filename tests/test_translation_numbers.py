@@ -164,3 +164,24 @@ def test_a_warning_quotes_the_number_as_the_comment_writes_it():
     warnings = translation_warnings("The model has many parameters in total.", "该模型共有 1750 亿个参数，训练了 100 轮。")
     reason = warnings[0]["reasons"][0]
     assert "1750 亿" in reason and "100" in reason and "E+" not in reason
+
+
+def test_a_warning_quotes_a_number_with_a_magnitude_suffix_as_the_comment_writes_it():
+    reason = translation_warnings("We fine-tune LLaMA-2 7B.", "我们微调 LLaMA-2 13B。")[0]["reasons"][0]
+    assert "13B" in reason and "billion" not in reason
+    reason = translation_warnings("The model has 175B parameters in total.", "该模型共有 1750 亿个参数，训练了 100 轮。")[0]["reasons"][0]
+    assert "100" in reason and "1750" not in reason, "175B and 1750 亿 are one number"
+
+
+@pytest.mark.parametrize(("source", "translated"), [
+    ("We fine-tune Llama-7B.", "我们微调 Llama 7B。"),
+    ("We fine-tune Llama 7B.", "我们微调 Llama-7B。"),
+    ("We compare Qwen2.5-7B and Mistral 7B.", "我们比较 Qwen2.5 7B 和 Mistral-7B。"),
+])
+def test_a_name_and_its_size_with_a_hyphen_or_a_space_are_one_name(source, translated):
+    assert translation_warnings(source, translated) == []
+
+
+def test_another_size_of_the_name_still_warns():
+    assert translation_warnings("We fine-tune Llama-7B.", "我们微调 Llama 13B。")
+    assert translation_warnings("We fine-tune Llama 7B.", "我们微调 Llama-13B。")

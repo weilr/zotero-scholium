@@ -1006,8 +1006,14 @@ def _tokens(s, origin=None):
     s = re.sub(r"(\d)(?:st|nd|rd|th)\b", r"\1", s)                 # 20th -> 20
     s = re.sub(r"(\d)\s?[x×](?![A-Za-z0-9])", r"\1 ", s)            # 2-3x -> 2-3 (a factor, "2–3 倍")
     # a magnitude as a capital suffix is the number with its word, read before the case is lowered: 6B is 6 billion (60 亿),
-    # 1.5M is 1.5 million (150 万); not inside a name (Llama-7B)
-    s = re.sub(r"(?<![A-Za-z0-9_.\-])(\d+(?:\.\d+)?)([KMB])(?![A-Za-z0-9])", lambda m: f"{m[1]} {MAGNITUDES[m[2]]}", s)
+    # 1.5M is 1.5 million (150 万); not inside a name (Llama-7B). `written` keeps each one as written, for `origin`
+    written = {}
+
+    def magnitude(m):
+        words = f"{m[1]} {MAGNITUDES[m[2]]}"
+        written.setdefault(words, m[0])
+        return words
+    s = re.sub(r"(?<![A-Za-z0-9_.\-])(\d+(?:\.\d+)?)([KMB])(?![A-Za-z0-9])", magnitude, s)
     toks = set()
     for m in re.finditer(r"([A-Za-z]+)-\s+([A-Za-z]{2,})", s):
         toks.update(part.lower() for part in m.groups() if len(part) >= 3)
@@ -1031,7 +1037,9 @@ def _tokens(s, origin=None):
         token = value + ("%" if match["percent"] else "") + (" " + unit if unit else "")
         toks.add(token)
         if origin is not None:
-            origin.setdefault(token, match[0].strip())
+            text = match[0].strip()
+            words = next((w for w in written if text.startswith(w)), None)
+            origin.setdefault(token, written[words] + text[len(words):] if words else text)
         return " "
     s = NUMBER_RE.sub(number_token, s)
     for t in re.findall(r"[a-z0-9]+(?:\.[0-9]+)?", s):
@@ -1087,7 +1095,10 @@ def _text_variants(text):
     alt = re.sub(r"(\d)\s*per\s?cent\b", r"\1%", alt, flags=re.I)
     alt = re.sub(r"\bunit(?=[- ](?:scale|variance|norm|length|vector|sphere|ball|cube|interval|circle|square|magnitude)s?\b)", "1", alt,
                  flags=re.I)
-    return re.sub(r"(\d)\s*(?:thousand|million|billion|trillion)\b", r"\1", alt, flags=re.I)
+    alt = re.sub(r"(\d)\s*(?:thousand|million|billion|trillion)\b", r"\1", alt, flags=re.I)
+    # a model's name and its size, joined by a hyphen or a space, is one name either way: Llama-7B, Llama 7B
+    sized = re.findall(r"(?<![A-Za-z0-9_.\-])([A-Za-z][A-Za-z0-9.]*)[- ](\d+(?:\.\d+)?[KMB])(?![A-Za-z0-9])", text)
+    return alt + "".join(f" {name}-{size} {name} {size}" for name, size in sized)
 
 
 def page_number(a):
@@ -1323,7 +1334,17 @@ def check_style(annotations, cfg, listing=None, note_html=None):
         if not lo <= n <= hi:
             warnings.append({"kind": "core_count", "page": None, "text": None,
                              "reason": f"{n} highlights in the core colour {core}; core_range is {lo}-{hi}"})
-    if note_html and not re.search(r"<h1[\s>]", note_html, flags=re.I):
+    # the note starts with its <h1>, after whitespace, comments and Zotero's <div data-schema-version> wrapper
+    lead = note_html.lstrip("﻿") if note_html else ""
+    while True:
+        rest = re.sub(r"^(?:\s+|<!--.*?-->|<div\b[^>]*\bdata-schema-version\b[^>]*>)", "", lead, count=1, flags=re.S | re.I)
+        if rest == lead:
+            break
+        lead = rest
+    if note_html is not None and not lead:
+        warnings.append({"kind": "note_title", "page": None, "text": "reading note",
+                         "reason": "the reading note is empty: write it, or leave note_html out"})
+    elif note_html and not re.match(r"<h1[\s>]", lead, flags=re.I):
         title = cfg.get("note_title_prefix")
         start = f"<h1>{title}</h1>" if title else "<h1> and the paper's title"
         warnings.append({"kind": "note_title", "page": None, "text": "reading note",
