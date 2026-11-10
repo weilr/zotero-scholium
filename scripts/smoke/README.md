@@ -127,7 +127,7 @@ imports a copy into the throwaway's storage.
 | `--model`, `--effort`, `--locale` | `haiku`, `low`, `zh-CN` | the plugin's settings for the run |
 | `--extra` | `""` | instructions typed above Annotate (none: the one-click run) |
 | `--max-msgs` | 60 | the probe cancels the run after this many API messages (the agent never sees it) |
-| `--max-usd` | 1.00 | the session ends once its result lines' `total_cost_usd` passes this |
+| `--max-usd` | 1.00 | the session ends once its runs' cost passes this (from the result lines; a resumed session's total counted once) |
 | `--limit`, `--minutes` | 20, 30 | minutes for the agent run, and for the whole Zotero session |
 | `--chat` | `""` | a question in the Chat tab after the run |
 | `--open-reader` | off | a reader tab before and after the run, the eye button's preference never set |

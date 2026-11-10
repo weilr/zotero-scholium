@@ -140,7 +140,7 @@ def run_files(run):
 # ---------------------------------------------------------------------------------------------------------------------
 def usage_totals(results):
     u = lambda r: r.get("usage") or {}
-    return {"cost_usd": round(sum(r.get("total_cost_usd") or 0 for r in results), 4),
+    return {"cost_usd": round(sum(live.run_costs(results)), 4),   # each run once: a resumed session's total_cost_usd grows
             "turns": sum(r.get("num_turns") or 0 for r in results), "runs": len(results),
             "duration_s": round(sum(r.get("duration_ms") or 0 for r in results) / 1000),
             "input_tokens": sum(u(r).get("input_tokens") or 0 for r in results),
@@ -543,7 +543,7 @@ def main(argv=None):
     rn.add_argument("--only", help="a comma list of the set's paper names or arXiv ids")
     rn.add_argument("--git", default="HEAD", help="a commit, or a comma list of commits to compare (interleaved)")
     rn.add_argument("--repeat", type=int, default=1)
-    rn.add_argument("--max-usd", type=float, default=1.0, help="the whole set's stop, from the result lines' total_cost_usd")
+    rn.add_argument("--max-usd", type=float, default=1.0, help="the whole set's stop, from its runs' cost in the result lines")
     rn.add_argument("--min-left", type=float, default=0.05, help="no run starts with less than this left of --max-usd")
     rn.add_argument("--max-msgs", type=int, default=None, help="each run's invisible cap (default: the set's)")
     rn.add_argument("--model", default=None)

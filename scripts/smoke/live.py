@@ -27,7 +27,7 @@ Safety layers, none of which can be turned off (scripts/smoke/README.md says mor
              during the session leaves it unverified
   budget     Claude Code never gets --max-budget-usd (it shows the agent its budget each turn and the agent then
              economizes); the probe cancels the run after --max-msgs API messages, a cap the agent does not see, and the
-             runner stops the session once the result lines' total_cost_usd passes --max-usd
+             runner stops the session once its runs' cost (from the result lines) passes --max-usd
   processes  only processes whose command line names this run's profile are ended; CLAUDE* variables of the calling shell
              are not passed on; TEMP, APPDATA and CODEX_HOME are the run's own
 
@@ -381,19 +381,40 @@ def watch_step(rows, table, profile, roots, seen, port=USER_PORT):
 
 
 # ---- the cost ----
+def result_event(line):
+    """A stream-json result line as a dict, else None."""
+    if '"result"' not in line:
+        return None
+    try:
+        e = json.loads(line)
+    except ValueError:
+        return None
+    return e if isinstance(e, dict) and e.get("type") == "result" else None
+
+
+def run_costs(results):
+    """The cost of each agent run of its result line, in order. Claude Code's total_cost_usd is the session's total so far,
+    which a resumed session (a follow-up) carries on: a run's own cost is model_usage_since_last_result's costUSD, else
+    what total_cost_usd grew by since the same session's previous result (the whole total for a session's first, or one
+    whose total got smaller)."""
+    last, out = {}, []
+    for e in results:
+        sid, total = e.get("session_id"), float(e.get("total_cost_usd") or 0)
+        since = e.get("model_usage_since_last_result")
+        if isinstance(since, dict) and since:
+            cost = sum(float((v or {}).get("costUSD") or 0) for v in since.values() if isinstance(v, dict))
+        else:
+            prev = last.get(sid, 0.0) if sid else 0.0
+            cost = total - prev if total >= prev else total
+        if sid:
+            last[sid] = total
+        out.append(cost)
+    return out
+
+
 def result_cost(lines):
-    """The sum of total_cost_usd over the stream-json result lines (one per agent run)."""
-    total = 0.0
-    for line in lines:
-        if '"result"' not in line:
-            continue
-        try:
-            e = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(e, dict) and e.get("type") == "result":
-            total += float(e.get("total_cost_usd") or 0)
-    return total
+    """The cost of the agent runs of these stream-json lines (one result line each), each counted once."""
+    return sum(run_costs([e for e in map(result_event, lines) if e]))
 
 
 def conversation_logs(run, kind="*"):
@@ -425,8 +446,26 @@ def new_lines(path, since=None):
 
 
 def session_cost(run, since=None):
-    """The session's cost: the result lines written to the run's conversation logs since `since` (log_sizes)."""
-    return sum(result_cost(new_lines(path, since)) for path in conversation_logs(run))
+    """The session's cost: the runs whose result lines were written to the run's conversation logs since `since`
+    (log_sizes). The lines before it are read too, as the base of a resumed session's growing total_cost_usd."""
+    results, counted = [], []
+    for path in conversation_logs(run):
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError:
+            continue
+        start = (since or {}).get(path, 0)
+        if start > len(data):
+            start = 0
+        pos = 0
+        for raw in data.splitlines(keepends=True):
+            e = result_event(raw.decode("utf8", "replace"))
+            if e:
+                results.append(e)
+                counted.append(pos >= start)
+            pos += len(raw)
+    return sum(c for c, new in zip(run_costs(results), counted) if new)
 
 
 def annotate_results(run, since=None):
@@ -784,7 +823,7 @@ def parser(config):
     ap.add_argument("--locale", default="zh-CN", choices=sorted(smoke.QUESTION))
     ap.add_argument("--extra", default="", help="extra instructions typed above Annotate (default: none, the one-click run)")
     ap.add_argument("--max-msgs", type=int, default=60, help="the probe cancels the run after this many API messages (the agent is not shown it)")
-    ap.add_argument("--max-usd", type=float, default=1.0, help="the session ends once its result lines' total_cost_usd passes this")
+    ap.add_argument("--max-usd", type=float, default=1.0, help="the session ends once its runs' cost (from the result lines) passes this")
     ap.add_argument("--limit", type=float, default=20, help="minutes the agent run may take before the probe cancels it")
     ap.add_argument("--minutes", type=float, default=30, help="minutes the whole Zotero session may take")
     ap.add_argument("--chat", default="", help="a question for the Chat tab after the run")

@@ -788,3 +788,58 @@ def test_the_probe_stops_a_pre_run():
     probe = open(os.path.join(SMOKE, "probe", "live.js"), encoding="utf8").read()
     assert 'if (CFG.stopPreRun) await step("stop-prerun"' in probe and "IOUtils.remove(CFG.slowFlag)" in probe
     assert probe.index('step("stop-prerun"') < probe.index('step("annotate"')
+
+
+# ---- the cost of a resumed session (an annotation and its follow-ups) ----
+# a recorded session: one annotation and four follow-ups in its Annotations tab, each `claude -p --resume` of the same
+# session. total_cost_usd and modelUsage are the session's totals so far; model_usage_since_last_result, num_turns and
+# usage are the run's own
+RESUMED = [(0.0200, 0.0200, 16, 17234), (0.0232, 0.0032, 5, 1943), (0.0239, 0.0007, 1, 250), (0.0280, 0.0041, 6, 2246), (0.0287, 0.0007, 1, 119)]
+
+
+def resumed_lines(since_last=True, session="388571a0-session"):
+    out = []
+    for total, own, turns, output in RESUMED:
+        e = {"type": "result", "subtype": "success", "session_id": session, "total_cost_usd": total, "num_turns": turns,
+             "usage": {"input_tokens": 2, "cache_read_input_tokens": 50000, "cache_creation_input_tokens": 400, "output_tokens": output},
+             "modelUsage": {"claude-haiku-5-5": {"costUSD": total}}}
+        if since_last:
+            e["model_usage_since_last_result"] = {"claude-haiku-5-5": {"costUSD": own, "outputTokens": output}}
+        out.append(json.dumps(e))
+    return out
+
+
+def test_a_resumed_session_is_counted_once():
+    assert live.result_cost(resumed_lines()) == pytest.approx(0.0287)   # summing total_cost_usd gave 0.1238
+    assert live.run_costs([json.loads(l) for l in resumed_lines()]) == pytest.approx([own for _, own, _, _ in RESUMED])
+    # without model_usage_since_last_result (an older Claude Code): what the session's total grew by
+    assert live.result_cost(resumed_lines(since_last=False)) == pytest.approx(0.0287)
+    two = resumed_lines(False, "s1")[:2] + resumed_lines(False, "s2")[:3]   # two sessions, each its own total
+    assert live.result_cost(two) == pytest.approx(0.0232 + 0.0239)
+    restarted = [json.dumps({"type": "result", "session_id": "s", "total_cost_usd": t}) for t in (0.03, 0.01)]   # a total that got smaller
+    assert live.result_cost(restarted) == pytest.approx(0.04)
+    assert live.result_cost(STREAM) == pytest.approx(0.028)   # runs without a session id: each its own
+
+
+def test_the_session_cost_of_a_copy_counts_only_the_new_runs(tmp_path, monkeypatch):
+    """A --from-run copy's log holds the session's earlier runs: the new runs count by what they add to its total."""
+    src, run = str(tmp_path / "src"), str(tmp_path / "new")
+    log = os.path.join("data", "tmp", "scholium", "ATT", "conversations", "annotate-1.jsonl")
+    lines = resumed_lines(since_last=False)
+    write(os.path.join(src, log), "\n".join(lines[:2]) + "\n")
+    os.makedirs(os.path.join(src, "profile"))
+    live.prepare_run(run)
+    monkeypatch.setattr(live, "ours", lambda profile: [])
+    live.copy_from_run(src, run)
+    since = live.log_sizes(run)
+    assert live.session_cost(run, since) == 0
+    with open(os.path.join(run, log), "a", encoding="utf8") as f:   # the follow-ups of the new session
+        f.write("\n".join(lines[2:]) + "\n")
+    assert live.session_cost(run, since) == pytest.approx(0.0287 - 0.0232)
+    assert live.session_cost(run) == pytest.approx(0.0287)
+
+
+def test_the_scores_count_a_resumed_session_once():
+    totals = ev.usage_totals([json.loads(l) for l in resumed_lines()])
+    assert totals["cost_usd"] == pytest.approx(0.0287, abs=1e-4) and totals["turns"] == 29 and totals["runs"] == 5
+    assert totals["output_tokens"] == sum(o for _, _, _, o in RESUMED)   # usage is each run's own: summed as before
