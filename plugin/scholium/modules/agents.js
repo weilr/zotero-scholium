@@ -95,7 +95,7 @@ Object.assign(ScholiumRunner, {
       const k = this.keyOf(other);
       await IOUtils.makeDirectory(this.outDir(k), { createAncestors: true, ignoreExisting: true });
       await this.writePaper(other, pdf, parent ? parent.key : "");
-      job.paperFiles.push({ path: this.paperPath(k), title: ref.title || (parent || other).getDisplayTitle() });
+      job.paperFiles.push({ key: k, path: this.paperPath(k), title: ref.title || (parent || other).getDisplayTitle() });
     }
     if (this.job !== running || running.stopAsked) return this.halted(job, running);   // the plugin stopped, or ■, meanwhile
     let made = null;   // an annotation's new session, and the agent's session before it
@@ -172,10 +172,14 @@ Object.assign(ScholiumRunner, {
                   exitCode: null, stderr: "", current: null, applies: {}, commands: {}, missing: null, gone: false, unlogged: [] };
     if (this.job !== running) return;   // the plugin stopped while the log was written
     // ■ meanwhile: the run ends as a cancel ends it, its words in the log
-    // a new annotation's status and extract, run here before the agent starts (preRun)
-    job.pre = !running.stopAsked && job.annotate && !job.say && !job.compact ? await this.preRun(job, ctx) : null;
+    // a new annotation's status and extract, run here before the agent starts (preRun); a question's extract of its
+    // papers without sentences.txt (preRunQuestion)
+    const question = (job.kind || "chat") === "chat" && !!job.say && !job.resume && !job.compact && !job.annotate;
+    job.pre = running.stopAsked ? null : job.annotate && !job.say && !job.compact ? await this.preRun(job, ctx)
+      : question ? await this.preRunQuestion(job, ctx) : null;
     if (this.job !== running) return;   // the plugin stopped meanwhile
     if (running.stopAsked || (job.pre && job.pre.cancelled)) ctx.current = { key, proc: null, cancelled: true };
+    else if (job.pre && job.pre.scanned && question) this.scannedAsk(ctx);
     else if (job.pre && job.pre.scanned) this.scannedEnd(ctx);
     else if (agent === "codex") await this.runCodex(program, ctx);
     else await this.runClaude(program, ctx);
@@ -380,21 +384,15 @@ Object.assign(ScholiumRunner, {
     this.refresh();
   },
 
-  // an annotation's first steps, run by the plugin before the agent starts, with the command its prompt names
-  // (scriptProgram), the agent's environment and the paper's output folder: `status <item key> [--group ID]` within
-  // PRE_STATUS_MS, then `extract` within PRE_EXTRACT_MS, by the skill's script the agent runs (skillScript). { status (its
-  // JSON, minified), lines (of sentences.txt), script } when both ran; { scanned } for a PDF without a text layer (extract's exit
-  // code 3); { cancelled } after ■; null otherwise, and the agent runs them itself. The live line says the PDF is read
-  async preRun(job, ctx) {
-    const runner = job.scriptRun || {}, script = runner.command ? await this.skillScript(job.agent) : null;
-    if (!script) return null;
-    const key = this.keyOf(job.att), out = this.outDir(key), running = ctx.running;
-    const env = await this.agentEnv(job.agent === "codex");
-    const group = this.groupOf(job.att.libraryID);
-    const run = async (args, ms) => {
+  // the skill's script as the agent runs it, for the plugin's own first steps (preRun, preRunQuestion): with the command
+  // its prompt names (scriptProgram), the agent's environment, in a paper's output folder, within a time; the process is
+  // the run's current one, which ■ kills. null after ■ or a stop, and once one came while the process was being created
+  preRunner(job, ctx, script, env) {
+    const runner = job.scriptRun || {}, running = ctx.running, key = ctx.key;
+    return async (args, ms, workdir) => {
       if (running.stopAsked || this.job !== running) return null;
       const proc = await this.subprocess().call(Object.assign({ command: runner.command, arguments: runner.prefix.concat([script], args),
-                                                                 workdir: out }, env));
+                                                                 workdir }, env));
       if (running.stopAsked || this.job !== running) {   // the plugin stopped, or ■, while the process was being created
         try { proc.kill(); } catch (e) {}
         ctx.current = { key, proc, cancelled: true };
@@ -404,26 +402,47 @@ Object.assign(ScholiumRunner, {
       try { return await this.readOutput(proc, ms); }
       finally { this.current = null; }
     };
+  },
+
+  // `extract` of a paper (its key of keyOf) into its output folder by a preRunner: { lines (of sentences.txt) }; { scanned }
+  // for a PDF without a text layer (exit code 3); { cancelled } after ■; null when it failed or did not end in time
+  async preExtract(run, ctx, k, ms) {
+    const out = this.outDir(k), txt = PathUtils.join(out, "sentences.txt");
+    const extract = await run(["extract", "--config", this.paperPath(k), "--sentences", PathUtils.join(out, "sentences.json"), "--out", txt],
+                              ms, out);
+    if (ctx.current && ctx.current.cancelled) return { cancelled: true };
+    if (!extract || extract.late) return null;
+    if (extract.exitCode === 3) return { scanned: true };
+    if (extract.exitCode !== 0) return null;
+    const text = await IOUtils.readUTF8(txt);
+    return { lines: text.split(/\r?\n/).length - (/\n$/.test(text) ? 1 : 0) };
+  },
+
+  // an annotation's first steps, run by the plugin before the agent starts, by the skill's script the agent runs
+  // (skillScript, preRunner): `status <item key> [--group ID]` within PRE_STATUS_MS, then `extract` within PRE_EXTRACT_MS.
+  // { status (its JSON, minified), lines (of sentences.txt), script } when both ran; { scanned } for a PDF without a text
+  // layer; { cancelled } after ■; null otherwise, and the agent runs them itself. The live line says the PDF is read
+  async preRun(job, ctx) {
+    const script = job.scriptRun && job.scriptRun.command ? await this.skillScript(job.agent) : null;
+    if (!script) return null;
+    const key = this.keyOf(job.att), running = ctx.running;
+    const run = this.preRunner(job, ctx, script, await this.agentEnv(job.agent === "codex"));
+    const group = this.groupOf(job.att.libraryID);
     running.preRun = true;
     this.refresh();
     this.settleRun();
     try {
       // a PDF without a parent item is named by its own key, which status takes too
-      const status = await run(["status", job.parentKey || job.att.key].concat(group ? ["--group", String(group)] : []), this.PRE_STATUS_MS);
+      const status = await run(["status", job.parentKey || job.att.key].concat(group ? ["--group", String(group)] : []), this.PRE_STATUS_MS,
+                               this.outDir(key));
       if (ctx.current && ctx.current.cancelled) return { cancelled: true };
       let json = null;
       try { json = status && !status.late && status.exitCode === 0 ? JSON.stringify(JSON.parse(status.out)) : null; } catch (e) {}
       if (!json) return null;
       this.advance(ctx, "extract");   // the agent's steps go on after it
-      const txt = PathUtils.join(out, "sentences.txt");
-      const extract = await run(["extract", "--config", this.paperPath(key), "--sentences", PathUtils.join(out, "sentences.json"), "--out", txt],
-                                this.PRE_EXTRACT_MS);
-      if (ctx.current && ctx.current.cancelled) return { cancelled: true };
-      if (!extract || extract.late) return null;
-      if (extract.exitCode === 3) return { scanned: true };
-      if (extract.exitCode !== 0) return null;
-      const text = await IOUtils.readUTF8(txt);
-      return { status: json, lines: text.split(/\r?\n/).length - (/\n$/.test(text) ? 1 : 0), script };
+      const extract = await this.preExtract(run, ctx, key, this.PRE_EXTRACT_MS);
+      if (!extract || extract.cancelled || extract.scanned) return extract;
+      return { status: json, lines: extract.lines, script };
     } catch (e) {
       this.log("pre-run failed: " + e);
       return null;
@@ -432,6 +451,56 @@ Object.assign(ScholiumRunner, {
       this.refresh();
       this.settleRun();
     }
+  },
+
+  // a question's first step, run by the plugin before the agent starts as preRun runs it: `extract` of each of its papers
+  // whose output folder has no sentences.txt yet, the paper shown first, one after the other, all within PRE_EXTRACT_MS.
+  // `status` is left to the agent: a question needs the paper's record (authors, venue, notes) only now and then. { lines,
+  // script } when the paper shown was extracted; { scanned } when it has no text layer; { cancelled } after ■; null
+  // otherwise, and the agent runs extract itself. Each other paper's entry of job.paperFiles says whether its
+  // sentences.txt is there (sentences) or it has no text layer (scanned)
+  async preRunQuestion(job, ctx) {
+    const key = this.keyOf(job.att), running = ctx.running;
+    const there = k => this.exists(PathUtils.join(this.outDir(k), "sentences.txt"));
+    const papers = [];
+    if (!(await there(key))) papers.push(null);
+    for (const f of job.paperFiles || []) {
+      if (await there(f.key)) f.sentences = true;
+      else papers.push(f);
+    }
+    const script = papers.length && job.scriptRun && job.scriptRun.command ? await this.skillScript(job.agent) : null;
+    if (!script || this.job !== running) return null;
+    const run = this.preRunner(job, ctx, script, await this.agentEnv(job.agent === "codex"));
+    const until = Date.now() + this.PRE_EXTRACT_MS;
+    let pre = null;
+    running.preRun = true;
+    this.refresh();
+    this.settleRun();
+    try {
+      for (const f of papers) {
+        const left = until - Date.now();
+        if (left < 1000 || running.stopAsked || this.job !== running) break;   // the rest are the agent's
+        const done = await this.preExtract(run, ctx, f ? f.key : key, left);
+        if (done && done.cancelled) return done;
+        if (f) Object.assign(f, done && done.lines >= 0 ? { sentences: true } : done && done.scanned ? { scanned: true } : {});
+        else if (done && done.scanned) return done;
+        else if (done) pre = { lines: done.lines, script };
+      }
+      return pre;
+    } catch (e) {
+      this.log("pre-run failed: " + e);
+      return pre;
+    } finally {
+      running.preRun = false;
+      this.refresh();
+      this.settleRun();
+    }
+  },
+
+  // a scanned PDF a question's pre-run found: the run ends without an agent, with a message that says so
+  scannedAsk(ctx) {
+    ctx.current = { key: ctx.key, proc: null, cancelled: false };
+    ctx.failure = this.text("noTextLayerAsk");
   },
 
   // a scanned PDF found by the pre-run: the run ends as an agent's does that found it, with the card that says so

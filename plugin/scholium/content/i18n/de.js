@@ -32,6 +32,7 @@ var texts = h => {
     noPython: `Python wurde nicht gefunden: Installieren Sie uv (führen Sie ${h.uvInstall} in einem Terminal aus) oder installieren Sie Python 3.9 oder neuer und führen Sie pip install -U pymupdf aus, und versuchen Sie es dann erneut.`,
     noUv: `uv wurde nicht gefunden: Installieren Sie es in einem Terminal mit ${h.uvInstall} und versuchen Sie es dann erneut.`,
     noTextLayer: "Das PDF hat keine Textebene (ein gescanntes Dokument): Führen Sie zuerst eine Texterkennung (OCR) durch (z. B. mit ocrmypdf oder „Text erkennen“ in Acrobat) und annotieren Sie es dann erneut.",
+    noTextLayerAsk: "Das PDF hat keine Textebene (ein gescanntes Dokument), sein Text kann nicht gelesen werden: Führen Sie zuerst eine Texterkennung (OCR) durch (z. B. mit ocrmypdf oder „Text erkennen“ in Acrobat) und fragen Sie dann erneut.",
     checkLabel: id => ({ localApi: "Lokale API", claude: "Claude Code", claudeSkill: "Skill für Claude Code",
                          codex: "Codex", codexSkill: "Skill für Codex", uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,
     checkApiOn: "Eingeschaltet; Scholium liest die Paper darüber.",

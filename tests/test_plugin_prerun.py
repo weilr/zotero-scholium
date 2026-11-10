@@ -97,7 +97,7 @@ const card = pane => {
     facts.group = { calls: calls(h), agent: h.log.calls.length };
     h.runner.stop();
   }
-  // a question, and an annotation without the skill's script, run nothing before the agent
+  // a question runs only extract (test_plugin_prerun_question.py), and an annotation without the skill's script nothing
   {
     const h = harness(base({ scriptRuns: { status: [STATUS, 0], extract: ['x', 0] }, scripts: [[init, ...ending('答。')]] }));
     h.runner.start('x');
@@ -231,8 +231,8 @@ def test_a_group_paper_gives_status_its_group(facts):
     assert g["calls"][1]["workdir"] == "/data/tmp/scholium/ATT1_g777"
 
 
-def test_a_question_and_a_missing_skill_run_nothing_before_the_agent(facts):
-    assert facts["question"] == {"calls": 0, "agent": 1}
+def test_a_question_runs_only_extract_and_a_missing_skill_nothing_before_the_agent(facts):
+    assert facts["question"] == {"calls": 1, "agent": 1}, "a question's pre-run: test_plugin_prerun_question.py"
     assert facts["noSkill"] == {"calls": 0, "agent": 1}
 
 

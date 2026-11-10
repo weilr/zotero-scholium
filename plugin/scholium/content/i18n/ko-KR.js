@@ -28,6 +28,7 @@ var texts = h => {
     noPython: `Python을 찾을 수 없습니다. uv를 설치하거나(터미널에서 ${h.uvInstall} 실행), Python 3.9 이상을 설치하고 pip install -U pymupdf를 실행한 후 다시 시도하세요.`,
     noUv: `uv를 찾을 수 없습니다. 터미널에서 ${h.uvInstall} 명령으로 설치한 후 다시 시도하세요.`,
     noTextLayer: "이 PDF에는 텍스트 레이어가 없습니다(스캔한 문서). 먼저 OCR을 실행한 후(예: ocrmypdf 또는 Acrobat의 텍스트 인식) 다시 주석을 다세요.",
+    noTextLayerAsk: "이 PDF에는 텍스트 레이어가 없어(스캔한 문서) 본문을 읽을 수 없습니다. 먼저 OCR을 실행한 후(예: ocrmypdf 또는 Acrobat의 텍스트 인식) 다시 질문하세요.",
     // the setup check of the settings page: each line's name, its sentence, and its button
     checkLabel: id => ({ localApi: "로컬 API", claude: "Claude Code", claudeSkill: "Claude Code 스킬",
                          codex: "Codex", codexSkill: "Codex 스킬", uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,

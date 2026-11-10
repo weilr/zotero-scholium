@@ -138,6 +138,18 @@ Object.assign(ScholiumRunner, {
                         `- extract wrote ${txt} (${p.lines} lines; its first lines are the index) and sentences.json beside it`];
   },
 
+  // the question's line of the extract the plugin ran before the agent (preRunQuestion); its status is the agent's
+  questionPreLines(job) {
+    const p = job.pre;
+    if (!p || !(p.lines >= 0)) return [];
+    const txt = PathUtils.join(this.outDir(this.keyOf(job.att)), "sentences.txt");
+    return [this.zh() ? `插件已经运行了 extract，写好了 ${txt}（${p.lines} 行，开头几行是索引）和同一目录的 sentences.json：直接读 sentences.txt，`
+                        + "不要再运行 extract；问题要用题录（作者、出处、笔记）时再运行 status。"
+                      : `The plugin has already run extract: it wrote ${txt} (${p.lines} lines; its first lines are the index) and sentences.json `
+                        + "beside it. Read sentences.txt and do not run extract again; run status only when the question needs the paper's record "
+                        + "(authors, venue, notes)."];
+  },
+
   // the prompt's line of a paper in a group library: the group, which status and samples are given
   groupLines(job) {
     const group = this.groupOf(job.att.libraryID);
@@ -153,12 +165,12 @@ Object.assign(ScholiumRunner, {
     return this.zh() ? [
       "这个问题同时涉及下面几篇论文。每个 paper.json 给出那篇论文的 PDF 路径、两个 key 和输出目录：按需对每篇用 --config 它的 paper.json 运行 extract，"
         + "读它自己输出目录里的 sentences.txt。句子编号 [#123] 只用于上面这篇；引用其他论文时写论文标题和页码。",
-      ...files.map(f => `- ${f.path}（${f.title}）`),
+      ...files.map(f => `- ${f.path}（${f.title}${f.sentences ? "；sentences.txt 已写好" : f.scanned ? "；扫描件，没有文字层" : ""}）`),
     ] : [
       "The question is also about the papers below. Each paper.json gives that paper's PDF path, its two keys and its output directory: "
         + "run extract with --config and its paper.json as needed, and read the sentences.txt in its own output directory. Sentence numbers [#123] "
         + "are for the paper above only; for the others, name the paper and the page.",
-      ...files.map(f => `- ${f.path} (${f.title})`),
+      ...files.map(f => `- ${f.path} (${f.title}${f.sentences ? "; sentences.txt is there" : f.scanned ? "; a scan without a text layer" : ""})`),
     ];
   },
 
@@ -238,6 +250,7 @@ Object.assign(ScholiumRunner, {
       "这是从 Zotero 里发来的无人值守任务：不要向用户提问，不要启动子代理。只回答，不写批注和笔记；用户在问题里明确要求时，才按技能的流程写入 Zotero。",
       this.paperRule(this.keyOf(job.att)),
       ...this.scriptLines(job),
+      ...this.questionPreLines(job),
       ...this.languageLines(),
       ...this.annotationLines(job, own),
       `引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt（已有就直接读 sentences.txt）。`,
@@ -261,6 +274,7 @@ Object.assign(ScholiumRunner, {
         + "and no note unless the question asks for them, and then write to Zotero as the skill describes.",
       this.paperRule(this.keyOf(job.att)),
       ...this.scriptLines(job),
+      ...this.questionPreLines(job),
       ...this.languageLines(),
       ...this.annotationLines(job, own),
       `When you quote a sentence of the paper, put its sentence number after it as [#123] (several: [#12][#15]); the numbers come from extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt (read sentences.txt when it is there).`,
@@ -573,7 +587,7 @@ Object.assign(ScholiumRunner, {
   runningTitle() {
     if (this.job.source && this.job.source.compact) return this.text("compactingState", this.duration(this.elapsed()));
     const retry = this.job.retry;
-    const step = (this.job.asking ? this.text("working") : this.job.preRun && !this.STEPS.includes(this.job.step) ? this.text("preRun") : this.stepText(this.job.step))
+    const step = (this.job.preRun && !this.STEPS.includes(this.job.step) ? this.text("preRun") : this.job.asking ? this.text("working") : this.stepText(this.job.step))
       + (retry ? " · " + this.text("reconnecting", retry.attempt, retry.max) : "");
     return this.text("running", step, this.duration(this.elapsed()));
   },

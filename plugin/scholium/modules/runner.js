@@ -232,6 +232,9 @@ var ScholiumRunner = {
       noUv: zh ? `找不到 uv，在终端运行 ${uvInstall} 安装后再试。` : `uv was not found; install it with ${uvInstall} in a terminal, then try again.`,
       noTextLayer: zh ? "这个 PDF 没有文字层（扫描件）：先做 OCR 文字识别（例如 ocrmypdf，或 Acrobat 的“识别文本”），再批注。"
                       : "The PDF has no text layer (a scanned document): run OCR on it first (e.g. ocrmypdf, or Acrobat's Recognize Text), then annotate again.",
+      // a question about a scanned PDF, which the plugin's extract found before any agent
+      noTextLayerAsk: zh ? "这个 PDF 没有文字层（扫描件），读不出正文：先做 OCR 文字识别（例如 ocrmypdf，或 Acrobat 的“识别文本”），再提问。"
+                         : "The PDF has no text layer (a scanned document), so its text cannot be read: run OCR on it first (e.g. ocrmypdf, or Acrobat's Recognize Text), then ask again.",
       // the setup check of the settings page: each line's name, its sentence, and its button
       checkLabel: id => ({ localApi: zh ? "本地 API" : "Local API", claude: "Claude Code", claudeSkill: zh ? "Claude Code 的技能" : "Claude Code's skill",
                            codex: "Codex", codexSkill: zh ? "Codex 的技能" : "Codex's skill", uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,

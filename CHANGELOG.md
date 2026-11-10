@@ -17,6 +17,9 @@
   `--apply` holds back; words to its session may let a finding through only when they ask for that exception.
 - A new annotation's `status` and `extract` are run by the plugin before the agent starts, and given to it in the
   prompt; a scanned PDF ends the run there, without an agent.
+- A conversation's first question starts with its papers' sentences extracted: the plugin runs `extract` before the
+  agent for each paper without `sentences.txt`, and the prompt says so; a scanned PDF ends the question there with a
+  message.
 - The skill reads the reading note's template before it writes the note, and the dry run and `--apply` hold back a
   note without its `<h1>` title (`note_title`; `--accept note_title` lets it through).
 - The reader's eye button turns on by itself with the first annotation written, for a user who has never used it;
