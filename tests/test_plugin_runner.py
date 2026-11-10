@@ -1285,7 +1285,7 @@ SCENARIOS = r"""
                           waits: h.live(), current: h.runner.current };
   }
   {
-    // the turn has begun with the skill: its first step; shutting down does not wait for the turn to end
+    // the turn has begun with the skill, which is no step; shutting down does not wait for the turn to end
     const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [CODEX_SCRIPT.slice(0, 2).concat(['WAIT'])] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
@@ -3648,11 +3648,11 @@ def test_the_agents_share_the_papers_conversations(facts):
 
 def test_codex_steps_and_cancel(facts):
     c = facts["codexCancel"]
-    assert c["during"] == ["", "第 2/5 步 提取句子"], "the state line is its dot; the step is in its tooltip"
+    assert c["during"] == ["", "第 1/4 步 提取句子"], "the state line is its dot; the step is in its tooltip"
     assert c["interrupt"] == {"threadId": "T1", "turnId": "U1"} and c["killed"] is True
     assert c["last"] == ["scholium-card failed", "已取消重试"] and c["state"] is None
     assert c["results"] == 0 and c["waits"] == [] and c["current"] is None and c["shutdown"] is True
-    assert c["begun"] == ["", "第 1/5 步 加载技能"]
+    assert c["begun"] == ["", "启动 Codex"], "the skill's call is no step: the starting words"
     s = facts["codexSkillFound"]
     assert s["/data/tmp/scholium"]["methods"] == ["skills/list"]
     assert s["/data/tmp/scholium"]["input"] == [{"type": "skill", "name": "zotero-scholium", "path": "/home/u/.codex/skills/zotero-scholium/SKILL.md"}]

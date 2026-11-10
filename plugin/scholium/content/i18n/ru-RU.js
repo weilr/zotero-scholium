@@ -128,7 +128,6 @@ var texts = h => {
        notes ? `${plural(notes, "заметка", "заметки", "заметок")} ${word(notes, "перемещена", "перемещены", "перемещено")} в Корзину` : ""].filter(Boolean).join("; ") + ".",
     deleteFailed: msg => `Не удалось удалить: ${msg}`,
     starting: name => `запуск ${name}`,
-    skill: "загрузка навыка",
     extract: "извлечение предложений",
     reading: "чтение статьи",
     writing: "написание аннотаций",

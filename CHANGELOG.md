@@ -28,7 +28,8 @@
 - The translation check takes a number with a capital magnitude suffix and the same value with 万 or 亿 as one:
   6B and 60 亿, 1.5M and 150 万, 175B and 1750 亿 are no longer reported.
 - The state line's step: a `status`, `samples` or `profile` command with `--config` is no longer taken for the dry
-  run, the steps count the flow without a dry run (five), and the plugin's own `status` and `extract` show as theirs.
+  run, the steps are extract, reading, writing and applying (four; loading the skill shows the starting words), and
+  the plugin's own `status` and `extract` show as theirs.
 - Disabling, updating or removing the plugin also takes its button out of the reader's sidenav, where it stayed hidden
   after the reader tabs were closed.
 

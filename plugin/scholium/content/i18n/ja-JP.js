@@ -119,7 +119,6 @@ var texts = h => {
       .filter(Boolean).join("。") + "。",
     deleteFailed: msg => `削除に失敗しました：${msg}`,
     starting: name => `${name} を起動`,
-    skill: "スキルの読み込み",
     extract: "文の抽出",
     reading: "論文の通読",
     writing: "注釈の作成",

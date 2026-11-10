@@ -129,7 +129,6 @@ var texts = h => {
                                notes ? `${plural(notes, "note mise", "notes mises")} à la corbeille` : ""].filter(Boolean).join(" ; ") + ".",
     deleteFailed: msg => `Échec de la suppression : ${msg}`,
     starting: name => `démarrage de ${name}`,
-    skill: "chargement de la compétence",
     extract: "extraction des phrases",
     reading: "lecture de l'article",
     writing: "rédaction des annotations",

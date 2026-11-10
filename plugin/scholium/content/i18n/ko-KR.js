@@ -122,7 +122,6 @@ var texts = h => {
     },
     deleteFailed: msg => `삭제하지 못했습니다: ${msg}`,
     starting: name => `${name} 시작 중`,
-    skill: "스킬 불러오는 중",
     extract: "문장 추출 중",
     reading: "논문 읽는 중",
     writing: "주석 작성 중",

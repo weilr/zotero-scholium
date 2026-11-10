@@ -130,7 +130,6 @@ var texts = h => {
        notes ? `${plural(notes, "Notiz", "Notizen")} in den Papierkorb verschoben` : ""].filter(Boolean).join("; ") + ".",
     deleteFailed: msg => `Löschen fehlgeschlagen: ${msg}`,
     starting: name => `${name} wird gestartet`,
-    skill: "Skill wird geladen",
     extract: "Sätze werden extrahiert",
     reading: "Paper wird gelesen",
     writing: "Anmerkungen werden verfasst",

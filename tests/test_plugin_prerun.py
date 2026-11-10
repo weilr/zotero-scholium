@@ -184,5 +184,5 @@ def test_the_live_lines_steps_follow_the_pre_run(facts):
     s = facts["steps"]
     during_status, during_extract, agent = s["steps"]
     assert during_status.startswith(s["reading"] + " · 已用 "), "status: what is happening, not the agent's start"
-    assert during_extract.startswith("第 2/5 步 提取句子 · 已用 ")
-    assert s["agent"] == 1 and agent.startswith("第 3/5 步 通读论文 · 已用 "), "the agent goes on after status and extract"
+    assert during_extract.startswith("第 1/4 步 提取句子 · 已用 ")
+    assert s["agent"] == 1 and agent.startswith("第 2/4 步 通读论文 · 已用 "), "the agent goes on after status and extract"

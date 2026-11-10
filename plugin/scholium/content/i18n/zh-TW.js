@@ -115,7 +115,6 @@ var texts = h => {
     deleteDone: (n, notes) => [n || !notes ? `已刪除 ${n} 個 Scholium 標註` : "", notes ? `${notes} 篇筆記已移到垃圾筒` : ""].filter(Boolean).join("，") + "。",
     deleteFailed: msg => `刪除失敗：${msg}`,
     starting: name => `啟動 ${name}`,
-    skill: "載入技能",
     extract: "擷取句子",
     reading: "通讀論文",
     writing: "撰寫標註",

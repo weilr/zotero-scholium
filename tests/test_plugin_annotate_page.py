@@ -1021,7 +1021,7 @@ def test_the_annotation_tab(facts):
     assert d["sendShown"] is True, "■ stops the annotation"
     assert d["step"] == "applying"
     assert d["state"] == "", "the state line has only its dot, as a question's"
-    assert re.fullmatch(r"第 5/5 步 写入 Zotero · 已用 \d+s", d["stateTitle"]), "the tooltip has the step and the time"
+    assert re.fullmatch(r"第 4/4 步 写入 Zotero · 已用 \d+s", d["stateTitle"]), "the tooltip has the step and the time"
     f = a["after"]
     assert f["parts"] == ["scholium-entry prompt", "scholium-fold", "scholium-card"], "the closing words go into the folded steps"
     assert f["closing"] == "Done.\n高亮 28 条（核心 12 条），页边批注 9 条，笔记《Deep latent》，无剩余警告。"
@@ -1043,7 +1043,7 @@ def test_the_annotation_tab(facts):
 
 def test_the_step_reached_shows_at_once(facts):
     f = facts["stepAtOnce"]
-    assert f["step"] == "applying" and f["title"].startswith("第 5/5 步 写入 Zotero · 已用 ")
+    assert f["step"] == "applying" and f["title"].startswith("第 4/4 步 写入 Zotero · 已用 ")
 
 
 def test_a_failed_annotation(facts):
@@ -1144,7 +1144,7 @@ def test_a_run_without_a_log_line_is_no_attempt_of_the_turn_before(facts):
 
 def test_words_to_the_annotation_session_name_their_step(facts):
     f = facts["wordsState"]
-    assert f["state"] == "" and f["title"].startswith("第 5/5 步 写入 Zotero · 已用 ")
+    assert f["state"] == "" and f["title"].startswith("第 4/4 步 写入 Zotero · 已用 ")
     assert "scholium-steps" not in f["parts"]
 
 

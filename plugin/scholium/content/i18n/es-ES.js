@@ -127,7 +127,6 @@ var texts = h => {
        notes ? `${plural(notes, "nota se movió", "notas se movieron")} a la papelera` : ""].filter(Boolean).join("; ") + ".",
     deleteFailed: msg => `No se pudo eliminar: ${msg}`,
     starting: name => `iniciando ${name}`,
-    skill: "cargando la habilidad",
     extract: "extrayendo frases",
     reading: "leyendo el artículo",
     writing: "redactando las anotaciones",

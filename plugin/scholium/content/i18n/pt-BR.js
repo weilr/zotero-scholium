@@ -128,7 +128,6 @@ var texts = h => {
        notes ? `${plural(notes, "nota movida", "notas movidas")} para a lixeira` : ""].filter(Boolean).join("; ") + ".",
     deleteFailed: msg => `Falha ao excluir: ${msg}`,
     starting: name => `iniciando ${name}`,
-    skill: "carregando a habilidade",
     extract: "extraindo frases",
     reading: "lendo o artigo",
     writing: "escrevendo as anotações",

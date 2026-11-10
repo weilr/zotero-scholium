@@ -152,7 +152,7 @@ history and the annotation sessions are those of that PDF.
 
   The choices apply to the runs started afterwards, are saved for each agent, and are shared by all panes.
 - Beside the chip, one line of state for the tab shown: while a run goes on, only its dot; the tooltip gives the step
-  ("step 3/5 reading the paper", 「第 3/5 步 通读论文」; "Reading the PDF…" while the plugin runs status before the agent starts) and the time. The line also shows the attempt while the
+  ("step 2/4 reading the paper", 「第 2/4 步 通读论文」; "Reading the PDF…" while the plugin runs status before the agent starts) and the time. The line also shows the attempt while the
   agent's connection is tried again, the place in the queue and a pause for the usage limit with **Continue now**.
   Otherwise, on the Chat tab, the latest outcome of the conversation shown with its turns and tokens (the tooltip
   splits the tokens into input, cache and output); on the Annotations tab the outcome of **Delete annotations** (a
