@@ -1366,15 +1366,24 @@ def check_style(annotations, cfg, listing=None, note_html=None):
                 warn("duplicate", b, "the same span is highlighted twice")
             elif any(_overlaps(r, b["position"]["rects"]) for r in a["position"]["rects"]):
                 warn("overlap", b, "intersects another highlight: " + a["text"][:40])
+    last = _last_write(cfg)
     if cfg.get("cleanup", False):   # a rewrite would undo what the user changed in the tool's annotations since they were written
         for old in (listing or {}).get("annotations", []):
-            if not set(old.get("tags") or []) & OWN_TAGS or not _changed_by_user(old) or any(_reproduces(a, old) for a in annotations):
+            if not set(old.get("tags") or []) & OWN_TAGS or not _edited(old, last) or any(_reproduces(a, old) for a in annotations):
                 continue
             comment = " ".join((old.get("comment") or "").split())
             warnings.append({"kind": "user_edit", "page": page_number(old), "text": _brief(old.get("text") or comment)[:60],
                              "reason": f"the user changed this annotation ({old.get('key')}) in Zotero after the tool wrote it, and the "
                                        f"rewrite would undo that: keep its comment “{comment[:300]}” and colour {old.get('color')} in the "
                                        "configuration, or --accept user_edit when the user asked to change it"})
+    # the reading note this folder wrote, which note_replace would replace, changed by the user since
+    if note_html and cfg.get("note_replace"):
+        for n in _edited_notes(listing, last):
+            if note_body(n["html"]) != note_body(note_html):
+                warnings.append({"kind": "user_edit", "page": None, "text": "reading note",
+                                 "reason": f"the user changed the tool's reading note ({n['key']}) in Zotero after the tool wrote it, and "
+                                           "note_replace would replace it: keep their changes in note_html, or --accept user_edit when "
+                                           "the user asked to rewrite it (their version then goes to Zotero's trash)"})
     if cfg.get("core_range"):
         lo, hi = cfg["core_range"]
         core = cfg["core_color"].lower()
@@ -1430,7 +1439,7 @@ def check_cleanup(annotations, cfg, listing, config_path):
     same = lambda p: os.path.normcase(os.path.abspath(p))
     mine = set()
     if isinstance(record, dict) and isinstance(record.get("config"), str) and same(record["config"]) == same(config_path):
-        mine = set(record.get("createdKeys") or []) | set(record.get("replacedKeys") or [])
+        mine = set().union(*(record.get(k) or [] for k in ("createdKeys", "updatedKeys", "keptKeys", "replacedKeys")))
 
     def held(old):
         pos = parse_position(old.get("position"))
@@ -1452,6 +1461,129 @@ def check_cleanup(annotations, cfg, listing, config_path):
                        "stay; for a complete redo the user asked for, --accept cleanup_other"}]
 
 
+def _last_write(cfg):
+    """What the output folder's last write left (applied_keys.json); {} without one."""
+    try:
+        record = json.loads(read_text(os.path.join(cfg["out_dir"], "applied_keys.json")))
+    except (OSError, ValueError, KeyError):
+        return {}
+    return record if isinstance(record, dict) else {}
+
+
+def _fingerprint(*parts):
+    return hashlib.sha1(json.dumps(parts, ensure_ascii=False).encode("utf8")).hexdigest()[:16]
+
+
+def annotation_print(a):
+    """A listed annotation's fingerprint: its type, colour, comment, text, page and rectangles, as a listing gives them."""
+    pos = parse_position(a.get("position"))
+    return _fingerprint(a.get("type"), (a.get("color") or "").lower(), a.get("comment") or "", a.get("text") or "", pos.get("pageIndex"),
+                        [[round(v, 1) for v in r] for r in position_rects(pos)])
+
+
+def _edited(old, last):
+    """Whether the user changed a listed annotation of the tool since the tool wrote it: against the fingerprint the
+    output folder's last write kept of it (an update in place moves its dates), else by its dates."""
+    written = (last or {}).get("written") or {}
+    if old.get("key") in written:
+        return annotation_print(old) != written[old["key"]]
+    return _changed_by_user(old)
+
+
+def _edited_notes(listing, last):
+    """The tool's notes of the listing that the output folder's last write wrote, whose text the user changed since."""
+    kept = (last or {}).get("notes") or {}
+    return [n for n in (listing or {}).get("notes", []) if n.get("key") in kept and isinstance(n.get("html"), str)
+            and _fingerprint(note_body(n["html"])) != kept[n["key"]]]
+
+
+MARK_TYPES = ("highlight", "underline")
+
+
+def _stored_position(a):
+    """A new annotation's position as the plugin and the JavaScript file store it: a sticky note's as its icon."""
+    pos = dict(a["position"])
+    if a["type"] == "note" and pos.get("rects"):
+        pos.pop("fontSize", None)
+        pos.pop("rotation", None)
+        r = pos["rects"][0]
+        pos["rects"] = [[r[0], r[3] - 22, r[0] + 22, r[3]]]
+    return pos
+
+
+def _same_position(new, old, tol=0.5):
+    """The same page, rectangles within `tol` points, and the same other values (font size, rotation)."""
+    a, b = position_rects(new), position_rects(old)
+    rest = lambda pos: {k: (round(v, 2) if isinstance(v, (int, float)) else v) for k, v in pos.items() if k not in ("rects", "pageIndex")}
+    return (new.get("pageIndex") == old.get("pageIndex") and len(a) == len(b) and rest(new) == rest(old)
+            and all(abs(x - y) <= tol for ra, rb in zip(a, b) for x, y in zip(ra, rb)))
+
+
+def rewrite_plan(out, cfg, listing, last=None, note_html=None):
+    """How a cleanup run rewrites the tool's annotations in place. Each new annotation is paired with at most one of the
+    tool's annotations of the listing that it holds again: the same type and page, and (in this order of preference) the
+    same text (a highlight or underline) or comment (a margin or sticky note) at the same place, the same place, the same
+    text or comment, or rectangles over the old ones. A pair with nothing changed is kept as it is; one with changes is
+    updated in the changed fields only (comment, colour, text, position with its sort index, page label). The new
+    annotations without a pair are created, the tool's annotations without one deleted, and with cleanup_external the
+    external ones too. With note_replace, the tool's reading note this folder wrote and the user has not changed since is
+    updated in place (note.update). {"create": [indices of out], "update": [{key, index, fields}], "keep": [{key, index}],
+    "remove": [keys], "note": {update: key} or None}."""
+    plan = {"create": list(range(len(out))), "update": [], "keep": [], "remove": [], "note": None}
+    anns = (listing or {}).get("annotations", [])
+    if cfg.get("cleanup", False):
+        free = [o for o in anns if set(o.get("tags") or []) & OWN_TAGS]
+        page = lambda o: parse_position(o.get("position")).get("pageIndex")
+        norm = lambda s: " ".join((s or "").split())
+        body = lambda x: norm(x.get("text") if x.get("type") in MARK_TYPES else x.get("comment"))
+        place = lambda a, o: (_same_position(a["position"], parse_position(o.get("position")))
+                              or _same_position(_stored_position(a), parse_position(o.get("position"))))
+        over = lambda a, o: any(_overlaps(r, position_rects(parse_position(o.get("position"))))
+                                for pos in (a["position"], _stored_position(a)) for r in position_rects(pos))
+        tests = [lambda a, o: bool(body(a)) and body(a) == body(o) and place(a, o), place,
+                 lambda a, o: bool(body(a)) and body(a) == body(o), over]
+        paired = {}
+        for test in tests:
+            for i, a in enumerate(out):
+                if i in paired:
+                    continue
+                o = next((o for o in free if o.get("type") == a["type"] and page(o) == a["position"]["pageIndex"] and test(a, o)), None)
+                if o is not None:
+                    paired[i] = o
+                    free.remove(o)
+        plan["create"] = [i for i in range(len(out)) if i not in paired]
+        for i, o in sorted(paired.items()):
+            a, fields = out[i], {}
+            if (a.get("comment") or "") != (o.get("comment") or ""):
+                fields["comment"] = a.get("comment", "")
+            if (a.get("color") or "").lower() != (o.get("color") or "").lower():
+                fields["color"] = a["color"]
+            if a["type"] in MARK_TYPES and (a.get("text") or "") != (o.get("text") or ""):
+                fields["text"] = a.get("text", "")
+            if not place(a, o):
+                fields.update(position=a["position"], sortIndex=a["sortIndex"])
+            if a.get("pageLabel") and a["pageLabel"] != o.get("pageLabel"):
+                fields["pageLabel"] = a["pageLabel"]
+            (plan["update"].append({"key": o["key"], "index": i, "fields": fields}) if fields
+             else plan["keep"].append({"key": o["key"], "index": i}))
+        plan["remove"] = [o["key"] for o in free]
+        if cfg.get("cleanup_external"):
+            plan["remove"] += [o["key"] for o in anns if o.get("isExternal") and not set(o.get("tags") or []) & OWN_TAGS]
+    if note_html and cfg.get("note_replace") and cfg.get("item_key"):
+        kept, only = (last or {}).get("notes") or {}, cfg.get("note_title_prefix") or ""
+        changed = {n["key"] for n in _edited_notes(listing, last)}
+        for n in (listing or {}).get("notes", []):
+            if (n.get("key") in kept and n["key"] not in changed and isinstance(n.get("html"), str)
+                    and set(n.get("tags") or []) & OWN_TAGS and (n.get("title") or "").startswith(only)):
+                plan["note"] = {"update": n["key"]}
+                break
+    return plan
+
+
+def rewrite_counts(plan):
+    return {"created": len(plan["create"]), "updated": len(plan["update"]), "kept": len(plan["keep"]), "removed": len(plan["remove"])}
+
+
 def compact_listing(listing):
     """Counts and the other annotations of a listing; the tool's own annotations are counted only."""
     anns = listing.get("annotations", [])
@@ -1463,7 +1595,7 @@ def compact_listing(listing):
             "by_color": dict(collections.Counter(a.get("color") or "" for a in anns)),
             "others_detail": [{"key": a["key"], "type": a["type"], "color": a.get("color"), "page": a.get("pageLabel"),
                                "text": (a.get("text") or a.get("comment") or "")[:60]} for a in others],
-            "notes": listing.get("notes", [])}
+            "notes": [{k: v for k, v in n.items() if k != "html"} for n in listing.get("notes", [])]}
 
 
 def version_note(html, prefix, existing_titles):
@@ -2053,6 +2185,17 @@ class LocalApi:
                 raise RuntimeError(f"delete failed (HTTP {s}): {t[:300]}")
         return len(keys)
 
+    def update(self, changes):
+        """Changes to existing items, each {key, version, fields…}; the failures, as the local API names them. The version
+        guards each item: one that changed since it was read is not written."""
+        failed = []
+        for i in range(0, len(changes), 50):
+            s, h, t = self.write("POST", self.lib + "/items", changes[i:i + 50])
+            if s != 200:
+                return failed + [{"message": f"update failed (HTTP {s}): {t[:300]}", "items": f"{i + 1}-{len(changes)} of {len(changes)}"}]
+            failed += list((json.loads(t).get("failed") or {}).values())
+        return failed
+
     def trash(self, rows):
         """Move items to Zotero's trash (recoverable there); `rows` are their API rows, whose versions guard the write."""
         for i in range(0, len(rows), 50):
@@ -2103,11 +2246,17 @@ def api_list(cfg, api):
     if cfg.get("item_key"):
         for c in api.children(cfg["item_key"]):
             if c["data"]["itemType"] == "note":
-                notes.append({"key": c["key"], "title": note_title_from_html(c["data"].get("note", ""))})
+                tags = [t["tag"] for t in c["data"].get("tags", [])]
+                notes.append(dict({"key": c["key"], "title": note_title_from_html(c["data"].get("note", "")), "tags": tags},
+                                  **({"html": c["data"].get("note", "")} if set(tags) & OWN_TAGS else {})))
     return {"ok": True, "backend": "api", "attachmentKey": cfg["attachment_key"], "annotations": anns, "notes": notes}
 
 
-def api_apply(cfg, out, api):
+API_FIELDS = {"comment": "annotationComment", "color": "annotationColor", "text": "annotationText", "position": "annotationPosition",
+              "pageLabel": "annotationPageLabel", "sortIndex": "annotationSortIndex"}
+
+
+def api_apply(cfg, out, api, plan=None):
     # An item_key that is not the attachment's parent is refused before anything is written, as the plugin refuses it.
     item_key, att_key = cfg.get("item_key"), cfg["attachment_key"]
     if item_key and item_key != att_key and api.item(att_key)["data"].get("parentItem") != item_key:
@@ -2124,7 +2273,18 @@ def api_apply(cfg, out, api):
     result = {"ok": False, "backend": "api", "removed": 0, "kept": kept,
               "noteCreated": False, "notesTrashed": 0, "created": {},
               "createdKeys": [], "noteKeys": [], "failed": []}
-    victims, note = [], None
+    changes = []
+    if plan is not None:   # a rewrite in place: the tool's annotations as the plan read them, else nothing is written
+        planned = [u["key"] for u in plan["update"]] + [k["key"] for k in plan["keep"]] + plan["remove"]
+        if cfg.get("cleanup", False) and sorted(planned) != sorted(to_delete):
+            raise RuntimeError("the tool's annotations on the attachment changed since they were read; run again")
+        version = {r["key"]: r["data"].get("version", r.get("version", 0)) for r in rows}
+        changes = [dict({"key": u["key"], "version": version[u["key"]]},
+                        **{API_FIELDS[f]: json.dumps(v) if f == "position" else v for f, v in u["fields"].items()}) for u in plan["update"]]
+        to_delete = list(plan["remove"])
+        result.update(updatedKeys=[], keptKeys=[k["key"] for k in plan["keep"]])
+        out = [out[i] for i in plan["create"]]
+    victims, note, update_note = [], None, None
     # (1) Child note: the local API has no transaction, so it is written after every annotation was accepted (3); old
     #     notes stay until then, and with note_replace the tool's earlier notes then go to the trash. A tool note with
     #     the same text is not written again.
@@ -2133,16 +2293,23 @@ def api_apply(cfg, out, api):
         prefix = cfg.get("note_title_prefix") or cfg.get("note_title") or ""
         existing = [c for c in api.children(cfg["item_key"]) if c["data"]["itemType"] == "note"]
         same = next((c for c in existing if _own(c) and note_body(c["data"].get("note", "")) == note_body(html)), None)
+        # the tool's note this folder wrote, which the plan rewrites in place
+        target = next((c for c in existing if _own(c) and plan and plan.get("note") and c["key"] == plan["note"]["update"]), None)
         if cfg.get("note_replace"):
             only = cfg.get("note_title_prefix") or ""
-            victims = [c for c in existing if _own(c) and c is not same
+            victims = [c for c in existing if _own(c) and c is not same and c is not target
                        and note_title_from_html(c["data"].get("note", "")).startswith(only)]
         if same:
             result["noteSkipped"] = f"the tool's note {same['key']} has the same text"
+            if target is not None and target is not same:
+                victims.append(target)
         else:
-            titles = [note_title_from_html(c["data"].get("note", "")) for c in existing if c not in victims]
+            titles = [note_title_from_html(c["data"].get("note", "")) for c in existing if c not in victims and c is not target]
             html, _ = version_note(html, prefix, titles)
-            note = {"itemType": "note", "parentItem": cfg["item_key"], "note": html, "tags": [{"tag": TAG}]}
+            if target is not None:
+                update_note = {"key": target["key"], "version": target["data"].get("version", target.get("version", 0)), "note": html}
+            else:
+                note = {"itemType": "note", "parentItem": cfg["item_key"], "note": html, "tags": [{"tag": TAG}]}
     # (2) annotations
     items = []
     for a in out:
@@ -2162,7 +2329,7 @@ def api_apply(cfg, out, api):
     counts = {}
     for a in out:
         counts[a["type"]] = counts.get(a["type"], 0) + 1
-    result["created"] = counts
+    result["created"] = counts   # the annotations created; a rewrite in place counts its updates in updatedKeys
     # (3) the note; when it is not written, the new annotations are removed again, so that a failed write leaves nothing
     if note:
         keys, failed = api.create([note])
@@ -2176,6 +2343,23 @@ def api_apply(cfg, out, api):
                 result.update(createdKeys=[], noteKeys=[], created={}, undone="the new annotations were removed again, since the note was not written")
             except Exception as e:
                 result["undoError"] = f"the new annotations stay, since removing them failed: {e}; run --list before running again"
+            return result
+    # (4) the changes in place: the reading note and the annotations that changed; each version guards its item
+    if update_note or changes:
+        try:
+            failed = api.update(([update_note] if update_note else []) + changes)
+        except Exception as e:
+            failed = [{"message": str(e)}]
+        if failed:
+            result["updateError"] = "; ".join(str(f.get("message", f)) for f in failed)[:600]
+        # the changes made: all but those that failed by their key; none when a failure names no key
+        missed = {f.get("key") for f in failed if isinstance(f, dict)}
+        done = [] if None in missed or any(not isinstance(f, dict) for f in failed) else [c["key"] for c in changes if c["key"] not in missed]
+        result["updatedKeys"] = done
+        if update_note and None not in missed and update_note["key"] not in missed:
+            result.update(noteKeys=[update_note["key"]], noteUpdated=True)
+        if failed:   # what is left of the earlier set stays; a run again takes it from there
+            result["ok"] = True
             return result
     # Do not remove earlier work if either creation call failed.
     try:   # the new items are written; a failure here leaves earlier ones in place
@@ -2314,25 +2498,32 @@ def plugin_list(cfg):
     return (res, None) if res["ok"] else (None, res["error"])
 
 
-def plugin_apply(cfg, out):
+def plugin_apply(cfg, out, plan=None):
     token, lst, base = plugin_connect(cfg)
     if not token:
         return None, lst
     if not lst.get("ok"):   # nothing is written where the attachment could not be read
         return None, lst.get("error")
+    # a rewrite in place needs a plugin that updates (its listing says canUpdate); an older one deletes and creates
+    plan = plan if plan is not None and lst.get("canUpdate") else None
+    target = plan["note"]["update"] if plan and plan.get("note") else None
     html = read_text(cfg["note_html"]) if cfg.get("note_html") else None
     prefix = cfg.get("note_title_prefix") or cfg.get("note_title") or ""
     only = cfg.get("note_title_prefix") or ""
     replace = bool(cfg.get("note_replace", False))
     if html:   # the notes the run leaves in place decide the version in the new note's title
         stay = [n["title"] for n in lst.get("notes", [])
-                if not (replace and set(n.get("tags") or []) & OWN_TAGS and (n["title"] or "").startswith(only))]
+                if n.get("key") != target and not (replace and set(n.get("tags") or []) & OWN_TAGS and (n["title"] or "").startswith(only))]
         html, prefix = version_note(html, prefix, stay)
     # trashOwn and trashTitlePrefix are new keys: an older plugin ignores them and trashes nothing
     payload = {"itemKey": cfg["item_key"], "attachmentKey": cfg["attachment_key"],
                "cleanup": bool(cfg.get("cleanup", False)), "cleanupExternal": bool(cfg.get("cleanup_external")), "tag": TAG, "legacyTags": sorted(LEGACY_TAGS), "annotations": out,
-               "note": {"html": html, "titlePrefix": prefix, "trashOwn": replace, "trashTitlePrefix": only} if html else None,
+               "note": dict({"html": html, "titlePrefix": prefix, "trashOwn": replace, "trashTitlePrefix": only},
+                            **({"updateKey": target} if target else {})) if html else None,
                **plugin_library(cfg)}
+    if plan is not None:
+        payload.update(rewrite=True, annotations=[out[i] for i in plan["create"]], keep=[k["key"] for k in plan["keep"]],
+                       updates=[dict({"key": u["key"]}, **u["fields"]) for u in plan["update"]], remove=list(plan["remove"]))
     s, h, t = http("POST", base + "/apply", payload, {"X-Annotate-Token": token}, timeout=LocalApi.WRITE_TIMEOUT)
     res = json.loads(t) if s == 200 else {}
     if not res.get("ok"):
@@ -2346,8 +2537,14 @@ def plugin_apply(cfg, out):
 # ---------------------------------------------------------------------------
 # Backend 3: "Run JavaScript" file (manual execution)
 # ---------------------------------------------------------------------------
-def render_js(cfg, out):
+def render_js(cfg, out, plan=None):
     html = read_text(cfg["note_html"]) if cfg.get("note_html") else None
+    # a rewrite in place (rewrite_plan): the annotations to create, and those to change, keep and remove by their keys
+    rewrite = None
+    if plan is not None:
+        rewrite = {"updates": [dict({"key": u["key"]}, **u["fields"]) for u in plan["update"]], "keep": [k["key"] for k in plan["keep"]],
+                   "remove": list(plan["remove"]), "noteUpdate": plan["note"]["update"] if plan.get("note") else None}
+        out = [out[i] for i in plan["create"]]
     title_prefix = cfg.get("note_title_prefix") or cfg.get("note_title") or ""
     replace = bool(html and cfg.get("note_replace"))
     note_step = ("create a child note unless a note of this tool has the same text; " +
@@ -2358,7 +2555,7 @@ def render_js(cfg, out):
     return f"""// Usage: in Zotero, open Tools -> Developer -> Run JavaScript, enable "Run as async function",
 // paste the entire content of this file, and click Run.
 // Effect (all changes are made in the Zotero database; the PDF file is not modified):
-//   (0) {'delete annotations carrying a current or legacy tool tag on the attachment, once the new ones are saved (step 2);' if cfg.get('cleanup', False) else 'keep every existing annotation (cleanup disabled);'}
+//   (0) {(f"rewrite the tool's annotations in place: change {len(rewrite['updates'])}, keep {len(rewrite['keep'])} as they are and delete {len(rewrite['remove'])} (step 2), stopping when they are not the ones read;" if cfg.get('cleanup', False) else "keep every existing annotation (cleanup disabled);") if rewrite else ('delete annotations carrying a current or legacy tool tag on the attachment, once the new ones are saved (step 2);' if cfg.get('cleanup', False) else 'keep every existing annotation (cleanup disabled);')}
 //   (1) {note_step};
 //   (2) create {n_h} highlight/underline annotations and {n_t} margin text annotations; a failure leaves the old ones.
 var ITEM_KEY = {json.dumps(cfg['item_key'])}, ATT_KEY = {json.dumps(cfg['attachment_key'])}, TAG = {json.dumps(TAG)};
@@ -2368,6 +2565,7 @@ var NOTE_HTML = {json.dumps(html, ensure_ascii=False)};
 var NOTE_TITLE_PREFIX = {json.dumps(title_prefix, ensure_ascii=False)};
 var NOTE_REPLACE = {json.dumps(replace)}, TRASH_TITLE_PREFIX = {json.dumps(cfg.get('note_title_prefix') or '', ensure_ascii=False)};
 var ANNOTATIONS = {json.dumps(out, ensure_ascii=False)};
+var REWRITE = {json.dumps(rewrite, ensure_ascii=False)};
 
 var GROUP_ID = {json.dumps(cfg.get('group_id'))}, LIBRARY_ID = {json.dumps(cfg.get('library_id'))};
 var libraryID = GROUP_ID ? Zotero.Groups.getLibraryIDFromGroupID(GROUP_ID) : LIBRARY_ID || Zotero.Libraries.userLibraryID;
@@ -2378,29 +2576,47 @@ if (!parent) throw new Error("item not found: " + ITEM_KEY);
 if (!att) throw new Error("attachment not found: " + ATT_KEY);
 if (ITEM_KEY !== ATT_KEY && att.parentID !== parent.id) throw new Error("item " + ITEM_KEY + " is not the parent of attachment " + ATT_KEY + "; set item_key to the attachment's parent key from status");
 
-var old = [], kept = 0;
-for (let a of (CLEANUP ? att.getAnnotations(true) : [])) {{
-  let tags = a.getTags().map(t => t.tag);
-  let mine = tags.some(t => OWN_TAGS.includes(t));
-  if (mine) {{ old.push(a); }} else {{ kept++; }}
+var old = [], kept = 0, changes = [];
+var ownAnn = a => a.getTags().some(t => OWN_TAGS.includes(t.tag));
+if (REWRITE) {{
+  // the tool's annotations as they were read: those to change, keep and delete, and no other of the tool's
+  let byKey = new Map(att.getAnnotations(true).map(a => [a.key, a]));
+  let named = new Set(REWRITE.updates.map(u => u.key).concat(REWRITE.keep, REWRITE.remove));
+  for (let k of named) if (!byKey.has(k) || !ownAnn(byKey.get(k))) throw new Error("annotation " + k + " is not one of the tool's on this attachment; run the tool again");
+  if (CLEANUP) for (let a of byKey.values()) if (ownAnn(a) && !named.has(a.key)) throw new Error("the tool's annotations on the attachment changed since they were read; run the tool again");
+  old = REWRITE.remove.map(k => byKey.get(k));
+  changes = REWRITE.updates.map(u => [byKey.get(u.key), u]);
+  for (let a of byKey.values()) if (!ownAnn(a)) kept++;
+}} else {{
+  for (let a of (CLEANUP ? att.getAnnotations(true) : [])) {{
+    if (ownAnn(a)) {{ old.push(a); }} else {{ kept++; }}
+  }}
 }}
 
-var noteCreated = false, noteSame = null, trash = [];
+var noteCreated = false, noteUpdated = false, noteSame = null, trash = [];
 if (NOTE_HTML) {{
   let body = h => String(h || "").replace(/<h1[^>]*>[\\s\\S]*?<\\/h1>/i, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ")
     .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&").replace(/\\s+/g, " ").trim();
   let notes = Zotero.Items.get(parent.getNotes());
   let own = n => n.getTags().some(t => OWN_TAGS.includes(t.tag));
   noteSame = notes.find(n => own(n) && body(n.getNote()) === body(NOTE_HTML)) || null;
-  if (NOTE_REPLACE) trash = notes.filter(n => own(n) && n !== noteSame && (n.getNoteTitle() || "").startsWith(TRASH_TITLE_PREFIX)).map(n => n.id);
-  let existing = notes.filter(n => !trash.includes(n.id)).map(n => n.getNoteTitle());
+  // the tool's note the folder wrote, rewritten in place
+  let target = REWRITE && REWRITE.noteUpdate ? notes.find(n => own(n) && n.key === REWRITE.noteUpdate) || null : null;
+  if (REWRITE && REWRITE.noteUpdate && !target) throw new Error("note " + REWRITE.noteUpdate + " is not the tool's under this item; run the tool again");
+  if (NOTE_REPLACE) trash = notes.filter(n => own(n) && n !== noteSame && n !== target && (n.getNoteTitle() || "").startsWith(TRASH_TITLE_PREFIX)).map(n => n.id);
+  if (noteSame && target && target !== noteSame) trash.push(target.id);
+  let existing = notes.filter(n => !trash.includes(n.id) && n !== target).map(n => n.getNoteTitle());
   let same = existing.filter(t => t && NOTE_TITLE_PREFIX && t.startsWith(NOTE_TITLE_PREFIX));
   let html = NOTE_HTML;
   if (same.length) {{
     let d = new Date(), ds = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
     html = html.replace(/<h1([^>]*)>([\\s\\S]*?)<\\/h1>/i, (m, attrs, t) => "<h1" + attrs + ">" + t.replace(/\\s*\\(v\\d+, \\d{{4}}-\\d{{2}}-\\d{{2}}\\)\\s*$/, "") + " (v" + (same.length + 1) + ", " + ds + ")</h1>");
   }}
-  if (!noteSame) {{
+  if (!noteSame && target) {{
+    target.setNote(html);
+    await target.saveTx();
+    noteUpdated = true;
+  }} else if (!noteSame) {{
     let note = new Zotero.Item("note");
     note.libraryID = libraryID;
     note.parentID = parent.id;
@@ -2432,10 +2648,25 @@ await Zotero.DB.executeTransaction(async function () {{
     await ann.save();
     created[type]++;
   }}
+  // the changes in place: only the fields that changed
+  for (let [ann, u] of changes) {{
+    if ("comment" in u) ann.annotationComment = u.comment;
+    if ("color" in u) ann.annotationColor = u.color;
+    if ("text" in u && (ann.annotationType === "highlight" || ann.annotationType === "underline")) ann.annotationText = u.text;
+    if ("pageLabel" in u) ann.annotationPageLabel = u.pageLabel;
+    if ("sortIndex" in u) ann.annotationSortIndex = u.sortIndex;
+    if ("position" in u) {{
+      let pos = Object.assign({{}}, u.position);
+      if (ann.annotationType === "note") {{ delete pos.fontSize; delete pos.rotation; let r = pos.rects[0]; pos.rects = [[r[0], r[3] - 22, r[0] + 22, r[3]]]; }}
+      ann.annotationPosition = JSON.stringify(pos);
+    }}
+    await ann.save();
+  }}
   for (let a of old) await a.erase();
 }});
 if (trash.length) await Zotero.Items.trashTx(trash);
-return "removed " + old.length + " old annotations (kept " + kept + " of yours); note: " + (NOTE_HTML ? (noteCreated ? "created" : noteSame ? "the same text exists already" : "not created") : "none") +
+return "removed " + old.length + " old annotations (kept " + kept + " of yours)" + (REWRITE ? "; changed " + changes.length + ", left " + REWRITE.keep.length + " as they were" : "") +
+  "; note: " + (NOTE_HTML ? (noteCreated ? "created" : noteUpdated ? "rewritten in place" : noteSame ? "the same text exists already" : "not created") : "none") +
   (trash.length ? "; " + trash.length + " earlier notes of the tool moved to the trash" : "") +
   "; created " + created.highlight + " highlights, " + (created.underline ? created.underline + " underlines, " : "") + created.text + " margin texts" + (created.note ? ", " + created.note + " sticky notes" : "") + ".";
 """
@@ -2972,6 +3203,44 @@ def brief_report(report):
     return out
 
 
+def _record_prints(written, lst, last, note_html):
+    """The fingerprints of what a write left, into its record: each of the tool's annotations it created, updated or
+    kept, and those an earlier record knew that are still there unchanged (an add-only write); its reading note's text."""
+    mine = set(written["createdKeys"]) | set(written["updatedKeys"]) | set(written["keptKeys"])
+    before = (last or {}).get("written") or {}
+    prints = {}
+    for a in lst.get("annotations", []):
+        if not set(a.get("tags") or []) & OWN_TAGS:
+            continue
+        fp = annotation_print(a)
+        if a["key"] in mine or before.get(a["key"]) == fp:
+            prints[a["key"]] = fp
+    written["written"] = prints
+    present = {n["key"] for n in lst.get("notes", [])}
+    notes = {k: v for k, v in ((last or {}).get("notes") or {}).items() if k in present}
+    for k in written.get("noteKeys") or []:
+        if note_html is not None:
+            notes[k] = _fingerprint(note_body(note_html))
+    written["notes"] = notes
+
+
+def _not_updated(plan, out, res, listed):
+    """The keys of the annotations a rewrite in place updated whose read-back does not have the new comment, colour or text."""
+    if not plan or not res.get("updatedKeys"):
+        return []
+    done = set(res["updatedKeys"])
+    wrong = []
+    for u in plan["update"]:
+        a = listed.get(u["key"])
+        if u["key"] not in done or a is None:
+            continue
+        f = u["fields"]
+        if (("comment" in f and (a.get("comment") or "") != f["comment"][:2000]) or ("color" in f and (a.get("color") or "").lower() != f["color"].lower())
+                or ("text" in f and (a.get("text") or "") != f["text"][:2000])):
+            wrong.append(u["key"])
+    return wrong
+
+
 def config_problems(raw):
     """Mistakes a run would otherwise pass over in silence or end on with a traceback: unknown keys (a misspelt
     "cleanup" keeps its default), an unknown level, a colour that is not #rrggbb, a switch that is not true or false, a
@@ -3136,15 +3405,18 @@ def main(argv=None):
     pdf_before = _sha256(cfg["pdf"])
     out, missed = build(cfg, obstacles)
     json.dump(out, open(os.path.join(cfg["out_dir"], "annotations.json"), "w", encoding="utf8"), ensure_ascii=False, indent=1)
-    js_path = os.path.join(cfg["out_dir"], "create_annotations.js")
-    open(js_path, "w", encoding="utf8").write(render_js(cfg, out))
     by_type = collections.Counter(a["type"] for a in out)
     note_html = read_text(cfg["note_html"]) if cfg.get("note_html") else None
     own_now = [a for a in (listing or {}).get("annotations", []) if set(a.get("tags") or []) & OWN_TAGS]
+    # a cleanup, or a reading note replaced, rewrites in place what it holds again (rewrite_plan)
+    last = _last_write(cfg)
+    plan = rewrite_plan(out, cfg, listing, last, note_html) if listing and (cfg.get("cleanup") or cfg.get("note_replace")) else None
+    js_path = os.path.join(cfg["out_dir"], "create_annotations.js")
+    open(js_path, "w", encoding="utf8").write(render_js(cfg, out, plan))
     report = {"highlights": by_type.get("highlight", 0), "underlines": by_type.get("underline", 0),
               "margin_texts": by_type.get("text", 0), "sticky_notes": by_type.get("note", 0),
               "colors": dict(collections.Counter(a["color"] for a in out if a["type"] in ("highlight", "underline"))),
-              "cleanup_removes": (len(own_now) if listing else None) if cfg.get("cleanup") else 0,
+              "cleanup_removes": ((len(plan["remove"]) if plan else len(own_now)) if listing else None) if cfg.get("cleanup") else 0,
               "missed": missed, "translation_warnings": check_translations(out),
               "style_warnings": check_style(out, cfg, listing, note_html) + check_cleanup(out, cfg, listing, args.config),
               "snapped": [{"page": page_number(a), "text": a["text"][:60], "similarity": a["snapped"]} for a in out if a.get("snapped")],
@@ -3154,6 +3426,8 @@ def main(argv=None):
                          for a in out if a.get("fitted")],
               "as_notes": [{"page": page_number(a), "text": a["comment"][:60]} for a in out if a.get("as_note")],
               "existing_annotations": existing_info, "js": js_path}
+    if plan and cfg.get("cleanup"):
+        report["rewrite"] = rewrite_counts(plan)
     previews = [os.path.join(cfg["out_dir"], f"preview_p{p}.png") for p in cfg["preview_pages"]]
     previews = [path for path in previews if os.path.exists(path)]   # pages outside the document are not rendered
     if previews:
@@ -3186,38 +3460,56 @@ def main(argv=None):
             res, err = None, why
             try:
                 if name == "api":
-                    res = api_apply(cfg, out, handle)
+                    res = api_apply(cfg, out, handle, plan)
                 elif name == "plugin":
-                    res, err = plugin_apply(cfg, out)
+                    res, err = plugin_apply(cfg, out, plan)
             except Exception as e:
                 res, err = None, str(e)
             report["applied"] = False
+            keys_path = os.path.join(cfg["out_dir"], "applied_keys.json")
+            written = None   # the keys the write left, for the record of applied_keys.json
             if res is not None:
                 report["result"] = res
-                if res.get("createdKeys") or res.get("noteKeys"):   # the keys go to a file; the report keeps counts
-                    # with the configuration that wrote them and the tool's annotations its cleanup replaced (check_cleanup)
-                    keys_path = os.path.join(cfg["out_dir"], "applied_keys.json")
-                    json.dump({"config": os.path.abspath(args.config), "createdKeys": res.get("createdKeys", []),
-                               "replacedKeys": [a["key"] for a in own_now] if cfg.get("cleanup") else [], "noteKeys": res.get("noteKeys", [])},
-                              open(keys_path, "w", encoding="utf8"), indent=1)
-                    report["result"] = dict({k: v for k, v in res.items() if k not in ("createdKeys", "noteKeys")}, keys=keys_path)
+                created, updated, unchanged = res.get("createdKeys", []), res.get("updatedKeys", []), res.get("keptKeys", [])
+                if created or updated or unchanged or res.get("noteKeys"):   # the keys go to a file; the report keeps counts
+                    # with the configuration that wrote them, what its cleanup replaced (check_cleanup) and, after the read-back,
+                    # the fingerprints of what it left (user_edit)
+                    written = {"config": os.path.abspath(args.config), "createdKeys": created, "updatedKeys": updated, "keptKeys": unchanged,
+                               "replacedKeys": list(plan["remove"]) if plan and "updatedKeys" in res else [a["key"] for a in own_now] if cfg.get("cleanup") else [],
+                               "noteKeys": res.get("noteKeys", [])}
+                    json.dump(written, open(keys_path, "w", encoding="utf8"), indent=1)
+                    report["result"] = dict({k: v for k, v in res.items() if k not in ("createdKeys", "noteKeys", "updatedKeys", "keptKeys")},
+                                            keys=keys_path)
+                if cfg.get("cleanup") and res.get("ok"):
+                    report["rewrite"] = {"created": len(created), "updated": len(updated), "kept": len(unchanged), "removed": res.get("removed", 0)}
             if res and res.get("ok"):
                 try:
                     lst = api_list(cfg, handle) if name == "api" else plugin_list(cfg)[0]
                     if not lst:
                         raise RuntimeError("read-back unavailable")
                     report["now_in_zotero"] = {"annotations": len(lst["annotations"]), "notes": [n["title"][:70] for n in lst["notes"]]}
+                    if written is not None:
+                        _record_prints(written, lst, last, note_html)
+                        json.dump(written, open(keys_path, "w", encoding="utf8"), indent=1)
                     if "createdKeys" in res:   # the local API and plugins from 0.1.9 on return the new keys
-                        ann_keys = {a["key"] for a in lst["annotations"]}
+                        listed = {a["key"]: a for a in lst["annotations"]}
                         note_keys = {n["key"] for n in lst["notes"]}
-                        verification = {"missing_annotations": sorted(set(res["createdKeys"]) - ann_keys),
-                                        "missing_notes": sorted(set(res.get("noteKeys", [])) - note_keys)}
+                        verification = {"missing_annotations": sorted((set(res["createdKeys"]) | set(res.get("updatedKeys", [])) |
+                                                                       set(res.get("keptKeys", []))) - set(listed)),
+                                        "missing_notes": sorted(set(res.get("noteKeys", [])) - note_keys),
+                                        "not_updated": _not_updated(plan, out, res, listed)}
                         report["verification"] = verification
                         if any(verification.values()):
-                            raise RuntimeError("new items are missing from read-back")
+                            raise RuntimeError("new or changed items are missing from read-back" if not verification["not_updated"]
+                                               else "changed items read back unchanged")
                     report["applied"] = True
                 except Exception as e:
                     report["apply_error"] = f"write returned success, but verification failed: {e}; inspect --list before retrying"
+                if res.get("updateError"):   # the new items are written; the changes in place, and the removals, are not all made
+                    report["applied"] = "partial" if report["applied"] else False
+                    change = (f"the new items were written, but changing the earlier ones failed: {res['updateError']}; "
+                              "run --list to see what is stored before running again")
+                    report["apply_error"] = report["apply_error"] + "; " + change if "apply_error" in report else change
                 if res.get("removeError"):   # the new items are written; earlier ones are still there
                     report["applied"] = "partial" if report["applied"] else False
                     removal = (f"the new items were written, but removing the earlier ones failed: {res['removeError']}; "

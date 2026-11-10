@@ -57,7 +57,7 @@ uv run scholium.py …                     # uv 读取脚本内嵌的元数据�
    }
    ```
 
-   只保留用户要求的输出类型。每篇论文使用独立的 `out_dir`，如 `out/<ATTACHMENT_KEY>`，句子文件和笔记文件也放在该目录。仅完整重做时使用 `cleanup: true`；不设时只做添加（补笔记、页边批注或处理选定范围）。cleanup 会删掉不是这份配置写入的本工具批注时，`--apply` 不写入（`cleanup_other`），除非加 `--accept cleanup_other`。带阅读笔记的重做可设 `note_replace: true`，把工具以前的笔记移入回收站。
+   只保留用户要求的输出类型。每篇论文使用独立的 `out_dir`，如 `out/<ATTACHMENT_KEY>`，句子文件和笔记文件也放在该目录。仅完整重做时使用 `cleanup: true`；不设时只做添加（补笔记、页边批注或处理选定范围）。cleanup 会删掉不是这份配置写入的本工具批注时，`--apply` 不写入（`cleanup_other`），除非加 `--accept cleanup_other`。cleanup 对新配置仍包含的批注就地修改：同一位置的批注保留原 key，只写入改动的字段（报告里的 `rewrite`）。带阅读笔记的重做可设 `note_replace: true`，把工具以前的笔记移入回收站。
 
    群组文库里的条目，在配置里加 `"group_id": <群组 ID>`（插件的 `paper.json` 里有），`status` 和 `samples` 加 `--group <ID>`。
 

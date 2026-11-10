@@ -26,6 +26,11 @@
   from then on only the button changes it.
 - In an annotation's Claude Code runs, one turn writes at most 32,000 tokens, thinking included
   (`CLAUDE_CODE_MAX_OUTPUT_TOKENS`), unless the user's environment sets that variable.
+- A cleanup re-apply changes in place what it holds again: an annotation of the tool at the same place keeps its key
+  and only its changed fields are written, unchanged ones are left alone, only the new ones are created and only those
+  left out are deleted, through the plugin, the local API and the JavaScript file; the report's `rewrite` counts them.
+  With `note_replace`, the reading note the output folder wrote is rewritten in place while the user has not changed it;
+  a reading note the user changed is held back as `user_edit`. A plugin before this one deletes and creates as before.
 
 ### Fixed
 

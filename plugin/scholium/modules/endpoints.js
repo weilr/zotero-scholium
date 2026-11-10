@@ -86,14 +86,22 @@ var ScholiumEndpoints = {
     return att;
   },
 
+  // the attachment's annotations and its item's notes, the tool's notes with their text (whether the user changed one);
+  // canUpdate: apply takes a rewrite in place
   async list(data) {
     const libraryID = this.library(data);
     const att = this.attachment(data, libraryID);
     const anns = att.getAnnotations(true).map(a => this.summarize(a));
     const notes = [];
     const parent = att.parentID ? Zotero.Items.get(att.parentID) : null;
-    if (parent) for (const n of Zotero.Items.get(parent.getNotes())) notes.push({ key: n.key, title: n.getNoteTitle(), tags: n.getTags().map(t => t.tag) });
-    return { ok: true, version: this.version, libraryID, attachmentKey: att.key, parentKey: parent ? parent.key : null, annotations: anns, notes };
+    if (parent) {
+      for (const n of Zotero.Items.get(parent.getNotes())) {
+        const tags = n.getTags().map(t => t.tag);
+        notes.push(Object.assign({ key: n.key, title: n.getNoteTitle(), tags }, tags.some(t => this.OWN_TAGS.includes(t)) ? { html: n.getNote() } : {}));
+      }
+    }
+    return { ok: true, version: this.version, canUpdate: true, libraryID, attachmentKey: att.key, parentKey: parent ? parent.key : null,
+             annotations: anns, notes };
   },
 
   async apply(data) {
@@ -112,16 +120,37 @@ var ScholiumEndpoints = {
 
     // (0) cleanup: annotations tagged by this tool, and external (PDF-imported, locked) annotations when
     //     data.cleanupExternal is true. They are removed in (2), after the new annotations are saved.
+    //     A rewrite in place (data.rewrite) names them: those to change (updates, with the fields that change), to keep
+    //     as they are and to remove; one that is not the tool's on this attachment (an external one may be removed), or
+    //     one of the tool's that it does not name, ends the write before anything is saved
     const tag = data.tag || "";
     if (tag && tag !== this.OWN_TAGS[0]) throw new Error(`tag must be ${this.OWN_TAGS[0]}`);
     const ownTags = new Set(this.OWN_TAGS);
-    const old = [];
+    const isOwn = a => a.getTags().some(t => ownTags.has(t.tag));
+    let old = [];
     let kept = 0;
-    if (data.cleanup !== false) {
+    const changes = [], keep = Array.isArray(data.keep) ? data.keep.map(String) : [];
+    if (data.rewrite) {
+      const byKey = new Map(att.getAnnotations(true).map(a => [a.key, a]));
+      const updates = Array.isArray(data.updates) ? data.updates : [], remove = Array.isArray(data.remove) ? data.remove.map(String) : [];
+      const stranger = k => new Error(`annotation ${k} is not one of the tool's on this attachment; run the tool again`);
+      for (const k of updates.map(u => String(u.key)).concat(keep)) if (!byKey.has(k) || !isOwn(byKey.get(k))) throw stranger(k);
+      for (const k of remove) {
+        const a = byKey.get(k);
+        if (!a || !(isOwn(a) || (data.cleanupExternal && a.annotationIsExternal))) throw stranger(k);
+      }
+      const named = new Set(updates.map(u => String(u.key)).concat(keep, remove));
+      if (data.cleanup !== false) {
+        for (const a of byKey.values()) {
+          if (isOwn(a) && !named.has(a.key)) throw new Error("the tool's annotations on the attachment changed since they were read; run the tool again");
+        }
+      }
+      old = remove.map(k => byKey.get(k));
+      for (const u of updates) changes.push([byKey.get(String(u.key)), u]);
+      for (const a of byKey.values()) if (!isOwn(a) && !remove.includes(a.key)) kept++;   // the user's, as without a rewrite
+    } else if (data.cleanup !== false) {
       for (const a of att.getAnnotations(true)) {
-        const tags = a.getTags().map(t => t.tag);
-        const mine = tags.some(t => ownTags.has(t)) ||
-                     (data.cleanupExternal && a.annotationIsExternal);
+        const mine = isOwn(a) || (data.cleanupExternal && a.annotationIsExternal);
         if (mine) old.push(a); else kept++;
       }
     }
@@ -129,8 +158,8 @@ var ScholiumEndpoints = {
     // (1) child note. A note of this tool with the same text is not written again, nor one with the same title.
     //     With note.trashOwn, the tool's other notes (titles starting with trashTitlePrefix, when given) go to the
     //     trash once everything is written; notes without the tool's tags are never touched.
-    let noteCreated = false, noteSkipped = false, notesTrashed = 0, newNote = null;
-    const trash = [], noteKeys = [], createdKeys = [];
+    let noteCreated = false, noteSkipped = false, notesTrashed = 0, newNote = null, rewriteNote = null;
+    const trash = [], noteKeys = [], createdKeys = [], updatedKeys = [];
     if (data.note && data.note.html && parent) {
       const prefix = data.note.titlePrefix || "";
       const body = html => String(html || "").replace(/<h1[^>]*>[\s\S]*?<\/h1>/i, " ").replace(/<[^>]+>/g, " ")
@@ -139,11 +168,17 @@ var ScholiumEndpoints = {
       const existingNotes = Zotero.Items.get(parent.getNotes());
       const own = n => n.getTags().some(t => ownTags.has(t.tag));
       const same = existingNotes.find(n => own(n) && body(n.getNote()) === body(data.note.html));
+      // the tool's note a rewrite names (updateKey) is written over in place, keeping its key
+      const target = data.note.updateKey ? existingNotes.find(n => n.key === String(data.note.updateKey)) : null;
+      if (data.note.updateKey && !(target && own(target))) throw new Error(`note ${data.note.updateKey} is not the tool's under this item; run the tool again`);
       if (data.note.trashOwn) {
         const only = data.note.trashTitlePrefix || "";
-        for (const n of existingNotes) if (own(n) && n !== same && (n.getNoteTitle() || "").startsWith(only)) trash.push(n.id);
+        for (const n of existingNotes) if (own(n) && n !== same && n !== target && (n.getNoteTitle() || "").startsWith(only)) trash.push(n.id);
       }
-      if (same || (prefix && existingNotes.some(n => !trash.includes(n.id) && (n.getNoteTitle() || "").startsWith(prefix)))) {
+      if (data.note.trashOwn && same && target && target !== same) trash.push(target.id);   // replaced by the same text
+      if (!same && target) {
+        rewriteNote = target;
+      } else if (same || (prefix && existingNotes.some(n => !trash.includes(n.id) && (n.getNoteTitle() || "").startsWith(prefix)))) {
         noteSkipped = true;
       } else {
         newNote = new Zotero.Item("note");
@@ -159,6 +194,10 @@ var ScholiumEndpoints = {
     const allowed = new Set(["highlight", "underline", "text", "note"]);
     await Zotero.DB.executeTransaction(async () => {
       if (newNote) await newNote.save();
+      if (rewriteNote) {
+        rewriteNote.setNote(data.note.html);
+        await rewriteNote.save();
+      }
       for (const a of anns) {
         if (!allowed.has(a.type)) continue;
         const ann = new Zotero.Item("annotation");
@@ -180,9 +219,25 @@ var ScholiumEndpoints = {
         created[type]++;
         createdKeys.push(ann.key);
       }
+      // the changes in place: only the fields given, which are those that changed
+      for (const [ann, u] of changes) {
+        if ("comment" in u) ann.annotationComment = String(u.comment || "");
+        if ("color" in u) ann.annotationColor = String(u.color || "#ffd400").toLowerCase();
+        if ("text" in u && (ann.annotationType === "highlight" || ann.annotationType === "underline")) ann.annotationText = String(u.text || "");
+        if ("pageLabel" in u) ann.annotationPageLabel = String(u.pageLabel);
+        if ("sortIndex" in u) ann.annotationSortIndex = String(u.sortIndex);
+        if (u.position) {
+          const pos = Object.assign({}, u.position);
+          if (ann.annotationType === "note") { delete pos.fontSize; delete pos.rotation; const r = pos.rects[0]; pos.rects = [[r[0], r[3] - 22, r[0] + 22, r[3]]]; }
+          ann.annotationPosition = JSON.stringify(pos);
+        }
+        await ann.save();
+        updatedKeys.push(ann.key);
+      }
       for (const a of old) await a.erase();
     });
     if (newNote) { noteCreated = true; noteKeys.push(newNote.key); }
+    if (rewriteNote) noteKeys.push(rewriteNote.key);
     // the reader's eye button turns on with the first write of a user who never used it (ScholiumToggle.showOnce)
     if (createdKeys.length) ScholiumToggle.showOnce().catch(e => this.log("annotations not shown: " + e));
     // (3) the earlier notes go to the trash; the new items are written whatever happens here
@@ -191,7 +246,8 @@ var ScholiumEndpoints = {
       try { await Zotero.Items.trashTx(trash); notesTrashed = trash.length; }
       catch (e) { removeError = String((e && e.message) || e); }
     }
-    return { ok: true, removed: old.length, kept, noteCreated, noteSkipped, notesTrashed, created, createdKeys, noteKeys, removeError };
+    return Object.assign({ ok: true, removed: old.length, kept, noteCreated, noteSkipped, notesTrashed, created, createdKeys, noteKeys, removeError },
+                         data.rewrite ? { updatedKeys, keptKeys: keep } : {}, rewriteNote ? { noteUpdated: true } : {});
   },
 
   register() {

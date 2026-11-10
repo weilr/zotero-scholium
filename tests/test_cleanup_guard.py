@@ -70,14 +70,16 @@ def test_reapplying_an_add_only_write_with_cleanup_keeps_the_earlier_annotations
     assert "1 of the tool's annotations" in reason and "EARLIER" in reason and "--accept cleanup_other" in reason
     # a complete redo the user asked for lets it through
     code, third = run(paper, monkeypatch, capsys, {"highlights": FIXED, "cleanup": True}, "--apply", "--accept", "cleanup_other", api=api)
-    assert third["applied"] is True and api.deleted == ["EARLIER", "NEW1"] and "USERS" in api.rows
+    assert third["applied"] is True and api.deleted == ["EARLIER"] and "USERS" in api.rows
+    assert [u["key"] for u in api.updated] == ["NEW1"], "the corrected one is changed in place"
 
 
 def test_a_configuration_that_holds_the_earlier_annotations_again_may_replace_them(paper, monkeypatch, capsys):
     api = Api(earlier())
     hl = HL + [{"page": 1, "text": S2, "comment": "另一句。"}]
     code, report = run(paper, monkeypatch, capsys, {"highlights": hl, "cleanup": True}, "--apply", api=api)
-    assert "cleanup_other" not in kinds(report) and report["applied"] is True and api.deleted == ["EARLIER"]
+    assert "cleanup_other" not in kinds(report) and report["applied"] is True and api.deleted == []
+    assert [u["key"] for u in api.updated] == ["EARLIER"], "the one it holds again is changed in place"
 
 
 def test_reapplying_the_configuration_that_wrote_them_needs_nothing_more(paper, monkeypatch, capsys):
@@ -85,10 +87,10 @@ def test_reapplying_the_configuration_that_wrote_them_needs_nothing_more(paper, 
     code, first = run(paper, monkeypatch, capsys, {"highlights": HL}, "--apply", api=api)
     assert first["applied"] is True
     code, second = run(paper, monkeypatch, capsys, {"highlights": FIXED, "cleanup": True}, "--apply", api=api)
-    assert second["applied"] is True and "cleanup_other" not in kinds(second) and api.deleted == ["NEW1"]
+    assert second["applied"] is True and "cleanup_other" not in kinds(second) and api.deleted == []
     # and once more after that cleanup write: its own annotations are the ones it replaces
     code, third = run(paper, monkeypatch, capsys, {"highlights": HL, "cleanup": True}, "--apply", api=api)
-    assert third["applied"] is True and api.deleted == ["NEW1", "NEW2"]
+    assert third["applied"] is True and api.deleted == [] and [u["key"] for u in api.updated] == ["NEW1", "NEW1"]
 
 
 def test_another_configurations_write_is_not_this_ones(paper, monkeypatch, capsys):
@@ -115,7 +117,8 @@ def test_a_margin_note_written_over_an_earlier_one_replaces_it(paper, monkeypatc
     api = Api([old])
     summaries = [{"page": 1, "anchor": S1, "text": "改过的页边批注。"}]
     code, report = run(paper, monkeypatch, capsys, {"summaries": summaries, "cleanup": True}, "--apply", api=api)
-    assert "cleanup_other" not in kinds(report) and report["applied"] is True and api.deleted == ["NOTE1"]
+    assert "cleanup_other" not in kinds(report) and report["applied"] is True and api.deleted == []
+    assert [u["key"] for u in api.updated] == ["NOTE1"] and api.n == 0, "the margin note over it is that one, changed"
 
 
 # the plugin's Annotate again: it deletes the tool's annotations before the agent starts, so that the agent's first write

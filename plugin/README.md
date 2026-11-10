@@ -416,8 +416,8 @@ which listens on localhost only), and the same three at the paths of Scholium Br
 | Endpoint | Purpose |
 |---|---|
 | `GET /scholium/ping` | returns `{ok, version, dataDir}`; no token required |
-| `POST /scholium/list` | lists the annotations of one attachment (the tool's own whole, with the dates they were added and changed) and the child notes of its parent item, with their tags, and the plugin's version |
-| `POST /scholium/apply` | writes a child note (unless a note of the tool has the same text), then, in one transaction, creates highlights and text annotations and, with `cleanup`, deletes those the tool created earlier; with `note.trashOwn`, moves the tool's earlier notes to the trash; returns the keys it created |
+| `POST /scholium/list` | lists the annotations of one attachment (the tool's own whole, with the dates they were added and changed) and the child notes of its parent item, with their tags (the tool's with their text), the plugin's version, and that it changes annotations in place (`canUpdate`) |
+| `POST /scholium/apply` | writes a child note (unless a note of the tool has the same text), then, in one transaction, creates highlights and text annotations and, with `cleanup`, deletes those the tool created earlier; with `rewrite`, changes the tool's annotations it names in the fields given, keeps those it names and deletes only those it names, and rewrites the tool's note `note.updateKey` in place; with `note.trashOwn`, moves the tool's earlier notes to the trash; returns the keys it created and changed |
 | `/scholium-bridge/ping`, `/scholium-bridge/list`, `/scholium-bridge/apply` | the same three, for the skill of Scholium Bridge 0.1.9 |
 
 `list` and `apply` look the attachment up in My Library, or in the library the request names by `groupID` (a group's id)

@@ -42,6 +42,12 @@ class Api:
             self.rows[keys[-1]] = {"key": keys[-1], "data": dict(item, parentItem=item.get("parentItem"))}
         return keys, []
 
+    def update(self, changes):   # a change in place: the fields given
+        self.updated = getattr(self, "updated", []) + [dict(c) for c in changes]
+        for c in changes:
+            self.rows[c["key"]]["data"].update({k: v for k, v in c.items() if k not in ("key", "version")})
+        return []
+
     def delete(self, keys):
         self.deleted += keys
         for k in keys:
@@ -137,7 +143,8 @@ def test_the_report_says_how_many_annotations_cleanup_removes(paper, monkeypatch
                ann_row("USER")])
     hl = [{"page": 1, "text": SENTENCE, "comment": "该方法提升了结果。"}]
     _, report = run(paper, monkeypatch, capsys, {"cleanup": True, "highlights": hl}, api=api)
-    assert report["cleanup_removes"] == 2
+    assert report["cleanup_removes"] == 1 and report["rewrite"] == {"created": 0, "updated": 1, "kept": 0, "removed": 1}, \
+        "the new highlight over OWN1 changes it in place"
     _, report = run(paper, monkeypatch, capsys, {"highlights": hl}, api=api)
     assert "cleanup_removes" not in report, "cleanup is off by default"
     _, report = run(paper, monkeypatch, capsys, {"highlights": hl}, "--verbose", api=api)
@@ -357,7 +364,7 @@ def test_a_redo_is_not_applied_without_reading_the_attachment(paper, monkeypatch
     assert "--ignore-existing cannot be combined with cleanup: true" in report["apply_error"]
     assert api.n == 0 and api.deleted == [], "nothing was written or removed"
     code, report = run(paper, monkeypatch, capsys, {"highlights": hl, "cleanup": True}, "--apply", "--accept", "cleanup_other", api=api)
-    assert code == 0 and report["applied"] is True and api.deleted == ["OWN1"]
+    assert code == 0 and report["applied"] is True and api.deleted == [] and [u["key"] for u in api.updated] == ["OWN1"]
     code, report = run(paper, monkeypatch, capsys, {"highlights": hl}, "--apply", "--ignore-existing", api=Api())
     assert code == 0 and report["applied"] is True, "without cleanup --ignore-existing still writes"
 
@@ -432,10 +439,10 @@ def test_the_plugins_keys_are_kept_and_checked_after_writing(paper, monkeypatch,
     listing = {"ok": True, "version": "0.1.9", "annotations": [], "notes": []}
     monkeypatch.setattr(cli, "plugin_list", lambda cfg: (listing, None))
     result = {"ok": True, "removed": 0, "kept": 0, "noteCreated": False, "created": {"highlight": 1}, "createdKeys": ["NEW1"], "noteKeys": []}
-    monkeypatch.setattr(cli, "plugin_apply", lambda cfg, out: (result, None))
+    monkeypatch.setattr(cli, "plugin_apply", lambda cfg, out, plan=None: (result, None))
     listing["annotations"] = [{"key": "NEW1", "tags": ["zotero-scholium"]}]
     code, report = run(paper, monkeypatch, capsys, {"highlights": hl}, "--apply", "--ignore-existing", "--verbose")
-    assert code == 0 and report["applied"] is True and report["verification"] == {"missing_annotations": [], "missing_notes": []}
+    assert code == 0 and report["applied"] is True and report["verification"] == {"missing_annotations": [], "missing_notes": [], "not_updated": []}
     tmp, _ = paper
     assert json.loads((tmp / "out" / "applied_keys.json").read_text(encoding="utf8"))["createdKeys"] == ["NEW1"]
     listing["annotations"] = []

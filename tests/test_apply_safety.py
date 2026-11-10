@@ -288,7 +288,7 @@ def test_a_run_names_an_item_that_is_not_the_parent(tmp_path, monkeypatch, capsy
 def test_main_reports_verified_annotation_and_note(tmp_path, monkeypatch, capsys):
     code, report = run_main(tmp_path, monkeypatch, capsys, MemoryApi(), with_note=True, args=("--ignore-existing", "--verbose"))
     assert code == 0 and report["applied"] is True
-    assert report["verification"] == {"missing_annotations": [], "missing_notes": []}
+    assert report["verification"] == {"missing_annotations": [], "missing_notes": [], "not_updated": []}
     assert report["now_in_zotero"]["annotations"] == 1
     assert report["result"]["noteCreated"] is True and report["result"]["removed"] == 0 and report["result"]["keys"]
     assert len(report["pdf_sha256"]["before"]) == 64 and report["js"].endswith("create_annotations.js")
