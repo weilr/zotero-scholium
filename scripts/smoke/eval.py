@@ -14,7 +14,8 @@
 A run is a folder live.py made (probe-config.json, live.json, data/, shots/). A baseline is the JSON of score --out:
 {"papers": [...]}, without paths of the machine; runs are compared with the baseline's run of the same paper (arXiv id).
 `run` stops starting runs once the set's result lines add up to --max-usd (each run is given what is left as its own
---max-usd), and stops the set when live.py refuses a run or a safety layer stopped one (exit code 2 or 3).
+--max-usd), and stops the set when live.py refuses a run, a safety layer stopped one, or one is unverified (exit code
+2, 3 or 4).
 """
 import argparse
 import collections
@@ -36,6 +37,7 @@ if HERE not in sys.path:
 import live  # noqa: E402
 
 EVALSET = os.path.join(HERE, "evalset.json")
+STOPS = (live.REFUSED_EXIT, live.SAFETY_EXIT, live.UNVERIFIED_EXIT)   # live.py's exit codes that end a set
 CJK = re.compile(r"[一-鿿]")
 TAG = "zotero-scholium"
 READ_FILES = ("SKILL.md", "reading_note.template.html", "config.template.json", "style-zh.md", "style-en.md")
@@ -497,8 +499,9 @@ def run_set(a, data):
         if os.path.isfile(os.path.join(a.out, tag, live.MARKER)):
             done.append(tag)
         print(f"== {tag}: exit {code}, cost {live.session_cost(os.path.join(a.out, tag)):.4f} USD", flush=True)
-        if code in (live.REFUSED_EXIT, live.SAFETY_EXIT):
-            print(f"== STOP: {tag} was {'refused' if code == live.REFUSED_EXIT else 'stopped by a safety layer'}; the set ends", flush=True)
+        if code in STOPS:
+            why = {live.REFUSED_EXIT: "refused", live.SAFETY_EXIT: "stopped by a safety layer", live.UNVERIFIED_EXIT: "unverified"}[code]
+            print(f"== STOP: {tag} was {why}; the set ends", flush=True)
             break
     total = sum(live.session_cost(os.path.join(a.out, t)) for t in done)
     print(f"== the set spent {total:.4f} of {a.max_usd:.2f} USD", flush=True)
@@ -510,7 +513,7 @@ def run_set(a, data):
             print()
             print(compare_table(evals, read_json(a.compare, {}).get("papers") or [], SCORE_ROWS))
         print(f"\nscores: {os.path.join(a.out, 'eval.json')} and eval.md")
-    return code if code in (live.REFUSED_EXIT, live.SAFETY_EXIT) else 0
+    return code if code in STOPS else 0
 
 
 def write_baseline(evals, name):

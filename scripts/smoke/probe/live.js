@@ -83,6 +83,27 @@ async function main() {
   try { Zotero.Server.LocalAPI._promptForAuthorization = async () => ({ allow: true, remember: false }); } catch (e) {}
   const ok = await waitFor(() => Zotero.__scholium && Zotero.__scholium.paneID, 60000);
   const r = R();
+  // Claude Code's skill folder as the plugin sees it (--add-dir, the pre-run's script): the commit's export, not the
+  // user's installed skill
+  if (r && CFG.claudeSkills) {
+    const skills0 = r.skillsDir;
+    r.skillsDir = function (agent) { return agent === "claude" ? CFG.claudeSkills : skills0.call(this, agent); };
+  }
+  // every process the plugin starts (the agent, the pre-run's status and extract): its program and arguments
+  if (r) {
+    const sp0 = r.subprocess;
+    r.subprocess = function () {
+      const m = sp0.call(this);
+      const w = Object.create(m);
+      Object.defineProperty(w, "call", { value: async o => {
+        const env = (o && o.environment) || {};
+        line("spawn", { command: o && o.command, arguments: ((o && o.arguments) || []).map(a => String(a).slice(0, 220)),
+                        workdir: o && o.workdir, SCHOLIUM_ZOTERO_PORT: env.SCHOLIUM_ZOTERO_PORT, preRun: !!(R().job && R().job.preRun) });
+        return m.call(o);
+      } });
+      return w;
+    };
+  }
   line("start", { zotero: Zotero.version, plugin: r && r.version, locale: Zotero.locale, model: r && r.modelPref("claude"),
                   port: Zotero.Prefs.get("httpServer.port"), claudeSkills: r && r.skillsDir("claude"),
                   showAnnotationsPref: Zotero.Prefs.get("extensions.scholium.showAnnotations", true), lang: r && r.lang() });

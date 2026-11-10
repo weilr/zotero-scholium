@@ -145,7 +145,8 @@ many later messages re-read them, and the context of each API message. `--compar
 against the baseline's run of the same paper.
 
 Exit code 0: a complete run; 1: safe but incomplete (a timeout, no result); 2: refused before Zotero started; 3: a
-safety layer stopped it.
+safety layer stopped it; 4: unverified (a closed connection with 23119 appeared that the watcher could not attribute;
+`live.json` says which). `live.json`'s `verdict` is `safe`, `unverified` or `unsafe`.
 
 ## An evaluation
 
@@ -207,8 +208,17 @@ None of these can be turned off.
   chain-test item, and compares netstat :23119 before and after. If any of it fails, there is no run.
 - **Watcher:** from before Zotero starts until after it ended, netstat is read every second. Every connection with 23119
   on either side is logged (`watch23119-all.txt`), the clients in `watch23119.txt`. A connection to 23119 from this run's
-  process tree (the runner, its Zotero and their children) ends the run's Zotero at once: `TRIPPED`, exit code 3.
-- **netstat:** :23119 before and after the session must be the same.
+  process tree (the runner, its Zotero and their children) that a sample shows ends the run's Zotero: `TRIPPED`, exit
+  code 3. Only the processes whose command line names the run's profile are ended, never the connecting process.
+  Windows reuses process ids, so a parent created after its child does not count as its parent. A connection shorter
+  than a second may be missed while it is open; it then shows only as a closed one (TIME_WAIT, no process), and one that
+  appears during the session makes it unverified (exit code 4), since it could have been the run's.
+- **netstat:** the LISTENING lines of :23119 (your Zotero) must be the same before and after the session; your own
+  connections to it come and go and are only logged.
+- **The session's Zotero:** the runner waits while the Zotero it started runs, also when the process list cannot be
+  read, and at the end ends that process by the handle it holds if the list missed it.
+- **The skill:** the probe gives the plugin the export's skill folder as Claude Code's, so `--add-dir` and the pre-run
+  run the commit's skill, not one you installed; `facts.json` records each process the plugin starts.
 - **Isolation:** as for the smoke checks: profile, data, APPDATA, TEMP and CODEX_HOME are the run's; the calling
   shell's `CLAUDE*` variables are not passed on. A rehearsal also gets an empty `CLAUDE_CONFIG_DIR`. Only processes
   whose command line names the run's profile are ended, and only a folder this runner made is emptied for a new run.

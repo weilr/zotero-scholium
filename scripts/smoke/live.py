@@ -21,8 +21,10 @@ Safety layers, none of which can be turned off (scripts/smoke/README.md says mor
              throwaway's port and each redirect noted; a redirect during the run fails it
   chain      before Annotate: the guard's self-test, the exported script's `status` through the guard and with `python -I`
              and SCHOLIUM_ZOTERO_PORT alone, and an `--apply` on a chain-test item, with netstat :23119 unchanged
-  watcher    netstat every second for the whole session, both sides of 23119 logged; a connection to 23119 from this run's
-             process tree (this runner, its Zotero and their children) ends the run's Zotero at once (TRIPPED)
+  watcher    netstat once a second for the whole session, both sides of 23119 logged; a connection to 23119 from this run's
+             process tree (this runner, its Zotero and their children) that a sample shows ends the run's own Zotero
+             (TRIPPED); a shorter connection shows only as a closed one (TIME_WAIT, no process), and one that appears
+             during the session leaves it unverified
   budget     Claude Code never gets --max-budget-usd (it shows the agent its budget each turn and the agent then
              economizes); the probe cancels the run after --max-msgs API messages, a cap the agent does not see, and the
              runner stops the session once the result lines' total_cost_usd passes --max-usd
@@ -30,7 +32,8 @@ Safety layers, none of which can be turned off (scripts/smoke/README.md says mor
              are not passed on; TEMP, APPDATA and CODEX_HOME are the run's own
 
 Windows only (the watcher reads netstat -ano and Win32_Process). Exit code 0: a complete run; 1: safe but incomplete
-(timeout, no result); 2: refused before starting; 3: a safety layer stopped it (the eval set stops on 2 and 3).
+(timeout, no result); 2: refused before starting; 3: a safety layer stopped it; 4: unverified, a closed connection with
+23119 appeared that the watcher could not attribute (the eval set stops on 2, 3 and 4).
 """
 import argparse
 import glob
@@ -58,7 +61,7 @@ PROBE_BASE = os.path.join(HERE, "probe", "bootstrap.js")
 PROBE_LIVE = os.path.join(HERE, "probe", "live.js")
 MARKER = "live-run.txt"            # in each run folder this runner made: only such a folder is ever emptied
 FORBIDDEN_FLAGS = ("--max-budget-usd",)
-SAFETY_EXIT, REFUSED_EXIT = 3, 2
+SAFETY_EXIT, REFUSED_EXIT, UNVERIFIED_EXIT = 3, 2, 4
 WINDOWS = os.name == "nt"   # the watcher needs netstat -ano and Win32_Process
 CHAIN_SENTENCE = smoke.PDF_PAGES[0][2][0]
 CONFIG_KEYS = {"zotero", "claude", "fake", "out", "port", "papers", "model", "effort", "locale", "max_msgs", "max_usd",
@@ -281,13 +284,21 @@ def is_listen(row):
 
 def in_tree(pid, table, profile, roots=()):
     """Whether pid is of this run: its parent chain reaches one of roots (this runner) or a process whose command line
-    names this run's profile (its Zotero). table: {pid: (parent pid, name, command line)}."""
+    names this run's profile (its Zotero). table: {pid: (parent pid, name, command line[, creation time])}. Windows
+    reuses process ids and a process keeps the id of a parent that is gone, so the chain ends at a "parent" created
+    after its child: that is another process with the same id. Only used to say whose a connection is: a trip ends
+    the run's own Zotero (end_ours), never the process found here."""
     seen = set()
     while pid in table and pid not in seen:
         seen.add(pid)
-        parent, _, cmd = table[pid]
+        entry = table[pid]
+        parent, cmd, created = entry[0], entry[2], (entry[3] if len(entry) > 3 else None)
         if pid in roots or smoke.profile_matches(cmd, profile):
             return True
+        above = table.get(parent)
+        above_created = above[3] if above is not None and len(above) > 3 else None
+        if created is not None and above_created is not None and above_created > created:
+            return False
         pid = parent
     return pid in roots
 
@@ -307,12 +318,12 @@ def watch_step(rows, table, profile, roots, seen, port=USER_PORT):
             seen["all"].add(key)
             side = "zotero-side" if r["local"].endswith(tail) else "client-side"
             every.append(f"{side} pid {r['pid']} {name}: {r['line']}")
-        if not r["foreign"].endswith(tail):
-            continue
-        if not r["pid"]:   # a closed connection (TIME_WAIT): no process to name
-            if r["local"] not in seen.setdefault("closed", set()):
-                seen["closed"].add(r["local"])
+        if not r["pid"]:   # a closed connection (TIME_WAIT), on either side: no process to name
+            if (r["local"], r["foreign"]) not in seen.setdefault("closed", set()):
+                seen["closed"].add((r["local"], r["foreign"]))
                 clients.append(f"closed {r['line']}")
+            continue
+        if not r["foreign"].endswith(tail):
             continue
         mine = in_tree(r["pid"], table, profile, roots)
         if (r["pid"], r["local"]) not in seen.setdefault("clients", set()):
@@ -345,15 +356,38 @@ def conversation_logs(run, kind="*"):
     return sorted(glob.glob(os.path.join(run, "data", "tmp", "scholium", "*", "conversations", kind + ".jsonl")))
 
 
-def session_cost(run):
-    total = 0.0
+def log_sizes(run):
+    """{log: its size in bytes}: what the run's conversation logs held as the session began (a --from-run copy's)."""
+    out = {}
     for path in conversation_logs(run):
         try:
-            with open(path, encoding="utf8", errors="replace") as f:
-                total += result_cost(f)
+            out[path] = os.path.getsize(path)
         except OSError:
             pass
-    return total
+    return out
+
+
+def new_lines(path, since=None):
+    """A log's lines written after since[path] bytes (all of a log that was not there, or got shorter)."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return []
+    start = (since or {}).get(path, 0)
+    if start > len(data):
+        start = 0
+    return data[start:].decode("utf8", "replace").splitlines()
+
+
+def session_cost(run, since=None):
+    """The session's cost: the result lines written to the run's conversation logs since `since` (log_sizes)."""
+    return sum(result_cost(new_lines(path, since)) for path in conversation_logs(run))
+
+
+def annotate_results(run, since=None):
+    return sum(1 for path in conversation_logs(run, "annotate-*") for line in new_lines(path, since)
+               if '"type": "result"' in line or '"type":"result"' in line)
 
 
 def check_agent_env(facts, port):
@@ -365,9 +399,17 @@ def check_agent_env(facts, port):
     return bool(seen) and got == [str(port)] and not aborted, {"agent processes": len(seen), "SCHOLIUM_ZOTERO_PORT": got, "aborted": aborted}
 
 
+def unverified(s):
+    """Why a safe session's safety cannot be confirmed: closed connections with 23119 that appeared during it, whose
+    process the watcher could not see (a connection shorter than its one-second samples)."""
+    closed = (s.get("watch") or {}).get("closed during") or []
+    return [f"{len(closed)} closed connection(s) with 23119 appeared during the session without a process id; one shorter "
+            "than the watcher's one-second samples cannot be attributed and could have been this run's (watch23119.txt)"] if closed else []
+
+
 def verdict(s):
     """(safe, complete) of a session summary."""
-    safe = (not s["tripped"] and s["netstat"]["before"] == s["netstat"]["after"] and s["redirects"] == 0
+    safe = (not s["tripped"] and listening(s["netstat"]["before"]) == listening(s["netstat"]["after"]) and s["redirects"] == 0
             and s["chain"].get("ok") is True and s["agent_env"]["ok"] and not s.get("aborted"))
     complete = s["ended"] == "quit" and s["annotate_results"] > 0 and s["db"]
     return safe, bool(complete)
@@ -381,14 +423,20 @@ def netstat_text():
 
 
 def procs():
-    """{pid: (parent pid, name, command line)} of every process."""
-    ps = "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.Name)`t$($_.CommandLine)\" }"
+    """{pid: (parent pid, name, command line, creation time as a FILETIME or None)} of every process."""
+    ps = ("Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t"
+          "$(if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() })`t$($_.Name)`t$($_.CommandLine)\" }")
     out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, encoding="utf8", errors="replace").stdout
+    return parse_procs(out)
+
+
+def parse_procs(text):
     table = {}
-    for line in out.splitlines():
-        parts = line.split("\t", 3)
-        if len(parts) == 4 and parts[0].isdigit():
-            table[int(parts[0])] = (int(parts[1]) if parts[1].isdigit() else 0, parts[2], parts[3])
+    for line in (text or "").splitlines():
+        parts = line.split("\t", 4)
+        if len(parts) == 5 and parts[0].strip().isdigit():
+            created = parts[2].strip()
+            table[int(parts[0])] = (int(parts[1]) if parts[1].strip().isdigit() else 0, parts[3], parts[4], int(created) if created.isdigit() else None)
     return table
 
 
@@ -404,6 +452,12 @@ class Watcher(threading.Thread):
         super().__init__(daemon=True)
         self.run_dir, self.profile, self.roots = run, profile, {os.getpid()}
         self.stopping, self.tripped, self.samples, self.seen = threading.Event(), None, 0, {}
+        self.zotero_started, self.closed_before = False, set()   # the closed connections already there as Zotero starts
+
+    def closed_during(self):
+        """The closed connections with 23119 (TIME_WAIT, no process) that appeared once the run's Zotero started: a
+        connection shorter than a sample shows only so, and could have been this run's."""
+        return sorted(set(self.seen.get("closed", ())) - self.closed_before)
 
     def write(self, name, lines):
         if lines:
@@ -419,13 +473,14 @@ class Watcher(threading.Thread):
                 if rows:
                     table = procs()
                     every, clients, trip = watch_step(rows, table, self.profile, self.roots, self.seen)
+                    if not self.zotero_started:
+                        self.closed_before |= set(self.seen.get("closed", ()))
                     self.write("watch23119-all.txt", every)
                     self.write("watch23119.txt", clients)
-                    if trip and not self.tripped:
+                    if trip and not self.tripped:   # only the run's own Zotero is ended, never the connecting process
                         self.tripped = dict(trip, at=time.strftime("%H:%M:%S"))
                         self.write("watch23119.txt", [f"TRIPPED by pid {trip['pid']}: ending this run's Zotero"])
-                        smoke.end_ours(self.profile)
-                        subprocess.run(["taskkill", "/PID", str(trip["pid"]), "/T", "/F"], capture_output=True)
+                        self.tripped["ended"] = smoke.end_ours(self.profile)
             except Exception as e:  # noqa: BLE001 - the watcher keeps watching
                 self.write("watch23119.txt", [f"watch error {e!r}"])
             self.stopping.wait(1)
@@ -566,7 +621,10 @@ def session(a):
     stop_file = os.path.join(run, "stop-request.json")
     config = {"shots": d["shots"], "run": run, "pdf": a.pdf, "chainPdf": smoke.make_pdf(os.path.join(d["chain"], "chain.pdf")),
               "extra": a.extra, "port": a.port, "paper": paper, "limitMin": a.limit, "locale": a.locale, "flags": flags,
-              "maxMsgs": a.max_msgs, "stopFile": stop_file, "checks": [], "openReader": bool(a.open_reader), "chat": a.chat or ""}
+              "maxMsgs": a.max_msgs, "stopFile": stop_file, "checks": [], "openReader": bool(a.open_reader), "chat": a.chat or "",
+              # Claude Code's skill folder as the plugin sees it: the export's, so that --add-dir and the pre-run's script
+              # are the commit's, not a skill the user installed
+              "claudeSkills": os.path.join(export, "skills")}
     if fake_dir:
         config["fake"] = fake_dir
     with open(os.path.join(run, "probe-config.json"), "w", encoding="utf8") as f:
@@ -586,11 +644,13 @@ def session(a):
     print(f"[{a.tag}] netstat :{USER_PORT} before: {before}", flush=True)
     with open(os.path.join(run, "watch23119-all.txt"), "w", encoding="utf8") as f:
         f.write(f"{time.strftime('%H:%M:%S')} session start; netstat :{USER_PORT}: {before}\n")
+    since = log_sizes(run)   # the logs a --from-run copy brought: what they hold is not this session's
     watcher = Watcher(run, d["profile"])
     watcher.start()
     time.sleep(1.5)   # a first sample before Zotero starts
     log = open(os.path.join(run, "zotero-debug.txt"), "a", encoding="utf8")
-    subprocess.Popen([a.zotero, "-no-remote", "-profile", d["profile"], "-ZoteroDebugText"], env=env, stdout=log, stderr=subprocess.STDOUT)
+    watcher.zotero_started = True
+    zotero = subprocess.Popen([a.zotero, "-no-remote", "-profile", d["profile"], "-ZoteroDebugText"], env=env, stdout=log, stderr=subprocess.STDOUT)
     started, ended, chain, stop_at = time.time(), "quit", {}, None
     try:
         time.sleep(8)
@@ -609,7 +669,7 @@ def session(a):
                 with open(os.path.join(run, "chain-done.json"), "w", encoding="utf8") as f:
                     json.dump(chain, f, ensure_ascii=False, indent=1)
                 print(f"[{a.tag}] chain test: {'passed' if chain.get('ok') else 'FAILED: ' + ', '.join(chain.get('failed') or [])}", flush=True)
-            cost = session_cost(run)
+            cost = session_cost(run, since)
             if stop_at is None and cost > a.max_usd:
                 stop_at = time.time()
                 with open(stop_file, "w", encoding="utf8") as f:
@@ -618,12 +678,16 @@ def session(a):
             if stop_at is not None and time.time() > stop_at + 90:
                 ended = "COST"
                 break
-            if not ours(d["profile"]):
+            # the session lasts while the Zotero started here runs, also when the process list cannot be read
+            if zotero.poll() is not None and not ours(d["profile"]):
                 break
         else:
             ended = "timeout"
     finally:
         killed = smoke.end_ours(d["profile"])
+        if zotero.poll() is None:   # the process list missed it: the handle held here names this run's Zotero, and only it
+            subprocess.run(["taskkill", "/PID", str(zotero.pid), "/T", "/F"], capture_output=True)
+            killed = killed + [zotero.pid]
         time.sleep(2)
         watcher.stopping.set()
         watcher.join(10)
@@ -632,21 +696,20 @@ def session(a):
     seconds = round(time.time() - started)
     facts = read_json(os.path.join(d["shots"], "facts.json"), [])
     env_ok, env_info = check_agent_env(facts, a.port)
-    annotate_results = 0
-    for path in conversation_logs(run, "annotate-*"):
-        with open(path, encoding="utf8", errors="replace") as f:
-            annotate_results += sum(1 for line in f if '"type": "result"' in line or '"type":"result"' in line)
     s = {"tag": a.tag, "git": a.git, "commit": a.commit, "fake": bool(a.fake), "model": a.model, "effort": a.effort, "locale": a.locale,
          "port": a.port, "max_msgs": a.max_msgs, "max_usd": a.max_usd, "ended": ended, "killed": killed, "seconds": seconds,
          "netstat": {"before": before, "after": after},
          "redirects": redirects(d["guard"]) - (chain.get("guardSelfTestRedirects") or 0),
          "tripped": watcher.tripped, "watch": {"samples": watcher.samples, "logged": len(watcher.seen.get("all", ())),
-                                               "other clients": sorted(watcher.seen.get("other", ())), "closed": len(watcher.seen.get("closed", ()))},
+                                               "other clients": sorted(watcher.seen.get("other", ())), "closed": len(watcher.seen.get("closed", ())),
+                                               "closed during": [f"{local} -> {foreign}" for local, foreign in watcher.closed_during()]},
          "chain": {k: chain.get(k) for k in ("ok", "failed", "redirects", "netstat23119")}, "agent_env": dict(env_info, ok=env_ok),
-         "aborted": [f.get("reason") for f in facts if f.get("what") == "abort"], "cost_usd": round(session_cost(run), 4),
-         "cost_stop": stop_at is not None, "annotate_results": annotate_results, "db": os.path.exists(os.path.join(d["shots"], "db.json")),
+         "aborted": [f.get("reason") for f in facts if f.get("what") == "abort"], "cost_usd": round(session_cost(run, since), 4),
+         "cost_stop": stop_at is not None, "annotate_results": annotate_results(run, since), "db": os.path.exists(os.path.join(d["shots"], "db.json")),
          "personal_script": a.personal, "at": time.strftime("%Y-%m-%d %H:%M:%S")}
     s["safe"], s["complete"] = verdict(s)
+    s["unverified"] = unverified(s)
+    s["verdict"] = "unsafe" if not s["safe"] else "unverified" if s["unverified"] else "safe"
     with open(os.path.join(run, "live.json"), "w", encoding="utf8") as f:
         json.dump(s, f, ensure_ascii=False, indent=1)
     print(f"[{a.tag}] ended: {ended}, ended by the runner: {killed}, {seconds} s, cost {s['cost_usd']} USD", flush=True)
@@ -741,6 +804,9 @@ def main(argv=None):
     if not s["safe"]:
         print(f"[{a.tag}] SAFETY STOP: see live.json, watch23119.txt and chain-done.json in {os.path.join(a.out, a.tag)}", flush=True)
         return SAFETY_EXIT
+    if s["unverified"]:
+        print(f"[{a.tag}] UNVERIFIED: " + "; ".join(s["unverified"]), flush=True)
+        return UNVERIFIED_EXIT
     print(f"[{a.tag}] {'complete' if s['complete'] else 'INCOMPLETE'}; score it: python scripts/smoke/eval.py report {os.path.join(a.out, a.tag)}", flush=True)
     return 0 if s["complete"] else 1
 

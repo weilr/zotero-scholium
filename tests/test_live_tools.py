@@ -204,6 +204,12 @@ def test_the_probe_cancels_a_run_given_a_budget_or_another_port():
     assert "chain-request.json" in probe and "if (!chainOk)" in probe
 
 
+def test_the_probe_points_claude_code_at_the_export():
+    probe = open(os.path.join(SMOKE, "probe", "live.js"), encoding="utf8").read()
+    assert 'agent === "claude" ? CFG.claudeSkills' in probe and 'line("spawn"' in probe and "Object.defineProperty(w, \"call\"" in probe
+    assert '"claudeSkills": os.path.join(export, "skills")' in open(os.path.join(SMOKE, "live.py"), encoding="utf8").read()
+
+
 def test_the_probe_records_the_click_and_the_live_line():
     probe = open(os.path.join(SMOKE, "probe", "live.js"), encoding="utf8").read()
     assert probe.index('line("clicked"') < probe.index("await realClick(annotGo(box))")   # the pre-run's time: click to Claude Code's args
@@ -308,16 +314,18 @@ Active Connections
   UDP    0.0.0.0:23119          *:*                                    4242
 """
 PROFILE = "C:\\runs\\a\\profile"
-TABLE = {
-    100: (1, "python.exe", "python scripts/smoke/live.py"),                                  # the runner
-    5000: (100, "zotero.exe", '"C:\\Z\\zotero.exe" -no-remote -profile "C:\\runs\\a\\profile"'),
-    7001: (5000, "claude.exe", "claude.exe -p"),
-    7002: (7001, "pwsh.exe", "pwsh -c ..."),
-    7003: (7002, "python.exe", "python scholium.py --apply"),                                # the run's agent
-    7004: (100, "python.exe", "python scholium.py status"),                                   # the chain test
-    4242: (1, "zotero.exe", '"C:\\Program Files\\Zotero\\zotero.exe"'),                       # the user's own
-    9100: (1, "WINWORD.EXE", "WINWORD.EXE"),
-    9200: (9201, "a.exe", "a"), 9201: (9200, "b.exe", "b"),                                  # a loop of parents
+TABLE = {   # pid: (parent pid, name, command line, creation time)
+    100: (1, "python.exe", "python scripts/smoke/live.py", 1000),                            # the runner
+    5000: (100, "zotero.exe", '"C:\\Z\\zotero.exe" -no-remote -profile "C:\\runs\\a\\profile"', 1100),
+    7001: (5000, "claude.exe", "claude.exe -p", 1200),
+    7002: (7001, "pwsh.exe", "pwsh -c ...", 1300),
+    7003: (7002, "python.exe", "python scholium.py --apply", 1400),                          # the run's agent
+    7004: (100, "python.exe", "python scholium.py status", 1150),                             # the chain test
+    4242: (1, "zotero.exe", '"C:\\Program Files\\Zotero\\zotero.exe"', 10),                   # the user's own
+    9100: (1, "WINWORD.EXE", "WINWORD.EXE", 20),
+    9200: (9201, "a.exe", "a", 30), 9201: (9200, "b.exe", "b", 30),                          # a loop of parents
+    # Word, started before this run, whose parent is gone; that parent's id now belongs to this run's Zotero, its claude
+    9300: (5000, "WINWORD.EXE", "WINWORD.EXE /automation", 500), 9301: (7001, "WINWORD.EXE", "WINWORD.EXE", 900),
 }
 
 
@@ -338,6 +346,93 @@ def test_the_run_is_its_runner_its_zotero_and_their_children():
     assert not live.in_tree(4242, TABLE, PROFILE, roots) and not live.in_tree(9100, TABLE, PROFILE, roots)
     assert not live.in_tree(9200, TABLE, PROFILE, roots) and not live.in_tree(12345, TABLE, PROFILE, roots)
     assert live.in_tree(100, {}, PROFILE, roots)
+
+
+def test_a_reused_parent_id_is_not_the_runs():
+    """Windows reuses process ids: a process whose parent is gone keeps its id, which may now be the run's Zotero's.
+    A "parent" created after its child is another process, and the chain ends there."""
+    roots = {100}
+    assert not live.in_tree(9300, TABLE, PROFILE, roots) and not live.in_tree(9301, TABLE, PROFILE, roots)
+    old = {k: v[:3] for k, v in TABLE.items()}   # without creation times the chain is followed as before
+    assert live.in_tree(9300, old, PROFILE, roots)
+    unknown = dict(TABLE)
+    unknown[7002] = (7001, "pwsh.exe", "pwsh", None)   # a creation time not known: the chain goes on
+    assert live.in_tree(7003, unknown, PROFILE, roots)
+
+
+def test_a_trip_ends_only_the_runs_zotero(monkeypatch, tmp_path):
+    rows = live.netstat_rows("  TCP 127.0.0.1:50009 127.0.0.1:23119 ESTABLISHED 7003\n")
+    assert live.watch_step(rows, TABLE, PROFILE, {100}, {})[2]["pid"] == 7003
+    word = live.netstat_rows("  TCP 127.0.0.1:50010 127.0.0.1:23119 ESTABLISHED 9300\n")   # Word's Zotero integration
+    assert live.watch_step(word, TABLE, PROFILE, {100}, {})[2] is None
+    ended, ran = [], []
+    monkeypatch.setattr(live, "netstat_text", lambda: "  TCP 127.0.0.1:50009 127.0.0.1:23119 ESTABLISHED 7003\n")
+    monkeypatch.setattr(live, "procs", lambda: TABLE)
+    monkeypatch.setattr(live.smoke, "end_ours", lambda profile: ended.append(profile) or [5000])
+    monkeypatch.setattr(live.subprocess, "run", lambda *a, **k: ran.append(a) or pytest.fail("a process was started: %r" % (a,)))
+    w = live.Watcher(str(tmp_path), PROFILE)
+    w.roots = {100}
+    w.stopping.wait = lambda t: w.stopping.set()   # one sample
+    w.run()
+    assert w.tripped["pid"] == 7003 and w.tripped["ended"] == [5000] and ended == [PROFILE] and ran == []
+    assert "taskkill" not in open(os.path.join(SMOKE, "live.py"), encoding="utf8").read().split("class Watcher")[1].split("def prepare_run")[0]
+
+
+def test_a_closed_connection_during_the_session_leaves_it_unverified(monkeypatch, tmp_path):
+    """A connection shorter than a sample shows only as TIME_WAIT without a process, on either side: one that was not
+    there as the run's Zotero started could have been the run's."""
+    old = "  TCP 127.0.0.1:50020 127.0.0.1:23119 TIME_WAIT 0\n"
+    new = "  TCP 127.0.0.1:50021 127.0.0.1:23119 TIME_WAIT 0\n  TCP 127.0.0.1:23119 127.0.0.1:50022 TIME_WAIT 0\n"
+    samples = iter([old, old + new])
+    monkeypatch.setattr(live, "netstat_text", lambda: next(samples))
+    monkeypatch.setattr(live, "procs", lambda: {})
+    w = live.Watcher(str(tmp_path), PROFILE)
+    calls = []
+
+    def wait(t):
+        calls.append(t)
+        w.zotero_started = True   # Zotero starts after the first sample
+        if len(calls) == 2:
+            w.stopping.set()
+    w.stopping.wait = wait
+    w.run()
+    assert w.closed_before == {("127.0.0.1:50020", "127.0.0.1:23119")}
+    assert w.closed_during() == [("127.0.0.1:23119", "127.0.0.1:50022"), ("127.0.0.1:50021", "127.0.0.1:23119")]
+    assert w.tripped is None
+    listen = "TCP 127.0.0.1:23119 0.0.0.0:0 LISTENING 4242"
+    s = {"tripped": None, "netstat": {"before": [listen], "after": [listen]}, "redirects": 0, "chain": {"ok": True}, "agent_env": {"ok": True},
+         "aborted": [], "ended": "quit", "annotate_results": 1, "db": True, "watch": {"closed during": ["a -> b", "c -> d"]}}
+    assert live.verdict(s) == (True, True) and "2 closed connection(s)" in live.unverified(s)[0]
+    assert live.unverified(dict(s, watch={"closed during": []})) == []
+    assert live.UNVERIFIED_EXIT not in (0, 1, live.REFUSED_EXIT, live.SAFETY_EXIT) and live.UNVERIFIED_EXIT in ev.STOPS
+
+
+def test_a_from_run_copy_brings_no_cost_or_results(tmp_path, monkeypatch):
+    """--from-run copies the source's data, its conversation logs too: only what they gain in the new session counts."""
+    src, run = str(tmp_path / "src"), str(tmp_path / "new")
+    old_log = os.path.join("data", "tmp", "scholium", "OLDATT", "conversations", "annotate-1.jsonl")
+    write(os.path.join(src, old_log), json.dumps({"type": "result", "total_cost_usd": 0.8}) + "\n")
+    os.makedirs(os.path.join(src, "profile"))
+    live.prepare_run(run)
+    monkeypatch.setattr(live, "ours", lambda profile: [])
+    live.copy_from_run(src, run)
+    since = live.log_sizes(run)
+    assert live.session_cost(run) == pytest.approx(0.8)   # without since: the copy's
+    assert live.session_cost(run, since) == 0 and live.annotate_results(run, since) == 0
+    with open(os.path.join(run, old_log), "a", encoding="utf8") as f:   # the session writes on in the old log
+        f.write(json.dumps({"type": "result", "total_cost_usd": 0.05}) + "\n")
+    write(os.path.join(run, "data", "tmp", "scholium", "NEWATT", "conversations", "annotate-2.jsonl"),
+          json.dumps({"type": "result", "total_cost_usd": 0.02}) + "\n")
+    assert live.session_cost(run, since) == pytest.approx(0.07) and live.annotate_results(run, since) == 2
+    write(os.path.join(run, old_log), "{}\n")   # a log rewritten shorter: read whole
+    assert live.new_lines(os.path.join(run, old_log), since) == ["{}"]
+
+
+def test_the_process_table_reads_creation_times():
+    t = live.parse_procs("100\t1\t133000000000000000\tpython.exe\tpython live.py\n4\t0\t\tSystem\t\n"
+                         "7\t100\t133000000000000100\tcmd.exe\tcmd /c \"a\tb\"\nnot a row\n")
+    assert t[100] == (1, "python.exe", "python live.py", 133000000000000000)
+    assert t[4] == (0, "System", "", None) and t[7][2] == 'cmd /c "a\tb"'
 
 
 def test_a_connection_from_the_run_trips_the_watcher():
@@ -390,11 +485,15 @@ def test_the_session_cost_counts_every_log_of_the_run(tmp_path):
 
 
 def test_the_verdict():
-    ns = {"before": ["a"], "after": ["a"]}
+    listen = "TCP 127.0.0.1:23119 0.0.0.0:0 LISTENING 4242"
+    ns = {"before": [listen], "after": [listen]}
     good = {"tripped": None, "netstat": ns, "redirects": 0, "chain": {"ok": True}, "agent_env": {"ok": True}, "aborted": [],
             "ended": "quit", "annotate_results": 1, "db": True}
     assert live.verdict(good) == (True, True)
-    for change in ({"tripped": {"pid": 1}}, {"netstat": {"before": ["a"], "after": ["a", "b"]}}, {"redirects": 2}, {"chain": {}},
+    # the user's own connections (Word, a browser) come and go: only the LISTENING lines are compared
+    assert live.verdict(dict(good, netstat={"before": [listen], "after": [listen, "TCP 127.0.0.1:50002 127.0.0.1:23119 TIME_WAIT 0"]}))[0]
+    for change in ({"tripped": {"pid": 1}}, {"netstat": {"before": [listen], "after": [listen.replace("4242", "4243")]}},
+                   {"netstat": {"before": [listen], "after": []}}, {"redirects": 2}, {"chain": {}},
                    {"agent_env": {"ok": False}}, {"aborted": ["the chain test failed: no real run"]}):
         assert live.verdict(dict(good, **change))[0] is False, change
     assert live.verdict(dict(good, ended="timeout")) == (True, False)
