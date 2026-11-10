@@ -178,6 +178,50 @@ def check_env(env, run, guard_dir, fake=False):
     return True
 
 
+FAKE_CODEX_PY = os.path.join(HERE, "fakecodex", "fake_codex.py")
+SLOW_FLAG = "SLOW_PRERUN"   # in <run>/codex-home: the skill copy's status waits while it is there (--stop-prerun)
+SLOW_SHIM = ('import os as _fk_os, sys as _fk_sys, time as _fk_time\n'
+             'if _fk_sys.argv[1:2] == ["status"] and _fk_os.path.exists(_fk_os.path.join(_fk_os.path.dirname(_fk_os.path.dirname('
+             '_fk_os.path.dirname(_fk_os.path.dirname(_fk_os.path.abspath(__file__))))), "%s")):\n'
+             '    _fk_time.sleep(8)   # live.py --stop-prerun only: a pre-run slow enough for its stop button\n' % SLOW_FLAG)
+
+
+def codex_prefs(prefs, codex_path):
+    """The prefs of a run with Codex: the plugin's agent, the (fake) codex executable."""
+    return dict(prefs, **{"extensions.scholium.agent": "codex", "extensions.scholium.codexPath": codex_path})
+
+
+def setup_fake_codex(exe, run):
+    """The fake codex in the run's own folder: the launcher, fake_codex.py beside it and the Python to run it with, so that
+    its logs (calls/) are the run's."""
+    folder = os.path.join(run, "fakecodex")
+    os.makedirs(folder, exist_ok=True)
+    shutil.copyfile(exe, os.path.join(folder, "fakecodex.exe"))
+    shutil.copyfile(FAKE_CODEX_PY, os.path.join(folder, "fake_codex.py"))
+    with open(os.path.join(folder, "python.txt"), "w", encoding="utf8") as f:
+        f.write(sys.executable)
+    return os.path.join(folder, "fakecodex.exe")
+
+
+def install_codex_skill(export, run, slow=False):
+    """The export's skill as a Codex user has it installed: <run>/codex-home/skills/zotero-scholium (CODEX_HOME is the
+    run's). With slow, its copy's status waits while <run>/codex-home/SLOW_PRERUN is there, for the stop-button check."""
+    home = os.path.join(run, "codex-home")
+    dst = os.path.join(home, "skills", "zotero-scholium")
+    shutil.copytree(os.path.join(export, "skills", "zotero-scholium"), dst)
+    if slow:
+        script = os.path.join(dst, "scripts", "scholium.py")
+        with open(script, encoding="utf8") as f:
+            text = f.read()
+        marker = '\nif __name__ == "__main__":'
+        if text.count(marker) != 1:
+            raise RuntimeError("the skill's script has no single __main__ block for the slow pre-run")
+        with open(script, "w", encoding="utf8", newline="\n") as f:
+            f.write(text.replace(marker, "\n" + SLOW_SHIM + marker))
+        open(os.path.join(home, SLOW_FLAG), "w").close()
+    return dst
+
+
 def assemble_probe(base, live):
     """The live probe: bootstrap.js (the smoke probe's helpers and finish()) with live.js in place of its main()."""
     i, j = base.find("\nasync function main() {"), base.find("\nasync function finish() {")
@@ -603,6 +647,9 @@ def session(a):
         with open(os.path.join(fake_dir, "next.txt"), "w", encoding="utf8") as f:
             f.write("annotate-ok")
     prefs = live_prefs(d["data"], a.port, a.locale, a.fake or a.claude, a.model, a.effort, show_pref=not a.open_reader)
+    if a.fake_codex:   # the plugin set to Codex: the fake in the run's folder, the export's skill in the run's CODEX_HOME
+        prefs = codex_prefs(prefs, setup_fake_codex(a.fake_codex, run))
+        install_codex_skill(export, run, slow=a.stop_prerun)
     with open(os.path.join(d["profile"], "user.js"), "w", encoding="utf8") as f:
         f.write(smoke.user_js(prefs))
     plugin_id, _, _ = smoke.build_plugin_xpi(os.path.join(export, "plugin", "scholium"), os.path.join(d["profile"], "extensions", "P.xpi"),
@@ -624,7 +671,8 @@ def session(a):
               "maxMsgs": a.max_msgs, "stopFile": stop_file, "checks": [], "openReader": bool(a.open_reader), "chat": a.chat or "",
               # Claude Code's skill folder as the plugin sees it: the export's, so that --add-dir and the pre-run's script
               # are the commit's, not a skill the user installed
-              "claudeSkills": os.path.join(export, "skills")}
+              "claudeSkills": os.path.join(export, "skills"),
+              "stopPreRun": bool(a.stop_prerun), "slowFlag": os.path.join(d["codex-home"], SLOW_FLAG)}
     if fake_dir:
         config["fake"] = fake_dir
     with open(os.path.join(run, "probe-config.json"), "w", encoding="utf8") as f:
@@ -696,7 +744,7 @@ def session(a):
     seconds = round(time.time() - started)
     facts = read_json(os.path.join(d["shots"], "facts.json"), [])
     env_ok, env_info = check_agent_env(facts, a.port)
-    s = {"tag": a.tag, "git": a.git, "commit": a.commit, "fake": bool(a.fake), "model": a.model, "effort": a.effort, "locale": a.locale,
+    s = {"tag": a.tag, "git": a.git, "commit": a.commit, "fake": bool(a.fake), "fake_codex": bool(a.fake_codex), "model": a.model, "effort": a.effort, "locale": a.locale,
          "port": a.port, "max_msgs": a.max_msgs, "max_usd": a.max_usd, "ended": ended, "killed": killed, "seconds": seconds,
          "netstat": {"before": before, "after": after},
          "redirects": redirects(d["guard"]) - (chain.get("guardSelfTestRedirects") or 0),
@@ -728,6 +776,8 @@ def parser(config):
     ap.add_argument("--git", default="HEAD", metavar="REV", help="the commit whose plugin/scholium, skills/zotero-scholium and .claude-plugin run")
     ap.add_argument("--claude", help="the real claude executable (default: npm's under APPDATA, else PATH)")
     ap.add_argument("--fake", help="a rehearsal: the fake claude built from fakeclaude/fakeclaude.cs (no model is called)")
+    ap.add_argument("--fake-codex", help="with --fake: the plugin set to Codex, with the fake codex built from fakecodex/launcher.cs")
+    ap.add_argument("--stop-prerun", action="store_true", help="with --fake-codex: first an Annotate stopped with ■ during its pre-run")
     ap.add_argument("--port", type=int, default=23129, help="the throwaway's local server port (never 23119)")
     ap.add_argument("--model", default="haiku")
     ap.add_argument("--effort", default="low")
@@ -767,6 +817,10 @@ def main(argv=None):
         a.port = smoke.check_port(a.port)
         if a.max_msgs < 1 or a.max_usd <= 0:
             raise ValueError("--max-msgs and --max-usd must be positive: a run always has both caps")
+        if a.fake_codex and not a.fake:
+            raise ValueError("--fake-codex is a rehearsal: give the fake claude too (--fake), so that no real agent is started")
+        if a.stop_prerun and not a.fake_codex:
+            raise ValueError("--stop-prerun slows the Codex skill copy's status: it needs --fake-codex")
     except ValueError as e:
         ap.error(str(e))
     if not WINDOWS:
@@ -778,6 +832,10 @@ def main(argv=None):
     if a.meta and not os.path.isfile(a.meta):
         ap.error(f"--meta: no file at {a.meta}")
     a.zotero, a.pdf = os.path.abspath(a.zotero), os.path.abspath(a.pdf)
+    if a.fake_codex:
+        a.fake_codex = os.path.abspath(a.fake_codex)
+        if not os.path.isfile(a.fake_codex):
+            ap.error("--fake-codex: build fakecodex.exe first (scripts/smoke/README.md)")
     if a.fake:
         a.fake = os.path.abspath(a.fake)
         if not os.path.isfile(a.fake):

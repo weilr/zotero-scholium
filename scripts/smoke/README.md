@@ -223,6 +223,28 @@ None of these can be turned off.
   shell's `CLAUDE*` variables are not passed on. A rehearsal also gets an empty `CLAUDE_CONFIG_DIR`. Only processes
   whose command line names the run's profile are ended, and only a folder this runner made is emptied for a new run.
 
+## Codex, with a fake app-server
+
+`fakecodex/` is a stand-in for `codex app-server`, so that the plugin's Codex path (the pre-run, the prompt, the steps
+of the live line, the card, the eye button, ■) can be checked in a throwaway Zotero without a model or an account. Build
+its launcher once, as the fake Claude Code:
+
+```
+C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /out:%TEMP%\scholium-fake\fakecodex.exe scripts\smoke\fakecodex\launcher.cs
+python scripts/smoke/live.py --zotero "C:\Program Files\Zotero\zotero.exe" --pdf D:\papers\2305.18290.pdf --port 23149 ^
+    --fake %TEMP%\scholium-fake\fakeclaude.exe --fake-codex %TEMP%\scholium-fake\fakecodex.exe --stop-prerun --open-reader --chat "这篇论文讲什么？"
+```
+
+`--fake-codex` sets the plugin to Codex with the fake on `codexPath` (copied into `<run>\fakecodex\` with
+`fake_codex.py` and the Python that runs it, so its logs are the run's: `<run>\fakecodex\calls\`), and installs the
+export's skill into the run's `CODEX_HOME`. It needs `--fake` too, so that no real agent is ever started. The fake
+answers the plugin's JSON-RPC requests (initialize, account/read, model/list, skills/list, thread/start, turn/start,
+turn/interrupt, …) and plays the one-click annotation: it reads `sentences.txt`, writes `config.json` and the note with
+placeholder comments, and runs the skill's own `scholium.py --apply` against the throwaway's port (refused when the
+port is missing or 23119); any other turn gets one sentence. `--stop-prerun` first presses ■ during an Annotate's
+pre-run (the skill copy's `status` waits while `<run>\codex-home\SLOW_PRERUN` is there). `shots\facts.json` records each
+process the plugin starts, with its port and `UV_CACHE_DIR`, and the live line's words and step.
+
 ## A live run folder
 
 ```

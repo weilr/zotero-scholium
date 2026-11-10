@@ -212,6 +212,31 @@ async function main() {
     await delay(1500);
   });
 
+  // --stop-prerun: Annotate, then ■ while the plugin's pre-run reads the PDF (the skill copy's status waits while
+  // CFG.slowFlag is there); the run must stop without starting the agent
+  if (CFG.stopPreRun) await step("stop-prerun", async () => {
+    const box = await selectItem(D);
+    await showTab(box, "annot");
+    line("clicked", { run: "stop-prerun" });
+    let sampled = false;
+    const sampler = sampleLive(box, () => sampled);
+    await realClick(annotGo(box));
+    line("preRunSeen", { seen: !!(await waitFor(() => R().job && R().job.preRun, 20000, 50)) });
+    await delay(800);
+    const p = paneOf(box);
+    const btn = (p && p.send) || q(box, ".scholium-round");
+    line("stopButton", { cls: btn && btn.className, text: txt(btn), preRun: !!(R().job && R().job.preRun) });
+    if (btn) await realClick(btn);
+    const t1 = Date.now();
+    await waitFor(() => !busy(), 40000, 200);
+    sampled = true;
+    await sampler;
+    await delay(1500);
+    line("stopDone", { seconds: Math.round((Date.now() - t1) / 1000), busy: busy(), cards: cards(box), annotations: allAnns(D.att).length });
+    await shot("s1-stopped", box);
+    try { await IOUtils.remove(CFG.slowFlag); line("slowRemoved", {}); } catch (e) { line("slowRemoveError", { error: String(e) }); }
+  });
+
   let box = null;
   const t0run = Date.now();
   await step("annotate", async () => {

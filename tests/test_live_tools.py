@@ -652,3 +652,139 @@ def test_the_set_does_not_start_without_its_papers(tmp_path, capsys, monkeypatch
     assert ev.main(["run", "--zotero", "z.exe", "--papers", str(tmp_path), "--port", "23149", "--out", str(tmp_path / "out")]) == 2
     err = capsys.readouterr().err
     assert "https://arxiv.org/pdf/2305.18290v3" in err and "1503.02531.pdf" in err
+
+
+# ---- the fake Codex app-server (scripts/smoke/fakecodex) ----
+def load_fake_codex():
+    spec = importlib.util.spec_from_file_location("live_tools_fake_codex", os.path.join(SMOKE, "fakecodex", "fake_codex.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.fixture
+def fake(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCHOLIUM_FAKE_CODEX_LOG", str(tmp_path / "log"))
+    mod = load_fake_codex()
+    sent = []
+    monkeypatch.setattr(mod, "send", sent.append)
+    mod.sent = sent
+    return mod
+
+
+def test_the_fake_codex_answers_the_plugins_requests(fake, tmp_path, monkeypatch):
+    home, cwd = tmp_path / "codex-home", tmp_path / "cwd"
+    write(home / "skills" / "zotero-scholium" / "SKILL.md", "---\nname: zotero-scholium\n---\n")
+    write(cwd / ".agents" / "skills" / "other" / "SKILL.md", "x")
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    for i, method in enumerate(["initialize", "account/read", "model/list", "mcpServerStatus/list", "plugin/installed", "thread/start", "bogus"], 1):
+        fake.handle({"method": method, "id": i, "params": {}})
+    fake.handle({"method": "skills/list", "id": 8, "params": {"cwds": [str(cwd)]}})
+    fake.handle({"method": "thread/resume", "id": 9, "params": {"threadId": "thr_1"}})
+    fake.handle({"method": "initialized"})   # a notification: no answer
+    got = {m["id"]: m for m in fake.sent}
+    assert sorted(got) == list(range(1, 10))
+    assert got[2]["result"] == {"account": {"type": "apiKey"}, "requiresOpenaiAuth": False}   # signed in: no account needed
+    assert got[3]["result"]["data"][0]["model"] == "gpt-fake"
+    assert got[6]["result"]["thread"]["id"].startswith("thr_fake_") and got[9]["result"]["thread"]["id"] == "thr_1"
+    assert got[7]["error"]["code"] == -32601
+    skills = got[8]["result"]["data"][0]["skills"]
+    assert [s["name"] for s in skills] == ["zotero-scholium", "other"]   # CODEX_HOME's and the folder's own, nothing else
+    assert skills[0]["path"] == str(home / "skills" / "zotero-scholium" / "SKILL.md")
+    monkeypatch.delenv("CODEX_HOME")
+    fake.sent.clear()
+    fake.handle({"method": "skills/list", "id": 10, "params": {"cwds": [str(cwd)]}})
+    assert [s["name"] for s in fake.sent[0]["result"]["data"][0]["skills"]] == ["other"]
+
+
+def test_the_fake_codex_refuses_the_users_port(fake):
+    for port, ok in (("23119", False), ("", False), ("9", False), ("abc", False), ("70000", False), ("23149", True)):
+        assert fake.port_ok({"SCHOLIUM_ZOTERO_PORT": port}) is ok, port
+    assert fake.port_ok({}) is False
+
+
+def test_the_fake_codex_plays_the_plugins_annotation_prompt():
+    from plugin_harness import plugin_source
+    src = plugin_source()
+    fake = load_fake_codex()
+    for words in ("为下面这篇论文做整篇标注", "annotate the whole paper below"):   # the plugin's one-click prompt, both languages
+        assert words in src, words
+        assert fake.is_annotation("使用 zotero-scholium 技能，" + words + "：…")
+    assert not fake.is_annotation("使用 zotero-scholium 技能读下面这篇论文，回答用户在 Zotero 里提的问题。")
+
+
+def test_an_interrupt_completes_the_turn_once(fake):
+    fake.handle({"method": "turn/interrupt", "id": 4, "params": {"threadId": "thr", "turnId": "turn_9"}})
+    fake.finish("thr", "turn_9", 0)   # the turn's own thread ending later
+    assert fake.sent[0] == {"id": 4, "result": {}}
+    done = [m for m in fake.sent if m.get("method") == "turn/completed"]
+    assert len(done) == 1 and done[0]["params"]["turn"]["status"] == "interrupted"
+
+
+def test_the_fake_codexs_comments_are_placeholders(fake):
+    for words in (1, 10, 40):
+        c = fake.filler(words)
+        assert len(c) >= 12 and c.endswith("。") and not re.search(r"[0-9A-Za-z:：]", c)
+
+
+def test_the_fake_codex_speaks_json_rpc_on_stdin(tmp_path):
+    env = dict(os.environ, SCHOLIUM_FAKE_CODEX_LOG=str(tmp_path / "log"), CODEX_HOME=str(tmp_path / "home"))
+    script = os.path.join(SMOKE, "fakecodex", "fake_codex.py")
+    lines = [{"method": "initialize", "id": 1, "params": {}}, {"method": "initialized"}, {"method": "bogus", "id": 2}]
+    p = subprocess.run([sys.executable, "-X", "utf8", script, "app-server"], input="\n".join(json.dumps(m) for m in lines) + "\n",
+                       capture_output=True, text=True, encoding="utf8", env=env, timeout=60)
+    out = [json.loads(l) for l in p.stdout.splitlines()]
+    assert p.returncode == 0 and [m["id"] for m in out] == [1, 2] and "error" in out[1]
+    v = subprocess.run([sys.executable, script, "--version"], capture_output=True, text=True, env=env, timeout=60)
+    assert re.search(r"\d+\.\d+\.\d+", v.stdout)
+    logs = os.listdir(str(tmp_path / "log"))
+    assert logs and not os.path.exists(os.path.join(SMOKE, "fakecodex", "calls"))   # its log goes where it is told
+
+
+def test_the_runner_sets_the_plugin_to_the_fake_codex(tmp_path):
+    p = live.codex_prefs(live.live_prefs("d", 23149, "zh-CN", "fake.exe", "haiku", "low"), "C:\\run\\fakecodex\\fakecodex.exe")
+    assert p["extensions.scholium.agent"] == "codex" and p["extensions.scholium.codexPath"] == "C:\\run\\fakecodex\\fakecodex.exe"
+    assert p["extensions.zotero.firstRun2"] is False and p["extensions.zotero.httpServer.port"] == 23149
+    exe = write(tmp_path / "built" / "fakecodex.exe", "MZ")
+    run = str(tmp_path / "run")
+    path = live.setup_fake_codex(exe, run)
+    folder = os.path.dirname(path)
+    assert path == os.path.join(run, "fakecodex", "fakecodex.exe") and open(path).read() == "MZ"
+    assert open(os.path.join(folder, "python.txt")).read() == sys.executable
+    assert open(os.path.join(folder, "fake_codex.py"), "rb").read() == open(live.FAKE_CODEX_PY, "rb").read()
+
+
+def test_the_codex_skill_copy_and_its_slow_status(tmp_path):
+    export = tmp_path / "export"
+    write(export / "skills" / "zotero-scholium" / "SKILL.md", "---\nname: zotero-scholium\n---\n")
+    write(export / "skills" / "zotero-scholium" / "scripts" / "scholium.py", "import sys\n\ndef main():\n    return 0\n\nif __name__ == \"__main__\":\n    sys.exit(main())\n")
+    fast = live.install_codex_skill(str(export), str(tmp_path / "a"))
+    assert fast == str(tmp_path / "a" / "codex-home" / "skills" / "zotero-scholium")
+    assert open(os.path.join(fast, "scripts", "scholium.py")).read() == open(str(export / "skills" / "zotero-scholium" / "scripts" / "scholium.py")).read()
+    assert not os.path.exists(str(tmp_path / "a" / "codex-home" / live.SLOW_FLAG))
+    slow = live.install_codex_skill(str(export), str(tmp_path / "b"), slow=True)
+    script = os.path.join(slow, "scripts", "scholium.py")
+    text = open(script, encoding="utf8").read()
+    compile(text, script, "exec")
+    assert text.index("_fk_time.sleep(8)") < text.index('if __name__ == "__main__":') and live.SLOW_FLAG in text
+    flag = str(tmp_path / "b" / "codex-home" / live.SLOW_FLAG)
+    assert os.path.exists(flag)
+    four_up = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(script))))
+    assert os.path.join(four_up, live.SLOW_FLAG) == flag   # the shim looks where the runner put the flag
+    write(export / "skills" / "zotero-scholium" / "scripts" / "scholium.py", "print(1)\n")
+    with pytest.raises(RuntimeError, match="__main__"):
+        live.install_codex_skill(str(export), str(tmp_path / "c"), slow=True)
+
+
+@pytest.mark.parametrize("args, words", [(["--fake-codex", "x.exe"], "--fake"), (["--stop-prerun"], "--fake-codex")])
+def test_the_codex_options_need_the_fakes(args, words, capsys, monkeypatch):
+    monkeypatch.setattr(live, "session", lambda a: pytest.fail("a session started"))
+    with pytest.raises(SystemExit) as e:
+        live.main(["--zotero", "z.exe", "--pdf", "p.pdf"] + args)
+    assert e.value.code == 2 and words in capsys.readouterr().err
+
+
+def test_the_probe_stops_a_pre_run():
+    probe = open(os.path.join(SMOKE, "probe", "live.js"), encoding="utf8").read()
+    assert 'if (CFG.stopPreRun) await step("stop-prerun"' in probe and "IOUtils.remove(CFG.slowFlag)" in probe
+    assert probe.index('step("stop-prerun"') < probe.index('step("annotate"')
