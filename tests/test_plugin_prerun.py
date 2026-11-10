@@ -113,6 +113,62 @@ const card = pane => {
     facts.noSkill = { calls: h.log.scriptCalls.length, agent: h.log.calls.length };
     h.runner.stop();
   }
+  // ■ while the status process is being created: it is killed once it is there, and the run ends at once
+  {
+    const h = harness(base({ scriptRuns: { status: 'HOLD', extract: ['x', 0] } }));
+    h.runner.start('x');
+    const S = h.runner.subprocess(), call = S.call;
+    let release = null;
+    S.call = async opts => {
+      if (opts.arguments.some(a => /scholium\.py$/.test(String(a))) && !release) await new Promise(r => { release = r; });
+      return call(opts);
+    };
+    await annotate(h); await settle(100);
+    const pending = !!release && h.log.scriptCalls.length === 0;
+    const stopped = h.runner.cancel();
+    release(); await settle(400);
+    facts.stopWhileCreated = { pending, stopped, kills: h.log.scriptKills, job: !!h.runner.job, agent: h.log.calls.length, timers: h.live() };
+    h.runner.stop();
+  }
+  // a scanned PDF's notice is the whole message, as an error
+  {
+    const h = harness(base({ scriptRuns: { status: [STATUS, 0], extract: ['{"error": "no text layer"}', 3] } }));
+    h.runner.start('x');
+    await annotate(h); await settle(600);
+    const n = h.log.notices.at(-1);
+    facts.scannedNotice = { descriptions: n.descriptions, errors: n.errors, text: h.runner.text('noTextLayer') };
+    h.runner.stop();
+  }
+  // a PDF without a parent item: status is given its attachment key
+  {
+    const h = harness(base({ scriptRuns: { status: [STATUS, 0], extract: ['x', 0] } }));
+    h.runner.start('x');
+    h.att1.parentID = null; h.att1.parentItemKey = undefined;
+    await annotate(h, h.att1); await settle(600);
+    facts.standalone = { calls: calls(h), agent: h.log.calls.length, prompt: h.log.stdin[0] || null };
+    h.runner.stop();
+  }
+  // Codex: the pre-run's lines go into the prompt only when Codex uses the skill copy the pre-run ran
+  for (const [name, dir] of [['codexOther', '/home/u/.agents/skills/zotero-scholium'], ['codexSame', '/home/u/.codex/skills/zotero-scholium']]) {
+    const h = harness({ env: { PATH: '/w/bin' }, present: ['/w/bin/uv.exe', dir + '/SKILL.md', dir + '/scripts/scholium.py'],
+                        prefs: { 'extensions.scholium.agent': 'codex' }, codex: { skillAt: '/data/tmp/scholium' },
+                        scriptRuns: { status: [STATUS, 0], extract: ['x', 0] } });
+    h.runner.start('x');
+    await annotate(h); await settle(800);
+    const start = h.log.codexProcs.flatMap(pr => pr.sent).find(m => m.method === 'turn/start');
+    facts[name] = { script: (calls(h)[0] || {}).args, skill: start && start.params.input.find(i => i.type === 'skill').path,
+                    prompt: start ? start.params.input[0].text : null };
+    h.runner.stop();
+  }
+  // Claude Code's plugin cache: the highest version of the skill that is not orphaned
+  {
+    const C = '/home/u/.claude/plugins/cache', P = C + '/m/scholium';
+    const versions = ['1.2.0', '1.10.0', '2.0.0', '0.9.0'];
+    const present = ['/w/bin/uv.exe', P + '/2.0.0/.orphaned_at'];
+    for (const v of versions) present.push(`${P}/${v}/skills/zotero-scholium/SKILL.md`, `${P}/${v}/skills/zotero-scholium/scripts/scholium.py`);
+    const h = harness({ env: { PATH: '/w/bin' }, present, dirs: { [C]: [C + '/m'], [C + '/m']: [P], [P]: versions.map(v => `${P}/${v}`) } });
+    facts.cache = await h.runner.claudeSkillDir();
+  }
   process.stdout.write(JSON.stringify(facts));
 })().catch(e => { process.stderr.write(String(e.stack || e)); process.exit(1); });
 """
@@ -186,3 +242,33 @@ def test_the_live_lines_steps_follow_the_pre_run(facts):
     assert during_status.startswith(s["reading"] + " · 已用 "), "status: what is happening, not the agent's start"
     assert during_extract.startswith("第 1/4 步 提取句子 · 已用 ")
     assert s["agent"] == 1 and agent.startswith("第 2/4 步 通读论文 · 已用 "), "the agent goes on after status and extract"
+
+
+def test_stop_while_the_pre_runs_process_is_created_kills_it_and_ends_the_run(facts):
+    s = facts["stopWhileCreated"]
+    assert s["pending"] and s["stopped"]
+    assert s == dict(s, kills=1, job=False, agent=0) and 60000 not in s["timers"], "no wait for the status deadline"
+
+
+def test_a_scanned_pdfs_notice_is_its_whole_message_as_an_error(facts):
+    n = facts["scannedNotice"]
+    assert n["descriptions"] == [n["text"]] and n["errors"] == 1
+
+
+def test_a_pdf_without_a_parent_gives_status_its_attachment_key(facts):
+    s = facts["standalone"]
+    assert s["calls"][0]["args"] == ["run", SCRIPT_PY, "status", "ATT1"] and len(s["calls"]) == 2
+    assert s["agent"] == 1 and "插件已经运行了 status" in s["prompt"]
+
+
+def test_codex_gets_the_pre_runs_lines_only_from_the_skill_copy_it_uses(facts):
+    other, same = facts["codexOther"], facts["codexSame"]
+    assert other["script"][1] == "/home/u/.agents/skills/zotero-scholium/scripts/scholium.py"
+    assert other["skill"] == "/home/u/.codex/skills/zotero-scholium/SKILL.md"
+    assert "插件已经运行了 status" not in other["prompt"], "another copy ran: the agent runs them itself"
+    assert same["script"][1] == "/home/u/.codex/skills/zotero-scholium/scripts/scholium.py"
+    assert "插件已经运行了 status" in same["prompt"]
+
+
+def test_claude_codes_plugin_cache_gives_the_highest_version_that_is_not_orphaned(facts):
+    assert facts["cache"] == "/home/u/.claude/plugins/cache/m/scholium/1.10.0/skills/zotero-scholium"

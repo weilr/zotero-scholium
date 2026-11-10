@@ -204,8 +204,10 @@ Object.assign(ScholiumRunner, {
     } else if (exitCode === 0 && result && !result.is_error) {
       ok = true;
       message = job.compact ? (ctx.compacted ? this.compactSizes(ctx.compacted).replace(/^ · /, "") : "") : summary;
-      this.notice(job, job.compact ? this.text("compactedNotice")
-        : [`${this.text("done")} · ${this.duration(Date.now() - started)}`, answered ? summary : this.brief(summary)].filter(Boolean).join("\n"));
+      // a scanned PDF the pre-run found: its whole message, as an error
+      const scanned = !!(job.pre && job.pre.scanned);
+      this.notice(job, job.compact ? this.text("compactedNotice") : scanned ? this.text("noTextLayer")
+        : [`${this.text("done")} · ${this.duration(Date.now() - started)}`, answered ? summary : this.brief(summary)].filter(Boolean).join("\n"), scanned);
       // an annotation's end, also of its second try or of its continuation after a pause: the numbers counted in Zotero,
       // the turns and tokens of all of its runs
       if (running.annotation) {
@@ -381,7 +383,7 @@ Object.assign(ScholiumRunner, {
   // an annotation's first steps, run by the plugin before the agent starts, with the command its prompt names
   // (scriptProgram), the agent's environment and the paper's output folder: `status <item key> [--group ID]` within
   // PRE_STATUS_MS, then `extract` within PRE_EXTRACT_MS, by the skill's script the agent runs (skillScript). { status (its
-  // JSON, minified), lines (of sentences.txt) } when both ran; { scanned } for a PDF without a text layer (extract's exit
+  // JSON, minified), lines (of sentences.txt), script } when both ran; { scanned } for a PDF without a text layer (extract's exit
   // code 3); { cancelled } after ■; null otherwise, and the agent runs them itself. The live line says the PDF is read
   async preRun(job, ctx) {
     const runner = job.scriptRun || {}, script = runner.command ? await this.skillScript(job.agent) : null;
@@ -393,6 +395,11 @@ Object.assign(ScholiumRunner, {
       if (running.stopAsked || this.job !== running) return null;
       const proc = await this.subprocess().call(Object.assign({ command: runner.command, arguments: runner.prefix.concat([script], args),
                                                                  workdir: out }, env));
+      if (running.stopAsked || this.job !== running) {   // the plugin stopped, or ■, while the process was being created
+        try { proc.kill(); } catch (e) {}
+        ctx.current = { key, proc, cancelled: true };
+        return null;
+      }
       this.current = ctx.current = { key, proc, cancelled: false };
       try { return await this.readOutput(proc, ms); }
       finally { this.current = null; }
@@ -401,7 +408,8 @@ Object.assign(ScholiumRunner, {
     this.refresh();
     this.settleRun();
     try {
-      const status = await run(["status", job.parentKey].concat(group ? ["--group", String(group)] : []), this.PRE_STATUS_MS);
+      // a PDF without a parent item is named by its own key, which status takes too
+      const status = await run(["status", job.parentKey || job.att.key].concat(group ? ["--group", String(group)] : []), this.PRE_STATUS_MS);
       if (ctx.current && ctx.current.cancelled) return { cancelled: true };
       let json = null;
       try { json = status && !status.late && status.exitCode === 0 ? JSON.stringify(JSON.parse(status.out)) : null; } catch (e) {}
@@ -415,7 +423,7 @@ Object.assign(ScholiumRunner, {
       if (extract.exitCode === 3) return { scanned: true };
       if (extract.exitCode !== 0) return null;
       const text = await IOUtils.readUTF8(txt);
-      return { status: json, lines: text.split(/\r?\n/).length - (/\n$/.test(text) ? 1 : 0) };
+      return { status: json, lines: text.split(/\r?\n/).length - (/\n$/.test(text) ? 1 : 0), script };
     } catch (e) {
       this.log("pre-run failed: " + e);
       return null;
@@ -950,6 +958,8 @@ Object.assign(ScholiumRunner, {
         ctx.noSkill = "codex";
         throw new Error(this.text("noSkill", "codex"));
       }
+      // the pre-run's results are the agent's only when they came from the skill copy Codex uses; else it runs them itself
+      if (skill && job.pre && job.pre.script && !this.sameDir(PathUtils.parent(PathUtils.parent(job.pre.script)), PathUtils.parent(skill.path))) job.pre = null;
       let opened = null;
       if (job.resume) {
         // a thread that Codex refuses to resume is one it no longer has: a new one goes on with the conversation; an

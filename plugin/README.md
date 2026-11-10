@@ -100,7 +100,8 @@ question's prompts say how the script runs on this computer: with `uv run` when 
 the Python found there. Before a new annotation's agent starts, the plugin runs the skill's `status` and `extract` itself
 with that command, the agent's environment and the skill's script the agent finds (the section's live line says "Reading
 the PDF…", and ■ stops them); the prompt then gives their results, and a scanned PDF ends the run there with its card.
-When either fails or does not end in 60 s (`extract`: 180 s), or no skill is found, the agent runs them.
+When either fails or does not end in 60 s (`extract`: 180 s), no skill is found, or Codex uses another copy of the skill
+than the one they ran, the agent runs them.
 A question is told to read the paper with the skill's `status` and `extract` and to write to Zotero only when it asks for that. A session
 that has not seen the paper's annotations of the tool is told how many there are and, when the plugin saw them
 written, the configuration that wrote them, the agent and the time (kept in `<out dir>/applied.json`: a write whose output says it was applied, also "partial", is kept whatever the exit

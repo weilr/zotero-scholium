@@ -357,8 +357,8 @@ Object.assign(ScholiumRunner, {
   },
 
   // the folder of the zotero-scholium skill Claude Code finds: in its skills folder, in the data directory's project skills
-  // (a run's working directory), or in a plugin of its cache (plugins/cache/<marketplace>/<plugin>/<version>/skills); null
-  // when there is none
+  // (a run's working directory), or in a plugin of its cache (plugins/cache/<marketplace>/<plugin>/<version>/skills), the
+  // highest version there of those Claude Code has not left behind as orphaned (.orphaned_at); null when there is none
   async claudeSkillDir() {
     const user = this.skillsDir("claude");
     const dirs = (user ? [PathUtils.join(user, "zotero-scholium")] : [])
@@ -371,11 +371,21 @@ Object.assign(ScholiumRunner, {
       for (const dir of level) { try { next.push(...await IOUtils.getChildren(dir)); } catch (e) {} }
       level = next;
     }
+    const found = [];
     for (const dir of level) {
       const skill = PathUtils.join(dir, "skills", "zotero-scholium");
-      if (await this.exists(PathUtils.join(skill, "SKILL.md"))) return skill;
+      if (!(await this.exists(PathUtils.join(dir, ".orphaned_at"))) && (await this.exists(PathUtils.join(skill, "SKILL.md")))) found.push([dir, skill]);
     }
-    return null;
+    // 1.10.0 after 1.9.2; a name that is no version (a commit) before any version
+    const parts = dir => (/^v?(\d+(?:\.\d+)*)(?:[-+].*)?$/.exec(String(dir).split(/[\\/]/).pop()) || [, ""])[1].split(".").filter(Boolean).map(Number);
+    const newer = (a, b) => {
+      const x = parts(a), y = parts(b);
+      for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+      return x.length > y.length;
+    };
+    let best = null;
+    for (const f of found) if (!best || newer(f[0], best[0])) best = f;
+    return best ? best[1] : null;
   },
 
   // Codex: the program a run uses, through `codex app-server` started as a run starts it: whether it is signed in
@@ -545,6 +555,15 @@ Object.assign(ScholiumRunner, {
       if ((await this.exists(PathUtils.join(dir, "SKILL.md"))) && (await this.exists(script))) return script;
     }
     return null;
+  },
+
+  // whether two paths name one folder: separators and a trailing one aside, and on Windows the case
+  sameDir(a, b) {
+    const norm = p => {
+      const s = String(p || "").replace(/\\/g, "/").replace(/(.)\/+$/, "$1");
+      return Services.appinfo.OS === "WINNT" ? s.toLowerCase() : s;
+    };
+    return !!a && norm(a) === norm(b);
   },
 
   // uv on the agent's PATH and its version: the skill's script then runs as `uv run`, which provides Python and PyMuPDF.

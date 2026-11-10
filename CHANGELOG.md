@@ -37,6 +37,11 @@
 - The card's remaining warnings: a period inside a warning (Fig. 3, p. 9) no longer cuts it short, a warning that
   starts with the language's word for none (keine Übersetzung für S. 3) is kept, 0 and 无（…） are none, and Traditional
   Chinese counts (剩餘警告 2 條（…）) are read.
+- ■ while the pre-run's `status` or `extract` is starting stops it at once; it went on until its time was up.
+- The pre-run's results go into a Codex prompt only when Codex uses the skill copy that ran them, and of Claude Code's
+  plugin cache the highest version of the skill is taken, not an orphaned one.
+- A PDF without a parent item gets the pre-run too (`status` is given the attachment's key).
+- A scanned PDF's notice gives the whole message, as an error; it said "Done".
 
 ## 0.2.2 (2026-11-10)
 
