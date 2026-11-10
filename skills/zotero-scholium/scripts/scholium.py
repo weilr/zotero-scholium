@@ -982,6 +982,14 @@ def build(cfg, obstacles=None):
 
 
 CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
+CYRILLIC_RE = re.compile(r"[\u0400-\u04ff]")
+# a number's words for thousand, million and billion in a comment in German, French, Spanish, Portuguese or Russian,
+# which _local_numbers reads as the English ones
+LOCAL_SCALES = (("billion", r"mil\s+millones|mil\s+milh(?:ões|oes)|mrd\.?|milliard(?:en|e|s)?|bilh(?:ões|ão|oes|ao)|млрд\.?|миллиард(?:ов|а)?"),
+                ("million", r"mio\.?|million(?:en|s)?|millones|millón|milh(?:ões|ão|oes|ao)|млн\.?|миллион(?:ов|а)?"),
+                ("thousand", r"tsd\.?|tausend|mille|mil|тыс\.?|тысяч[аи]?"))
+LOCAL_NUMBER_RE = re.compile(r"(?<![^\W\d_])(\d[\d.,\u00a0\u202f\u2009]*\d|\d)(?:\s*(" + "|".join(f"(?:{p})" for _, p in LOCAL_SCALES)
+                             + r")(?![^\W\d_]))?", re.I)
 INVISIBLE_RE = re.compile("[\u00ad\u200b]")   # soft hyphen, zero-width space
 MAGNITUDES = {"K": "thousand", "M": "million", "B": "billion"}
 NUMBER_RE = re.compile(
@@ -994,10 +1002,37 @@ NUMBER_RE = re.compile(
 )
 
 
-def _tokens(s, origin=None):
+def _local_numbers(s, written):
+    """Numbers written as German, French, Spanish, Portuguese or Russian write them, as English writes them: a period or a
+    thin space before three digits groups them, a single comma is the decimal one (1.500.000 and 1,5 Mio. -> 1500000 and
+    1.5 million). `written` receives each changed one as written."""
+    def local(m):
+        number = re.sub(r"[.\u00a0\u202f\u2009](?=\d{3}(?!\d))", "", m[1])
+        number = number.replace(",", ".") if number.count(",") == 1 else number.replace(",", "")
+        word = next((w for w, p in LOCAL_SCALES if m[2] and re.fullmatch(p, m[2], flags=re.I)), None)
+        new = number + (" " + word if word else "")
+        if new != m[0]:
+            written.setdefault(new, m[0])
+        return new
+    return LOCAL_NUMBER_RE.sub(local, s)
+
+
+def _term_words(s):
+    """The words of a comment in a Latin-script language that are terms, lower-cased: acronyms (DPO), CamelCase (PbRL), and
+    words with digits or Greek letters (y1, πSFT); its other words are its language's own."""
+    return {w.lower() for w in re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", s))
+            if (len(w) >= 2 and w.isupper()) or re.search(r"[a-zß-ÿ][A-ZÀ-Þ]", w) or re.search(r"[\d\u0370-\u03ff]", w)}
+
+
+def _tokens(s, origin=None, local=False, letters=False):
     """Latin words (3+ characters) and numbers, lower-cased; hyphenation across lines is joined first,
     and both the joined form and its two halves count as terms. `origin`, when given, receives each number's
-    text as written (1.75E+11 -> "1750 亿")."""
+    text as written (1.75E+11 -> "1750 亿"). `local`: numbers read as a comment in German, French, Spanish, Portuguese or
+    Russian writes them (_local_numbers); `letters`: words of any letters (ermöglicht), not only Latin ones without
+    accents."""
+    written = {}   # what a number read another way was written as, for `origin`
+    if local:
+        s = _local_numbers(s, written)
     # compatibility forms: mathematical italic letters (𝑜𝑢𝑡) and superscript digits (10⁻⁶) become plain characters
     # (a full-width comma stays a separator: "2.1%，3" is not one number)
     s = unicodedata.normalize("NFKC", "".join(LIG.get(c, c) for c in s).replace("，", "， "))
@@ -1007,19 +1042,17 @@ def _tokens(s, origin=None):
     s = re.sub(r"(\d)\s?[x×](?![A-Za-z0-9])", r"\1 ", s)            # 2-3x -> 2-3 (a factor, "2–3 倍")
     # a magnitude as a capital suffix is the number with its word, read before the case is lowered: 6B is 6 billion (60 亿),
     # 1.5M is 1.5 million (150 万); not inside a name (Llama-7B). `written` keeps each one as written, for `origin`
-    written = {}
-
     def magnitude(m):
         words = f"{m[1]} {MAGNITUDES[m[2]]}"
         written.setdefault(words, m[0])
         return words
     s = re.sub(r"(?<![A-Za-z0-9_.\-])(\d+(?:\.\d+)?)([KMB])(?![A-Za-z0-9])", magnitude, s)
     toks = set()
-    for m in re.finditer(r"([A-Za-z]+)-\s+([A-Za-z]{2,})", s):
+    for m in re.finditer(r"([^\W\d_]+)-\s+([^\W\d_]{2,})" if letters else r"([A-Za-z]+)-\s+([A-Za-z]{2,})", s):
         toks.update(part.lower() for part in m.groups() if len(part) >= 3)
     s = re.sub(r"(\w)-\s+(\w)", r"\1\2", s).lower()
     # Keep version-bearing names intact even when their numeric parts are decimals.
-    toks.update(t for t in re.findall(r"(?<![a-z0-9])[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)+", s)
+    toks.update(t for t in re.findall(r"(?<![^\W_])[^\W\d_][^\W_]*(?:[-_.][^\W_]+)+" if letters else r"(?<![a-z0-9])[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)+", s)
                 if any(c.isdigit() for c in t))
     def number_token(match):
         # Decimal tuple scaling is exact, including values beyond the default precision.
@@ -1038,11 +1071,11 @@ def _tokens(s, origin=None):
         toks.add(token)
         if origin is not None:
             text = match[0].strip()
-            words = next((w for w in written if text.startswith(w)), None)
+            words = max((w for w in written if text.startswith(w)), key=len, default=None)
             origin.setdefault(token, written[words] + text[len(words):] if words else text)
         return " "
     s = NUMBER_RE.sub(number_token, s)
-    for t in re.findall(r"[a-z0-9]+(?:\.[0-9]+)?", s):
+    for t in re.findall(r"[^\W_]+(?:\.[0-9]+)?" if letters else r"[a-z0-9]+(?:\.[0-9]+)?", s):
         if len(t) >= 3 or any(c.isdigit() for c in t):
             toks.add(t)
     return toks
@@ -1116,6 +1149,11 @@ def check_translations(annotations):
     per-English-word ratio far outside the usual range (a comment much longer or shorter than the span
     it translates). The caller decides how to act on them.
 
+    A comment in Chinese, Japanese or Korean counts every Latin word; so does one in Cyrillic, whose numbers are also read
+    with its decimal comma and its words for thousand, million and billion. One in a Latin-script language (German,
+    French, Spanish, Portuguese, or English for a paper in another language) counts only its numbers, read both ways,
+    and its terms (_term_words): its other words are its language's own.
+
     PDF text loses superscripts and subscripts (10⁻³ is extracted as 10−3, L² as L2, CM² as "CM 2"), so a
     comment's <sub>/<sup> is read both joined to its base and set apart, and the closer reading counts. Words the
     comment keeps in the original (names, citations, terms) need no translation and do not count towards the
@@ -1129,7 +1167,14 @@ def check_translations(annotations):
         base = MATH_RE.sub(" ", comment)    # mathematics is display, not content
         plain = TAG_RE.sub(" ", base)
         joined = TAG_RE.sub(" ", SCRIPT_TAG_RE.sub("", base))
+        script = ("cjk" if CJK_RE.search(plain) else
+                  "cyrillic" if len(CYRILLIC_RE.findall(plain)) > len(re.findall(r"[A-Za-z]", plain)) else "latin")
+        latin = script == "latin"
         text_tokens = _tokens(text) | _tokens(_text_variants(text))
+        if script != "cjk":   # the sentence also read with the comment's letters and its way of writing numbers
+            for t in (text, _text_variants(text)):
+                text_tokens |= _tokens(t, letters=latin) | _tokens(t, local=True, letters=latin)
+        terms = _term_words(plain + " " + joined) if latin else None
         text_words = re.findall(r"[A-Za-z]+", unicodedata.normalize("NFKC", text))
         acronyms = {m.lower() for m in re.findall(r"(?<![A-Za-z])[A-Z]{2,6}s?(?![A-Za-z])", plain)}
         readings = [joined, plain]
@@ -1137,8 +1182,11 @@ def check_translations(annotations):
             readings += [re.sub(r"(?<![\d.])1\s*/\s*(?=\d)", "", p) for p in (joined, plain)]
         found = []
         for p in readings:   # each reported as the comment writes it
-            origin = {}
-            found.append(sorted({origin.get(t, t) for t in _tokens(p, origin) if not _covered(t, text_tokens, text_words, acronyms)}))
+            for local in (False,) if script == "cjk" else (True, False):   # a tie quotes the number with its own word
+                origin = {}
+                found.append(sorted({origin.get(t, t) for t in _tokens(p, origin, local=local, letters=latin)
+                                     if not _covered(t, text_tokens, text_words, acronyms)
+                                     and (terms is None or t in terms or any(c.isdigit() for c in t))}))
         extra = min(found, key=len)
         words = len(text_words)
         kept = {_stem(w.lower()) for p in (plain, joined) for w in re.findall(r"[A-Za-z]+", unicodedata.normalize("NFKC", p))}

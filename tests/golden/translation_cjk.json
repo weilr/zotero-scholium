@@ -1,0 +1,124 @@
+[
+ [
+  "We train a 6B model.",
+  "我们训练一个 6 亿参数的模型。",
+  [
+   {
+    "page": "1",
+    "text": "We train a 6B model.",
+    "comment": "我们训练一个 6 亿参数的模型。",
+    "reasons": [
+     "terms or numbers not present in the highlighted text: 6 亿"
+    ]
+   }
+  ]
+ ],
+ [
+  "We fine-tune LLaMA-2 7B.",
+  "我们微调 LLaMA-2 13B。",
+  [
+   {
+    "page": "1",
+    "text": "We fine-tune LLaMA-2 7B.",
+    "comment": "我们微调 LLaMA-2 13B。",
+    "reasons": [
+     "terms or numbers not present in the highlighted text: 13B"
+    ]
+   }
+  ]
+ ],
+ [
+  "Schrödinger's equation holds for 1,500 samples.",
+  "薛定谔方程对 1,500 个样本成立（Schrödinger）。",
+  []
+ ],
+ [
+  "The model reaches 3.57% error.",
+  "模型的错误率为 3,57%。",
+  [
+   {
+    "page": "1",
+    "text": "The model reaches 3.57% error.",
+    "comment": "模型的错误率为 3,57%。",
+    "reasons": [
+     "terms or numbers not present in the highlighted text: 3, 57%"
+    ]
+   }
+  ]
+ ],
+ [
+  "Accuracy improves on CIFAR10.",
+  "在 CIFAR100 上准确率提高，Größe 不变。",
+  [
+   {
+    "page": "1",
+    "text": "Accuracy improves on CIFAR10.",
+    "comment": "在 CIFAR100 上准确率提高，Größe 不变。",
+    "reasons": [
+     "terms or numbers not present in the highlighted text: cifar100"
+    ]
+   }
+  ]
+ ],
+ [
+  "We use PPO with a KL penalty.",
+  "我们使用带 KL 惩罚的 PPO 和 DPO。",
+  [
+   {
+    "page": "1",
+    "text": "We use PPO with a KL penalty.",
+    "comment": "我们使用带 KL 惩罚的 PPO 和 DPO。",
+    "reasons": [
+     "terms or numbers not present in the highlighted text: dpo"
+    ]
+   }
+  ]
+ ],
+ [
+  "We train for 10K steps with 1.5M examples.",
+  "训练 1 万步，使用 150 万个样例和 Mrd. 2 个模型。",
+  [
+   {
+    "page": "1",
+    "text": "We train for 10K steps with 1.5M examples.",
+    "comment": "训练 1 万步，使用 150 万个样例和 Mrd. 2 个模型。",
+    "reasons": [
+     "terms or numbers not present in the highlighted text: 2, mrd"
+    ]
+   }
+  ]
+ ],
+ [
+  "The method improves the result.",
+  "该方法提升了结果，提升 1.500.000 倍。",
+  [
+   {
+    "page": "1",
+    "text": "The method improves the result.",
+    "comment": "该方法提升了结果，提升 1.500.000 倍。",
+    "reasons": [
+     "terms or numbers not present in the highlighted text: 000, 1.500"
+    ]
+   }
+  ]
+ ],
+ [
+  "Policies are trained online.",
+  "策略在线训练；ポリシーはオンラインで学習される。",
+  []
+ ],
+ [
+  "The loss is small.",
+  "손실은 작다 (Verlust ist klein).",
+  [
+   {
+    "page": "1",
+    "text": "The loss is small.",
+    "comment": "손실은 작다 (Verlust ist klein).",
+    "reasons": [
+     "terms or numbers not present in the highlighted text: ist, klein, verlust"
+    ]
+   }
+  ]
+ ]
+]

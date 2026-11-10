@@ -51,6 +51,10 @@
   when its configuration holds the paper's whole set. `applied_keys.json` names the configuration.
 - The translation check quotes a number with a K, M or B suffix as the comment writes it (13B, not 13 billion), and
   takes a model's name and its size with a hyphen or a space as one name (Llama-7B, Llama 7B).
+- The translation check of a comment in German, French, Spanish, Portuguese or English no longer lists its ordinary words:
+  it checks its numbers, also written with the language's words and comma or period (6 Mrd., 1,5 Mio., 6 milliards,
+  6 mil millones, 6 bilhões), and its terms (acronyms, CamelCase names, words with digits or Greek letters); words with
+  umlauts or accents are no longer split. A Russian comment's numbers are read the same way.
 - `note_title` holds back a reading note that does not start with its `<h1>` (one after an introduction or inside a
   comment no longer counts) and an empty one.
 

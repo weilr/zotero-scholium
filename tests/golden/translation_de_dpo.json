@@ -1,0 +1,58 @@
+[
+ [
+  "In this paper we introduce a new parameterization of the reward model in RLHF that enables extraction of the corresponding optimal policy in closed form, allowing us to solve the standard RLHF problem with only a simple classification loss.",
+  "In diesem Paper stellen wir eine neue Parametrisierung des Belohnungsmodells im RLHF vor, die die Extraktion der entsprechenden optimalen Policy in geschlossener Form ermöglicht und es erlaubt, das Standardproblem von RLHF allein mit einem einfachen Klassifikationsverlust zu lösen."
+ ],
+ [
+  "The resulting algorithm, which we call Direct Prefer- ence Optimization (DPO), is stable, performant, and computationally lightweight, eliminating the need for sampling from the LM during fine-tuning or performing significant hyperparameter tuning.",
+  "Der daraus resultierende Algorithmus, den wir Direct Preference Optimization (DPO) nennen, ist stabil, leistungsfähig und rechnerisch schlank; er macht das Sampling aus dem Sprachmodell während des Feinabgleichs und umfangreiches Hyperparameter-Tuning überflüssig."
+ ],
+ [
+  "Notably, fine-tuning with DPO exceeds PPO-based RLHF in ability to control sen- timent of generations, and matches or improves response quality in summarization and single-turn dialogue while being substantially simpler to implement and train.",
+  "Bemerkenswert ist, dass das Feinabstimmen mit DPO das PPO-basierte RLHF bei der Steuerung der Stimmung von Generierungen übertrifft und bei Zusammenfassungen sowie Einzelturn-Dialogen die Antwortqualität erreicht oder verbessert, während es deutlich einfacher zu implementieren und zu trainieren ist."
+ ],
+ [
+  "We propose Direct Preference Optimiza- tion (DPO), an algorithm that implicitly optimizes the same objective as existing RLHF algorithms (reward maximization with a KL-divergence constraint) but is simple to implement and straight- forward to train.",
+  "Wir schlagen Direct Preference Optimization (DPO) vor, einen Algorithmus, der implizit dieselbe Zielfunktion optimiert wie bestehende RLHF-Algorithmen (Maximierung der Belohnung mit einer KL-Divergenz-Nebenbedingung), der aber einfach zu implementieren und unkompliziert zu trainieren ist."
+ ],
+ [
+  "Our main contribution is Direct Preference Optimization (DPO), a simple RL-free algorithm for training language models from preferences.",
+  "Unser Hauptbeitrag ist Direct Preference Optimization (DPO), ein einfacher RL-freier Algorithmus zum Training von Sprachmodellen aus Präferenzen."
+ ],
+ [
+  "Our experiments show that DPO is at least as effective as existing methods, including PPO-based RLHF, for learning from preferences in tasks such as sentiment modulation, summarization, and dialogue, using language models with up to 6B parameters.",
+  "Unsere Experimente zeigen, dass DPO mindestens so wirksam ist wie bestehende Methoden, einschließlich des PPO-basierten RLHF, beim Lernen aus Präferenzen in Aufgaben wie der Modulation von Stimmung, Zusammenfassung und Dialog, mit Sprachmodellen von bis zu 6 Mrd. Parametern."
+ ],
+ [
+  "However, RLHF is a complex and often unstable procedure, first fitting a reward model that reflects the human preferences, and then fine-tuning the large unsupervised LM using reinforcement learning to maximize this estimated reward without drifting too far from the original model.",
+  "Allerdings ist RLHF ein komplexes und oft instabiles Verfahren: Zuerst wird ein Belohnungsmodell gefittet, das die menschlichen Präferenzen abbildet, und anschließend wird das große, unüberwachte Sprachmodell mittels Reinforcement Learning so feinabgestimmt, dass die geschätzte Belohnung maximiert wird, ohne zu weit vom ursprünglichen Modell abzuweichen."
+ ],
+ [
+  "While RLHF produces models with impressive conversational and coding abilities, the RLHF pipeline is considerably more complex than supervised learning, involving training multiple LMs and sampling from the LM policy in the loop of training, incurring significant computational costs.",
+  "Während RLHF Modelle mit beeindruckenden Konversations- und Programmierfähigkeiten hervorbringt, ist die RLHF-Pipeline deutlich komplexer als überwachtes Lernen; sie umfasst das Training mehrerer Sprachmodelle und das Sampling aus der Policy des Sprachmodells während des Trainings, was erhebliche Rechenkosten verursacht."
+ ],
+ [
+  "Intuitively, the DPO update increases the relative log probability of preferred to dispreferred responses, but it incorporates a dynamic, per-example importance weight that prevents the model degeneration that we find occurs with a naive probability ratio objective.",
+  "Intuitiv erhöht das DPO-Update die relative Log-Wahrscheinlichkeit bevorzugter gegenüber abgelehnten Antworten; dabei verwendet es ein dynamisches, pro Beispiel gewichtetes Importance-Gewicht, das die Modelldegeneration verhindert, die wir bei einem naiven Wahrscheinlichkeitsverhältnis-Ziel beobachten."
+ ],
+ [
+  "However, while existing methods use the preference model to define a preference loss to train a reward model and then train a policy that optimizes the learned reward model, DPO uses a change of variables to define the preference loss as a function of the policy directly.",
+  "Anders als bestehende Methoden, die das Präferenzmodell nutzen, um einen Präferenzverlust für ein Belohnungsmodell zu definieren und anschließend eine Policy zu trainieren, die das gelernte Belohnungsmodell optimiert, verwendet DPO eine Variablentransformation, um den Präferenzverlust direkt als Funktion der Policy zu definieren."
+ ],
+ [
+  "Despite the appeal of using relative human preferences, fine-tuning large language models with reinforcement learning remains a major practical challenge; this work provides a theoretically-justified approach to optimizing relative preferences without RL.",
+  "Trotz des Reizes relativer menschlicher Präferenzen bleibt das Feinabstimmen großer Sprachmodelle mit Reinforcement Learning eine große praktische Herausforderung; diese Arbeit liefert einen theoretisch begründeten Ansatz zur Optimierung relativer Präferenzen ohne RL."
+ ],
+ [
+  "However, in the CDB setting, preference labels are given online, while in learning from human preferences, we typically learn from a fixed batch of offline preference-annotated action pairs [49].",
+  "Bei kontextuellen Dueling-Bandits werden Präferenzlabels online vergeben, während wir beim Lernen aus menschlichen Präferenzen typischerweise aus einem festen Batch von offline annotierten Aktionspaaren lernen."
+ ],
+ [
+  "Various algorithms for PbRL exist, including methods that can reuse off-policy preference data, but generally involve first explicitly estimating the latent scoring function (i.e. the reward model) and subsequently optimizing it [16, 9, 12, 36, 21].",
+  "Verschiedene PbRL-Algorithmen existieren, darunter Methoden, die Off-Policy-Präferenzdaten wiederverwenden können, doch sie schätzen in der Regel zuerst die latente Bewertungsfunktion (also das Belohnungsmodell) explizit und optimieren sie anschließend."
+ ],
+ [
+  "Reward Modelling Phase: In the second phase the SFT model is prompted with prompts x to produce pairs of answers (y1, y2) ∼πSFT(y | x).",
+  "In der zweiten Phase wird das SFT-Modell mit Prompts x aufgefordert, Paare von Antworten (y1, y2) ∼ πSFT(y | x) zu erzeugen."
+ ]
+]
