@@ -1490,11 +1490,22 @@ def _edited(old, last):
     return _changed_by_user(old)
 
 
+def note_prints(html):
+    """A stored note's fingerprints: of its HTML as Zotero keeps it (any change: markup, an image, its title) and of its
+    text (note_body)."""
+    return {"html": _fingerprint(html), "text": _fingerprint(note_body(html))}
+
+
+def _noted(last, key):
+    """What the output folder's last write kept of a note: {html?, text}; an older record kept the text's alone."""
+    v = ((last or {}).get("notes") or {}).get(key)
+    return v if isinstance(v, dict) else {"text": v} if isinstance(v, str) else None
+
+
 def _edited_notes(listing, last):
     """The tool's notes of the listing that the output folder's last write wrote, whose text the user changed since."""
-    kept = (last or {}).get("notes") or {}
-    return [n for n in (listing or {}).get("notes", []) if n.get("key") in kept and isinstance(n.get("html"), str)
-            and _fingerprint(note_body(n["html"])) != kept[n["key"]]]
+    return [n for n in (listing or {}).get("notes", []) if _noted(last, n.get("key")) and isinstance(n.get("html"), str)
+            and _fingerprint(note_body(n["html"])) != _noted(last, n["key"]).get("text")]
 
 
 MARK_TYPES = ("highlight", "underline")
@@ -1569,13 +1580,15 @@ def rewrite_plan(out, cfg, listing, last=None, note_html=None):
         plan["remove"] = [o["key"] for o in free]
         if cfg.get("cleanup_external"):
             plan["remove"] += [o["key"] for o in anns if o.get("isExternal") and not set(o.get("tags") or []) & OWN_TAGS]
+    # the note in place only while it is as the tool stored it: an image, markup or a title of the user's (its text the
+    # same) sends it to the trash instead, where it can be restored
     if note_html and cfg.get("note_replace") and cfg.get("item_key"):
-        kept, only = (last or {}).get("notes") or {}, cfg.get("note_title_prefix") or ""
-        changed = {n["key"] for n in _edited_notes(listing, last)}
+        only = cfg.get("note_title_prefix") or ""
         for n in (listing or {}).get("notes", []):
-            if (n.get("key") in kept and n["key"] not in changed and isinstance(n.get("html"), str)
+            noted = _noted(last, n.get("key"))
+            if (noted and noted.get("html") and isinstance(n.get("html"), str) and _fingerprint(n["html"]) == noted["html"]
                     and set(n.get("tags") or []) & OWN_TAGS and (n.get("title") or "").startswith(only)):
-                plan["note"] = {"update": n["key"]}
+                plan["note"] = {"update": n["key"], "expect": n["html"]}
                 break
     return plan
 
@@ -2294,7 +2307,8 @@ def api_apply(cfg, out, api, plan=None):
         existing = [c for c in api.children(cfg["item_key"]) if c["data"]["itemType"] == "note"]
         same = next((c for c in existing if _own(c) and note_body(c["data"].get("note", "")) == note_body(html)), None)
         # the tool's note this folder wrote, which the plan rewrites in place
-        target = next((c for c in existing if _own(c) and plan and plan.get("note") and c["key"] == plan["note"]["update"]), None)
+        target = next((c for c in existing if _own(c) and plan and plan.get("note") and c["key"] == plan["note"]["update"]
+                       and c["data"].get("note", "") == plan["note"].get("expect")), None)
         if cfg.get("note_replace"):
             only = cfg.get("note_title_prefix") or ""
             victims = [c for c in existing if _own(c) and c is not same and c is not target
@@ -2469,7 +2483,7 @@ def plugin_connect(cfg):
             token = open(found[0], encoding="utf8").read().strip()
             break
     for base in PLUGIN_PATHS:
-        s, h, t = http("POST", base + "/list", dict({"attachmentKey": cfg.get("attachment_key", "")}, **plugin_library(cfg)),
+        s, h, t = http("POST", base + "/list", dict({"attachmentKey": cfg.get("attachment_key", ""), "noteHtml": True}, **plugin_library(cfg)),
                        {"X-Annotate-Token": token or ""}, timeout=15)
         if s != 404:
             break
@@ -2507,6 +2521,7 @@ def plugin_apply(cfg, out, plan=None):
     # a rewrite in place needs a plugin that updates (its listing says canUpdate); an older one deletes and creates
     plan = plan if plan is not None and lst.get("canUpdate") else None
     target = plan["note"]["update"] if plan and plan.get("note") else None
+    expect = plan["note"].get("expect") if target else None
     html = read_text(cfg["note_html"]) if cfg.get("note_html") else None
     prefix = cfg.get("note_title_prefix") or cfg.get("note_title") or ""
     only = cfg.get("note_title_prefix") or ""
@@ -2519,7 +2534,7 @@ def plugin_apply(cfg, out, plan=None):
     payload = {"itemKey": cfg["item_key"], "attachmentKey": cfg["attachment_key"],
                "cleanup": bool(cfg.get("cleanup", False)), "cleanupExternal": bool(cfg.get("cleanup_external")), "tag": TAG, "legacyTags": sorted(LEGACY_TAGS), "annotations": out,
                "note": dict({"html": html, "titlePrefix": prefix, "trashOwn": replace, "trashTitlePrefix": only},
-                            **({"updateKey": target} if target else {})) if html else None,
+                            **({"updateKey": target, "expectHtml": expect} if target else {})) if html else None,
                **plugin_library(cfg)}
     if plan is not None:
         payload.update(rewrite=True, annotations=[out[i] for i in plan["create"]], keep=[k["key"] for k in plan["keep"]],
@@ -2543,7 +2558,8 @@ def render_js(cfg, out, plan=None):
     rewrite = None
     if plan is not None:
         rewrite = {"updates": [dict({"key": u["key"]}, **u["fields"]) for u in plan["update"]], "keep": [k["key"] for k in plan["keep"]],
-                   "remove": list(plan["remove"]), "noteUpdate": plan["note"]["update"] if plan.get("note") else None}
+                   "remove": list(plan["remove"]), "noteUpdate": plan["note"]["update"] if plan.get("note") else None,
+                   "noteExpect": plan["note"].get("expect") if plan.get("note") else None}
         out = [out[i] for i in plan["create"]]
     title_prefix = cfg.get("note_title_prefix") or cfg.get("note_title") or ""
     replace = bool(html and cfg.get("note_replace"))
@@ -2593,16 +2609,15 @@ if (REWRITE) {{
   }}
 }}
 
-var noteCreated = false, noteUpdated = false, noteSame = null, trash = [];
+var noteCreated = false, noteUpdated = false, noteSame = null, trash = [], noteSave = null, noteInPlace = false;
 if (NOTE_HTML) {{
   let body = h => String(h || "").replace(/<h1[^>]*>[\\s\\S]*?<\\/h1>/i, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ")
     .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&").replace(/\\s+/g, " ").trim();
   let notes = Zotero.Items.get(parent.getNotes());
   let own = n => n.getTags().some(t => OWN_TAGS.includes(t.tag));
   noteSame = notes.find(n => own(n) && body(n.getNote()) === body(NOTE_HTML)) || null;
-  // the tool's note the folder wrote, rewritten in place
-  let target = REWRITE && REWRITE.noteUpdate ? notes.find(n => own(n) && n.key === REWRITE.noteUpdate) || null : null;
-  if (REWRITE && REWRITE.noteUpdate && !target) throw new Error("note " + REWRITE.noteUpdate + " is not the tool's under this item; run the tool again");
+  // the tool's note the folder wrote, rewritten in place while it is as it was read; else it goes to the trash
+  let target = REWRITE && REWRITE.noteUpdate ? notes.find(n => own(n) && n.key === REWRITE.noteUpdate && n.getNote() === REWRITE.noteExpect) || null : null;
   if (NOTE_REPLACE) trash = notes.filter(n => own(n) && n !== noteSame && n !== target && (n.getNoteTitle() || "").startsWith(TRASH_TITLE_PREFIX)).map(n => n.id);
   if (noteSame && target && target !== noteSame) trash.push(target.id);
   let existing = notes.filter(n => !trash.includes(n.id) && n !== target).map(n => n.getNoteTitle());
@@ -2612,18 +2627,18 @@ if (NOTE_HTML) {{
     let d = new Date(), ds = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
     html = html.replace(/<h1([^>]*)>([\\s\\S]*?)<\\/h1>/i, (m, attrs, t) => "<h1" + attrs + ">" + t.replace(/\\s*\\(v\\d+, \\d{{4}}-\\d{{2}}-\\d{{2}}\\)\\s*$/, "") + " (v" + (same.length + 1) + ", " + ds + ")</h1>");
   }}
+  // saved with the annotations, in their transaction
   if (!noteSame && target) {{
     target.setNote(html);
-    await target.saveTx();
-    noteUpdated = true;
+    noteSave = target;
+    noteInPlace = true;
   }} else if (!noteSame) {{
     let note = new Zotero.Item("note");
     note.libraryID = libraryID;
     note.parentID = parent.id;
     note.setNote(html);
     note.setTags([{{tag: TAG}}]);
-    await note.saveTx();
-    noteCreated = true;
+    noteSave = note;
   }}
 }}
 
@@ -2663,6 +2678,7 @@ await Zotero.DB.executeTransaction(async function () {{
     await ann.save();
   }}
   for (let a of old) await a.erase();
+  if (noteSave) {{ await noteSave.save(); if (noteInPlace) noteUpdated = true; else noteCreated = true; }}
 }});
 if (trash.length) await Zotero.Items.trashTx(trash);
 return "removed " + old.length + " old annotations (kept " + kept + " of yours)" + (REWRITE ? "; changed " + changes.length + ", left " + REWRITE.keep.length + " as they were" : "") +
@@ -3216,11 +3232,13 @@ def _record_prints(written, lst, last, note_html):
         if a["key"] in mine or before.get(a["key"]) == fp:
             prints[a["key"]] = fp
     written["written"] = prints
-    present = {n["key"] for n in lst.get("notes", [])}
-    notes = {k: v for k, v in ((last or {}).get("notes") or {}).items() if k in present}
-    for k in written.get("noteKeys") or []:
-        if note_html is not None:
-            notes[k] = _fingerprint(note_body(note_html))
+    stored = {n["key"]: n.get("html") for n in lst.get("notes", [])}
+    notes = {k: v for k, v in ((last or {}).get("notes") or {}).items() if k in stored}
+    for k in written.get("noteKeys") or []:   # as read back: a listing without the notes' text keeps their text's alone
+        if isinstance(stored.get(k), str):
+            notes[k] = note_prints(stored[k])
+        elif note_html is not None:
+            notes[k] = {"text": _fingerprint(note_body(note_html))}
     written["notes"] = notes
 
 

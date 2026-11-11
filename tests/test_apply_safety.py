@@ -203,7 +203,7 @@ def test_the_generated_javascript_refuses_an_item_that_is_not_the_parent(tmp_pat
     out = json.loads(subprocess.run([NODE, "-e", RUN_JS], input=script, encoding="utf8", capture_output=True, check=True,
                                     timeout=15).stdout)
     assert out.get("error") == error
-    assert out["saved"] == ([] if error else ["note", "annotation"])
+    assert out["saved"] == ([] if error else ["annotation", "note"]), "the note is saved in the annotations' transaction, last"
 
 
 def run_main(tmp_path, monkeypatch, capsys, api, with_note=False, args=("--ignore-existing",), **options):

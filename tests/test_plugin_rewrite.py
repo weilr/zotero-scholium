@@ -98,7 +98,7 @@ def by_key(out):
 
 
 def test_the_listing_says_it_updates_and_gives_the_tools_notes_their_text():
-    out = zotero({"attachmentKey": "ATTACH01"}, EXISTING, listing=True)["result"]
+    out = zotero({"attachmentKey": "ATTACH01", "noteHtml": True}, EXISTING, listing=True)["result"]
     assert out["canUpdate"] is True
     notes = {n["key"]: n for n in out["notes"]}
     assert notes["N1"]["html"] == "<h1>Paper</h1><p>Old.</p>" and "html" not in notes["N2"], "the user's note keeps its text"
@@ -138,14 +138,16 @@ def test_a_plan_that_does_not_fit_the_attachment_writes_nothing(plan, why):
 
 
 def test_the_reading_note_is_rewritten_in_place():
-    note = {"html": "<h1>Paper</h1><p>New.</p>", "titlePrefix": "Paper", "trashOwn": True, "trashTitlePrefix": "Paper", "updateKey": "N1"}
+    note = {"html": "<h1>Paper</h1><p>New.</p>", "titlePrefix": "Paper", "trashOwn": True, "trashTitlePrefix": "Paper", "updateKey": "N1",
+            "expectHtml": "<h1>Paper</h1><p>Old.</p>"}
     out = zotero(request(keep=["A1", "A2"], note=note), EXISTING)
     r = out["result"]
     assert r["noteKeys"] == ["N1"] and r["noteUpdated"] is True and r["noteCreated"] is False and out["trashed"] == []
     assert by_key(out)["N1"]["note"] == "<h1>Paper</h1><p>New.</p>" and out["saves"] == ["N1"]
-    # a note key that is not the tool's
+    # a note key that is not the tool's: the user's note is left alone, the tool's goes to the trash, a new one is written
     out = zotero(request(keep=["A1", "A2"], note=dict(note, updateKey="N2")), EXISTING)
-    assert "is not the tool's" in out["error"] and out["saves"] == []
+    assert "error" not in out and by_key(out)["N2"]["note"] == "<h1>Mine</h1><p>The user's.</p>" and out["trashed"] == ["N1"]
+    assert out["result"]["noteCreated"] is True and not out["result"].get("noteUpdated")
 
 
 def test_without_a_plan_the_tools_annotations_are_deleted_and_created_as_before():
@@ -202,7 +204,8 @@ def test_the_javascript_file_rewrites_the_reading_note_in_place(tmp_path):
     note.write_text("<h1>Paper</h1><p>New.</p>", encoding="utf8")
     cfg = dict(cli.DEFAULTS, item_key="PARENT01", attachment_key="ATTACH01", cleanup=True, note_html=str(note), note_replace=True,
                note_title_prefix="Paper")
-    plan = {"create": [], "update": [], "keep": [{"key": "A1", "index": 0}, {"key": "A2", "index": 1}], "remove": [], "note": {"update": "N1"}}
+    plan = {"create": [], "update": [], "keep": [{"key": "A1", "index": 0}, {"key": "A2", "index": 1}], "remove": [],
+            "note": {"update": "N1", "expect": "<h1>Paper</h1><p>Old.</p>"}}
     out = zotero(script=cli.render_js(cfg, [NEW, NEW], plan), existing=EXISTING)
     assert "error" not in out, out.get("error")
     assert by_key(out)["N1"]["note"] == "<h1>Paper</h1><p>New.</p>" and out["trashed"] == [] and out["saves"] == ["N1"]

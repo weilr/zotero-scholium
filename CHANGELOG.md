@@ -29,8 +29,9 @@
 - A cleanup re-apply changes in place what it holds again: an annotation of the tool at the same place keeps its key
   and only its changed fields are written, unchanged ones are left alone, only the new ones are created and only those
   left out are deleted, through the plugin, the local API and the JavaScript file; the report's `rewrite` counts them.
-  With `note_replace`, the reading note the output folder wrote is rewritten in place while the user has not changed it;
-  a reading note the user changed is held back as `user_edit`. A plugin before this one deletes and creates as before.
+  With `note_replace`, the reading note the output folder wrote is rewritten in place while it is as the tool stored it;
+  one whose text the user changed is held back as `user_edit`, one with the user's markup, images or title goes to the
+  trash as before. A plugin before this one deletes and creates as before.
 
 ### Fixed
 

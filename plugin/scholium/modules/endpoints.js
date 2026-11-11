@@ -86,8 +86,8 @@ var ScholiumEndpoints = {
     return att;
   },
 
-  // the attachment's annotations and its item's notes, the tool's notes with their text (whether the user changed one);
-  // canUpdate: apply takes a rewrite in place
+  // the attachment's annotations and its item's notes, the tool's notes with their HTML when asked (noteHtml: whether the
+  // user changed one); canUpdate: apply takes a rewrite in place
   async list(data) {
     const libraryID = this.library(data);
     const att = this.attachment(data, libraryID);
@@ -97,7 +97,8 @@ var ScholiumEndpoints = {
     if (parent) {
       for (const n of Zotero.Items.get(parent.getNotes())) {
         const tags = n.getTags().map(t => t.tag);
-        notes.push(Object.assign({ key: n.key, title: n.getNoteTitle(), tags }, tags.some(t => this.OWN_TAGS.includes(t)) ? { html: n.getNote() } : {}));
+        notes.push(Object.assign({ key: n.key, title: n.getNoteTitle(), tags },
+                                 data.noteHtml && tags.some(t => this.OWN_TAGS.includes(t)) ? { html: n.getNote() } : {}));
       }
     }
     return { ok: true, version: this.version, canUpdate: true, libraryID, attachmentKey: att.key, parentKey: parent ? parent.key : null,
@@ -168,9 +169,10 @@ var ScholiumEndpoints = {
       const existingNotes = Zotero.Items.get(parent.getNotes());
       const own = n => n.getTags().some(t => ownTags.has(t.tag));
       const same = existingNotes.find(n => own(n) && body(n.getNote()) === body(data.note.html));
-      // the tool's note a rewrite names (updateKey) is written over in place, keeping its key
-      const target = data.note.updateKey ? existingNotes.find(n => n.key === String(data.note.updateKey)) : null;
-      if (data.note.updateKey && !(target && own(target))) throw new Error(`note ${data.note.updateKey} is not the tool's under this item; run the tool again`);
+      // the tool's note a rewrite names (updateKey) is written over in place, keeping its key, while it is as the plan read it
+      // (expectHtml); else it goes to the trash with the others and a new one is written
+      const target = data.note.updateKey ? existingNotes.find(n => n.key === String(data.note.updateKey) && own(n)
+                                                              && (data.note.expectHtml === undefined || n.getNote() === data.note.expectHtml)) || null : null;
       if (data.note.trashOwn) {
         const only = data.note.trashTitlePrefix || "";
         for (const n of existingNotes) if (own(n) && n !== same && n !== target && (n.getNoteTitle() || "").startsWith(only)) trash.push(n.id);
