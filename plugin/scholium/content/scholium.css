@@ -64,13 +64,17 @@
 
 .scholium-line {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
 
-/* one line, cut with an ellipsis where the pane is narrow */
+/* beside the chip, or under it where the pane is too narrow for both, cut with an ellipsis only where it is longer than
+   the whole line */
 .scholium-line .scholium-state {
   margin-inline-start: auto;
+  flex-shrink: 0;
+  max-width: 100%;
   min-width: 0;
   font-size: 11px;
   color: var(--fill-secondary);
@@ -103,9 +107,10 @@
 .scholium-card-nums b { display: block; font-size: 16px; }
 .scholium-card-nums span, .scholium-card-usage { font-size: 10.5px; color: var(--fill-secondary); }
 .scholium-card-nums span { word-break: keep-all; }
-.scholium-confirm { display: flex; align-items: center; gap: 6px; font-size: 11.5px; padding: 4px 6px; border-radius: 4px;
+.scholium-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11.5px; padding: 4px 6px; border-radius: 4px;
   background: color-mix(in srgb, var(--accent-red) 8%, transparent); }
-.scholium-confirm-text { flex: 1; }
+/* the buttons go under the text where the pane is narrow */
+.scholium-confirm-text { flex: 1 1 180px; }
 
 .scholium-popover {
   box-sizing: border-box;
@@ -691,6 +696,9 @@
   min-width: 0;
   font-size: 10.5px;
   color: var(--fill-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* the round button: ↑ sends, ■ stops; the glyph is its text, drawn as an icon */

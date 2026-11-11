@@ -58,6 +58,12 @@
   when its configuration holds the paper's whole set. `applied_keys.json` names the configuration.
 - The translation check quotes a number with a K, M or B suffix as the comment writes it (13B, not 13 billion), and
   takes a model's name and its size with a hyphen or a space as one name (Llama-7B, Llama 7B).
+- Ask Scholium (N papers) no longer opens the reader's side pane in the library tab.
+- In a narrow item pane, the confirmation's buttons go under its text and the state line under the model chip, and
+  the send hint is cut with its whole text in its tooltip. The tooltip's time is in the language's words, a stopped
+  annotation's card says "Cancelled", a scanned PDF's card gives its message without a row of zeros, the state line
+  no longer says the sentences are being extracted once the plugin's extract is done, and the eye button's English
+  names Scholium.
 - `user_edit` also holds back a rewrite that would put back an annotation the user moved or relabelled in Zotero, or
   delete one they tagged.
 - A question about several papers is told to quote the first paper's sentences as [#123] every time, never as

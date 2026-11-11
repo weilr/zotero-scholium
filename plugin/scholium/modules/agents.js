@@ -178,6 +178,7 @@ Object.assign(ScholiumRunner, {
     job.pre = running.stopAsked ? null : job.annotate && !job.say && !job.compact ? await this.preRun(job, ctx)
       : question ? await this.preRunQuestion(job, ctx) : null;
     if (this.job !== running) return;   // the plugin stopped meanwhile
+    if (job.pre && job.pre.status && !running.stopAsked) this.advance(ctx, "reading");   // the agent reads the sentences next
     if (running.stopAsked || (job.pre && job.pre.cancelled)) ctx.current = { key, proc: null, cancelled: true };
     else if (job.pre && job.pre.scanned && !question) this.scannedEnd(ctx);   // a question goes on, told the PDF is a scan
     else if (agent === "codex") await this.runCodex(program, ctx);
@@ -219,7 +220,8 @@ Object.assign(ScholiumRunner, {
         const none = !(own.highlights || own.margin || own.notes || own.readingNotes);
         const counts = Object.assign({ type: "scholium", subtype: "counts" }, own,
                                      { warnings: none && ctx.missing ? this.text(ctx.missing) : this.warningsOf(text),
-                                       turns: spent.turns, tokens: spent.tokens, at: Date.now() });
+                                       turns: spent.turns, tokens: spent.tokens, at: Date.now() },
+                                     none && ctx.missing === "noTextLayer" ? { scanned: true } : {});
         try { await IOUtils.writeUTF8(logPath, JSON.stringify(counts) + "\n", { mode: "append" }); }
         catch (e) { this.log("counts not logged: " + e); }
         this.appendEntries(this.entries(counts));

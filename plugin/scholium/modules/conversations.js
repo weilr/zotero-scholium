@@ -1514,7 +1514,9 @@ Object.assign(ScholiumRunner, {
     // a run that left the paper none of the tool's annotations and notes says so, with what it said was left
     const none = !(e.highlights || e.margin || e.notes || e.readingNotes);
     if (none) node.className += " none";
-    title.textContent = none ? (e.warnings ? this.text("annotNoneWarn", e.warnings) : this.text("annotNone"))
+    // a scanned PDF's: its message, without a row of zeros
+    title.textContent = none && e.scanned ? this.text("annotNoneScan", e.warnings)
+      : none ? (e.warnings ? this.text("annotNoneWarn", e.warnings) : this.text("annotNone"))
       : e.warnings === "" ? this.text("annotDoneClean") : e.warnings ? this.text("annotDoneWarn", e.warnings) : this.text("annotDone");
     const nums = doc.createElement("div");
     nums.className = "scholium-card-nums";
@@ -1531,7 +1533,7 @@ Object.assign(ScholiumRunner, {
     usage.className = "scholium-card-usage";
     usage.textContent = [e.turns > 0 ? this.text("turns", e.turns) : "", e.tokens > 0 ? this.text("tokens", this.kTokens(e.tokens)) : "",
                          e.at ? this.clock(e.at) : ""].filter(Boolean).join(" · ");
-    node.append(title, nums, usage);
+    node.append(...(none && e.scanned ? [title, usage] : [title, nums, usage]));
     return node;
   },
 
@@ -1542,7 +1544,7 @@ Object.assign(ScholiumRunner, {
     const node = doc.createElement("div");
     node.className = "scholium-card failed";
     const text = doc.createElement("div");
-    text.textContent = failure.text;
+    text.textContent = failure.cancelled ? this.text("cancelledTitle") : failure.text;
     node.append(text);
     const extra = (run.turn && run.turn.extra) || "";
     if (view.pane && index === (view.runCount || 0) - 1 && !this.busy(view.shownKey, "annotate")) {

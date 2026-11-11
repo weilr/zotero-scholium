@@ -136,6 +136,7 @@ var texts = h => {
     done: "terminé",
     failed: "échec",
     cancelled: "annulé",
+    cancelledTitle: "Annulé",
     interrupted: "interrompu",
     interruptedLine: "L'exécution a été interrompue (l'extension a été mise à jour ou désactivée, ou Zotero a été fermé)",
     noOutput: "(aucune sortie)",
@@ -214,6 +215,7 @@ var texts = h => {
     warningsNone: "aucun",
     annotNone: "Aucune annotation écrite",
     annotNoneWarn: w => `Aucune annotation écrite : ${w}`,
+    annotNoneScan: w => `Aucune annotation écrite. ${w}`,
     // the words beside the card's numbers
     numHighlights: (n, c) => `${word(n, "surlignement", "surlignements")} (${c}\u00a0${word(c, "essentiel", "essentiels")})`,
     numMargin: n => word(n, "note en marge", "notes en marge"),

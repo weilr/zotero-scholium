@@ -352,6 +352,7 @@ var ScholiumRunner = {
       done: zh ? "完成" : "done",
       failed: zh ? "失败" : "failed",
       cancelled: zh ? "已取消" : "cancelled",
+      cancelledTitle: zh ? "已取消" : "Cancelled",   // the stopped card's title
       interrupted: zh ? "已中断" : "interrupted",
       interruptedLine: zh ? "运行被中断（插件更新或停用，或 Zotero 退出）" : "The run was interrupted (the plugin was updated or disabled, or Zotero quit)",
       noOutput: zh ? "（无输出）" : "(no output)",
@@ -438,6 +439,7 @@ var ScholiumRunner = {
       warningsNone: zh ? "无" : "none",
       annotNone: zh ? "没有写入批注" : "No annotations written",
       annotNoneWarn: w => zh ? `没有写入批注：${w}` : `No annotations written: ${w}`,
+      annotNoneScan: w => zh ? `没有写入批注：${w}` : `No annotations written. ${w}`,   // w: a whole sentence (noTextLayer)
       // the words beside the card's numbers
       numHighlights: (n, c) => zh ? `高亮（核心\u00a0${c}）` : `${word(n, "highlight", "highlights")} (${c}\u00a0core)`,
       numMargin: n => zh ? "页边批注" : word(n, "margin note", "margin notes"),
@@ -523,8 +525,8 @@ var ScholiumRunner = {
       monthDay: (month, day) => zh ? `${month}月${day}日` : `${month}/${day}`,
       durationWords: (h, m, s) => zh ? (h ? `${h} 小时 ${m} 分` : m ? `${m} 分 ${s} 秒` : `${s} 秒`) : h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`,
       // the reader toolbar's eye button
-      toggleHide: zh ? "隐藏 Scholium 批注" : "Hide scholium annotations",
-      toggleShow: zh ? "显示 Scholium 批注" : "Show scholium annotations",
+      toggleHide: zh ? "隐藏 Scholium 批注" : "Hide Scholium annotations",
+      toggleShow: zh ? "显示 Scholium 批注" : "Show Scholium annotations",
     };
   },
 };

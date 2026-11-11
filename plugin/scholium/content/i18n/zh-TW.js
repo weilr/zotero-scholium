@@ -122,6 +122,7 @@ var texts = h => {
     done: "完成",
     failed: "失敗",
     cancelled: "已取消",
+    cancelledTitle: "已取消",
     interrupted: "已中斷",
     interruptedLine: "執行被中斷（外掛已更新或停用，或 Zotero 已結束）",
     noOutput: "（無輸出）",
@@ -201,6 +202,7 @@ var texts = h => {
     warningsNone: "無",
     annotNone: "沒有寫入標註",
     annotNoneWarn: w => `沒有寫入標註：${w}`,
+    annotNoneScan: w => `沒有寫入標註：${w}`,
     // the words beside the card's numbers
     numHighlights: (n, c) => `螢光標示（核心\u00a0${c}）`,
     numMargin: n => "頁邊標註",

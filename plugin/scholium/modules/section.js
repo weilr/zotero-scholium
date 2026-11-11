@@ -213,7 +213,8 @@ Object.assign(ScholiumRunner, {
     if (event.type === "scholium" && event.subtype === "counts") {
       const n = k => Number(event[k]) || 0;
       out.push({ kind: "counts", highlights: n("highlights"), core: n("core"), margin: n("margin"), notes: n("notes"), readingNotes: n("readingNotes"),
-                 warnings: typeof event.warnings === "string" ? event.warnings : null, turns: n("turns"), tokens: n("tokens"), at: n("at") });
+                 warnings: typeof event.warnings === "string" ? event.warnings : null, turns: n("turns"), tokens: n("tokens"), at: n("at"),
+                 scanned: event.scanned === true });   // a PDF without a text layer
     }
     // when a run ended, under what it showed; or when its wait (for a limit, a second try) was stopped
     if (event.type === "scholium" && event.subtype === "time" && event.at > 0) out.push(Object.assign({ kind: "time", text: this.clock(event.at), at: event.at }, event.waited ? { waited: true } : {}));
@@ -365,7 +366,7 @@ Object.assign(ScholiumRunner, {
     pane.quote = quote;
     this.setTab(pane, "chat");
     // the section is opened at once and the box takes the focus before its scrolling settles
-    const shown = this.revealSection(reader._window, pane);
+    const shown = this.revealSection(reader._window, pane, null, true);
     try { pane.input.focus(); } catch (e) {}
     await shown;
     try { if (pane.doc.activeElement !== pane.input) pane.input.focus(); } catch (e) {}
@@ -412,11 +413,13 @@ Object.assign(ScholiumRunner, {
     return found;
   },
 
-  // the section in view in the reader's side pane: the context pane opened, the section opened, the item pane scrolled to
-  // it; each step may be missing. A section not drawn yet is found in the side pane of the reader's tab (Zotero draws it
-  // once it is scrolled to)
-  async revealSection(win, pane = null, tabID = null) {
-    try { if (win && win.ZoteroContextPane && win.ZoteroContextPane.collapsed) win.ZoteroContextPane.collapsed = false; } catch (e) {}
+  // the section in view: the reader's side pane opened (for a section in a reader's tab only: the library's tab has a
+  // context pane of its own, which stays as it is), the section opened, the item pane scrolled to it; each step may be
+  // missing. A section not drawn yet is found in the side pane of the reader's tab (Zotero draws it once it is scrolled to)
+  async revealSection(win, pane = null, tabID = null, reader = false) {
+    let inReader = reader || !!tabID;
+    try { inReader = inReader || !!(pane && pane.body && pane.body.closest && pane.body.closest("#zotero-context-pane")); } catch (e) {}
+    try { if (inReader && win && win.ZoteroContextPane && win.ZoteroContextPane.collapsed) win.ZoteroContextPane.collapsed = false; } catch (e) {}
     let section = null, details = null;
     try {
       if (pane && pane.body) { section = pane.body.closest("collapsible-section"); details = pane.body.closest("item-details"); }
@@ -610,6 +613,7 @@ Object.assign(ScholiumRunner, {
     const shortcut = this.sendShortcut();
     pane.hint.textContent = armed ? this.text("escAgain") : said
       || (shortcut === "enter" ? this.text("sendHintEnter") : shortcut === "cmdIfMultiline" ? this.text("sendHintMultiline", mod) : this.text("sendHint", mod));
+    pane.hint.title = pane.hint.textContent;   // cut with an ellipsis where the pane is narrow
   },
 
   // a word under the message box in place of the hint, for a moment

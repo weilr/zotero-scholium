@@ -135,6 +135,7 @@ var texts = h => {
     done: "готово",
     failed: "ошибка",
     cancelled: "отменено",
+    cancelledTitle: "Отменено",
     interrupted: "прервано",
     interruptedLine: "Запуск прерван (плагин был обновлён или отключён либо Zotero закрылся)",
     noOutput: "(нет вывода)",
@@ -214,6 +215,7 @@ var texts = h => {
     warningsNone: "нет",
     annotNone: "Аннотации не записаны",
     annotNoneWarn: w => `Аннотации не записаны: ${w}`,
+    annotNoneScan: w => `Аннотации не записаны. ${w}`,
     // the words beside the card's numbers
     numHighlights: (n, c) => `${word(n, "выделение", "выделения", "выделений")} (${c}\u00a0${word(c, "ключевое", "ключевых", "ключевых")})`,
     numMargin: n => word(n, "заметка на полях", "заметки на полях", "заметок на полях"),

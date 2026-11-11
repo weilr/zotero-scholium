@@ -126,7 +126,7 @@ def test_the_tick_writes_the_compactions_time_again(facts):
 def test_a_compactions_state_line_is_its_dot(facts):
     d = facts["manual"]["during"]
     assert d["state"] == "", "no words on the state line"
-    assert re.fullmatch(r"正在压缩 · \d+s", d["title"]), "the tooltip has the time"
+    assert re.fullmatch(r"正在压缩 · \d+ 秒", d["title"]), "the tooltip has the time"
 
 
 def test_a_finished_compaction_is_no_longer_swept(facts):

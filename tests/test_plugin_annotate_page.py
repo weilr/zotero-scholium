@@ -1021,7 +1021,7 @@ def test_the_annotation_tab(facts):
     assert d["sendShown"] is True, "■ stops the annotation"
     assert d["step"] == "applying"
     assert d["state"] == "", "the state line has only its dot, as a question's"
-    assert re.fullmatch(r"第 4/4 步 写入 Zotero · 已用 \d+s", d["stateTitle"]), "the tooltip has the step and the time"
+    assert re.fullmatch(r"第 4/4 步 写入 Zotero · 已用 \d+ 秒", d["stateTitle"]), "the tooltip has the step and the time"
     f = a["after"]
     assert f["parts"] == ["scholium-entry prompt", "scholium-fold", "scholium-card"], "the closing words go into the folded steps"
     assert f["closing"] == "Done.\n高亮 28 条（核心 12 条），页边批注 9 条，笔记《Deep latent》，无剩余警告。"

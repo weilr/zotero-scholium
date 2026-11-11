@@ -347,8 +347,8 @@ def facts():
 USER = sorted(["u1", "p1", "n1", "c1", "x1", "g1", "g2", "d1", "t1", "o1", "i1", "k1"])
 ALL = sorted(USER + ["m1", "s1"])
 WITH_S2 = sorted(ALL + ["s2"])
-HIDDEN_BUTTON = {"title": "Show scholium annotations", "pressed": "false", "active": False, "paths": 3}
-SHOWN_BUTTON = {"title": "Hide scholium annotations", "pressed": "true", "active": True, "paths": 2}
+HIDDEN_BUTTON = {"title": "Show Scholium annotations", "pressed": "false", "active": False, "paths": 3}
+SHOWN_BUTTON = {"title": "Hide Scholium annotations", "pressed": "true", "active": True, "paths": 2}
 
 
 def test_toggle_recognises_only_the_current_tag(facts):

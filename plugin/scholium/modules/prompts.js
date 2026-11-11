@@ -601,11 +601,11 @@ Object.assign(ScholiumRunner, {
 
   // the same with the time so far, for the line's tooltip
   runningTitle() {
-    if (this.job.source && this.job.source.compact) return this.text("compactingState", this.duration(this.elapsed()));
+    if (this.job.source && this.job.source.compact) return this.text("compactingState", this.durationWords(this.elapsed()));
     const retry = this.job.retry;
     const step = (this.job.preRun && !this.STEPS.includes(this.job.step) ? this.text("preRun") : this.job.asking ? this.text("working") : this.stepText(this.job.step))
       + (retry ? " · " + this.text("reconnecting", retry.attempt, retry.max) : "");
-    return this.text("running", step, this.duration(this.elapsed()));
+    return this.text("running", step, this.durationWords(this.elapsed()));
   },
 
   // the running paper's time so far in whole seconds, one value for its live line and its state line's tooltip: taken

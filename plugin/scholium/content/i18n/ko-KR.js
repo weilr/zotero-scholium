@@ -129,6 +129,7 @@ var texts = h => {
     done: "완료",
     failed: "실패",
     cancelled: "취소됨",
+    cancelledTitle: "취소됨",
     interrupted: "중단됨",
     interruptedLine: "실행이 중단되었습니다(플러그인이 업데이트 또는 비활성화되었거나 Zotero가 종료됨)",
     noOutput: "(출력 없음)",
@@ -207,6 +208,7 @@ var texts = h => {
     warningsNone: "없음",
     annotNone: "기록된 주석 없음",
     annotNoneWarn: w => `기록된 주석 없음: ${w}`,
+    annotNoneScan: w => `기록된 주석 없음. ${w}`,
     // the words beside the card's numbers
     numHighlights: (n, c) => `하이라이트 (핵심\u00a0${c})`,
     numMargin: n => "여백 메모",

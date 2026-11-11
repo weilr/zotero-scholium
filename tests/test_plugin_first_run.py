@@ -193,6 +193,6 @@ def test_a_failed_run_names_what_is_missing(facts):
 def test_a_scanned_pdf_says_to_run_ocr_first(facts):
     assert facts["scan"] == {"cls": "scholium-card none", "title": "没有写入批注：这个 PDF 没有文字层（扫描件）：先做 OCR 文字识别"
                                                                   "（例如 ocrmypdf，或 Acrobat 的“识别文本”），再批注。"}
-    assert facts["scanEnglish"]["title"] == ("No annotations written: The PDF has no text layer (a scanned document): run OCR on it "
+    assert facts["scanEnglish"]["title"] == ("No annotations written. The PDF has no text layer (a scanned document): run OCR on it "
                                              "first (e.g. ocrmypdf, or Acrobat's Recognize Text), then annotate again.")
     assert facts["scanSeen"] == {"codex": "noTextLayer", "source": None, "skill": None}, "only extract's error, not the words in the script or the skill"

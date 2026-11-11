@@ -1287,7 +1287,7 @@ def test_the_two_tabs(facts):
     assert t["first"] == {"tab": "chat", "chatShown": True, "annotShown": False}
     assert t["second"]["tab"] == "annotate" and t["second"]["chatShown"] is False and t["second"]["annotShown"] is True
     assert "on" in t["second"]["selected"][1] and "on" not in t["second"]["selected"][0]
-    assert t["chatState"] == "" and re.fullmatch(r"正在处理 · 已用 \d+s", t["chatTitle"]), "a question's line is its dot; the tooltip has the time"
+    assert t["chatState"] == "" and re.fullmatch(r"正在处理 · 已用 \d+ 秒", t["chatTitle"]), "a question's line is its dot; the tooltip has the time"
     assert t["annotState"] is None, "the annotation tab does not show the chat's run"
     assert t["chatDot"] is True and t["annotDot"] is False
     assert t["dotHere"] is True, "the tab being shown carries no dot"

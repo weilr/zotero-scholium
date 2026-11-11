@@ -1546,10 +1546,10 @@ def test_the_state_line_is_painted_on_the_tab_of_the_run(facts):
     assert a["chat"] == "", "the chat tab has nothing to say while the annotation runs"
     c = facts["tickChat"]
     assert c["chatRunning"] == "" and c["annot"] == "", "a question's line is its dot"
-    assert re.fullmatch(r"正在处理 · 已用 \d+s", c["chatTitle"]), "the tooltip has the time"
+    assert re.fullmatch(r"正在处理 · 已用 \d+ 秒", c["chatTitle"]), "the tooltip has the time"
     assert re.fullmatch(r"正在处理 \d+ 秒", c["after"]["before"]) and re.fullmatch(r"正在处理 1 分 \d 秒", c["after"]["text"]) and c["after"]["same"] and c["after"]["connected"], \
         "the tick writes the time into the same node, without drawing the run"
-    assert c["reconnect"]["state"] == "连接中断，正在重试（2/5）" and re.fullmatch(r"正在处理 · 连接中断，正在重试（2/5） · 已用 1\ds", c["reconnect"]["title"])
+    assert c["reconnect"]["state"] == "连接中断，正在重试（2/5）" and re.fullmatch(r"正在处理 · 连接中断，正在重试（2/5） · 已用 1\d 秒", c["reconnect"]["title"])
 
 
 def test_the_live_line_and_the_tooltip_give_one_time(facts):

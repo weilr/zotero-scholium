@@ -126,6 +126,7 @@ var texts = h => {
     done: "完了",
     failed: "失敗",
     cancelled: "キャンセル済み",
+    cancelledTitle: "キャンセル済み",
     interrupted: "中断",
     interruptedLine: "実行が中断されました（プラグインの更新または無効化、あるいは Zotero の終了）",
     noOutput: "（出力なし）",
@@ -205,6 +206,7 @@ var texts = h => {
     warningsNone: "なし",
     annotNone: "注釈は書き込まれませんでした",
     annotNoneWarn: w => `注釈は書き込まれませんでした：${w}`,
+    annotNoneScan: w => `注釈は書き込まれませんでした。${w}`,
     // the words beside the card's numbers
     numHighlights: (n, c) => `強調表示（核心\u00a0${c}）`,
     numMargin: n => "余白メモ",
