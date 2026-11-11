@@ -4,6 +4,7 @@ user's own skill script, the guard, the chain test's verdict, the watcher's read
 the cost stop's reading of the result lines."""
 import importlib.util
 import json
+import ntpath
 import os
 import re
 import shutil
@@ -128,6 +129,19 @@ def test_a_wrong_environment_is_refused(tmp_path, change):
     env = dict(live.live_env({"PATH": "p"}, run, guard), **change)
     with pytest.raises(RuntimeError):
         live.check_env(env, run, guard)
+
+
+@pytest.mark.parametrize("key", ["TEMP", "CODEX_HOME", "CLAUDE_CONFIG_DIR"])
+def test_environment_on_another_windows_drive_is_refused(monkeypatch, key):
+    with monkeypatch.context() as patch:
+        patch.setattr(live.os, "path", ntpath)
+        patch.setattr(live.os, "pathsep", ntpath.pathsep)
+        run, guard = r"D:\run", r"D:\run\guard"
+        env = live.live_env({}, run, guard, fake_dir=r"D:\run\fake")
+        assert live.check_env(env, run, guard, fake=True)
+        env[key] = r"C:\outside"
+        with pytest.raises(RuntimeError, match=key):
+            live.check_env(env, run, guard, fake=True)
 
 
 def test_the_fakes_config_dir_must_be_the_runs(tmp_path):

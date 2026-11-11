@@ -161,7 +161,12 @@ def live_env(base, run, guard_dir, fake_dir=None):
 def check_env(env, run, guard_dir, fake=False):
     """Raises unless the environment is a live run's: nothing of the caller's Claude Code, no SCHOLIUM_ZOTERO_PORT, the
     run's own folders, the guard first."""
-    inside = lambda p: bool(p) and os.path.commonpath([os.path.abspath(p), os.path.abspath(run)]) == os.path.abspath(run)
+    def inside(p):
+        try:
+            return bool(p) and os.path.commonpath([os.path.abspath(p), os.path.abspath(run)]) == os.path.abspath(run)
+        except ValueError:  # Windows paths on different drives cannot share the run's directory.
+            return False
+
     claude = [k for k in env if k.upper().startswith("CLAUDE") and not (fake and k == "CLAUDE_CONFIG_DIR")]
     problems = [f"{k} is passed on" for k in claude]
     if fake and not inside(env.get("CLAUDE_CONFIG_DIR")):

@@ -143,7 +143,7 @@ def test_first_sync_replaces_files_matching_an_older_release(repo, tmp_path):
     assert read(d, "scripts/scholium.py") == "print(3)\n" and read(d, "SKILL.md") == "english 2\n"
 
 
-def test_errors_exit_2_without_writing(repo, tmp_path):
+def test_errors_exit_2_without_writing(repo, tmp_path, monkeypatch):
     missing = tmp_path / "typo/zotero-scholium"
     code, out = run(repo, missing)
     assert code == 2 and "not a directory" in out and not missing.exists()
@@ -151,6 +151,8 @@ def test_errors_exit_2_without_writing(repo, tmp_path):
     d.mkdir()
     code, out = run(repo, "--ref", "v9.9.9", d)
     assert code == 2 and out.startswith("error: git") and not any(d.iterdir())
+    # A --basetemp inside a checkout must not let Git find that parent repository.
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
     code, out = run(tmp_path, d)
     assert code == 2 and out.startswith("error: git")
     (d / ".scholium-sync.json").write_text("{not json", encoding="utf8")
