@@ -31,7 +31,8 @@
   left out are deleted, through the plugin, the local API and the JavaScript file; the report's `rewrite` counts them.
   With `note_replace`, the reading note the output folder wrote is rewritten in place while it is as the tool stored it;
   one whose text the user changed is held back as `user_edit`, one with the user's markup, images or title goes to the
-  trash as before. A plugin before this one deletes and creates as before.
+  trash as before. A plugin before this one deletes and creates as before. A write whose annotations changed in Zotero
+  since the run read them writes nothing and asks to run again.
 
 ### Fixed
 

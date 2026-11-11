@@ -240,3 +240,97 @@ def test_an_annotation_the_user_moved_is_their_change(paper, monkeypatch, capsys
     bump(api, "NEW2", annotationPosition=json.dumps(pos))
     code, report = run(paper, monkeypatch, capsys, {"highlights": FIXED, "cleanup": True}, "--apply", api=api)
     assert report["applied"] is False and "user_edit" in kinds(report) and api.updated == []
+
+
+# --- a plan that no longer fits -------------------------------------------------------------------------------------
+
+def changing(api, key, when=2):
+    """The attachment's annotations as read the `when`-th time (the write's own read is the second): `key` changed."""
+    real, calls = api.children, []
+
+    def children(k, item_type=None):
+        if k == "ATT":
+            calls.append(1)
+            if len(calls) == when:
+                bump(api, key, annotationComment="改了一下。")
+        return real(k, item_type)
+    return children
+
+
+@pytest.mark.parametrize("key", ["NEW1", "NEW2"], ids=["changed", "removed"])
+def test_the_local_api_refuses_a_plan_whose_annotations_changed_since_the_listing(paper, monkeypatch, capsys, key):
+    api = UpdatingApi()
+    run(paper, monkeypatch, capsys, {"highlights": FIRST}, "--apply", api=api)
+    monkeypatch.setattr(api, "children", changing(api, key))
+    plan_set = hl((S1, "该方法在每个基准上都提升了结果。"), (S3, "第三句。"))   # NEW1 changed, NEW2 left out, one added
+    code, report = run(paper, monkeypatch, capsys, {"highlights": plan_set, "cleanup": True}, "--apply", api=api)
+    assert report["applied"] is False and "changed since they were read" in report["apply_error"]
+    assert api.updated == [] and api.deleted == [] and api.n == 2, "nothing written"
+
+
+@node
+def test_the_plugin_refuses_a_plan_whose_annotations_changed_since_the_listing():
+    stale = {"A1": "2026-11-10 09:00:00"}   # the date the listing gave; A1 is now 10:00
+    out = zotero(request(updates=[{"key": "A1", "comment": "x"}], keep=["A2"], expect=stale), EXISTING)
+    assert "changed since they were read" in out["error"] and out["saves"] == [] and out["erased"] == []
+    out = zotero(request(keep=["A1"], remove=["A2"], expect={"A2": "2026-11-10T09:00:00Z"}), EXISTING)
+    assert "changed since they were read" in out["error"] and out["erased"] == []
+    out = zotero(request(updates=[{"key": "A1", "comment": "x"}], keep=["A2"], expect={"A1": "2026-11-10T10:00:00Z"}), EXISTING)
+    assert out["result"]["updatedKeys"] == ["A1"], "the listing's date, in the local API's form, is the same date"
+
+
+@node
+@pytest.mark.parametrize("plan, why", [
+    ({"keep": ["A1", "A2"], "remove": ["A2"]}, "named twice"),
+    ({"keep": ["A1", "A1", "A2"]}, "named twice"),
+], ids=["keep-and-remove", "twice"])
+def test_the_plugin_refuses_a_key_named_twice(plan, why):
+    out = zotero(request(**plan), EXISTING)
+    assert why in out["error"] and out["saves"] == [] and out["erased"] == []
+
+
+@node
+def test_the_plugin_removes_nothing_without_cleanup():
+    out = zotero(request(cleanup=False, remove=["A2"]), EXISTING)
+    assert "without cleanup" in out["error"] and out["erased"] == []
+
+
+@node
+def test_the_javascript_file_refuses_a_stale_plan_and_removes_external_ones_with_cleanup_external(tmp_path):
+    cfg = dict(cli.DEFAULTS, item_key="PARENT01", attachment_key="ATTACH01", cleanup=True)
+    plan = {"create": [], "update": [{"key": "A1", "index": 0, "fields": {"comment": "x"}}], "keep": [{"key": "A2", "index": 1}],
+            "remove": [], "note": None, "seen": {"A1": {"modified": "2026-11-10 09:00:00"}}}
+    out = zotero(script=cli.render_js(cfg, [NEW, NEW], plan), existing=EXISTING)
+    assert "changed since they were read" in out["error"] and out["saves"] == []
+    # cleanup_external: the plan removes the external one, as the plugin does
+    existing = EXISTING + [{"key": "X1", "type": "highlight", "text": "Imported.", "external": True}]
+    cfg = dict(cfg, cleanup_external=True)
+    plan = {"create": [], "update": [], "keep": [{"key": "A1", "index": 0}, {"key": "A2", "index": 1}], "remove": ["X1"], "note": None}
+    out = zotero(script=cli.render_js(cfg, [NEW, NEW], plan), existing=existing)
+    assert "error" not in out, out.get("error")
+    assert out["erased"] == ["X1"] and "U1" in by_key(out)
+    out = zotero(script=cli.render_js(dict(cfg, cleanup_external=False), [NEW, NEW], plan), existing=existing)
+    assert "is not one of the tool's" in out["error"]
+
+
+def test_a_dry_run_against_a_plugin_that_cannot_update_shows_what_it_will_do(paper, monkeypatch, capsys):
+    listing = {"ok": True, "backend": "plugin", "version": "0.2.2", "notes": [], "annotations": [
+        {"key": "OLD1", "type": "highlight", "tags": ["zotero-scholium"], "text": S1, "comment": "旧。", "color": "#ffd400", "pageLabel": "1",
+         "position": {"pageIndex": 0, "rects": [[72, 110, 400, 125]]}}]}
+    monkeypatch.setattr(cli, "pick_backend", lambda *a: ("plugin", "TOKEN", "test plugin"))
+    monkeypatch.setattr(cli, "plugin_list", lambda cfg: (listing, None))
+    tmp, pdf = paper
+    (tmp / "config.json").write_text(json.dumps({"pdf": pdf, "item_key": "ITEM", "attachment_key": "ATT", "out_dir": str(tmp / "out"),
+                                                 "preview_pages": [], "highlights": FIRST[:1], "cleanup": True}), encoding="utf8")
+    try:
+        cli.main(["--config", str(tmp / "config.json")])
+    except SystemExit:
+        pass
+    report = json.loads(capsys.readouterr().out)
+    assert "rewrite" not in report and report["cleanup_removes"] == 1, "a plugin without canUpdate deletes and creates"
+    listing["canUpdate"] = True
+    try:
+        cli.main(["--config", str(tmp / "config.json")])
+    except SystemExit:
+        pass
+    assert json.loads(capsys.readouterr().out)["rewrite"]["removed"] == 0

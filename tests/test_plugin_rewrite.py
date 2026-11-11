@@ -31,7 +31,7 @@ class Item {
     Object.assign(this, { annotationType: fields.type, annotationComment: fields.comment || '', annotationText: fields.text || '',
                           annotationColor: fields.color || '#ffd400', annotationPageLabel: fields.pageLabel || '1',
                           annotationPosition: JSON.stringify(fields.position || { pageIndex: 0, rects: [[0, 0, 1, 1]] }),
-                          annotationIsExternal: !!fields.external, note: fields.html || '' });
+                          annotationIsExternal: !!fields.external, note: fields.html || '', dateModified: fields.modified || '2026-11-10 10:00:00' });
   }
   getTags() { return this.tags; }
   setTags(tags) { this.tags = tags; }

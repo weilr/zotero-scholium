@@ -135,12 +135,22 @@ var ScholiumEndpoints = {
       const byKey = new Map(att.getAnnotations(true).map(a => [a.key, a]));
       const updates = Array.isArray(data.updates) ? data.updates : [], remove = Array.isArray(data.remove) ? data.remove.map(String) : [];
       const stranger = k => new Error(`annotation ${k} is not one of the tool's on this attachment; run the tool again`);
+      const all = updates.map(u => String(u.key)).concat(keep, remove);
+      if (new Set(all).size !== all.length) throw new Error("an annotation is named twice in the rewrite; run the tool again");
+      if (remove.length && data.cleanup === false) throw new Error("a rewrite without cleanup removes nothing; run the tool again");
       for (const k of updates.map(u => String(u.key)).concat(keep)) if (!byKey.has(k) || !isOwn(byKey.get(k))) throw stranger(k);
       for (const k of remove) {
         const a = byKey.get(k);
         if (!a || !(isOwn(a) || (data.cleanupExternal && a.annotationIsExternal))) throw stranger(k);
       }
-      const named = new Set(updates.map(u => String(u.key)).concat(keep, remove));
+      // each one it changes or removes as the tool read it (expect: its date then); one changed since is left alone
+      const day = s => String(s || "").replace("T", " ").replace(/Z$/, "").replace(/\.\d+$/, "").trim();
+      for (const [k, d] of Object.entries(data.expect && typeof data.expect === "object" ? data.expect : {})) {
+        if (byKey.has(k) && day(byKey.get(k).dateModified) !== day(d)) {
+          throw new Error(`the tool's annotations on the attachment changed since they were read (${k}); run the tool again`);
+        }
+      }
+      const named = new Set(all);
       if (data.cleanup !== false) {
         for (const a of byKey.values()) {
           if (isOwn(a) && !named.has(a.key)) throw new Error("the tool's annotations on the attachment changed since they were read; run the tool again");

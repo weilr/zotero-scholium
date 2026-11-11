@@ -1589,6 +1589,9 @@ def rewrite_plan(out, cfg, listing, last=None, note_html=None):
         plan["remove"] = [o["key"] for o in free]
         if cfg.get("cleanup_external"):
             plan["remove"] += [o["key"] for o in anns if o.get("isExternal") and not set(o.get("tags") or []) & OWN_TAGS]
+        # what the listing said of each one it changes or removes: a write refuses the plan when one changed since
+        named = {u["key"] for u in plan["update"]} | set(plan["remove"])
+        plan["seen"] = {o["key"]: {"version": o.get("version"), "modified": o.get("modified")} for o in anns if o["key"] in named}
     # the note in place only while it is as the tool stored it: an image, markup or a title of the user's (its text the
     # same) sends it to the trash instead, where it can be restored
     if note_html and cfg.get("note_replace") and cfg.get("item_key"):
@@ -2265,7 +2268,7 @@ def api_list(cfg, api):
         return {"key": r["key"], "type": d["annotationType"], "color": d.get("annotationColor"), "author": d.get("annotationAuthorName", ""),
                 "tags": tags, "pageLabel": d.get("annotationPageLabel"), "text": (d.get("annotationText") or "")[:cut],
                 "comment": (d.get("annotationComment") or "")[:cut], "added": d.get("dateAdded"), "modified": d.get("dateModified"),
-                "position": parse_position(d.get("annotationPosition"))}
+                "position": parse_position(d.get("annotationPosition")), "version": d.get("version", r.get("version"))}
     anns = [listed(r) for r in rows]
     notes = []
     if cfg.get("item_key"):
@@ -2304,6 +2307,13 @@ def api_apply(cfg, out, api, plan=None):
         if cfg.get("cleanup", False) and sorted(planned) != sorted(to_delete):
             raise RuntimeError("the tool's annotations on the attachment changed since they were read; run again")
         version = {r["key"]: r["data"].get("version", r.get("version", 0)) for r in rows}
+        # each one it changes or removes as the listing saw it: one changed since (while the run read the PDF) is not
+        # overwritten or deleted
+        for k, seen in (plan.get("seen") or {}).items():
+            if seen.get("version") is not None and k in version and version[k] != seen["version"]:
+                raise RuntimeError(f"the tool's annotations on the attachment changed since they were read ({k}); run again")
+            if seen.get("version") is not None:
+                version[k] = seen["version"]
         changes = [dict({"key": u["key"], "version": version[u["key"]]},
                         **{API_FIELDS[f]: json.dumps(v) if f == "position" else v for f, v in u["fields"].items()}) for u in plan["update"]]
         to_delete = list(plan["remove"])
@@ -2554,7 +2564,8 @@ def plugin_apply(cfg, out, plan=None):
                **plugin_library(cfg)}
     if plan is not None:
         payload.update(rewrite=True, annotations=[out[i] for i in plan["create"]], keep=[k["key"] for k in plan["keep"]],
-                       updates=[dict({"key": u["key"]}, **u["fields"]) for u in plan["update"]], remove=list(plan["remove"]))
+                       updates=[dict({"key": u["key"]}, **u["fields"]) for u in plan["update"]], remove=list(plan["remove"]),
+                       expect={k: s["modified"] for k, s in (plan.get("seen") or {}).items() if s.get("modified")})
     s, h, t = http("POST", base + "/apply", payload, {"X-Annotate-Token": token}, timeout=LocalApi.WRITE_TIMEOUT)
     res = json.loads(t) if s == 200 else {}
     if not res.get("ok"):
@@ -2575,7 +2586,8 @@ def render_js(cfg, out, plan=None):
     if plan is not None:
         rewrite = {"updates": [dict({"key": u["key"]}, **u["fields"]) for u in plan["update"]], "keep": [k["key"] for k in plan["keep"]],
                    "remove": list(plan["remove"]), "noteUpdate": plan["note"]["update"] if plan.get("note") else None,
-                   "noteExpect": plan["note"].get("expect") if plan.get("note") else None}
+                   "noteExpect": plan["note"].get("expect") if plan.get("note") else None,
+                   "expect": {k: s["modified"] for k, s in (plan.get("seen") or {}).items() if s.get("modified")}}
         out = [out[i] for i in plan["create"]]
     title_prefix = cfg.get("note_title_prefix") or cfg.get("note_title") or ""
     replace = bool(html and cfg.get("note_replace"))
@@ -2593,6 +2605,7 @@ def render_js(cfg, out, plan=None):
 var ITEM_KEY = {json.dumps(cfg['item_key'])}, ATT_KEY = {json.dumps(cfg['attachment_key'])}, TAG = {json.dumps(TAG)};
 var OWN_TAGS = {json.dumps(sorted(OWN_TAGS))};
 var CLEANUP = {json.dumps(bool(cfg.get('cleanup', False)))};
+var CLEANUP_EXTERNAL = {json.dumps(bool(cfg.get('cleanup_external', False)))};
 var NOTE_HTML = {json.dumps(html, ensure_ascii=False)};
 var NOTE_TITLE_PREFIX = {json.dumps(title_prefix, ensure_ascii=False)};
 var NOTE_REPLACE = {json.dumps(replace)}, TRASH_TITLE_PREFIX = {json.dumps(cfg.get('note_title_prefix') or '', ensure_ascii=False)};
@@ -2613,8 +2626,14 @@ var ownAnn = a => a.getTags().some(t => OWN_TAGS.includes(t.tag));
 if (REWRITE) {{
   // the tool's annotations as they were read: those to change, keep and delete, and no other of the tool's
   let byKey = new Map(att.getAnnotations(true).map(a => [a.key, a]));
-  let named = new Set(REWRITE.updates.map(u => u.key).concat(REWRITE.keep, REWRITE.remove));
-  for (let k of named) if (!byKey.has(k) || !ownAnn(byKey.get(k))) throw new Error("annotation " + k + " is not one of the tool's on this attachment; run the tool again");
+  let all = REWRITE.updates.map(u => u.key).concat(REWRITE.keep, REWRITE.remove), named = new Set(all);
+  if (named.size !== all.length) throw new Error("an annotation is named twice in the rewrite; run the tool again");
+  let stranger = k => new Error("annotation " + k + " is not one of the tool's on this attachment; run the tool again");
+  for (let k of REWRITE.updates.map(u => u.key).concat(REWRITE.keep)) if (!byKey.has(k) || !ownAnn(byKey.get(k))) throw stranger(k);
+  for (let k of REWRITE.remove) if (!byKey.has(k) || !(ownAnn(byKey.get(k)) || (CLEANUP_EXTERNAL && byKey.get(k).annotationIsExternal))) throw stranger(k);
+  // each one it changes or removes as the tool read it: the file may run long after it was written
+  let day = s => String(s || "").replace("T", " ").replace(/Z$/, "").replace(/\\.\\d+$/, "").trim();
+  for (let [k, d] of Object.entries(REWRITE.expect || {{}})) if (byKey.has(k) && day(byKey.get(k).dateModified) !== day(d)) throw new Error("the tool's annotations on the attachment changed since they were read (" + k + "); run the tool again");
   if (CLEANUP) for (let a of byKey.values()) if (ownAnn(a) && !named.has(a.key)) throw new Error("the tool's annotations on the attachment changed since they were read; run the tool again");
   old = REWRITE.remove.map(k => byKey.get(k));
   changes = REWRITE.updates.map(u => [byKey.get(u.key), u]);
@@ -3498,7 +3517,8 @@ def main(argv=None):
     own_now = [a for a in (listing or {}).get("annotations", []) if set(a.get("tags") or []) & OWN_TAGS]
     # a cleanup, or a reading note replaced, rewrites in place what it holds again (rewrite_plan)
     last = _last_write(cfg)
-    plan = rewrite_plan(out, cfg, listing, last, note_html) if listing and (cfg.get("cleanup") or cfg.get("note_replace")) else None
+    rewritable = bool(listing) and (listing.get("backend") != "plugin" or listing.get("canUpdate") or args.backend == "js")
+    plan = rewrite_plan(out, cfg, listing, last, note_html) if rewritable and (cfg.get("cleanup") or cfg.get("note_replace")) else None
     js_path = os.path.join(cfg["out_dir"], "create_annotations.js")
     open(js_path, "w", encoding="utf8").write(render_js(cfg, out, plan))
     report = {"highlights": by_type.get("highlight", 0), "underlines": by_type.get("underline", 0),
