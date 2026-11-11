@@ -44,6 +44,10 @@ var ScholiumRunner = {
                             // next: the qid of the row of its queue that followed it
   replaced: new Map(),      // "key/conv" -> the conversation before an edited question, until Undo can no longer bring it back
   qseq: 0,                  // the number of the latest queued message
+  sendSeq: 0,               // the number of the latest message the user sent (send's sentSeq)
+  heldBack: new Map(),      // "key/conv" -> { keys: { user_edit: [...], cleanup_other: [...] }, seq }: what a run of the conversation
+                            // held back for the user to confirm, and the latest message sent then; the next message the user
+                            // sends may confirm it (confirmedFor)
   pendingQuotes: new Map(), // attachment key -> { quote: { text, page }, at }: a passage asked about before the section was drawn
   QUOTE_MS: 30000,          // how long such a passage waits for its section
   pendingPapers: new Map(), // attachment key -> { papers, at }: the other papers of a question about several (askPapers), until

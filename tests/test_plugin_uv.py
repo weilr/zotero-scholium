@@ -322,6 +322,12 @@ UV_UNIX = "curl -LsSf https://astral.sh/uv/install.sh | sh"
 NVM = "/home/u/.nvm/versions/node/v22/bin"
 MERGED = f"/opt/homebrew/bin:/usr/bin:{NVM}:/bin:/usr/sbin:/sbin"
 PLAIN = {"PYTHONIOENCODING": "utf-8", "SCHOLIUM_ZOTERO_PORT": "23119"}
+RUN_KEYS = ("SCHOLIUM_PLUGIN_RUN", "SCHOLIUM_HELD_BACK", "SCHOLIUM_CONFIRMED")
+
+
+def base(env):
+    """An agent's environment without what a run adds for the skill's script (test_plugin_confirm.py)."""
+    return {k: v for k, v in env.items() if k not in RUN_KEYS}
 
 
 @pytest.fixture(scope="module")
@@ -335,10 +341,10 @@ def test_the_login_shells_path_goes_before_zoteros_in_each_run_and_is_read_once(
     r = facts["macRuns"]
     assert r["shells"] == [["/bin/zsh", ["-ilc", "printf '%s' \"@SCHOLIUM_PATH@$PATH@SCHOLIUM_PATH@\""]]], "asked once, as a login shell"
     env = dict(PLAIN, PATH=MERGED + ":/home/u/.local/bin", CLAUDE_CODE_MAX_OUTPUT_TOKENS="32000")
-    assert r["envs"] == [env, env], "each folder once; ~/.local/bin there and added, ~/.cargo/bin not there and left out"
+    assert [base(e) for e in r["envs"]] == [env, env], "each folder once; ~/.local/bin there and added, ~/.cargo/bin not there and left out"
     assert r["append"] == [True, True]
     c = facts["macCodex"]
-    assert c["shells"] == 1 and c["env"] == [dict(PLAIN, PATH=MERGED, **CODEX_UV)] and c["append"] == [True]
+    assert c["shells"] == 1 and [base(e) for e in c["env"]] == [dict(PLAIN, PATH=MERGED, **CODEX_UV)] and c["append"] == [True]
 
 
 CODEX_UV = {"UV_CACHE_DIR": "/data/tmp/scholium/uv/cache", "UV_PYTHON_INSTALL_DIR": "/data/tmp/scholium/uv/python"}
@@ -347,10 +353,10 @@ CODEX_UV = {"UV_CACHE_DIR": "/data/tmp/scholium/uv/cache", "UV_PYTHON_INSTALL_DI
 def test_codex_gets_uvs_folders_inside_its_sandbox_unless_set(facts):
     u = facts["codexUv"]
     assert u["root"] == "/data/tmp/scholium" and all(v.startswith(u["root"] + "/") for v in CODEX_UV.values())
-    assert u["codex"] and all(e == dict(PLAIN, **CODEX_UV) for e in u["codex"]), "each Codex process"
+    assert u["codex"] and all(base(e) == dict(PLAIN, **CODEX_UV) for e in u["codex"]), "each Codex process"
     assert u["claude"] == PLAIN, "Claude Code keeps uv's defaults"
     s = facts["codexUvSet"]
-    assert s["codex"] and all(e == dict(PLAIN, UV_PYTHON_INSTALL_DIR="/data/tmp/scholium/uv/python") for e in s["codex"]), "the user's own is kept"
+    assert s["codex"] and all(base(e) == dict(PLAIN, UV_PYTHON_INSTALL_DIR="/data/tmp/scholium/uv/python") for e in s["codex"]), "the user's own is kept"
 
 
 def test_the_shell_is_shell_else_zsh(facts):
@@ -375,7 +381,7 @@ def test_a_shell_whose_output_never_ends_is_given_up_after_its_time(facts):
     assert o["kills"] == 1 and o["calls"] == 1 and o["timers"] == []
     r = facts["openRun"]
     assert r["before"] == {"calls": 0, "job": True}, "the run waits for the shell"
-    assert r["envs"] == [dict(PLAIN, CLAUDE_CODE_MAX_OUTPUT_TOKENS="32000")], "then goes on with Zotero's PATH"
+    assert [base(e) for e in r["envs"]] == [dict(PLAIN, CLAUDE_CODE_MAX_OUTPUT_TOKENS="32000")], "then goes on with Zotero's PATH"
     assert r["kills"] == 1
     s = facts["openStop"]
     assert s["stopped"] is True and s["job"] is False and s["queue"] == 0, "■ while it waits stops the run"

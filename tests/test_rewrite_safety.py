@@ -213,10 +213,12 @@ def bump(api, key, **data):
     api.rows[key]["data"].update(data, dateModified="2026-11-10T15:00:00Z", version=api.rows[key]["data"]["version"] + 1)
 
 
+ASK = ("stop and ask the user; pass --accept user_edit only after a later message of theirs confirms deleting or overwriting their "
+       "change")
 DELETE = ("since the tool wrote this annotation ({key}), the user {done} in Zotero, and the rewrite would delete it: keep it in the "
-          "configuration, or --accept user_edit when the user asked to delete it")
+          "configuration, or " + ASK)
 UNDO = ("since the tool wrote this annotation ({key}), the user {done} in Zotero, and the rewrite would undo that: keep {keep} in the "
-        "configuration, or --accept user_edit when the user asked to change it")
+        "configuration, or " + ASK)
 
 
 def user_edits(report):
@@ -275,6 +277,61 @@ def test_an_annotation_the_user_moved_is_their_change(paper, monkeypatch, capsys
     code, report = run(paper, monkeypatch, capsys, {"highlights": FIXED, "cleanup": True}, "--apply", api=api)
     assert report["applied"] is False and api.updated == []
     assert user_edits(report) == [UNDO.format(key="NEW2", done="moved or resized it", keep="its place")]
+
+
+# --- the user's word, in a run of the plugin's agent -------------------------------------------------------------------
+
+REFUSED = ("user_edit is let through only once the user has confirmed it (NEW2): stop and ask the user; a later message of theirs "
+           "that confirms deleting or overwriting their change lets --accept user_edit through")
+
+
+def tagged(paper, monkeypatch, capsys):
+    """Two writes, then the user tags NEW2: a set without it would delete it."""
+    api = written_twice(paper, monkeypatch, capsys)
+    api.rows["NEW2"]["data"]["tags"].append({"tag": "important"})
+    bump(api, "NEW2")
+    return api
+
+
+def test_in_the_plugins_run_accept_waits_for_the_users_later_message(paper, monkeypatch, capsys):
+    api = tagged(paper, monkeypatch, capsys)
+    held = paper[0] / "held_back.json"
+    monkeypatch.setenv("SCHOLIUM_PLUGIN_RUN", "1")
+    monkeypatch.setenv("SCHOLIUM_HELD_BACK", str(held))
+    drop = {"highlights": FIXED[:1], "cleanup": True}
+    code, report = run(paper, monkeypatch, capsys, drop, "--apply", api=api)
+    assert report["applied"] is False and json.loads(held.read_text(encoding="utf8")) == {"user_edit": ["NEW2"]}
+    assert [w["keys"] for w in report["style_warnings"] if w["kind"] == "user_edit"] == [["NEW2"]]
+    # the same turn: refused, also with --allow-warnings
+    for how in (["--accept", "user_edit"], ["--allow-warnings"]):
+        code, report = run(paper, monkeypatch, capsys, drop, "--apply", *how, api=api)
+        assert report["applied"] is False and REFUSED in report["apply_error"] and api.deleted == [], how
+    # confirmed for another annotation: still refused
+    monkeypatch.setenv("SCHOLIUM_CONFIRMED", "user_edit:NEW1;cleanup_other:NEW2")
+    code, report = run(paper, monkeypatch, capsys, drop, "--apply", "--accept", "user_edit", api=api)
+    assert report["applied"] is False and REFUSED in report["apply_error"] and api.deleted == []
+    # the user's next message confirmed it: through, and nothing more is noted as held back
+    held.unlink()
+    monkeypatch.setenv("SCHOLIUM_CONFIRMED", "user_edit:NEW2")
+    code, report = run(paper, monkeypatch, capsys, drop, "--apply", "--accept", "user_edit", api=api)
+    assert report["applied"] is True and api.deleted == ["NEW2"] and not held.exists()
+
+
+def test_outside_the_plugin_accept_lets_it_through_as_before(paper, monkeypatch, capsys):
+    api = tagged(paper, monkeypatch, capsys)
+    monkeypatch.setenv("SCHOLIUM_HELD_BACK", str(paper[0] / "held_back.json"))   # without the plugin's marker
+    code, report = run(paper, monkeypatch, capsys, {"highlights": FIXED[:1], "cleanup": True}, "--apply", "--accept", "user_edit", api=api)
+    assert report["applied"] is True and api.deleted == ["NEW2"]
+
+
+def test_the_listing_names_the_tools_annotations_the_user_changed(paper, monkeypatch, capsys):
+    api = tagged(paper, monkeypatch, capsys)
+    bump(api, "NEW1", annotationPageLabel="ii")
+    expect = [{"key": "NEW1", "type": "highlight", "page": "1", "text": S1, "changes": "changed the page label 1 → ii"},
+              {"key": "NEW2", "type": "highlight", "page": "1", "text": S2, "changes": "added the tag “important”"}]
+    for args in ((), ("--full",)):
+        code, listing = run(paper, monkeypatch, capsys, {"highlights": FIXED}, "--list", *args, api=api)
+        assert sorted(listing["changed_by_user"], key=lambda c: c["key"]) == expect, args
 
 
 # the plan of a comment correction to A1, which the user relabelled ii and tagged after the tool wrote it on page 1

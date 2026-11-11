@@ -179,11 +179,16 @@ Object.assign(ScholiumRunner, {
       : question ? await this.preRunQuestion(job, ctx) : null;
     if (this.job !== running) return;   // the plugin stopped meanwhile
     if (job.pre && job.pre.status && !running.stopAsked) this.advance(ctx, "reading");   // the agent reads the sentences next
+    // what the user confirmed of what a run before held back (confirmedFor), once for the message, also for its second try;
+    // the file where this run notes what it holds back starts empty (keepHeld)
+    if (job.confirmed === undefined) job.confirmed = this.confirmedFor(job, key);
+    if (await this.exists(this.heldPath(key))) await IOUtils.remove(this.heldPath(key), { ignoreAbsent: true }).catch(() => {});
     if (running.stopAsked || (job.pre && job.pre.cancelled)) ctx.current = { key, proc: null, cancelled: true };
     else if (job.pre && job.pre.scanned && !question) this.scannedEnd(ctx);   // a question goes on, told the PDF is a scan
     else if (agent === "codex") await this.runCodex(program, ctx);
     else await this.runClaude(program, ctx);
     await this.appendLog(ctx, []);   // what the log could not take during the run
+    await this.keepHeld(ctx);
     this.current = null;
     // an annotation that wrote, the first for a user who never used the reader's eye button: the annotations are shown
     if (running.annotation && ctx.wrote) await ScholiumToggle.showOnce().catch(e => this.log("annotations not shown: " + e));
@@ -507,10 +512,53 @@ Object.assign(ScholiumRunner, {
     ctx.result = { type: "result", subtype: "success", is_error: false, result: this.text("noTextLayer"), num_turns: 0 };
   },
 
+  // the skill's script refuses --accept user_edit and cleanup_other in the agent's run unless the user confirmed them: in a
+  // message sent after the run that held them back, for those annotations and notes (heldBack), or by Annotate again, for
+  // the tool's annotations that its deletion first left (taskPrompt's one exception). { kind: [keys] }
+  confirmedFor(job, key) {
+    const kinds = {};
+    if (job.annotate && job.own > 0) kinds.cleanup_other = job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).map(a => a.key);
+    const held = job.conv ? this.heldBack.get(`${key}/${job.conv}`) : null;
+    if (held && job.say && !job.compact && !job.annotate && (job.sentSeq || 0) > held.seq) {
+      for (const [kind, keys] of Object.entries(held.keys)) kinds[kind] = [...new Set((kinds[kind] || []).concat(keys))];
+      job.confirmedHeld = held;
+    }
+    return kinds;
+  },
+
+  heldPath(key) { return PathUtils.join(this.outDir(key), "held_back.json"); },
+
+  // what the script noted it held back in the run: kept for the conversation, until the user's next message, which takes
+  // it (a message sent before then does not); one the run took is gone after it
+  async keepHeld(ctx) {
+    const { job, key } = ctx;
+    let held = null;
+    if (await this.exists(this.heldPath(key))) {
+      try { held = JSON.parse(await IOUtils.readUTF8(this.heldPath(key))); } catch (e) {}
+      await IOUtils.remove(this.heldPath(key), { ignoreAbsent: true }).catch(() => {});
+    }
+    const keys = {};
+    for (const kind of ["user_edit", "cleanup_other"]) {
+      const list = held && Array.isArray(held[kind]) ? held[kind].filter(k => typeof k === "string" && k) : [];
+      if (list.length) keys[kind] = list;
+    }
+    const at = `${key}/${job.conv}`;
+    if (job.conv && Object.keys(keys).length) this.heldBack.set(at, { keys, seq: this.sendSeq });
+    else if (job.confirmedHeld && this.heldBack.get(at) === job.confirmedHeld) this.heldBack.delete(at);
+  },
+
+  // what the agent's process is told for the skill's script: that it runs for the plugin, where it notes what it holds
+  // back, and what the user confirmed (empty otherwise, whatever Zotero's own environment says)
+  runEnv(ctx) {
+    const confirmed = Object.entries(ctx.job.confirmed || {}).filter(([, keys]) => keys.length).map(([kind, keys]) => `${kind}:${keys.join(",")}`);
+    return { SCHOLIUM_PLUGIN_RUN: "1", SCHOLIUM_HELD_BACK: this.heldPath(ctx.key), SCHOLIUM_CONFIRMED: confirmed.join(";") };
+  },
+
   // Claude Code: `claude -p` with the prompt on stdin and its stream-json events on stdout
   async runClaude(claude, ctx) {
     const { job, key } = ctx;
     const env = await this.agentEnv();
+    Object.assign(env.environment, this.runEnv(ctx));
     // a turn of an annotation or of words to its session writes at most MAX_OUTPUT_TOKENS, its thinking included, unless
     // the user's environment sets the limit
     if ((job.kind === "annotate" || ctx.running.annotation) && !this.env("CLAUDE_CODE_MAX_OUTPUT_TOKENS")) env.environment.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(this.MAX_OUTPUT_TOKENS);
@@ -637,10 +685,12 @@ Object.assign(ScholiumRunner, {
   // `codex app-server`: JSON-RPC over stdin and stdout, one message per line. Answers settle their
   // requests, questions from Codex are answered by codexAnswer, and everything else goes to
   // onMessage([[message, line], …]) a chunk at a time.
-  async codexServer(codex, workdir, onMessage = null) {
+  async codexServer(codex, workdir, onMessage = null, more = {}) {
+    const env = await this.agentEnv(true);
+    Object.assign(env.environment, more);   // a run's (runEnv)
     const proc = await this.subprocess().call(Object.assign({
       command: codex, arguments: ["app-server"], workdir, stderr: "pipe",
-    }, await this.agentEnv(true)));
+    }, env));
     const rpc = { proc, next: 1, pending: new Map(), stderr: "" };
     const send = msg => proc.stdin.write(JSON.stringify(msg) + "\n");
     rpc.request = (method, params) => new Promise((resolve, reject) => {
@@ -991,7 +1041,7 @@ Object.assign(ScholiumRunner, {
         if (msg.method === "item/started" && !["userMessage", "agentMessage", "reasoning", "plan", "hookPrompt"].includes(item.type)) ctx.acted = true;
         this.advance(ctx, this.codexStep(msg));
       }
-    });
+    }, this.runEnv(ctx));
     if (this.job !== ctx.running || ctx.running.stopAsked) {   // the plugin stopped, or ■, while the server was being started
       rpc.close();
       ctx.current = { key, proc: rpc.proc, cancelled: true };
@@ -1479,6 +1529,7 @@ Object.assign(ScholiumRunner, {
     this.savedRemoved = null;
     this.heldQueues.clear();
     this.qseq = 0;
+    this.heldBack.clear();   // a confirmation is the next message's to this copy
     this.cancel();
     try { if (this.current) this.current.proc.kill(); } catch (e) {}   // without waiting for Codex to end its turn
     clearTimeout(this.draftTimer);

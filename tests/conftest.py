@@ -15,6 +15,9 @@ import pytest
 
 ZOTERO_PORT = 23119
 os.environ["SCHOLIUM_ZOTERO_PORT"] = "9"
+# a test that stands in for a run of the plugin's agent sets these itself (pytest started by such an agent has them)
+for name in ("SCHOLIUM_PLUGIN_RUN", "SCHOLIUM_CONFIRMED", "SCHOLIUM_HELD_BACK"):
+    os.environ.pop(name, None)
 CHILD_GUARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "child_guard")
 
 

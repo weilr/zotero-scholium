@@ -103,6 +103,27 @@ def test_another_configurations_write_is_not_this_ones(paper, monkeypatch, capsy
     assert "NEW2" in report["style_warnings"][0]["reason"] and "NEW1" not in report["style_warnings"][0]["reason"]
 
 
+def test_in_the_plugins_run_cleanup_other_waits_for_the_users_confirmation(paper, monkeypatch, capsys):
+    api = Api(earlier())
+    run(paper, monkeypatch, capsys, {"highlights": HL}, "--apply", api=api)
+    held = paper[0] / "held_back.json"
+    monkeypatch.setenv("SCHOLIUM_PLUGIN_RUN", "1")
+    monkeypatch.setenv("SCHOLIUM_HELD_BACK", str(held))
+    redo = {"highlights": FIXED, "cleanup": True}
+    code, report = run(paper, monkeypatch, capsys, redo, api=api)   # a dry run notes them too
+    assert json.loads(held.read_text(encoding="utf8")) == {"cleanup_other": ["EARLIER"]}
+    assert report["style_warnings"][0]["reason"].endswith(
+        "; or stop and ask the user; pass --accept cleanup_other only after a later message of theirs confirms deleting them, or "
+        "for a complete redo the user confirmed")
+    code, report = run(paper, monkeypatch, capsys, redo, "--apply", "--accept", "cleanup_other", api=api)
+    assert report["applied"] is False and api.deleted == [] and (
+        "cleanup_other is let through only once the user has confirmed it (EARLIER): stop and ask the user; a later message of "
+        "theirs that confirms deleting those annotations lets --accept cleanup_other through") in report["apply_error"]
+    monkeypatch.setenv("SCHOLIUM_CONFIRMED", "cleanup_other:EARLIER")
+    code, report = run(paper, monkeypatch, capsys, redo, "--apply", "--accept", "cleanup_other", api=api)
+    assert report["applied"] is True and api.deleted == ["EARLIER"] and "USERS" in api.rows
+
+
 def test_a_dry_run_reports_it_too_and_without_cleanup_nothing_is_checked(paper, monkeypatch, capsys):
     api = Api(earlier())
     code, report = run(paper, monkeypatch, capsys, {"highlights": HL, "cleanup": True}, api=api)
@@ -172,12 +193,13 @@ ANNOTATE_EN = ("When --apply reports user_edit or cleanup_other, pass no --accep
 FOLLOW_ZH = ("user_edit 和 cleanup_other 不适用上面的例外，永远不要凭自己的判断加 --accept：--apply 报告它们时，保留这些批注和笔记的现状仍能完成"
              "用户的要求，就在配置里保留（报告写了怎么做）；否则停下，不要写入，在回复里告诉用户是哪些批注或笔记（key、页码、改了什么），"
              "写入会覆盖或删掉它们，请用户在下一条消息里用自己的话确认；只有用户之后的消息明确说要覆盖或删除自己的改动，"
-             "才加 --accept user_edit 或 --accept cleanup_other。")
+             "才对你告诉用户的那些批注或笔记加 --accept user_edit 或 --accept cleanup_other（在那之前脚本不放行）。")
 FOLLOW_EN = ("That exception does not cover user_edit and cleanup_other: never pass --accept for them on your own judgement. When --apply reports "
              "them, keep those annotations and notes as they are in the configuration (the report says how) where that still does what the user "
              "asked; otherwise stop without writing, tell the user in your reply which annotations or notes they are (key, page, what changed) "
              "and that writing would overwrite or delete them, and ask them to confirm in their own words in their next message; only a later "
-             "message of theirs that explicitly says to overwrite or delete their own changes allows --accept user_edit or --accept cleanup_other.")
+             "message of theirs that explicitly says to overwrite or delete their own changes allows --accept user_edit or --accept cleanup_other, "
+             "for the annotations and notes you named (the script refuses them before then).")
 
 
 def test_the_agent_never_overrides_the_users_own_changes_without_their_word(plugin_facts):

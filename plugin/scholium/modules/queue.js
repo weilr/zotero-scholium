@@ -530,7 +530,10 @@ Object.assign(ScholiumRunner, {
     if (busy && (opts.compact || opts.retry || opts.edited)) return false;
     Object.assign(job, { agent: (opts.retry || opts.edited) && opts.agent ? opts.agent : this.agent(), say, own: job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length,
                          kind, retry: !!opts.retry, compact: !!opts.compact, quote: opts.quote || null, rewind: opts.rewind || null,
-                         edited: !!opts.edited },
+                         edited: !!opts.edited,
+                         // a new message, in the order sent (a retry or an edit is none): it may confirm what a run before it
+                         // held back (confirmedFor)
+                         sentSeq: opts.retry || opts.edited || opts.compact ? 0 : ++this.sendSeq },
                   // the other papers of a chat's message; without them, a run takes those its conversation's log names
                   kind === "chat" && Array.isArray(opts.papers) ? { papers: opts.papers } : {});
     // the paper is busy: the words wait in the queue of the conversation, as Codex queues a follow-up

@@ -1416,10 +1416,10 @@ def check_style(annotations, cfg, listing=None, note_html=None, plan=None):
     if note_html and cfg.get("note_replace"):
         for n in _edited_notes(listing, last):
             if note_body(n["html"]) != note_body(note_html):
-                warnings.append({"kind": "user_edit", "page": None, "text": "reading note",
+                warnings.append({"kind": "user_edit", "page": None, "text": "reading note", "keys": [n["key"]],
                                  "reason": f"the user changed the tool's reading note ({n['key']}) in Zotero after the tool wrote it, and "
-                                           "note_replace would replace it: keep their changes in note_html, or --accept user_edit when "
-                                           "the user asked to rewrite it (their version then goes to Zotero's trash)"})
+                                           "note_replace would replace it (their version would go to Zotero's trash): keep their changes "
+                                           f"in note_html, or {USER_EDIT_ASK}"})
     if cfg.get("core_range"):
         lo, hi = cfg["core_range"]
         core = cfg["core_color"].lower()
@@ -1490,11 +1490,11 @@ def check_cleanup(annotations, cfg, listing, config_path):
         return []
     pages = sorted({page_number(a) for a in other if page_number(a)}, key=lambda p: (len(p), p))
     keys = [a.get("key") for a in other]
-    return [{"kind": "cleanup_other", "page": None, "text": f"{len(other)} annotations",
+    return [{"kind": "cleanup_other", "page": None, "text": f"{len(other)} annotations", "keys": keys,
              "reason": f"cleanup: true would delete {len(other)} of the tool's annotations that this configuration did not write "
                        f"(page {', '.join(pages[:12])}; {', '.join(keys[:8])}{', …' if len(keys) > 8 else ''}): to keep them, add them "
                        "to this configuration (--list --full shows them), or do not rewrite with cleanup and let an advisory warning "
-                       "stay; for a complete redo the user asked for, --accept cleanup_other"}]
+                       f"stay; or {CLEANUP_OTHER_ASK}"}]
 
 
 def _last_write(cfg):
@@ -1557,10 +1557,14 @@ def _user_changes(old, last):
 CLASHES = {"comment": ("comment",), "color": ("color",), "text": ("text",), "place": ("position", "sortIndex")}
 
 
-def _user_edit(old, changes, effect):
-    """The user_edit finding of one of the tool's annotations: what the user changed, and what the rewrite would do to it
-    ("delete", or "undo" the changes given)."""
-    comment = " ".join((old.get("comment") or "").split())
+USER_EDIT_ASK = ("stop and ask the user; pass --accept user_edit only after a later message of theirs confirms deleting or overwriting "
+                 "their change")
+CLEANUP_OTHER_ASK = ("stop and ask the user; pass --accept cleanup_other only after a later message of theirs confirms deleting them, "
+                     "or for a complete redo the user confirmed")
+
+
+def _changes_text(changes):
+    """What the user changed, in words: "added the tag “important” and changed the page label 1 → ii"."""
     said = []
     for what in ("tags", "pageLabel", "comment", "color", "text", "place", "type", "other"):
         if what not in changes:
@@ -1573,16 +1577,22 @@ def _user_edit(old, changes, effect):
         else:
             said.append({"comment": "changed the comment", "text": "changed the text", "place": "moved or resized it",
                          "other": "changed it"}[what])
-    done = " and ".join(said) if len(said) < 3 else ", ".join(said[:-1]) + " and " + said[-1]
+    return " and ".join(said) if len(said) < 3 else ", ".join(said[:-1]) + " and " + said[-1]
+
+
+def _user_edit(old, changes, effect):
+    """The user_edit finding of one of the tool's annotations: what the user changed, and what the rewrite would do to it
+    ("delete", or "undo" the changes given)."""
+    comment = " ".join((old.get("comment") or "").split())
     if effect == "delete":
-        outcome = "the rewrite would delete it: keep it in the configuration, or --accept user_edit when the user asked to delete it"
+        outcome = f"the rewrite would delete it: keep it in the configuration, or {USER_EDIT_ASK}"
     else:
         keep = [{"comment": f"its comment “{comment[:300]}”", "color": f"its colour {old.get('color')}", "text": "its text",
                  "place": "its place"}[w] for w in ("comment", "color", "text", "place") if w in changes]
         keep = " and ".join(keep) or f"its comment “{comment[:300]}” and colour {old.get('color')}"
-        outcome = f"the rewrite would undo that: keep {keep} in the configuration, or --accept user_edit when the user asked to change it"
-    return {"kind": "user_edit", "page": page_number(old), "text": _brief(old.get("text") or comment)[:60],
-            "reason": f"since the tool wrote this annotation ({old.get('key')}), the user {done} in Zotero, and {outcome}"}
+        outcome = f"the rewrite would undo that: keep {keep} in the configuration, or {USER_EDIT_ASK}"
+    return {"kind": "user_edit", "page": page_number(old), "text": _brief(old.get("text") or comment)[:60], "keys": [old.get("key")],
+            "reason": f"since the tool wrote this annotation ({old.get('key')}), the user {_changes_text(changes)} in Zotero, and {outcome}"}
 
 
 def note_prints(html):
@@ -1697,18 +1707,96 @@ def rewrite_counts(plan):
     return {"created": len(plan["create"]), "updated": len(plan["update"]), "kept": len(plan["keep"]), "removed": len(plan["remove"])}
 
 
-def compact_listing(listing):
-    """Counts and the other annotations of a listing; the tool's own annotations are counted only."""
+def changed_by_user(listing, last=None):
+    """The tool's annotations of a listing that the user changed since the tool wrote them (_user_changes), with what they
+    changed: a request may name one by a tag of the user's."""
+    out = []
+    for a in (listing or {}).get("annotations", []):
+        changes = _user_changes(a, last) if set(a.get("tags") or []) & OWN_TAGS else {}
+        if changes:
+            out.append({"key": a["key"], "type": a["type"], "page": page_number(a), "text": _brief(a.get("text") or a.get("comment"))[:60],
+                        "changes": _changes_text(changes)})
+    return out
+
+
+def compact_listing(listing, last=None):
+    """Counts and the other annotations of a listing; the tool's own annotations are counted only, but for those the user
+    changed (changed_by_user, against the output folder's last record `last`)."""
     anns = listing.get("annotations", [])
     own = [a for a in anns if set(a.get("tags") or []) & OWN_TAGS]
     others = [a for a in anns if not (set(a.get("tags") or []) & OWN_TAGS)]
-    return {"ok": True, "backend": listing.get("backend"), "attachmentKey": listing.get("attachmentKey"),
-            "annotations": len(anns), "own": len(own), "others": len(others),
-            "by_type": dict(collections.Counter(a["type"] for a in anns)),
-            "by_color": dict(collections.Counter(a.get("color") or "" for a in anns)),
-            "others_detail": [{"key": a["key"], "type": a["type"], "color": a.get("color"), "page": a.get("pageLabel"),
-                               "text": (a.get("text") or a.get("comment") or "")[:60]} for a in others],
-            "notes": [{k: v for k, v in n.items() if k != "html"} for n in listing.get("notes", [])]}
+    changed = changed_by_user(listing, last)
+    return dict({"ok": True, "backend": listing.get("backend"), "attachmentKey": listing.get("attachmentKey"),
+                 "annotations": len(anns), "own": len(own), "others": len(others),
+                 "by_type": dict(collections.Counter(a["type"] for a in anns)),
+                 "by_color": dict(collections.Counter(a.get("color") or "" for a in anns))},
+                **({"changed_by_user": changed} if changed else {}),
+                others_detail=[{"key": a["key"], "type": a["type"], "color": a.get("color"), "page": a.get("pageLabel"),
+                                "text": (a.get("text") or a.get("comment") or "")[:60]} for a in others],
+                notes=[{k: v for k, v in n.items() if k != "html"} for n in listing.get("notes", [])])
+
+
+# the plugin's agent runs: --accept (or --allow-warnings) lets user_edit and cleanup_other through only for the keys the
+# user confirmed in a message after the run that held them back, and a run notes the keys it held back for the plugin
+PLUGIN_RUN = "SCHOLIUM_PLUGIN_RUN"   # "1" in the processes of the plugin's agent
+CONFIRMED = "SCHOLIUM_CONFIRMED"     # "user_edit:K1,K2;cleanup_other:K3"
+HELD_BACK = "SCHOLIUM_HELD_BACK"     # the file of the keys held back: {"user_edit": [...], "cleanup_other": [...]}
+CONFIRM_KINDS = ("user_edit", "cleanup_other")
+CONFIRMS = {"user_edit": "confirms deleting or overwriting their change", "cleanup_other": "confirms deleting those annotations"}
+
+
+def _held_keys(warnings):
+    """The keys the user_edit and cleanup_other findings name, by kind."""
+    held = {}
+    for w in warnings:
+        if w["kind"] in CONFIRM_KINDS:
+            keys = held.setdefault(w["kind"], [])
+            keys += [k for k in w.get("keys") or [] if k and k not in keys]
+    return held
+
+
+def _unconfirmed(warnings, accepted, allow_warnings):
+    """In a run of the plugin's agent, the keys of the user_edit and cleanup_other findings that --accept or --allow-warnings
+    would let through though the user has not confirmed them: {kind: [keys]}."""
+    if os.environ.get(PLUGIN_RUN) != "1":
+        return {}
+    confirmed = {}
+    for part in os.environ.get(CONFIRMED, "").split(";"):
+        kind, _, keys = part.partition(":")
+        confirmed.setdefault(kind.strip(), set()).update(k.strip() for k in keys.split(",") if k.strip())
+    out = {}
+    for kind, keys in _held_keys(warnings).items():
+        left = [k for k in keys if k not in confirmed.get(kind, set())]
+        if left and (kind in accepted or allow_warnings):
+            out[kind] = left
+    return out
+
+
+def refusal(kind, keys):
+    return (f"{kind} is let through only once the user has confirmed it ({', '.join(keys)}): stop and ask the user; a later "
+            f"message of theirs that {CONFIRMS[kind]} lets --accept {kind} through")
+
+
+def _note_held(warnings, applied):
+    """In a run of the plugin's agent, the keys of the user_edit and cleanup_other findings a run did not write, added to the
+    plugin's file: the user's next message may confirm them."""
+    path = os.environ.get(HELD_BACK)
+    held = _held_keys(warnings) if path and applied is not True else {}
+    if not held:
+        return
+    try:
+        before = json.loads(read_text(path))
+    except (OSError, ValueError):
+        before = {}
+    before = before if isinstance(before, dict) else {}
+    for kind, keys in held.items():
+        kept = [k for k in before.get(kind) or [] if isinstance(k, str)]
+        before[kind] = kept + [k for k in keys if k not in kept]
+    try:
+        with open(path, "w", encoding="utf8") as f:
+            json.dump(before, f)
+    except OSError:
+        pass
 
 
 def version_note(html, prefix, existing_titles):
@@ -3583,7 +3671,10 @@ def main(argv=None):
                 res, err = None, why
         except Exception as e:
             res, err = None, str(e)
-        print(json.dumps((res if args.full else compact_listing(res)) if res else {"error": err}, ensure_ascii=False, indent=1))
+        if res:   # with the tool's annotations the user changed, which a request may name by a tag of theirs
+            changed = changed_by_user(res, _last_write(cfg))
+            res = dict(res, **({"changed_by_user": changed} if changed else {})) if args.full else compact_listing(res, _last_write(cfg))
+        print(json.dumps(res if res else {"error": err}, ensure_ascii=False, indent=1))
         sys.exit(0 if res else 1)
 
     obstacles, existing_info, listing, unread = {}, "not consulted (--ignore-existing)", None, None
@@ -3646,6 +3737,8 @@ def main(argv=None):
         if blocking and not args.allow_warnings:
             blockers.append("style warnings are reported (" + ", ".join(sorted({w["kind"] for w in blocking})) +
                             "); correct them, or accept a deliberate exception with --accept KIND")
+        for kind, keys in _unconfirmed(report["style_warnings"], accepted, args.allow_warnings).items():
+            blockers.append(refusal(kind, keys))
         if report["layout_warnings"] and not args.allow_warnings and "layout" not in accepted:
             blockers.append("layout warnings are reported; move, shorten or drop those notes, or pass --accept layout")
         if args.ignore_existing and cfg.get("cleanup"):
@@ -3736,6 +3829,7 @@ def main(argv=None):
                     report["fallback"] = "execute the generated file in Zotero: Tools -> Developer -> Run JavaScript (Run as async function): " + js_path
     pdf_after = _sha256(cfg["pdf"])
     report["pdf_sha256"] = {"before": pdf_before, "after": pdf_after, "unchanged": pdf_before == pdf_after}
+    _note_held(report["style_warnings"], report.get("applied"))
     for key in ("applied", "apply_error", "fallback"):   # the outcome comes last, where the end of the output shows it
         if key in report:
             report[key] = report.pop(key)

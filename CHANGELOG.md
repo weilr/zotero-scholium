@@ -18,6 +18,9 @@
 - The agent never passes `--accept user_edit` or `--accept cleanup_other` on its own judgement: it keeps those
   annotations and notes, or writes nothing and names them, and overwrites or deletes them only after the user says so
   in a later message (the prompts and the skill).
+- In a run of the plugin's agent, `--accept user_edit` and `--accept cleanup_other` (and `--allow-warnings`) go through only
+  for the annotations and notes the user confirmed in a message sent after the run that held them back; `--list` names
+  the tool's annotations the user changed, with what they changed.
 - A new annotation's `status` and `extract` are run by the plugin before the agent starts, and given to it in the
   prompt; a scanned PDF ends the run there, without an agent.
 - A conversation's first question starts with its papers' sentences extracted: the plugin runs `extract` before the

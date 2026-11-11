@@ -401,7 +401,7 @@ Object.assign(ScholiumRunner, {
       "user_edit 和 cleanup_other 不适用上面的例外，永远不要凭自己的判断加 --accept：--apply 报告它们时，保留这些批注和笔记的现状仍能完成"
         + "用户的要求，就在配置里保留（报告写了怎么做）；否则停下，不要写入，在回复里告诉用户是哪些批注或笔记（key、页码、改了什么），"
         + "写入会覆盖或删掉它们，请用户在下一条消息里用自己的话确认；只有用户之后的消息明确说要覆盖或删除自己的改动，"
-        + "才加 --accept user_edit 或 --accept cleanup_other。",
+        + "才对你告诉用户的那些批注或笔记加 --accept user_edit 或 --accept cleanup_other（在那之前脚本不放行）。",
       ...changed,
       ...this.papersLines(job),
       "",
@@ -420,7 +420,8 @@ Object.assign(ScholiumRunner, {
         + "them, keep those annotations and notes as they are in the configuration (the report says how) where that still does what the user "
         + "asked; otherwise stop without writing, tell the user in your reply which annotations or notes they are (key, page, what changed) "
         + "and that writing would overwrite or delete them, and ask them to confirm in their own words in their next message; only a later "
-        + "message of theirs that explicitly says to overwrite or delete their own changes allows --accept user_edit or --accept cleanup_other.",
+        + "message of theirs that explicitly says to overwrite or delete their own changes allows --accept user_edit or --accept cleanup_other, "
+        + "for the annotations and notes you named (the script refuses them before then).",
       ...changed,
       ...this.papersLines(job),
       "",

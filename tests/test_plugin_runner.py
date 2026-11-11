@@ -2928,7 +2928,8 @@ def test_claude_is_started_headless_in_the_data_directory(facts):
     call = facts["call"]
     assert call["command"] == CLAUDE
     assert call["workdir"] == "/data"
-    assert call["env"] == {"PYTHONIOENCODING": "utf-8", "SCHOLIUM_ZOTERO_PORT": "23119", "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000"}, "an annotation's turns are capped"
+    assert call["env"] == {"PYTHONIOENCODING": "utf-8", "SCHOLIUM_ZOTERO_PORT": "23119", "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000",
+                           "SCHOLIUM_PLUGIN_RUN": "1", "SCHOLIUM_HELD_BACK": "/data/tmp/scholium/ATT1/held_back.json", "SCHOLIUM_CONFIRMED": ""}, "an annotation's turns are capped; the skill's script runs for the plugin"
     assert call["append"] is True
     args = call["args"]
     assert args[:7] == ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "auto"]
@@ -3549,7 +3550,7 @@ def test_codex_runs_the_skill_in_a_sandbox_through_its_app_server(facts):
     r = facts["codexRun"]
     assert r["call"] == {"command": CODEX_APP, "args": ["app-server"], "workdir": "/data/tmp/scholium",
                          "env": {"PYTHONIOENCODING": "utf-8", "SCHOLIUM_ZOTERO_PORT": "23119", "UV_CACHE_DIR": "/data/tmp/scholium/uv/cache",
-                                 "UV_PYTHON_INSTALL_DIR": "/data/tmp/scholium/uv/python"}, "append": True}
+                                 "UV_PYTHON_INSTALL_DIR": "/data/tmp/scholium/uv/python", "SCHOLIUM_PLUGIN_RUN": "1", "SCHOLIUM_HELD_BACK": "/data/tmp/scholium/ATT1/held_back.json", "SCHOLIUM_CONFIRMED": ""}, "append": True}
     assert r["methods"] == ["initialize", "initialized", "account/read", "mcpServerStatus/list", "plugin/installed", "skills/list", "skills/list",
                             "skills/extraRoots/set", "thread/start", "turn/start"]
     assert r["skillLists"] == [["/data/tmp/scholium"], ["/data"]] and r["roots"] == ["/data/.agents/skills"]
