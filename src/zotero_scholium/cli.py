@@ -1271,11 +1271,15 @@ def _changed_by_user(a):
 
 
 def _reproduces(new, old):
-    """Whether a new annotation repeats a listed one: the same page, type and colour, the same text and comment."""
+    """Whether a new annotation repeats a listed one: the same page, type and colour, the same text and comment, the same
+    page label and the same place (a rewrite in place would otherwise put back what the user moved or relabelled)."""
     same = lambda x, y: " ".join((x or "").split()) == " ".join((y or "").split())
-    return (new["position"]["pageIndex"] == parse_position(old.get("position")).get("pageIndex") and new["type"] == old.get("type")
+    pos = parse_position(old.get("position"))
+    return (new["position"]["pageIndex"] == pos.get("pageIndex") and new["type"] == old.get("type")
             and (new.get("color") or "").lower() == (old.get("color") or "").lower() and same(new.get("comment"), old.get("comment"))
-            and (new["type"] not in ("highlight", "underline") or _listed_as(new.get("text"), _brief(old.get("text")))))
+            and (new["type"] not in ("highlight", "underline") or _listed_as(new.get("text"), _brief(old.get("text"))))
+            and (not old.get("pageLabel") or not new.get("pageLabel") or new["pageLabel"] == old["pageLabel"])
+            and (not position_rects(pos) or _same_position(new["position"], pos) or _same_position(_stored_position(new), pos)))
 
 
 def _listed_as(text, listed):
@@ -1474,17 +1478,22 @@ def _fingerprint(*parts):
     return hashlib.sha1(json.dumps(parts, ensure_ascii=False).encode("utf8")).hexdigest()[:16]
 
 
+PRINT_VERSION = 2   # annotation_print's form; a record of another form is not compared (_edited)
+
+
 def annotation_print(a):
-    """A listed annotation's fingerprint: its type, colour, comment, text, page and rectangles, as a listing gives them."""
+    """A listed annotation's fingerprint, of what a user can change in Zotero: its type, colour, comment, text, tags, page
+    label, page, rectangles, font size and rotation, as a listing gives them."""
     pos = parse_position(a.get("position"))
-    return _fingerprint(a.get("type"), (a.get("color") or "").lower(), a.get("comment") or "", a.get("text") or "", pos.get("pageIndex"),
-                        [[round(v, 1) for v in r] for r in position_rects(pos)])
+    rest = {k: (round(v, 2) if isinstance(v, (int, float)) else v) for k, v in pos.items() if k not in ("rects", "pageIndex")}
+    return _fingerprint(a.get("type"), (a.get("color") or "").lower(), a.get("comment") or "", a.get("text") or "", sorted(a.get("tags") or []),
+                        a.get("pageLabel"), pos.get("pageIndex"), [[round(v, 1) for v in r] for r in position_rects(pos)], sorted(rest.items()))
 
 
 def _edited(old, last):
     """Whether the user changed a listed annotation of the tool since the tool wrote it: against the fingerprint the
     output folder's last write kept of it (an update in place moves its dates), else by its dates."""
-    written = (last or {}).get("written") or {}
+    written = (last or {}).get("written") or {} if (last or {}).get("printVersion") == PRINT_VERSION else {}
     if old.get("key") in written:
         return annotation_print(old) != written[old["key"]]
     return _changed_by_user(old)
@@ -3555,7 +3564,8 @@ def main(argv=None):
                 # read-back gives them. A write that wrote nothing leaves the record as it was
                 tried = plan is not None and bool(plan["update"]) and "updatedKeys" in res   # changes the answer may not confirm
                 if res.get("ok") and (created or updated or unchanged or res.get("noteKeys") or res.get("removed") or tried):
-                    written = {"config": os.path.abspath(args.config), "createdKeys": created, "updatedKeys": updated, "keptKeys": unchanged,
+                    written = {"config": os.path.abspath(args.config), "printVersion": PRINT_VERSION,
+                               "createdKeys": created, "updatedKeys": updated, "keptKeys": unchanged,
                                "replacedKeys": list(plan["remove"]) if plan and "updatedKeys" in res else [a["key"] for a in own_now] if cfg.get("cleanup") else [],
                                "noteKeys": res.get("noteKeys", [])}
                     _plan_prints(written, last, plan, listing, name)

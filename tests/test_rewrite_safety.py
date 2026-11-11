@@ -196,3 +196,47 @@ def test_the_local_apis_changes_name_the_keys_each_batch_took(monkeypatch):
     changes = [{"key": f"K{i}", "version": 1} for i in range(1, 54)]
     done, failed = api.update(changes)
     assert done == ["K1", "K2"] and failed[0]["key"] == "K3" and "HTTP 500" in failed[1]["message"] and failed[1]["items"] == "51-53 of 53"
+
+
+# --- what counts as the user's change -----------------------------------------------------------------------------
+
+def written_twice(paper, monkeypatch, capsys):
+    """Two writes, the second changing NEW1 in place: its fingerprint is the tool's."""
+    api = UpdatingApi()
+    run(paper, monkeypatch, capsys, {"highlights": FIRST}, "--apply", api=api)
+    run(paper, monkeypatch, capsys, {"highlights": FIXED, "cleanup": True}, "--apply", api=api)
+    api.updated = []
+    return api
+
+
+def bump(api, key, **data):
+    api.rows[key]["data"].update(data, dateModified="2026-11-10T15:00:00Z", version=api.rows[key]["data"]["version"] + 1)
+
+
+def test_a_page_label_the_user_set_is_their_change(paper, monkeypatch, capsys):
+    api = written_twice(paper, monkeypatch, capsys)
+    bump(api, "NEW1", annotationPageLabel="iii")   # Edit Page Number… in the reader
+    code, report = run(paper, monkeypatch, capsys, {"highlights": AGAIN, "cleanup": True}, "--apply", api=api)
+    assert report["applied"] is False and "user_edit" in kinds(report) and annotations(api)["NEW1"]["annotationPageLabel"] == "iii"
+
+
+def test_a_tag_the_user_added_is_their_change(paper, monkeypatch, capsys):
+    api = written_twice(paper, monkeypatch, capsys)
+    api.rows["NEW2"]["data"]["tags"].append({"tag": "important"})
+    bump(api, "NEW2")
+    # left out of the set, it would be deleted: held back
+    code, report = run(paper, monkeypatch, capsys, {"highlights": FIXED[:1], "cleanup": True}, "--apply", api=api)
+    assert report["applied"] is False and "user_edit" in kinds(report) and api.deleted == []
+    # kept in the set as it is, it stays with the user's tag, and nothing is said
+    code, report = run(paper, monkeypatch, capsys, {"highlights": FIXED, "cleanup": True}, "--apply", api=api)
+    assert report["applied"] is True and "user_edit" not in kinds(report) and api.updated == []
+    assert {"tag": "important"} in annotations(api)["NEW2"]["tags"]
+
+
+def test_an_annotation_the_user_moved_is_their_change(paper, monkeypatch, capsys):
+    api = written_twice(paper, monkeypatch, capsys)
+    pos = json.loads(api.rows["NEW2"]["data"]["annotationPosition"])
+    pos["rects"] = [[r[0] + 30, r[1], r[2] + 30, r[3]] for r in pos["rects"]]
+    bump(api, "NEW2", annotationPosition=json.dumps(pos))
+    code, report = run(paper, monkeypatch, capsys, {"highlights": FIXED, "cleanup": True}, "--apply", api=api)
+    assert report["applied"] is False and "user_edit" in kinds(report) and api.updated == []

@@ -57,6 +57,8 @@
   when its configuration holds the paper's whole set. `applied_keys.json` names the configuration.
 - The translation check quotes a number with a K, M or B suffix as the comment writes it (13B, not 13 billion), and
   takes a model's name and its size with a hyphen or a space as one name (Llama-7B, Llama 7B).
+- `user_edit` also holds back a rewrite that would put back an annotation the user moved or relabelled in Zotero, or
+  delete one they tagged.
 - A question about several papers is told to quote the first paper's sentences as [#123] every time, never as
   "sentence 29", so that they show as citations; the other papers by title and page.
 - The translation check of a comment in German, French, Spanish, Portuguese or English no longer lists its ordinary words:
