@@ -132,8 +132,9 @@ def test_the_eye_buttons_english_names_scholium(facts):
 @pytest.mark.parametrize("locale, sep", [("en-US", ". "), ("fr-FR", ". "), ("zh-CN", "：")])
 def test_a_scanned_pdfs_card_reads_as_its_message_without_a_row_of_zeros(facts, locale, sep):
     s = facts["scanned_" + locale]
+    assert len(s["card"]) == 2, "the card contains only its title and time"
     assert s["card"][0] == s["none"] + sep + s["text"]
-    assert len(s["card"]) == 2 and not re.search(r"^0", s["card"][1]), "the title and the time; no numbers"
+    assert re.search(r"\b\d{2}:\d{2}$", s["card"][1])
 
 
 def test_the_agents_start_after_the_pre_run_is_not_extracting(facts):

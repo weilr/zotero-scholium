@@ -97,19 +97,21 @@ def test_the_profile_prefs_are_the_throwaways():
 # ---- the environment ----
 BASE = {"PATH": "C:\\bin", "USERPROFILE": "C:\\Users\\someone", "CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "x", "Claude_Pid": "7",
         "CLAUDE_CONFIG_DIR": "C:\\Users\\someone\\.claude", "CODEX_HOME": "C:\\Users\\someone\\.codex", "SCHOLIUM_ZOTERO_PORT": "23119",
-        "TEMP": "C:\\Temp", "APPDATA": "C:\\AppData", "PYTHONPATH": "C:\\mine"}
+        "TEMP": "C:\\Temp", "APPDATA": "C:\\AppData"}
 
 
 def test_a_real_runs_environment(tmp_path):
     run, guard = str(tmp_path / "run"), str(tmp_path / "run" / "guard")
-    kept = dict(BASE)
-    env = live.live_env(BASE, run, guard)
-    assert BASE == kept
+    python_path = str(tmp_path / "mine")
+    base = dict(BASE, PYTHONPATH=python_path)
+    kept = dict(base)
+    env = live.live_env(base, run, guard)
+    assert base == kept
     assert not [k for k in env if k.upper().startswith("CLAUDE")]   # the user's login: no CLAUDE_CONFIG_DIR
     assert "SCHOLIUM_ZOTERO_PORT" not in env   # the plugin gives each agent its Zotero's port
     for k in ("TEMP", "TMP", "APPDATA", "ZOTERO_DATA_DIR", "CODEX_HOME"):
         assert os.path.commonpath([env[k], run]) == run, k
-    assert env["PYTHONPATH"].split(os.pathsep) == [guard, "C:\\mine"]
+    assert env["PYTHONPATH"].split(os.pathsep) == [guard, python_path]
     assert env["USERPROFILE"] == BASE["USERPROFILE"] and env["PATH"] == "C:\\bin"
     assert live.check_env(env, run, guard)
 
@@ -261,7 +263,8 @@ def test_the_live_probe_parses(tmp_path):
 
 
 def test_the_paper_meta():
-    assert live.paper_meta(None, "C:\\papers\\2305.18290.pdf") == {"itemType": "preprint", "fields": {"title": "2305.18290"}, "creators": []}
+    pdf = os.path.join("papers", "2305.18290.pdf")
+    assert live.paper_meta(None, pdf) == {"itemType": "preprint", "fields": {"title": "2305.18290"}, "creators": []}
     m = live.paper_meta({"fields": {"title": "T", "date": "2020"}, "creators": [["A", "B"]], "pdf": "ignored"}, "x.pdf")
     assert m == {"itemType": "preprint", "fields": {"title": "T", "date": "2020"}, "creators": [["A", "B"]]}
 
