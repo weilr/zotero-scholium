@@ -2199,15 +2199,18 @@ class LocalApi:
         return len(keys)
 
     def update(self, changes):
-        """Changes to existing items, each {key, version, fields…}; the failures, as the local API names them. The version
-        guards each item: one that changed since it was read is not written."""
-        failed = []
+        """Changes to existing items, each {key, version, fields…}: (the keys the local API took, its failures). The
+        version guards each item: one that changed since it was read is not written. A batch that fails as a whole ends
+        the run; whether it was taken, the read-back says."""
+        done, failed = [], []
         for i in range(0, len(changes), 50):
             s, h, t = self.write("POST", self.lib + "/items", changes[i:i + 50])
             if s != 200:
-                return failed + [{"message": f"update failed (HTTP {s}): {t[:300]}", "items": f"{i + 1}-{len(changes)} of {len(changes)}"}]
-            failed += list((json.loads(t).get("failed") or {}).values())
-        return failed
+                return done, failed + [{"message": f"update failed (HTTP {s}): {t[:300]}", "items": f"{i + 1}-{len(changes)} of {len(changes)}"}]
+            d = json.loads(t)
+            done += [v if isinstance(v, str) else (v or {}).get("key") for v in list((d.get("successful") or {}).values()) + list((d.get("unchanged") or {}).values())]
+            failed += list((d.get("failed") or {}).values())
+        return [k for k in done if k], failed
 
     def trash(self, rows):
         """Move items to Zotero's trash (recoverable there); `rows` are their API rows, whose versions guard the write."""
@@ -2360,15 +2363,19 @@ def api_apply(cfg, out, api, plan=None):
             return result
     # (4) the changes in place: the reading note and the annotations that changed; each version guards its item
     if update_note or changes:
+        taken = None
         try:
-            failed = api.update(([update_note] if update_note else []) + changes)
+            answer = api.update(([update_note] if update_note else []) + changes)
+            taken, failed = answer if isinstance(answer, tuple) else (None, answer)
         except Exception as e:
             failed = [{"message": str(e)}]
         if failed:
             result["updateError"] = "; ".join(str(f.get("message", f)) for f in failed)[:600]
-        # the changes made: all but those that failed by their key; none when a failure names no key
+        # the changes made: those the answer took, else all but those that failed by their key (none when a failure names
+        # no key); the read-back has the last word (_record_prints)
         missed = {f.get("key") for f in failed if isinstance(f, dict)}
-        done = [] if None in missed or any(not isinstance(f, dict) for f in failed) else [c["key"] for c in changes if c["key"] not in missed]
+        done = ([c["key"] for c in changes if c["key"] in set(taken)] if taken is not None
+                else [] if None in missed or any(not isinstance(f, dict) for f in failed) else [c["key"] for c in changes if c["key"] not in missed])
         result["updatedKeys"] = done
         if update_note and None not in missed and update_note["key"] not in missed:
             result.update(noteKeys=[update_note["key"]], noteUpdated=True)
@@ -3219,19 +3226,73 @@ def brief_report(report):
     return out
 
 
-def _record_prints(written, lst, last, note_html):
-    """The fingerprints of what a write left, into its record: each of the tool's annotations it created, updated or
-    kept, and those an earlier record knew that are still there unchanged (an add-only write); its reading note's text."""
-    mine = set(written["createdKeys"]) | set(written["updatedKeys"]) | set(written["keptKeys"])
+def _expected(old, fields, channel):
+    """The listing's entry of an annotation once a change in place has been made: the plugin and the JavaScript file store a
+    sticky note's position as its icon."""
+    e = dict(old)
+    for f in ("comment", "text", "pageLabel"):
+        if f in fields:
+            e[f] = fields[f][:2000] if f != "pageLabel" else fields[f]
+    if "color" in fields:
+        e["color"] = fields["color"].lower()
+    if "position" in fields:
+        e["position"] = _stored_position({"type": old.get("type"), "position": fields["position"]}) if channel != "api" else fields["position"]
+    return e
+
+
+def _same_content(a, b):
+    """The same type, comment, colour, text and page label in two listings' entries (their positions aside)."""
+    return (a.get("type") == b.get("type") and (a.get("comment") or "") == (b.get("comment") or "") and (a.get("text") or "") == (b.get("text") or "")
+            and (a.get("color") or "").lower() == (b.get("color") or "").lower() and a.get("pageLabel") == b.get("pageLabel"))
+
+
+def _plan_prints(written, last, plan, listing, channel):
+    """The fingerprints a record holds until the read-back gives them: the earlier record's, those of the annotations
+    kept as the plan saw them, and those of the changed ones as the changes leave them."""
+    old = {o["key"]: o for o in (listing or {}).get("annotations", [])}
+    prints = dict((last or {}).get("written") or {})
+    for k in (plan or {}).get("remove", []):
+        prints.pop(k, None)
+    for k in written["keptKeys"]:
+        if k in old:
+            prints[k] = annotation_print(old[k])
+    for u in (plan or {}).get("update", []):
+        if u["key"] in old and u["key"] in written["updatedKeys"]:
+            prints[u["key"]] = annotation_print(_expected(old[u["key"]], u["fields"], channel))
+    written["written"] = prints
+    written["notes"] = dict((last or {}).get("notes") or {})
+
+
+def _record_prints(written, lst, last, note_html, plan=None, listing=None, channel="api"):
+    """The fingerprints of what a write left, into its record, from the read-back: each of the tool's annotations it
+    created; each it was to change, once the read-back has the change (these are its updatedKeys, whatever the write's
+    answer said), or as it was when the change did not land; each it kept, as the plan saw it (a change the user made
+    meanwhile then shows as theirs); and those an earlier record knew that are still there unchanged (an add-only
+    write). An annotation changed otherwise meanwhile gets none: its dates decide. Its reading note's HTML and text."""
+    old = {o["key"]: o for o in (listing or {}).get("annotations", [])}
+    expect = {u["key"]: _expected(old[u["key"]], u["fields"], channel) for u in (plan or {}).get("update", []) if u["key"] in old}
+    created, kept = set(written["createdKeys"]), set(written["keptKeys"])
     before = (last or {}).get("written") or {}
-    prints = {}
+    prints, done = {}, []
     for a in lst.get("annotations", []):
         if not set(a.get("tags") or []) & OWN_TAGS:
             continue
-        fp = annotation_print(a)
-        if a["key"] in mine or before.get(a["key"]) == fp:
-            prints[a["key"]] = fp
+        k, fp = a["key"], annotation_print(a)
+        if k in created:
+            prints[k] = fp
+        elif k in expect:
+            if _same_content(a, expect[k]):
+                prints[k] = fp
+                done.append(k)
+            elif _same_content(a, old[k]):
+                prints[k] = annotation_print(old[k])
+        elif k in kept and k in old:
+            prints[k] = annotation_print(old[k])
+        elif before.get(k) == fp:
+            prints[k] = fp
     written["written"] = prints
+    if plan is not None and "updatedKeys" in written:
+        written["updatedKeys"] = done
     stored = {n["key"]: n.get("html") for n in lst.get("notes", [])}
     notes = {k: v for k, v in ((last or {}).get("notes") or {}).items() if k in stored}
     for k in written.get("noteKeys") or []:   # as read back: a listing without the notes' text keeps their text's alone
@@ -3489,13 +3550,21 @@ def main(argv=None):
             if res is not None:
                 report["result"] = res
                 created, updated, unchanged = res.get("createdKeys", []), res.get("updatedKeys", []), res.get("keptKeys", [])
-                if created or updated or unchanged or res.get("noteKeys"):   # the keys go to a file; the report keeps counts
-                    # with the configuration that wrote them, what its cleanup replaced (check_cleanup) and, after the read-back,
-                    # the fingerprints of what it left (user_edit)
+                # the record: the keys of what the write left, with the configuration that wrote them, what its cleanup
+                # replaced (check_cleanup) and the fingerprints of what it left (user_edit), as the plan saw them until the
+                # read-back gives them. A write that wrote nothing leaves the record as it was
+                tried = plan is not None and bool(plan["update"]) and "updatedKeys" in res   # changes the answer may not confirm
+                if res.get("ok") and (created or updated or unchanged or res.get("noteKeys") or res.get("removed") or tried):
                     written = {"config": os.path.abspath(args.config), "createdKeys": created, "updatedKeys": updated, "keptKeys": unchanged,
                                "replacedKeys": list(plan["remove"]) if plan and "updatedKeys" in res else [a["key"] for a in own_now] if cfg.get("cleanup") else [],
                                "noteKeys": res.get("noteKeys", [])}
+                    _plan_prints(written, last, plan, listing, name)
                     json.dump(written, open(keys_path, "w", encoding="utf8"), indent=1)
+                elif created:   # part of a failed write: the keys it created, the rest of the record as it was
+                    same = last.get("config") == os.path.abspath(args.config)
+                    json.dump(dict(last if same else {}, config=os.path.abspath(args.config),
+                                   createdKeys=(last.get("createdKeys", []) if same else []) + created), open(keys_path, "w", encoding="utf8"), indent=1)
+                if created or updated or unchanged or res.get("noteKeys"):   # the report keeps counts
                     report["result"] = dict({k: v for k, v in res.items() if k not in ("createdKeys", "noteKeys", "updatedKeys", "keptKeys")},
                                             keys=keys_path)
                 if cfg.get("cleanup") and res.get("ok"):
@@ -3507,8 +3576,10 @@ def main(argv=None):
                         raise RuntimeError("read-back unavailable")
                     report["now_in_zotero"] = {"annotations": len(lst["annotations"]), "notes": [n["title"][:70] for n in lst["notes"]]}
                     if written is not None:
-                        _record_prints(written, lst, last, note_html)
+                        _record_prints(written, lst, last, note_html, plan, listing, name)
                         json.dump(written, open(keys_path, "w", encoding="utf8"), indent=1)
+                        if "rewrite" in report:   # the changes in place as read back
+                            report["rewrite"]["updated"] = len(written["updatedKeys"])
                     if "createdKeys" in res:   # the local API and plugins from 0.1.9 on return the new keys
                         listed = {a["key"]: a for a in lst["annotations"]}
                         note_keys = {n["key"] for n in lst["notes"]}

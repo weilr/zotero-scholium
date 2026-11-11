@@ -113,3 +113,86 @@ def test_the_javascript_file_saves_the_note_with_the_annotations_or_not_at_all(t
     out = zotero(script=cli.render_js(cfg, [NEW, NEW], plan), existing=changed)
     assert "error" not in out, out.get("error")
     assert by_key(out)["N1"]["note"] == "<h1>Paper</h1><p>Old, and mine.</p>" and out["trashed"] == ["N1"]
+
+
+# --- the record of what the tool wrote --------------------------------------------------------------------------
+
+FIXED = hl((S1, "该方法在每个基准上都提升了结果。"), (S2, "另一句话。"))
+AGAIN = hl((S1, "该方法在所有基准上都提升了结果。"), (S2, "另一句话。"))
+
+
+def test_a_write_that_wrote_nothing_leaves_the_record_as_it_was(paper, monkeypatch, capsys):
+    api = UpdatingApi()
+    run(paper, monkeypatch, capsys, {"highlights": FIRST}, "--apply", api=api)
+    run(paper, monkeypatch, capsys, {"highlights": FIXED, "cleanup": True}, "--apply", api=api)   # NEW1 changed in place
+    before = record(paper)
+    real = api.create
+    api.create = lambda items: ([], [{"message": "create failed (HTTP 500): busy"}])
+    code, report = run(paper, monkeypatch, capsys, {"highlights": FIXED + hl((S3, "第三句。")), "cleanup": True}, "--apply", api=api)
+    assert report["applied"] is False and record(paper) == before
+    api.create = real
+    code, report = run(paper, monkeypatch, capsys, {"highlights": AGAIN, "cleanup": True}, "--apply", api=api)
+    assert report["applied"] is True and "user_edit" not in kinds(report), "the tool's own change is still known as the tool's"
+
+
+def test_a_change_the_answer_did_not_confirm_is_taken_from_the_read_back(paper, monkeypatch, capsys):
+    api = UpdatingApi()
+    run(paper, monkeypatch, capsys, {"highlights": FIRST}, "--apply", api=api)
+    real = api.update
+
+    def half(changes):   # the first change is made, then the request fails as a whole (as a later batch of 50 would)
+        real(changes[:1])
+        return [{"message": "update failed (HTTP 500): busy", "items": "2-2 of 2"}]
+    api.update = half
+    both = hl((S1, "该方法在每个基准上都提升了结果。"), (S2, "又一句话。"))
+    code, report = run(paper, monkeypatch, capsys, {"highlights": both, "cleanup": True}, "--apply", api=api)
+    assert report["applied"] == "partial" and record(paper)["updatedKeys"] == ["NEW1"]
+    api.update = real
+    code, report = run(paper, monkeypatch, capsys, {"highlights": hl((S1, "该方法在所有基准上都提升了结果。"), (S2, "又一句话。")), "cleanup": True},
+                       "--apply", api=api)
+    assert report["applied"] is True and "user_edit" not in kinds(report)
+
+
+def test_a_failed_read_back_keeps_the_plans_fingerprints(paper, monkeypatch, capsys):
+    api = UpdatingApi()
+    run(paper, monkeypatch, capsys, {"highlights": FIRST}, "--apply", api=api)
+    real, calls = cli.api_list, []
+
+    def api_list(cfg, handle):   # the listing answers, the read-back after the write does not
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError("read-back unavailable")
+        return real(cfg, handle)
+    monkeypatch.setattr(cli, "api_list", api_list)
+    code, report = run(paper, monkeypatch, capsys, {"highlights": FIXED, "cleanup": True}, "--apply", api=api)
+    assert report["applied"] is False and "verification failed" in report["apply_error"]
+    assert set(record(paper)["written"]) == {"NEW1", "NEW2"}
+    monkeypatch.setattr(cli, "api_list", real)
+    code, report = run(paper, monkeypatch, capsys, {"highlights": AGAIN, "cleanup": True}, "--apply", api=api)
+    assert report["applied"] is True and "user_edit" not in kinds(report)
+
+
+def test_an_annotation_the_user_changed_during_a_run_is_theirs_next_time(paper, monkeypatch, capsys):
+    api = UpdatingApi()
+    run(paper, monkeypatch, capsys, {"highlights": FIRST}, "--apply", api=api)
+    real = api.update
+
+    def meanwhile(changes):   # while the run writes, the user corrects NEW2, which the run keeps as it is
+        api.rows["NEW2"]["data"].update(annotationComment="我自己的译文。", dateModified="2026-11-10T16:00:00Z", version=7)
+        return real(changes)
+    api.update = meanwhile
+    run(paper, monkeypatch, capsys, {"highlights": FIXED, "cleanup": True}, "--apply", api=api)
+    api.update = real
+    code, report = run(paper, monkeypatch, capsys, {"highlights": AGAIN, "cleanup": True}, "--apply", api=api)
+    assert report["applied"] is False and "user_edit" in kinds(report) and annotations(api)["NEW2"]["annotationComment"] == "我自己的译文。"
+
+
+def test_the_local_apis_changes_name_the_keys_each_batch_took(monkeypatch):
+    answers = [(200, {}, json.dumps({"successful": {"0": {"key": "K1"}}, "unchanged": {"1": "K2"}, "failed": {"2": {"key": "K3", "code": 412}}})),
+               (500, {}, "busy")]
+    monkeypatch.setattr(cli, "http", lambda *a, **k: answers.pop(0))
+    api = cli.LocalApi("SID")
+    api.key, api.WRITE_ATTEMPTS = "KEY", 1
+    changes = [{"key": f"K{i}", "version": 1} for i in range(1, 54)]
+    done, failed = api.update(changes)
+    assert done == ["K1", "K2"] and failed[0]["key"] == "K3" and "HTTP 500" in failed[1]["message"] and failed[1]["items"] == "51-53 of 53"
