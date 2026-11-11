@@ -131,7 +131,8 @@ PLUGIN = r"""
       const h = harness({ existing: [['zotero-scholium']], eraseFails, locale });
       h.runner.start('x');
       await h.runner.annotate([h.item1]); await settle(600);
-      facts[locale + '-' + name] = { prompt: h.log.stdin[0] || null, erased: h.log.erased.length, confirms: h.log.confirms.length };
+      facts[locale + '-' + name] = { prompt: h.log.stdin[0] || null, erased: h.log.erased.length, confirms: h.log.confirms.length,
+                                     followUp: h.runner.followUpPrompt({ say: 'delete that highlight', own: 1 }) };
       h.runner.stop();
     }
   }
@@ -151,10 +152,47 @@ def plugin_facts(tmp_path_factory):
 def test_annotate_again_deletes_first_and_names_the_exception_only_when_that_failed(plugin_facts):
     zh, en = plugin_facts["zh-CN-cleared"], plugin_facts["en-US-cleared"]
     assert zh["erased"] == 1 and zh["confirms"] == 1 and "这篇论文目前没有本工具的注释。" in zh["prompt"]
-    assert "cleanup_other" not in zh["prompt"] and "cleanup_other" not in en["prompt"]
+    assert "--accept cleanup_other（" not in zh["prompt"] and "pass --accept cleanup_other (" not in en["prompt"]
     zh, en = plugin_facts["zh-CN-notCleared"], plugin_facts["en-US-notCleared"]
     assert zh["erased"] == 0 and ("\n这篇论文已有 1 条本工具的注释，用户已确认整篇重做：配置里设 cleanup: true；--apply 报告 cleanup_other 时加 "
                                   "--accept cleanup_other（上面不要用 --accept 的唯一例外）。\n") in zh["prompt"]
     assert ("\nThe paper already carries 1 annotations of this tool; the user confirmed a complete redo: set cleanup: true in the "
             "configuration, and when --apply reports cleanup_other, pass --accept cleanup_other (the one exception to the rule on "
             "--accept above).\n") in en["prompt"]
+
+
+# the user's own changes in Zotero (user_edit) and annotations a cleanup would delete (cleanup_other) are never the agent's
+# to override: kept as they are, or the run stops and tells the user, who confirms in a message of their own
+ANNOTATE_ZH = ("--apply 报告 user_edit 或 cleanup_other 时不要加 --accept：在配置里保留这些批注和笔记的现状（报告写了怎么做）；做不到时不要写入，"
+               "最后的回复不写下面那一行，改为告诉用户是哪些批注或笔记（key、页码、改了什么），写入会覆盖或删掉它们，请用户在后续消息里用自己的话确认。")
+ANNOTATE_EN = ("When --apply reports user_edit or cleanup_other, pass no --accept for them: keep those annotations and notes as they are in the "
+               "configuration (the report says how); where you cannot, write nothing and, in place of the closing line below, your final reply "
+               "tells the user which annotations or notes they are (key, page, what changed), that writing would overwrite or delete them, and "
+               "asks them to confirm in their own words in a follow-up message.")
+FOLLOW_ZH = ("user_edit 和 cleanup_other 不适用上面的例外，永远不要凭自己的判断加 --accept：--apply 报告它们时，保留这些批注和笔记的现状仍能完成"
+             "用户的要求，就在配置里保留（报告写了怎么做）；否则停下，不要写入，在回复里告诉用户是哪些批注或笔记（key、页码、改了什么），"
+             "写入会覆盖或删掉它们，请用户在下一条消息里用自己的话确认；只有用户之后的消息明确说要覆盖或删除自己的改动，"
+             "才加 --accept user_edit 或 --accept cleanup_other。")
+FOLLOW_EN = ("That exception does not cover user_edit and cleanup_other: never pass --accept for them on your own judgement. When --apply reports "
+             "them, keep those annotations and notes as they are in the configuration (the report says how) where that still does what the user "
+             "asked; otherwise stop without writing, tell the user in your reply which annotations or notes they are (key, page, what changed) "
+             "and that writing would overwrite or delete them, and ask them to confirm in their own words in their next message; only a later "
+             "message of theirs that explicitly says to overwrite or delete their own changes allows --accept user_edit or --accept cleanup_other.")
+
+
+def test_the_agent_never_overrides_the_users_own_changes_without_their_word(plugin_facts):
+    for name in ("cleared", "notCleared"):
+        zh, en = plugin_facts["zh-CN-" + name], plugin_facts["en-US-" + name]
+        # the annotation task: after the rule on --accept, before the redo's one exception
+        assert zh["prompt"].count("\n不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。\n" + ANNOTATE_ZH + "\n") == 1, name
+        assert en["prompt"].count("\nDo not pass --accept, --allow-warnings or --allow-missed: correct the findings instead.\n"
+                                  + ANNOTATE_EN + "\n") == 1, name
+        # a follow-up in the annotation's session: the user's words allow the other kinds, never these two
+        assert zh["followUp"].count("\n除非用户的话要求这个例外，否则不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。\n"
+                                    + FOLLOW_ZH + "\n") == 1, name
+        assert en["followUp"].count("\nDo not pass --accept, --allow-warnings or --allow-missed unless the user's message asks for that "
+                                    "exception: correct the findings instead.\n" + FOLLOW_EN + "\n") == 1, name
+    # the redo's exception still follows them, unchanged
+    zh, en = plugin_facts["zh-CN-notCleared"]["prompt"], plugin_facts["en-US-notCleared"]["prompt"]
+    assert zh.index(ANNOTATE_ZH) < zh.index("--accept cleanup_other（上面不要用 --accept 的唯一例外）。")
+    assert en.index(ANNOTATE_EN) < en.index("pass --accept cleanup_other (the one exception to the rule on --accept above).")

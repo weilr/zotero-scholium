@@ -15,6 +15,9 @@
   before it runs again.
 - A one-click annotation is told not to pass `--accept`, `--allow-warnings` or `--allow-missed` but to correct what
   `--apply` holds back; words to its session may let a finding through only when they ask for that exception.
+- The agent never passes `--accept user_edit` or `--accept cleanup_other` on its own judgement: it keeps those
+  annotations and notes, or writes nothing and names them, and overwrites or deletes them only after the user says so
+  in a later message (the prompts and the skill).
 - A new annotation's `status` and `extract` are run by the plugin before the agent starts, and given to it in the
   prompt; a scanned PDF ends the run there, without an agent.
 - A conversation's first question starts with its papers' sentences extracted: the plugin runs `extract` before the
@@ -59,7 +62,7 @@
 - The translation check quotes a number with a K, M or B suffix as the comment writes it (13B, not 13 billion), and
   takes a model's name and its size with a hyphen or a space as one name (Llama-7B, Llama 7B).
 - Ask Scholium (N papers) no longer opens the reader's side pane in the library tab.
-- In a narrow item pane, the confirmation's buttons go under its text and the state line under the model chip, and
+- In a narrow item pane, the confirmation's buttons go under its text together and the state line under the model chip, and
   the send hint is cut with its whole text in its tooltip. The tooltip's time is in the language's words, a stopped
   annotation's card says "Cancelled", a scanned PDF's card gives its message without a row of zeros, the state line
   no longer says the sentences are being extracted once the plugin's extract is done, and the eye button's English

@@ -107,10 +107,13 @@
 .scholium-card-nums b { display: block; font-size: 16px; }
 .scholium-card-nums span, .scholium-card-usage { font-size: 10.5px; color: var(--fill-secondary); }
 .scholium-card-nums span { word-break: keep-all; }
-.scholium-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11.5px; padding: 4px 6px; border-radius: 4px;
-  background: color-mix(in srgb, var(--accent-red) 8%, transparent); }
-/* the buttons go under the text where the pane is narrow */
+/* the buttons go under the text where the pane is narrow, both of them: they come first in the row's order, which runs
+   from the right (row-reverse), and the first line is the bottom one (wrap-reverse), so that only the text breaks off */
+.scholium-confirm { display: flex; flex-direction: row-reverse; flex-wrap: wrap-reverse; align-items: center; gap: 6px; font-size: 11.5px;
+  padding: 4px 6px; border-radius: 4px; background: color-mix(in srgb, var(--accent-red) 8%, transparent); }
 .scholium-confirm-text { flex: 1 1 180px; }
+.scholium-confirm > .scholium-button { order: -1; }
+.scholium-confirm > .scholium-button:last-child { order: -2; }
 
 .scholium-popover {
   box-sizing: border-box;

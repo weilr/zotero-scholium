@@ -96,7 +96,13 @@ def test_ask_scholium_leaves_the_librarys_context_pane_closed(facts):
 
 def test_the_narrow_pane_wraps_the_confirmation_and_the_state_line():
     rules = css_rules()
-    assert "flex-wrap: wrap" in rules[".scholium-confirm"] and "flex: 1 1 180px" in rules[".scholium-confirm-text"]
+    # the confirmation's two buttons go under its text together: first in the order of a row that runs from the right, on
+    # its first line, which is the bottom one
+    confirm = rules[".scholium-confirm"]
+    assert "display: flex;" in confirm and "flex-direction: row-reverse;" in confirm and "flex-wrap: wrap-reverse;" in confirm
+    assert "flex: 1 1 180px" in rules[".scholium-confirm-text"]
+    assert rules[".scholium-confirm > .scholium-button"].strip() == "order: -1;"
+    assert rules[".scholium-confirm > .scholium-button:last-child"].strip() == "order: -2;"
     assert "flex-wrap: wrap" in rules[".scholium-line"]
     state = rules[".scholium-line .scholium-state"]
     assert "flex-shrink: 0" in state and "max-width: 100%" in state and "text-overflow: ellipsis" in state

@@ -207,6 +207,9 @@ Object.assign(ScholiumRunner, {
         ...this.scriptLines(job),
         ...this.preRunLines(job),
         "不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。",
+        // what the user changed in Zotero, or annotations a cleanup would delete: only the user's own word lets that go
+        "--apply 报告 user_edit 或 cleanup_other 时不要加 --accept：在配置里保留这些批注和笔记的现状（报告写了怎么做）；做不到时不要写入，"
+          + "最后的回复不写下面那一行，改为告诉用户是哪些批注或笔记（key、页码、改了什么），写入会覆盖或删掉它们，请用户在后续消息里用自己的话确认。",
         ...this.languageLines(),
         // the user confirmed a redo, and the plugin could not delete them first: they may be another configuration's
         own ? `这篇论文已有 ${own} 条本工具的注释，用户已确认整篇重做：配置里设 cleanup: true；--apply 报告 cleanup_other 时加 --accept cleanup_other（上面不要用 --accept 的唯一例外）。` : "这篇论文目前没有本工具的注释。",
@@ -231,6 +234,10 @@ Object.assign(ScholiumRunner, {
       ...this.scriptLines(job),
       ...this.preRunLines(job),
       "Do not pass --accept, --allow-warnings or --allow-missed: correct the findings instead.",
+      "When --apply reports user_edit or cleanup_other, pass no --accept for them: keep those annotations and notes as they are in the "
+        + "configuration (the report says how); where you cannot, write nothing and, in place of the closing line below, your final reply "
+        + "tells the user which annotations or notes they are (key, page, what changed), that writing would overwrite or delete them, and "
+        + "asks them to confirm in their own words in a follow-up message.",
       ...this.languageLines(),
       own ? `The paper already carries ${own} annotations of this tool; the user confirmed a complete redo: set cleanup: true in the configuration, and when --apply reports cleanup_other, pass --accept cleanup_other (the one exception to the rule on --accept above).` : "The paper carries no annotations of this tool yet.",
       ...(job.extra ? ["", "The user's extra instructions:", job.extra] : []),
@@ -389,6 +396,12 @@ Object.assign(ScholiumRunner, {
       ...(job.own ? ["改已经写入的批注或补几条时，都编辑写入它们的那份配置（它是这篇论文的全部批注），设 cleanup: true 整份重写"
                      + "（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置，否则下次整份重写时会把它们删掉。"] : []),
       "除非用户的话要求这个例外，否则不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。",
+      // a deletion cannot be undone in Zotero: the user is told first what their changes are, and confirms in a message of
+      // their own
+      "user_edit 和 cleanup_other 不适用上面的例外，永远不要凭自己的判断加 --accept：--apply 报告它们时，保留这些批注和笔记的现状仍能完成"
+        + "用户的要求，就在配置里保留（报告写了怎么做）；否则停下，不要写入，在回复里告诉用户是哪些批注或笔记（key、页码、改了什么），"
+        + "写入会覆盖或删掉它们，请用户在下一条消息里用自己的话确认；只有用户之后的消息明确说要覆盖或删除自己的改动，"
+        + "才加 --accept user_edit 或 --accept cleanup_other。",
       ...changed,
       ...this.papersLines(job),
       "",
@@ -403,6 +416,11 @@ Object.assign(ScholiumRunner, {
                      + "set) and set cleanup: true, so that the whole set replaces them (and note_replace: true when the reading note changes); do not "
                      + "write a separate configuration with just new entries, which the next whole rewrite would delete."] : []),
       "Do not pass --accept, --allow-warnings or --allow-missed unless the user's message asks for that exception: correct the findings instead.",
+      "That exception does not cover user_edit and cleanup_other: never pass --accept for them on your own judgement. When --apply reports "
+        + "them, keep those annotations and notes as they are in the configuration (the report says how) where that still does what the user "
+        + "asked; otherwise stop without writing, tell the user in your reply which annotations or notes they are (key, page, what changed) "
+        + "and that writing would overwrite or delete them, and ask them to confirm in their own words in their next message; only a later "
+        + "message of theirs that explicitly says to overwrite or delete their own changes allows --accept user_edit or --accept cleanup_other.",
       ...changed,
       ...this.papersLines(job),
       "",
