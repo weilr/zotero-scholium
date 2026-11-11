@@ -3,9 +3,9 @@ module imports the CLI, so the CLI in this process (cli.BASE) and in every child
 environment of its own talks to port 9. A connection to port 23119 from this process, through a socket or asyncio's
 Proactor event loop on Windows, fails the test that made it: it raises ZoteroPortReached before any socket is opened, and
 the test is failed at its end even if the code under test caught the error. Every Python process a test starts, also
-with an environment of its own (subprocess.Popen's env), has the same guard from child_guard/sitecustomize.py on its
-PYTHONPATH, and its attempts fail the test too; a PYTHONPATH a test gives with a sitecustomize of its own keeps that one.
-A child started with python -I, or a program that is not Python, has none."""
+with an environment of its own (subprocess.Popen's env, given port 9 unless it names one), has the same guard from
+child_guard/sitecustomize.py first on its PYTHONPATH, and its attempts fail the test too; a sitecustomize of the test's own
+further on that PYTHONPATH runs after it. A child started with python -I, or a program that is not Python, has none."""
 import os
 import socket
 import subprocess
@@ -19,12 +19,12 @@ CHILD_GUARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "child_gu
 
 
 def _with_guard(env):
-    """An environment for a child process: the child guard's folder first on PYTHONPATH, unless the PYTHONPATH a test gives
-    names a sitecustomize of its own (a guard of the tool it tests), and the file the guard's attempts are noted in."""
-    paths = [p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p]
-    own = any(os.path.isfile(os.path.join(p, "sitecustomize.py")) for p in paths if p != CHILD_GUARD)
-    if CHILD_GUARD not in paths and not own:
-        env["PYTHONPATH"] = os.pathsep.join([CHILD_GUARD] + paths)
+    """An environment for a child process: the child guard's folder first on PYTHONPATH (a sitecustomize of the test's own
+    further on runs after it, child_guard/sitecustomize.py hands over to it), SCHOLIUM_ZOTERO_PORT 9 unless the test names
+    one, and the file the guard's attempts are noted in."""
+    paths = [p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p and p != CHILD_GUARD]
+    env["PYTHONPATH"] = os.pathsep.join([CHILD_GUARD] + paths)
+    env.setdefault("SCHOLIUM_ZOTERO_PORT", "9")
     if os.environ.get("SCHOLIUM_PORT_GUARD_LOG"):
         env.setdefault("SCHOLIUM_PORT_GUARD_LOG", os.environ["SCHOLIUM_PORT_GUARD_LOG"])
     return env

@@ -182,7 +182,8 @@ def test_the_script_takes_the_port_when_it_is_loaded(tmp_path):
                                      env=env, cwd=str(tmp_path), timeout=60)
     base = {k: v for k, v in os.environ.items() if k != "SCHOLIUM_ZOTERO_PORT"}
     assert run(dict(base, SCHOLIUM_ZOTERO_PORT="23129")).stdout.strip() == "http://127.0.0.1:23129"
-    assert run(base).stdout.strip() == run(dict(base, SCHOLIUM_ZOTERO_PORT="")).stdout.strip() == "http://127.0.0.1:23119"
+    # an empty one is the default (a child without one is given port 9 by conftest)
+    assert run(dict(base, SCHOLIUM_ZOTERO_PORT="")).stdout.strip() == "http://127.0.0.1:23119"
     wrong = run(dict(base, SCHOLIUM_ZOTERO_PORT="99999"))
     assert wrong.returncode != 0 and not wrong.stdout and 'SCHOLIUM_ZOTERO_PORT is "99999"' in wrong.stderr
     assert "Traceback" not in wrong.stderr

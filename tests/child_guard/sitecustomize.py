@@ -51,3 +51,16 @@ if sys.platform == "win32":   # asyncio's Proactor connects with ConnectEx, past
             _stop(address)
             return _proactor_connect(self, conn, address)
         windows_events.IocpProactor.connect = proactor_connect
+
+# a sitecustomize further on the path (a test's own: a guard of the tool it tests) runs after this one, as the module of
+# that name, so that its guard stands in front of this one's
+_here = os.path.dirname(os.path.abspath(__file__))
+for _dir in sys.path:
+    _file = os.path.join(_dir or os.getcwd(), "sitecustomize.py")
+    if os.path.abspath(_dir or os.getcwd()) != _here and os.path.isfile(_file):
+        import importlib.util
+        _spec = importlib.util.spec_from_file_location("sitecustomize", _file)
+        _module = importlib.util.module_from_spec(_spec)
+        sys.modules["sitecustomize"] = _module
+        _spec.loader.exec_module(_module)
+        break

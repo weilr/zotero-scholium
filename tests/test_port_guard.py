@@ -76,3 +76,26 @@ def test_a_child_python_with_an_environment_of_its_own_has_the_guard():
     assert "127.0.0.1" in noted
     with open(log, "r+b") as f:   # this test's own attempt does not fail it
         f.truncate(before)
+
+
+def test_a_child_with_a_sitecustomize_of_its_own_has_both(tmp_path):
+    """A test's own sitecustomize (a guard of the tool it tests) runs after the child guard, which stays in front."""
+    own = tmp_path / "own"
+    own.mkdir()
+    (own / "sitecustomize.py").write_text("import os\nos.environ['OWN_SITECUSTOMIZE'] = '1'\n", encoding="utf8")
+    env = {k: v for k, v in os.environ.items() if k not in ("SCHOLIUM_ZOTERO_PORT", "PYTHONPATH")}
+    env["PYTHONPATH"] = str(own)
+    code = ("import os, socket, sitecustomize\n"
+            "where = getattr(getattr(socket.socket.connect, '__code__', None), 'co_filename', '')\n"
+            "print(os.path.basename(os.path.dirname(sitecustomize.__file__)), os.environ.get('OWN_SITECUSTOMIZE'),\n"
+            "      os.path.basename(os.path.dirname(where)), os.environ.get('SCHOLIUM_ZOTERO_PORT'))\n"
+            "if 'child_guard' in where:\n"
+            "    socket.socket().connect(('127.0.0.1', 23119))\n")
+    from pathlib import Path
+    log = Path(os.environ["SCHOLIUM_PORT_GUARD_LOG"])
+    before = log.stat().st_size if log.exists() else 0
+    child = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=60)
+    assert child.stdout.split() == ["own", "1", "child_guard", "9"], child.stdout + child.stderr
+    assert "ZoteroPortReached" in child.stderr
+    with open(log, "r+b") as f:   # this test's own attempt does not fail it
+        f.truncate(before)
