@@ -1293,7 +1293,8 @@ def _changed_by_user(a):
 
 def _reproduces(new, old):
     """Whether a new annotation repeats a listed one: the same page, type and colour, the same text and comment, the same
-    page label and the same place (a rewrite in place would otherwise put back what the user moved or relabelled)."""
+    page label and the same place (where the tool's annotations are deleted and written again, only such a one keeps
+    what the user changed)."""
     same = lambda x, y: " ".join((x or "").split()) == " ".join((y or "").split())
     pos = parse_position(old.get("position"))
     return (new["position"]["pageIndex"] == pos.get("pageIndex") and new["type"] == old.get("type")
@@ -1337,7 +1338,7 @@ def _text_defects(s, page=False):
     return found
 
 
-def check_style(annotations, cfg, listing=None, note_html=None):
+def check_style(annotations, cfg, listing=None, note_html=None, plan=None):
     """Mechanical style checks on the generated annotations and the note; each finding is a warning.
 
     Checked: display defects in comments and margin texts (raw LaTeX, ^/_ exponents, tags the reader does not
@@ -1345,7 +1346,8 @@ def check_style(annotations, cfg, listing=None, note_html=None):
     that duplicate or intersect each other, highlights that overlap annotations already in Zotero (the tool's
     own earlier ones excepted unless `cleanup` is false), text the tool already wrote on the same page when `cleanup` is
     false (`duplicate_existing`), the tool's annotations that the user changed in Zotero and a rewrite with `cleanup` would
-    undo (`user_edit`), the number of core-coloured highlights against `core_range` (advisory: it does not
+    delete, or change in what the user changed (`user_edit`; `plan`: the rewrite in place, else they are deleted and
+    written again), the number of core-coloured highlights against `core_range` (advisory: it does not
     block --apply), a reading note without its <h1> title (`note_title`), and mathematics in the note (a double
     backslash inside a math node, LaTeX outside one).
     """
@@ -1393,14 +1395,23 @@ def check_style(annotations, cfg, listing=None, note_html=None):
                 warn("overlap", b, "intersects another highlight: " + a["text"][:40])
     last = _last_write(cfg)
     if cfg.get("cleanup", False):   # a rewrite would undo what the user changed in the tool's annotations since they were written
+        stays = {u["key"]: u["fields"] for u in plan["update"]} if plan else {}
+        stays.update({k["key"]: {} for k in plan["keep"]} if plan else {})
         for old in (listing or {}).get("annotations", []):
-            if not set(old.get("tags") or []) & OWN_TAGS or not _edited(old, last) or any(_reproduces(a, old) for a in annotations):
+            changes = _user_changes(old, last) if set(old.get("tags") or []) & OWN_TAGS else {}
+            if not changes:
                 continue
-            comment = " ".join((old.get("comment") or "").split())
-            warnings.append({"kind": "user_edit", "page": page_number(old), "text": _brief(old.get("text") or comment)[:60],
-                             "reason": f"the user changed this annotation ({old.get('key')}) in Zotero after the tool wrote it, and the "
-                                       f"rewrite would undo that: keep its comment “{comment[:300]}” and colour {old.get('color')} in the "
-                                       "configuration, or --accept user_edit when the user asked to change it"})
+            if plan is None:   # deleted and written again: only a new one that repeats it keeps the change, never the user's tags
+                if "tags" not in changes and any(_reproduces(a, old) for a in annotations):
+                    continue
+                warnings.append(_user_edit(old, changes, "undo"))
+            elif old.get("key") not in stays:
+                warnings.append(_user_edit(old, changes, "delete"))
+            else:   # changed in place in the configuration's fields: the user's tags and page label stay
+                fields = stays[old["key"]]
+                clash = {w: c for w, c in changes.items() if any(f in fields for f in CLASHES.get(w, ())) or (w == "other" and fields)}
+                if clash:
+                    warnings.append(_user_edit(old, clash, "undo"))
     # the reading note this folder wrote, which note_replace would replace, changed by the user since
     if note_html and cfg.get("note_replace"):
         for n in _edited_notes(listing, last):
@@ -1499,25 +1510,79 @@ def _fingerprint(*parts):
     return hashlib.sha1(json.dumps(parts, ensure_ascii=False).encode("utf8")).hexdigest()[:16]
 
 
-PRINT_VERSION = 2   # annotation_print's form; a record of another form is not compared (_edited)
+PRINT_VERSION = 3   # the form of a record's `written` (written_fields); a record of another form is not compared
 
 
-def annotation_print(a):
-    """A listed annotation's fingerprint, of what a user can change in Zotero: its type, colour, comment, text, tags, page
-    label, page, rectangles, font size and rotation, as a listing gives them."""
+def written_fields(a, label=None):
+    """What a record keeps of one of the tool's annotations, to tell later what the user changed in it: its type, colour
+    and page label, and fingerprints of its comment, its text and its place (page, rectangles, font size and rotation), as
+    a listing gives them. `label`: the page label the tool wrote, where the listing's may be one the user set."""
     pos = parse_position(a.get("position"))
     rest = {k: (round(v, 2) if isinstance(v, (int, float)) else v) for k, v in pos.items() if k not in ("rects", "pageIndex")}
-    return _fingerprint(a.get("type"), (a.get("color") or "").lower(), a.get("comment") or "", a.get("text") or "", sorted(a.get("tags") or []),
-                        a.get("pageLabel"), pos.get("pageIndex"), [[round(v, 1) for v in r] for r in position_rects(pos)], sorted(rest.items()))
+    return {"type": a.get("type"), "color": (a.get("color") or "").lower(), "pageLabel": a.get("pageLabel") if label is None else label,
+            "comment": _fingerprint(a.get("comment") or ""), "text": _fingerprint(a.get("text") or ""),
+            "place": _fingerprint(pos.get("pageIndex"), [[round(v, 1) for v in r] for r in position_rects(pos)], sorted(rest.items()))}
 
 
-def _edited(old, last):
-    """Whether the user changed a listed annotation of the tool since the tool wrote it: against the fingerprint the
-    output folder's last write kept of it (an update in place moves its dates), else by its dates."""
-    written = (last or {}).get("written") or {} if (last or {}).get("printVersion") == PRINT_VERSION else {}
-    if old.get("key") in written:
-        return annotation_print(old) != written[old["key"]]
-    return _changed_by_user(old)
+def _written(last):
+    """The record's written_fields by key; {} for a record of another form."""
+    if (last or {}).get("printVersion") != PRINT_VERSION:
+        return {}
+    return {k: v for k, v in ((last or {}).get("written") or {}).items() if isinstance(v, dict)}
+
+
+def _tool_label(key, last):
+    """The page label the tool wrote on an annotation, as the output folder's last record keeps it; None without one."""
+    return (_written(last).get(key) or {}).get("pageLabel")
+
+
+def _user_changes(old, last):
+    """What the user changed in a listed annotation of the tool since the tool wrote it, as {what: (then, now)}: the fields
+    of written_fields that differ from the output folder's last record of it, and "tags" for tags of the user's (any but
+    the tool's, which writes no other); {} for none. Without a record of it (none, one of another form, or one written
+    elsewhere) its dates say whether it changed, not how: "other" stands for that."""
+    then = _written(last).get(old.get("key"))
+    if then is not None:
+        changes = {f: (then.get(f), v) for f, v in written_fields(old).items() if then.get(f) != v}
+    else:
+        changes = {"other": (None, None)} if _changed_by_user(old) else {}
+    tags = sorted(set(old.get("tags") or []) - OWN_TAGS)
+    if tags:
+        changes["tags"] = ([], tags)
+    return changes
+
+
+# the fields of a rewrite in place (rewrite_plan) that would undo each change of the user's; the user's tags, and a page
+# label they set, a rewrite never changes
+CLASHES = {"comment": ("comment",), "color": ("color",), "text": ("text",), "place": ("position", "sortIndex")}
+
+
+def _user_edit(old, changes, effect):
+    """The user_edit finding of one of the tool's annotations: what the user changed, and what the rewrite would do to it
+    ("delete", or "undo" the changes given)."""
+    comment = " ".join((old.get("comment") or "").split())
+    said = []
+    for what in ("tags", "pageLabel", "comment", "color", "text", "place", "type", "other"):
+        if what not in changes:
+            continue
+        then, now = changes[what]
+        if what == "tags":
+            said.append(f"added the tag{'s' if len(now) > 1 else ''} " + ", ".join(f"“{t}”" for t in now))
+        elif what in ("pageLabel", "color", "type"):
+            said.append(f"changed {({'pageLabel': 'the page label', 'color': 'the colour', 'type': 'its type'})[what]} {then} → {now}")
+        else:
+            said.append({"comment": "changed the comment", "text": "changed the text", "place": "moved or resized it",
+                         "other": "changed it"}[what])
+    done = " and ".join(said) if len(said) < 3 else ", ".join(said[:-1]) + " and " + said[-1]
+    if effect == "delete":
+        outcome = "the rewrite would delete it: keep it in the configuration, or --accept user_edit when the user asked to delete it"
+    else:
+        keep = [{"comment": f"its comment “{comment[:300]}”", "color": f"its colour {old.get('color')}", "text": "its text",
+                 "place": "its place"}[w] for w in ("comment", "color", "text", "place") if w in changes]
+        keep = " and ".join(keep) or f"its comment “{comment[:300]}” and colour {old.get('color')}"
+        outcome = f"the rewrite would undo that: keep {keep} in the configuration, or --accept user_edit when the user asked to change it"
+    return {"kind": "user_edit", "page": page_number(old), "text": _brief(old.get("text") or comment)[:60],
+            "reason": f"since the tool wrote this annotation ({old.get('key')}), the user {done} in Zotero, and {outcome}"}
 
 
 def note_prints(html):
@@ -1565,7 +1630,8 @@ def rewrite_plan(out, cfg, listing, last=None, note_html=None):
     tool's annotations of the listing that it holds again: the same type and page, and (in this order of preference) the
     same text (a highlight or underline) or comment (a margin or sticky note) at the same place, the same place, the same
     text or comment, or rectangles over the old ones. A pair with nothing changed is kept as it is; one with changes is
-    updated in the changed fields only (comment, colour, text, position with its sort index, page label). The new
+    updated in the changed fields only (comment, colour, text, position with its sort index, and the page label unless
+    the user set one; never the tags, whose other ones are the user's). The new
     annotations without a pair are created, the tool's annotations without one deleted, and with cleanup_external the
     external ones too. With note_replace, the tool's reading note this folder wrote and the user has not changed since is
     updated in place (note.update). {"create": [indices of out], "update": [{key, index, fields}], "keep": [{key, index}],
@@ -1603,7 +1669,8 @@ def rewrite_plan(out, cfg, listing, last=None, note_html=None):
                 fields["text"] = a.get("text", "")
             if not place(a, o):
                 fields.update(position=a["position"], sortIndex=a["sortIndex"])
-            if a.get("pageLabel") and a["pageLabel"] != o.get("pageLabel"):
+            # the configuration has no page labels: one the user set stays, as their tags do (no field sets those)
+            if a.get("pageLabel") and a["pageLabel"] != o.get("pageLabel") and "pageLabel" not in _user_changes(o, last):
                 fields["pageLabel"] = a["pageLabel"]
             (plan["update"].append({"key": o["key"], "index": i, "fields": fields}) if fields
              else plan["keep"].append({"key": o["key"], "index": i}))
@@ -3295,50 +3362,58 @@ def _same_content(a, b):
             and (a.get("color") or "").lower() == (b.get("color") or "").lower() and a.get("pageLabel") == b.get("pageLabel"))
 
 
+def _label_of(key, fields, last):
+    """The page label a record keeps of an annotation a write changed or kept: the one it set, else the one the tool wrote
+    earlier (the listing's when there is no record of it), so that a label the user set stays theirs."""
+    return None if "pageLabel" in fields else _tool_label(key, last)
+
+
 def _plan_prints(written, last, plan, listing, channel):
-    """The fingerprints a record holds until the read-back gives them: the earlier record's, those of the annotations
-    kept as the plan saw them, and those of the changed ones as the changes leave them."""
+    """The fields a record holds until the read-back gives them (written_fields): the earlier record's, those of the
+    annotations kept as the plan saw them, and those of the changed ones as the changes leave them."""
     old = {o["key"]: o for o in (listing or {}).get("annotations", [])}
-    prints = dict((last or {}).get("written") or {})
+    prints = _written(last)
     for k in (plan or {}).get("remove", []):
         prints.pop(k, None)
     for k in written["keptKeys"]:
         if k in old:
-            prints[k] = annotation_print(old[k])
+            prints[k] = written_fields(old[k], _tool_label(k, last))
     for u in (plan or {}).get("update", []):
         if u["key"] in old and u["key"] in written["updatedKeys"]:
-            prints[u["key"]] = annotation_print(_expected(old[u["key"]], u["fields"], channel))
+            prints[u["key"]] = written_fields(_expected(old[u["key"]], u["fields"], channel), _label_of(u["key"], u["fields"], last))
     written["written"] = prints
     written["notes"] = dict((last or {}).get("notes") or {})
 
 
 def _record_prints(written, lst, last, note_html, plan=None, listing=None, channel="api"):
-    """The fingerprints of what a write left, into its record, from the read-back: each of the tool's annotations it
-    created; each it was to change, once the read-back has the change (these are its updatedKeys, whatever the write's
-    answer said), or as it was when the change did not land; each it kept, as the plan saw it (a change the user made
-    meanwhile then shows as theirs); and those an earlier record knew that are still there unchanged (an add-only
-    write). An annotation changed otherwise meanwhile gets none: its dates decide. Its reading note's HTML and text."""
+    """The fields of what a write left (written_fields), into its record, from the read-back: each of the tool's
+    annotations it created; each it was to change, once the read-back has the change (these are its updatedKeys,
+    whatever the write's answer said), or as it was when the change did not land; each it kept, as the plan saw it (a
+    change the user made meanwhile then shows as theirs); and what an earlier record kept of those it did not touch (an
+    add-only write), whatever the user changed in them since. Of one it changed or kept, the page label the tool wrote
+    stays (_label_of). Its reading note's HTML and text."""
     old = {o["key"]: o for o in (listing or {}).get("annotations", [])}
-    expect = {u["key"]: _expected(old[u["key"]], u["fields"], channel) for u in (plan or {}).get("update", []) if u["key"] in old}
+    fields = {u["key"]: u["fields"] for u in (plan or {}).get("update", []) if u["key"] in old}
+    expect = {k: _expected(old[k], f, channel) for k, f in fields.items()}
     created, kept = set(written["createdKeys"]), set(written["keptKeys"])
-    before = (last or {}).get("written") or {}
+    before = _written(last)
     prints, done = {}, []
     for a in lst.get("annotations", []):
         if not set(a.get("tags") or []) & OWN_TAGS:
             continue
-        k, fp = a["key"], annotation_print(a)
+        k = a["key"]
         if k in created:
-            prints[k] = fp
+            prints[k] = written_fields(a)
         elif k in expect:
             if _same_content(a, expect[k]):
-                prints[k] = fp
+                prints[k] = written_fields(a, _label_of(k, fields[k], last))
                 done.append(k)
             elif _same_content(a, old[k]):
-                prints[k] = annotation_print(old[k])
+                prints[k] = written_fields(old[k], _tool_label(k, last))
         elif k in kept and k in old:
-            prints[k] = annotation_print(old[k])
-        elif before.get(k) == fp:
-            prints[k] = fp
+            prints[k] = written_fields(old[k], _tool_label(k, last))
+        elif k in before:
+            prints[k] = before[k]
     written["written"] = prints
     if plan is not None and "updatedKeys" in written:
         written["updatedKeys"] = done
@@ -3547,7 +3622,7 @@ def main(argv=None):
               "colors": dict(collections.Counter(a["color"] for a in out if a["type"] in ("highlight", "underline"))),
               "cleanup_removes": ((len(plan["remove"]) if plan else len(own_now)) if listing else None) if cfg.get("cleanup") else 0,
               "missed": missed, "translation_warnings": check_translations(out),
-              "style_warnings": check_style(out, cfg, listing, note_html) + check_cleanup(out, cfg, listing, args.config),
+              "style_warnings": check_style(out, cfg, listing, note_html, plan) + check_cleanup(out, cfg, listing, args.config),
               "snapped": [{"page": page_number(a), "text": a["text"][:60], "similarity": a["snapped"]} for a in out if a.get("snapped")],
               "ambiguous_matches": [{"page": page_number(a), "text": (a.get("text") or a.get("comment", ""))[:60], "occurrences": a["occurrences"], "used": 1} for a in out if a.get("occurrences")],
               "layout_warnings": [{"page": page_number(a), "text": a["comment"][:60], "reason": a["layout_warning"]} for a in out if a.get("layout_warning")],

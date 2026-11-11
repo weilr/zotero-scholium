@@ -66,7 +66,7 @@ else {
 }
 run.then(result => process.stdout.write(JSON.stringify({ result, saves, erased, trashed,
   items: items.map(i => ({ key: i.key, type: i.itemType, comment: i.annotationComment, color: i.annotationColor, text: i.annotationText,
-                           position: i.annotationPosition, note: i.note })) })),
+                           position: i.annotationPosition, pageLabel: i.annotationPageLabel, tags: i.tags.map(t => t.tag), note: i.note })) })),
          error => process.stdout.write(JSON.stringify({ error: String(error && error.message || error), saves, erased })));
 """
 

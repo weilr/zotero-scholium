@@ -213,24 +213,58 @@ def bump(api, key, **data):
     api.rows[key]["data"].update(data, dateModified="2026-11-10T15:00:00Z", version=api.rows[key]["data"]["version"] + 1)
 
 
-def test_a_page_label_the_user_set_is_their_change(paper, monkeypatch, capsys):
+DELETE = ("since the tool wrote this annotation ({key}), the user {done} in Zotero, and the rewrite would delete it: keep it in the "
+          "configuration, or --accept user_edit when the user asked to delete it")
+UNDO = ("since the tool wrote this annotation ({key}), the user {done} in Zotero, and the rewrite would undo that: keep {keep} in the "
+        "configuration, or --accept user_edit when the user asked to change it")
+
+
+def user_edits(report):
+    return [w["reason"] for w in report.get("style_warnings", []) if w["kind"] == "user_edit"]
+
+
+def test_a_page_label_the_user_set_stays_while_the_comment_is_corrected(paper, monkeypatch, capsys):
     api = written_twice(paper, monkeypatch, capsys)
-    bump(api, "NEW1", annotationPageLabel="iii")   # Edit Page Number… in the reader
+    bump(api, "NEW1", annotationPageLabel="ii")   # Edit Page Number… in the reader
     code, report = run(paper, monkeypatch, capsys, {"highlights": AGAIN, "cleanup": True}, "--apply", api=api)
-    assert report["applied"] is False and "user_edit" in kinds(report) and annotations(api)["NEW1"]["annotationPageLabel"] == "iii"
+    assert report["applied"] is True and user_edits(report) == [] and report["rewrite"]["updated"] == 1
+    assert [sorted(c) for c in api.updated] == [["annotationComment", "key", "version"]], "only the configuration's fields are sent"
+    assert annotations(api)["NEW1"]["annotationPageLabel"] == "ii" and annotations(api)["NEW1"]["annotationComment"] == AGAIN[0]["comment"]
+    # the label is still the user's: left out of the set, the annotation would be deleted
+    code, report = run(paper, monkeypatch, capsys, {"highlights": AGAIN[1:], "cleanup": True}, "--apply", api=api)
+    assert report["applied"] is False and api.deleted == []
+    assert user_edits(report) == [DELETE.format(key="NEW1", done="changed the page label 1 → ii")]
 
 
-def test_a_tag_the_user_added_is_their_change(paper, monkeypatch, capsys):
+def test_a_tag_the_user_added_stays_and_holds_back_only_a_deletion(paper, monkeypatch, capsys):
     api = written_twice(paper, monkeypatch, capsys)
     api.rows["NEW2"]["data"]["tags"].append({"tag": "important"})
     bump(api, "NEW2")
     # left out of the set, it would be deleted: held back
     code, report = run(paper, monkeypatch, capsys, {"highlights": FIXED[:1], "cleanup": True}, "--apply", api=api)
-    assert report["applied"] is False and "user_edit" in kinds(report) and api.deleted == []
+    assert report["applied"] is False and api.deleted == []
+    assert user_edits(report) == [DELETE.format(key="NEW2", done="added the tag “important”")]
     # kept in the set as it is, it stays with the user's tag, and nothing is said
     code, report = run(paper, monkeypatch, capsys, {"highlights": FIXED, "cleanup": True}, "--apply", api=api)
-    assert report["applied"] is True and "user_edit" not in kinds(report) and api.updated == []
-    assert {"tag": "important"} in annotations(api)["NEW2"]["tags"]
+    assert report["applied"] is True and user_edits(report) == [] and api.updated == []
+    # its comment corrected: changed in place, and the tag stays
+    fixed = hl((S1, FIXED[0]["comment"]), (S2, "另一句话，改过。"))
+    code, report = run(paper, monkeypatch, capsys, {"highlights": fixed, "cleanup": True}, "--apply", api=api)
+    assert report["applied"] is True and user_edits(report) == [] and report["rewrite"]["updated"] == 1
+    assert [sorted(c) for c in api.updated] == [["annotationComment", "key", "version"]]
+    assert annotations(api)["NEW2"]["annotationComment"] == "另一句话，改过。" and {"tag": "important"} in annotations(api)["NEW2"]["tags"]
+
+
+def test_a_comment_the_user_changed_holds_back_a_rewrite_that_changes_it(paper, monkeypatch, capsys):
+    api = written_twice(paper, monkeypatch, capsys)
+    bump(api, "NEW1", annotationComment="我自己的译文。")
+    code, report = run(paper, monkeypatch, capsys, {"highlights": AGAIN, "cleanup": True}, "--apply", api=api)
+    assert report["applied"] is False and api.updated == []
+    assert user_edits(report) == [UNDO.format(key="NEW1", done="changed the comment", keep="its comment “我自己的译文。”")]
+    # the configuration keeps their comment: the rest goes through
+    code, report = run(paper, monkeypatch, capsys, {"highlights": hl((S1, "我自己的译文。"), (S2, "另一句话，改过。")), "cleanup": True},
+                       "--apply", api=api)
+    assert report["applied"] is True and user_edits(report) == [] and annotations(api)["NEW1"]["annotationComment"] == "我自己的译文。"
 
 
 def test_an_annotation_the_user_moved_is_their_change(paper, monkeypatch, capsys):
@@ -239,7 +273,44 @@ def test_an_annotation_the_user_moved_is_their_change(paper, monkeypatch, capsys
     pos["rects"] = [[r[0] + 30, r[1], r[2] + 30, r[3]] for r in pos["rects"]]
     bump(api, "NEW2", annotationPosition=json.dumps(pos))
     code, report = run(paper, monkeypatch, capsys, {"highlights": FIXED, "cleanup": True}, "--apply", api=api)
-    assert report["applied"] is False and "user_edit" in kinds(report) and api.updated == []
+    assert report["applied"] is False and api.updated == []
+    assert user_edits(report) == [UNDO.format(key="NEW2", done="moved or resized it", keep="its place")]
+
+
+# the plan of a comment correction to A1, which the user relabelled ii and tagged after the tool wrote it on page 1
+PLACE = {"pageIndex": 0, "rects": [[10, 10, 20, 20]]}
+TOOLS_A1 = {"key": "A1", "type": "highlight", "text": "First.", "comment": "旧译文。", "color": "#ffd400", "pageLabel": "1", "tags": ["zotero-scholium"],
+            "position": PLACE, "modified": "2026-11-10 10:00:00"}
+USERS_A1 = dict(TOOLS_A1, pageLabel="ii", tags=["zotero-scholium", "important"])
+
+
+def relabelled():
+    out = [dict(NEW, text="First.", comment="新译文。", position=PLACE)]
+    last = {"printVersion": cli.PRINT_VERSION, "written": {"A1": cli.written_fields(TOOLS_A1)}}
+    return out, cli.rewrite_plan(out, dict(cli.DEFAULTS, cleanup=True), {"annotations": [USERS_A1]}, last)
+
+
+@node
+def test_the_plugin_and_the_javascript_file_keep_the_users_page_label_and_tags(monkeypatch):
+    out, plan = relabelled()
+    assert [(u["key"], u["fields"]) for u in plan["update"]] == [("A1", {"comment": "新译文。"})], "no page label, no tags"
+    cfg = dict(cli.DEFAULTS, item_key="PARENT01", attachment_key="ATTACH01", cleanup=True)
+    # the plugin, given the payload plugin_apply sends; nothing reaches a socket
+    seen = {}
+    monkeypatch.setattr(cli, "plugin_connect", lambda cfg: ("TOKEN", {"ok": True, "canUpdate": True, "notes": []}, "http://plugin.invalid"))
+
+    def http(method, path, body=None, headers=None, timeout=60):
+        seen["payload"], seen["zotero"] = body, zotero(body, [USERS_A1])
+        return 200, {}, json.dumps(seen["zotero"]["result"])
+    monkeypatch.setattr(cli, "http", http)
+    res, err = cli.plugin_apply(cfg, out, plan)
+    assert err is None and res["updatedKeys"] == ["A1"] and seen["payload"]["updates"] == [{"key": "A1", "comment": "新译文。"}]
+    # and the JavaScript file
+    js = zotero(script=cli.render_js(cfg, out, plan), existing=[USERS_A1])
+    assert "error" not in js, js.get("error")
+    for done in (seen["zotero"], js):
+        a1 = by_key(done)["A1"]
+        assert (a1["comment"], a1["pageLabel"], a1["tags"]) == ("新译文。", "ii", ["zotero-scholium", "important"])
 
 
 # --- a plan that no longer fits -------------------------------------------------------------------------------------

@@ -67,8 +67,8 @@
   annotation's card says "Cancelled", a scanned PDF's card gives its message without a row of zeros, the state line
   no longer says the sentences are being extracted once the plugin's extract is done, and the eye button's English
   names Scholium.
-- `user_edit` also holds back a rewrite that would put back an annotation the user moved or relabelled in Zotero, or
-  delete one they tagged.
+- `user_edit` also holds back a rewrite that would put back an annotation the user moved in Zotero, or delete one they
+  tagged or relabelled. A rewrite in place keeps the user's tags and page label, and `user_edit` says what the user changed.
 - A question about several papers is told to quote the first paper's sentences as [#123] every time, never as
   "sentence 29", so that they show as citations; the other papers by title and page.
 - The translation check of a comment in German, French, Spanish, Portuguese or English no longer lists its ordinary words:
