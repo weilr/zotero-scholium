@@ -17,7 +17,8 @@
   `--apply` holds back; words to its session may let a finding through only when they ask for that exception.
 - The agent never passes `--accept user_edit` or `--accept cleanup_other` on its own judgement: it keeps those
   annotations and notes, or writes nothing and names them, and overwrites or deletes them only after the user says so
-  in a later message (the prompts and the skill).
+  in a later message (the prompts and the skill). It asks in the user's terms: what it would delete or overwrite, and
+  that a reply such as "Yes, delete it" goes ahead.
 - In a run of the plugin's agent, `--accept user_edit` and `--accept cleanup_other` (and `--allow-warnings`) go through only
   for the annotations and notes the user confirmed in a message sent after the run that held them back; `--list` names
   the tool's annotations the user changed, with what they changed.

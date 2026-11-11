@@ -183,23 +183,26 @@ def test_annotate_again_deletes_first_and_names_the_exception_only_when_that_fai
 
 
 # the user's own changes in Zotero (user_edit) and annotations a cleanup would delete (cleanup_other) are never the agent's
-# to override: kept as they are, or the run stops and tells the user, who confirms in a message of their own
-ANNOTATE_ZH = ("--apply 报告 user_edit 或 cleanup_other 时不要加 --accept：在配置里保留这些批注和笔记的现状（报告写了怎么做）；做不到时不要写入，"
-               "最后的回复不写下面那一行，改为告诉用户是哪些批注或笔记（key、页码、改了什么），写入会覆盖或删掉它们，请用户在后续消息里用自己的话确认。")
-ANNOTATE_EN = ("When --apply reports user_edit or cleanup_other, pass no --accept for them: keep those annotations and notes as they are in the "
-               "configuration (the report says how); where you cannot, write nothing and, in place of the closing line below, your final reply "
-               "tells the user which annotations or notes they are (key, page, what changed), that writing would overwrite or delete them, and "
-               "asks them to confirm in their own words in a follow-up message.")
-FOLLOW_ZH = ("user_edit 和 cleanup_other 不适用上面的例外，永远不要凭自己的判断加 --accept：--apply 报告它们时，保留这些批注和笔记的现状仍能完成"
-             "用户的要求，就在配置里保留（报告写了怎么做）；否则停下，不要写入，在回复里告诉用户是哪些批注或笔记（key、页码、改了什么），"
-             "写入会覆盖或删掉它们，请用户在下一条消息里用自己的话确认；只有用户之后的消息明确说要覆盖或删除自己的改动，"
-             "才对你告诉用户的那些批注或笔记加 --accept user_edit 或 --accept cleanup_other（在那之前脚本不放行）。")
-FOLLOW_EN = ("That exception does not cover user_edit and cleanup_other: never pass --accept for them on your own judgement. When --apply reports "
-             "them, keep those annotations and notes as they are in the configuration (the report says how) where that still does what the user "
-             "asked; otherwise stop without writing, tell the user in your reply which annotations or notes they are (key, page, what changed) "
-             "and that writing would overwrite or delete them, and ask them to confirm in their own words in their next message; only a later "
-             "message of theirs that explicitly says to overwrite or delete their own changes allows --accept user_edit or --accept cleanup_other, "
-             "for the annotations and notes you named (the script refuses them before then).")
+# to override: kept as they are, or the run stops and asks the user in their terms, who confirms in a message of their own
+ANNOTATE_ZH = ("--apply 报告 user_edit 或 cleanup_other 时，在用户确认之前不要尝试 --accept：在配置里保留这些批注和笔记的现状（报告写了怎么做）；"
+               "做不到时不要写入，最后的回复不写下面那一行，改为用用户的话说明写入会删掉或覆盖哪些批注或笔记（页码、开头几个字、用户改了什么），"
+               "并告诉用户回复“确认删除”（或“确认覆盖”）之类的话即可继续；不要提参数、脚本、命令行、权限或“自动模式”。")
+ANNOTATE_EN = ("When --apply reports user_edit or cleanup_other, do not try --accept for them before the user confirms: keep those annotations and "
+               "notes as they are in the configuration (the report says how); where you cannot, write nothing and, in place of the closing line "
+               "below, your final reply says in the user's terms what writing would delete or overwrite (page, first words, what they changed) and "
+               "that they can reply, for example, “Yes, delete it” in their language to go ahead; never mention flags, scripts, shells, permissions "
+               "or “auto mode”.")
+FOLLOW_ZH = ("user_edit 和 cleanup_other 不适用上面的例外，在用户确认之前不要尝试 --accept：--apply 报告它们时，保留这些批注和笔记的现状仍能完成"
+             "用户的要求，就在配置里保留（报告写了怎么做）；否则停下，不要写入，在回复里用用户的话说明写入会删掉或覆盖哪些批注或笔记"
+             "（页码、开头几个字、用户改了什么），并告诉用户回复“确认删除”（或“确认覆盖”）之类的话即可继续；不要提参数、脚本、命令行、"
+             "权限或“自动模式”。只有用户之后的消息明确确认，才对你说明的那些批注或笔记加 --accept user_edit 或 --accept cleanup_other"
+             "（在那之前脚本不放行）。")
+FOLLOW_EN = ("That exception does not cover user_edit and cleanup_other: do not try --accept for them before the user confirms. When --apply "
+             "reports them, keep those annotations and notes as they are in the configuration (the report says how) where that still does what "
+             "the user asked; otherwise stop without writing, and in your reply say in the user's terms what writing would delete or overwrite "
+             "(page, first words, what they changed) and that they can reply, for example, “Yes, delete it” in their language to go ahead; never "
+             "mention flags, scripts, shells, permissions or “auto mode”. Only a later message of theirs that confirms it allows --accept "
+             "user_edit or --accept cleanup_other, for the annotations and notes you named (the script refuses them before then).")
 
 
 def test_the_agent_never_overrides_the_users_own_changes_without_their_word(plugin_facts):
