@@ -4,6 +4,8 @@
 
 ### Changed
 
+- The reading-note template distinguishes training stages from alternative baselines and checks claimed omissions
+  against the paper; the Chinese writing guide also checks translation qualifiers and unreported experimental details.
 - The annotation's and a question's prompts say how the skill's script runs on this computer: with `uv run` when uv
   is found, else with the Python found.
 - An annotation ends with one short line in the user's language; its card shows the warnings that line names in every
