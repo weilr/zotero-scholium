@@ -179,8 +179,7 @@ Object.assign(ScholiumRunner, {
       : question ? await this.preRunQuestion(job, ctx) : null;
     if (this.job !== running) return;   // the plugin stopped meanwhile
     if (running.stopAsked || (job.pre && job.pre.cancelled)) ctx.current = { key, proc: null, cancelled: true };
-    else if (job.pre && job.pre.scanned && question) this.scannedAsk(ctx);
-    else if (job.pre && job.pre.scanned) this.scannedEnd(ctx);
+    else if (job.pre && job.pre.scanned && !question) this.scannedEnd(ctx);   // a question goes on, told the PDF is a scan
     else if (agent === "codex") await this.runCodex(program, ctx);
     else await this.runClaude(program, ctx);
     await this.appendLog(ctx, []);   // what the log could not take during the run
@@ -456,7 +455,8 @@ Object.assign(ScholiumRunner, {
   // a question's first step, run by the plugin before the agent starts as preRun runs it: `extract` of each of its papers
   // whose output folder has no sentences.txt yet, the paper shown first, one after the other, all within PRE_EXTRACT_MS.
   // `status` is left to the agent: a question needs the paper's record (authors, venue, notes) only now and then. { lines,
-  // script } when the paper shown was extracted; { scanned } when it has no text layer; { cancelled } after ■; null
+  // script } when the paper shown was extracted; { scanned } when it has no text layer (its other papers are extracted all
+  // the same, and the agent is told it is a scan); { cancelled } after ■; null
   // otherwise, and the agent runs extract itself. Each other paper's entry of job.paperFiles says whether its
   // sentences.txt is there (sentences) or it has no text layer (scanned)
   async preRunQuestion(job, ctx) {
@@ -483,7 +483,7 @@ Object.assign(ScholiumRunner, {
         const done = await this.preExtract(run, ctx, f ? f.key : key, left);
         if (done && done.cancelled) return done;
         if (f) Object.assign(f, done && done.lines >= 0 ? { sentences: true } : done && done.scanned ? { scanned: true } : {});
-        else if (done && done.scanned) return done;
+        else if (done && done.scanned) pre = { scanned: true };
         else if (done) pre = { lines: done.lines, script };
       }
       return pre;
@@ -495,12 +495,6 @@ Object.assign(ScholiumRunner, {
       this.refresh();
       this.settleRun();
     }
-  },
-
-  // a scanned PDF a question's pre-run found: the run ends without an agent, with a message that says so
-  scannedAsk(ctx) {
-    ctx.current = { key: ctx.key, proc: null, cancelled: false };
-    ctx.failure = this.text("noTextLayerAsk");
   },
 
   // a scanned PDF found by the pre-run: the run ends as an agent's does that found it, with the card that says so

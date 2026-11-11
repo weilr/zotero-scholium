@@ -30,7 +30,6 @@ var texts = h => {
     noPython: `No se encontró Python: instale uv (ejecute ${h.uvInstall} en una terminal), o instale Python 3.9 o posterior y ejecute pip install -U pymupdf, e inténtelo de nuevo.`,
     noUv: `No se encontró uv: instálelo con ${h.uvInstall} en una terminal e inténtelo de nuevo.`,
     noTextLayer: "El PDF no tiene capa de texto (es un documento escaneado): aplíquele primero OCR (p. ej., ocrmypdf o «Reconocer texto» de Acrobat) y vuelva a anotarlo.",
-    noTextLayerAsk: "El PDF no tiene capa de texto (es un documento escaneado) y no se puede leer su texto: aplíquele primero OCR (p. ej., ocrmypdf o «Reconocer texto» de Acrobat) y vuelva a preguntar.",
     // the setup check of the settings page: each line's name, its sentence, and its button
     checkLabel: id => ({ localApi: "API local", claude: "Claude Code", claudeSkill: "Habilidad de Claude Code",
                          codex: "Codex", codexSkill: "Habilidad de Codex", uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,

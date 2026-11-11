@@ -28,7 +28,6 @@ var texts = h => {
     noPython: `找不到 Python：安裝 uv（在終端機執行 ${h.uvInstall}），或安裝 Python 3.9 以上版本並執行 pip install -U pymupdf 後再試一次。`,
     noUv: `找不到 uv：在終端機執行 ${h.uvInstall} 安裝後再試一次。`,
     noTextLayer: "這個 PDF 沒有文字層（掃描檔）：請先做 OCR 文字辨識（例如 ocrmypdf，或 Acrobat 的「辨識文字」），再標註。",
-    noTextLayerAsk: "這個 PDF 沒有文字層（掃描檔），讀不出正文：請先做 OCR 文字辨識（例如 ocrmypdf，或 Acrobat 的「辨識文字」），再提問。",
     // the setup check of the settings page: each line's name, its sentence, and its button
     checkLabel: id => ({ localApi: "本機 API", claude: "Claude Code", claudeSkill: "Claude Code 的技能", codex: "Codex", codexSkill: "Codex 的技能",
                          uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,

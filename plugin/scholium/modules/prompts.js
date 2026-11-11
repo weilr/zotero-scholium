@@ -138,9 +138,17 @@ Object.assign(ScholiumRunner, {
                         `- extract wrote ${txt} (${p.lines} lines; its first lines are the index) and sentences.json beside it`];
   },
 
-  // the question's line of the extract the plugin ran before the agent (preRunQuestion); its status is the agent's
+  // the question's line of the extract the plugin ran before the agent (preRunQuestion), or of a PDF without a text layer;
+  // its status is the agent's
   questionPreLines(job) {
     const p = job.pre;
+    if (p && p.scanned) {
+      return [this.zh() ? "这篇论文的 PDF 是扫描件，没有文字层：extract 读不出它的正文，不要运行 extract。按它的题录和笔记（status）回答；"
+                          + "问题需要正文时，告诉用户先做 OCR 文字识别（例如 ocrmypdf，或 Acrobat 的“识别文本”）。"
+                        : "The paper's PDF is a scan without a text layer: extract cannot read its text, so do not run extract. Answer from its "
+                          + "record and notes (status); when the question needs the text, tell the user to run OCR on it first (e.g. ocrmypdf, "
+                          + "or Acrobat's Recognize Text)."];
+    }
     if (!p || !(p.lines >= 0)) return [];
     const txt = PathUtils.join(this.outDir(this.keyOf(job.att)), "sentences.txt");
     return [this.zh() ? `插件已经运行了 extract，写好了 ${txt}（${p.lines} 行，开头几行是索引）和同一目录的 sentences.json：直接读 sentences.txt，`

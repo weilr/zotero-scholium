@@ -31,7 +31,6 @@ var texts = h => {
     noPython: `Python не найден: установите uv (выполните ${h.uvInstall} в терминале) или установите Python 3.9 или новее и выполните pip install -U pymupdf, затем повторите попытку.`,
     noUv: `uv не найден: установите его командой ${h.uvInstall} в терминале и повторите попытку.`,
     noTextLayer: "В этом PDF нет текстового слоя (это скан): сначала распознайте текст (OCR), например с помощью ocrmypdf или функции «Распознать текст» в Acrobat, затем запустите аннотирование снова.",
-    noTextLayerAsk: "В этом PDF нет текстового слоя (это скан), его текст нельзя прочитать: сначала распознайте текст (OCR), например с помощью ocrmypdf или функции «Распознать текст» в Acrobat, затем задайте вопрос снова.",
     // the setup check of the settings page: each line's name, its sentence, and its button
     checkLabel: id => ({ localApi: "Локальный API", claude: "Claude Code", claudeSkill: "Навык Claude Code",
                          codex: "Codex", codexSkill: "Навык Codex", uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,

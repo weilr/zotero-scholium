@@ -28,7 +28,6 @@ var texts = h => {
     noPython: `Python が見つかりません。uv をインストールする（ターミナルで ${h.uvInstall} を実行）か、Python 3.9 以降をインストールして pip install -U pymupdf を実行してから、もう一度試してください。`,
     noUv: `uv が見つかりません。ターミナルで ${h.uvInstall} を実行してインストールしてから、もう一度試してください。`,
     noTextLayer: "この PDF にはテキストレイヤーがありません（スキャン文書）。先に OCR を実行してから（例：ocrmypdf、または Acrobat の「テキスト認識」）、もう一度注釈を付けてください。",
-    noTextLayerAsk: "この PDF にはテキストレイヤーがない（スキャン文書）ため、本文を読めません。先に OCR を実行してから（例：ocrmypdf、または Acrobat の「テキスト認識」）、もう一度質問してください。",
     // the setup check of the settings page: each line's name, its sentence, and its button
     checkLabel: id => ({ localApi: "ローカル API", claude: "Claude Code", claudeSkill: "Claude Code のスキル",
                          codex: "Codex", codexSkill: "Codex のスキル", uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,

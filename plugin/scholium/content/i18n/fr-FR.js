@@ -31,7 +31,6 @@ var texts = h => {
     noPython: `Python est introuvable ; installez uv (exécutez ${h.uvInstall} dans un terminal), ou installez Python 3.9 ou ultérieur et exécutez pip install -U pymupdf, puis réessayez.`,
     noUv: `uv est introuvable ; installez-le avec ${h.uvInstall} dans un terminal, puis réessayez.`,
     noTextLayer: "Le PDF n'a pas de couche texte (document numérisé) : appliquez-lui d'abord une reconnaissance de texte (OCR), par exemple avec ocrmypdf ou la fonction « Reconnaître le texte » d'Acrobat, puis relancez l'annotation.",
-    noTextLayerAsk: "Le PDF n'a pas de couche texte (document numérisé), son texte ne peut pas être lu : appliquez-lui d'abord une reconnaissance de texte (OCR), par exemple avec ocrmypdf ou la fonction « Reconnaître le texte » d'Acrobat, puis posez à nouveau la question.",
     // the setup check of the settings page: each line's name, its sentence, and its button
     checkLabel: id => ({ localApi: "API locale", claude: "Claude Code", claudeSkill: "Compétence de Claude Code",
                          codex: "Codex", codexSkill: "Compétence de Codex", uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,

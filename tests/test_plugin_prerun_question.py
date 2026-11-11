@@ -1,7 +1,7 @@
 """A question's first step run by the plugin before the agent starts: `extract` of each of its papers whose output folder
 has no sentences.txt yet, the paper shown first, one after the other within one time, with the command the prompt names,
 the agent's environment and the skill's script the agent finds; `status` is left to the agent. On success the prompt says
-sentences.txt is written; a scanned PDF ends the run before any agent with a message; a failure or a timeout leaves extract
+sentences.txt is written; for a scanned PDF it says the paper is a scan without a text layer; a failure or a timeout leaves extract
 to the agent; ■ stops it; the live line says the PDF is being read."""
 import pytest
 
@@ -52,15 +52,22 @@ const askBoth = async (h, popup) => {
     facts[name] = { calls: calls(h), agent: h.log.calls.length, prompt: h.log.stdin[0] || null };
     h.runner.stop();
   }
-  // a scanned PDF: no agent, the chat says why, as does the notice, as an error
+  // a scanned PDF: the agent is told the paper is a scan, and answers from its record and notes
   for (const locale of ['zh-CN', 'en-US']) {
     const h = harness(base({ locale, scriptRuns: { extract: ['{"error": "the PDF has no text layer"}', 3] } }));
     h.runner.start('x');
-    const p = await ask(h); await settle(600);
-    const n = h.log.notices.at(-1);
-    facts['scanned_' + locale] = { agent: h.log.calls.length, job: !!h.runner.job, text: h.runner.text('noTextLayerAsk'),
-                                   entries: p.view().entries.map(e => e[1]), notice: n && n.descriptions, errors: n && n.errors,
-                                   ends: convLines(h).filter(l => l.subtype === 'end').map(l => [l.outcome, l.text]) };
+    await ask(h); await settle(600);
+    facts['scanned_' + locale] = { agent: h.log.calls.length, prompt: h.log.stdin[0] || null,
+                                   ends: convLines(h).filter(l => l.subtype === 'end').map(l => l.outcome) };
+    h.runner.stop();
+  }
+  // a scanned PDF shown with another paper: the other one's extract runs too
+  {
+    const h = harness(base({ scriptRuns: { extract: ['{"error": "the PDF has no text layer"}', 3] } }));
+    const menu = withMenu(h);
+    h.runner.start('x');
+    await askBoth(h, menu); await settle(800);
+    facts.scannedBoth = { calls: calls(h).map(c => c.workdir), agent: h.log.calls.length, prompt: h.log.stdin[0] || null };
     h.runner.stop();
   }
   // an extract that never ends: after its 180 s the agent does it; the live line says the PDF is being read meanwhile
@@ -179,12 +186,23 @@ def test_a_paper_with_sentences_or_a_failed_extract_leaves_it_as_before(facts, n
     assert "（已有就直接读 sentences.txt）" in f["prompt"]
 
 
+SCAN = {"zh-CN": "\n这篇论文的 PDF 是扫描件，没有文字层：extract 读不出它的正文，不要运行 extract。按它的题录和笔记（status）回答；"
+                 "问题需要正文时，告诉用户先做 OCR 文字识别（例如 ocrmypdf，或 Acrobat 的“识别文本”）。\n",
+        "en-US": "\nThe paper's PDF is a scan without a text layer: extract cannot read its text, so do not run extract. Answer from its "
+                 "record and notes (status); when the question needs the text, tell the user to run OCR on it first (e.g. ocrmypdf, "
+                 "or Acrobat's Recognize Text).\n"}
+
+
 @pytest.mark.parametrize("locale", ["zh-CN", "en-US"])
-def test_a_scanned_pdf_ends_the_question_before_any_agent_with_a_message(facts, locale):
+def test_a_question_about_a_scanned_pdf_runs_and_is_told_so(facts, locale):
     s = facts["scanned_" + locale]
-    assert s["agent"] == 0 and s["job"] is False
-    assert s["ends"] == [["failed", s["text"]]] and any(s["text"] in e for e in s["entries"])
-    assert s["errors"] == 1 and any(s["text"] in d for d in s["notice"])
+    assert s["agent"] == 1 and s["ends"] == [] and s["prompt"].count(SCAN[locale]) == 1
+    assert "插件已经运行了 extract" not in s["prompt"] and "The plugin has already run extract" not in s["prompt"]
+
+
+def test_a_scanned_pdf_shown_with_another_paper_still_has_the_others_extract(facts):
+    b = facts["scannedBoth"]
+    assert b["calls"] == [OUT, "/data/tmp/scholium/ATT2"] and b["agent"] == 1 and SCAN["zh-CN"] in b["prompt"]
 
 
 def test_an_extract_that_never_ends_is_given_up_and_left_to_the_agent(facts):

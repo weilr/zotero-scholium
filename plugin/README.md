@@ -103,8 +103,8 @@ the PDF…", and ■ stops them); the prompt then gives their results, and a sca
 When either fails or does not end in 60 s (`extract`: 180 s), no skill is found, or Codex uses another copy of the skill
 than the one they ran, the agent runs them. Before the agent of a conversation's first question starts, the plugin runs
 `extract` the same way for each of the question's papers whose output directory has no `sentences.txt` yet, the paper shown
-first, one after the other and within 180 s in all; the prompt says which `sentences.txt` are written, and a scanned PDF
-of the paper shown ends the question there with a message. `status` is left to the agent.
+first, one after the other and within 180 s in all; the prompt says which `sentences.txt` are written, and which paper is
+a scan without a text layer (the agent then answers from its record and notes). `status` is left to the agent.
 A question is told to read the paper with the skill's `status` and `extract` and to write to Zotero only when it asks for that. A session
 that has not seen the paper's annotations of the tool is told how many there are and, when the plugin saw them
 written, the configuration that wrote them, the agent and the time (kept in `<out dir>/applied.json`: a write whose output says it was applied, also "partial", is kept whatever the exit
