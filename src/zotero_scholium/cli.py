@@ -1141,6 +1141,21 @@ def page_number(a):
     return str(page + 1) if isinstance(page, int) else a.get("pageLabel")
 
 
+ENGLISH_WORDS = set("the of and to in is are that with for on we our this by from as be which".split())
+LOCAL_WORDS = set(("der die das und mit von ist sind wir ein eine dem den des auf für nicht zu "     # de
+                   "le la les des et est sont nous une un pour dans du sur avec de il elle qui "   # fr
+                   "el los las del y es son nosotros para con por una un en "                      # es
+                   "o os da do das dos e é são nós para com uma um em").split())                   # pt
+
+
+def _number_convention(text, default="english"):
+    """How a text writes its numbers: "local" (a decimal comma, a period that groups) for German, French, Spanish or
+    Portuguese, "english" for English, by their common words; `default` when they do not tell."""
+    words = [w.lower() for w in re.findall(r"[^\W\d_]+", text)]
+    english, local = sum(w in ENGLISH_WORDS for w in words), sum(w in LOCAL_WORDS for w in words)
+    return "local" if local > english else "english" if english > local else default
+
+
 def check_translations(annotations):
     """Heuristic fidelity check: a highlight comment must translate the highlighted span only.
 
@@ -1171,9 +1186,15 @@ def check_translations(annotations):
                   "cyrillic" if len(CYRILLIC_RE.findall(plain)) > len(re.findall(r"[A-Za-z]", plain)) else "latin")
         latin = script == "latin"
         text_tokens = _tokens(text) | _tokens(_text_variants(text))
-        if script != "cjk":   # the sentence also read with the comment's letters and its way of writing numbers
-            for t in (text, _text_variants(text)):
-                text_tokens |= _tokens(t, letters=latin) | _tokens(t, local=True, letters=latin)
+        # each side's numbers read as its language writes them (1,5 and 1.500 in German, 1.5 and 1,500 in English), and both
+        # read the English way, which a comment may keep: never the sentence read another way than its own, which would
+        # take an English 1,500 for 1.5
+        sides = [(False, text_tokens)]
+        if script != "cjk":
+            english = text_tokens.union(*(_tokens(t, letters=latin) for t in (text, _text_variants(text))))
+            local = set().union(*(_tokens(t, local=True, letters=latin) for t in (text, _text_variants(text))))
+            own = script == "cyrillic" or _number_convention(plain, "local") == "local"   # a comment in Latin letters: rarely English
+            sides = [(own, local if _number_convention(text) == "local" else english), (False, english)]
         terms = _term_words(plain + " " + joined) if latin else None
         text_words = re.findall(r"[A-Za-z]+", unicodedata.normalize("NFKC", text))
         acronyms = {m.lower() for m in re.findall(r"(?<![A-Za-z])[A-Z]{2,6}s?(?![A-Za-z])", plain)}
@@ -1182,10 +1203,10 @@ def check_translations(annotations):
             readings += [re.sub(r"(?<![\d.])1\s*/\s*(?=\d)", "", p) for p in (joined, plain)]
         found = []
         for p in readings:   # each reported as the comment writes it
-            for local in (False,) if script == "cjk" else (True, False):   # a tie quotes the number with its own word
+            for local, sentence in sides:   # a tie quotes the number with its own word
                 origin = {}
                 found.append(sorted({origin.get(t, t) for t in _tokens(p, origin, local=local, letters=latin)
-                                     if not _covered(t, text_tokens, text_words, acronyms)
+                                     if not _covered(t, sentence, text_words, acronyms)
                                      and (terms is None or t in terms or any(c.isdigit() for c in t))}))
         extra = min(found, key=len)
         words = len(text_words)

@@ -80,3 +80,19 @@ def test_a_changed_number_or_an_added_term_is_flagged_as_written(source, comment
 def test_a_russian_comment_is_read_with_its_numbers_and_its_latin_terms(source, comment, flagged):
     found = reasons(source, comment)
     assert (found == []) if flagged is None else (len(found) == 1 and flagged in found[0])
+
+
+@pytest.mark.parametrize("source, comment, quoted", [
+    # a number off by a thousand: read the German way the comment says 1.5, the English way the sentence says 1500
+    ("We train on 1,500 images per class.", "Wir trainieren auf 1,5 Bildern pro Klasse.", "1,5"),
+    ("We train on 1,500 images per class.", "Wir trainieren auf 1.5 Bildern pro Klasse.", "1.5"),
+    # a German paper read with its own convention, an English comment read with English's
+    ("Wir trainieren auf 1,5 Mio. Bildern.", "We train on 1,500 images.", "1,500"),
+])
+def test_each_side_is_read_with_its_own_convention(source, comment, quoted):
+    [reason] = reasons(source, comment)
+    assert quoted in reason
+
+
+def test_the_chinese_counterpart_is_flagged_as_before():
+    assert reasons("We train on 1,500 images per class.", "我们在每类 1.5 张图像上训练。")
