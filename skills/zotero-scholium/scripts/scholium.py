@@ -2132,20 +2132,22 @@ def _unmatched_ids(pg, ids, recs):
 SCAN_TEXT_CHARS = 10   # a page with at most this many characters of text under an image over half of it is a scanned page
 
 
-def scanned_pages(pdf_path):
-    """(pages, scanned): the PDF's number of pages and how many of them are scanned: an image over at least half of the
+def scanned_pages(pdf_path, pages=None):
+    """(pages, scanned) for the selected 1-based pages, or the whole PDF: an image over at least half of the
     page with at most SCAN_TEXT_CHARS characters of text."""
     doc = pymupdf.open(pdf_path)
     try:
+        selected = list(range(len(doc))) if not pages else [p - 1 for p in pages if 1 <= p <= len(doc)]
         scanned = 0
-        for page in doc:
+        for p in selected:
+            page = doc[p]
             if len("".join(page.get_text("text").split())) > SCAN_TEXT_CHARS:
                 continue
             area = abs(page.rect) or 1
             covered = max((abs(pymupdf.Rect(i["bbox"]) & page.rect) for i in page.get_image_info()), default=0)
             if covered >= area / 2:
                 scanned += 1
-        return len(doc), scanned
+        return len(selected), scanned
     finally:
         doc.close()
 
@@ -2180,7 +2182,7 @@ def extract_main(argv):
             sys.exit("extract: --pages takes N or N-M")
         pages = list(range(int(m.group(1)), int(m.group(2) or m.group(1)) + 1))
     # most pages scanned: no text to annotate until OCR has added it; a PDF with no text at all stops after its extraction
-    total, scanned = scanned_pages(pdf)
+    total, scanned = scanned_pages(pdf, pages)
     if scanned * 2 > total:
         no_text_layer(total, scanned)
     if args.sentences:

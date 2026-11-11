@@ -534,3 +534,45 @@ def test_a_paper_with_a_figure_page_is_no_scan(tmp_path, capsys):
         page.insert_textbox(pymupdf.Rect(72, 72, 540, 700), "Recognized text of the scanned page, as OCR leaves it. " * 6, fontsize=10, render_mode=3)
     doc.saveIncr(); doc.close()
     assert cli.scanned_pages(ocr) == (2, 0)
+
+
+@pytest.mark.parametrize("numbered", [False, True])
+def test_extract_text_pages_of_a_mostly_scanned_pdf(tmp_path, numbered):
+    fp = str(tmp_path / "mixed.pdf")
+    _scan(fp, 5, text_pages=(1, 3))
+    out, js = tmp_path / "selected.txt", tmp_path / "sentences.json"
+    args = ["--pdf", fp, "--pages", "4", "--out", str(out)]
+    if numbered:
+        args += ["--sentences", str(js)]
+    assert cli.extract_main(args) == 0
+    text = out.read_text(encoding="utf8")
+    assert "--- p.4 ---" in text and "--- p.2 ---" not in text
+    assert "We study permutation invariance" in text
+    if numbered:
+        expected = cli.sentence_rects(fp, cli.extract_sentences(fp))
+        expected = [it for it in expected if "id" in it]
+        actual = json.loads(js.read_text(encoding="utf8"))["sentences"]
+        assert actual == expected, "the cache keeps whole-document IDs and rectangles"
+        assert {it["page"] for it in actual} == {2, 4}
+        assert all(it.get("rects") for it in actual)
+        for it in actual:
+            assert (f'\n{it["id"]} | ' in text) == (it["page"] == 4)
+
+
+@pytest.mark.parametrize("numbered", [False, True])
+def test_extract_scan_pages_of_a_mostly_text_pdf(tmp_path, capsys, numbered):
+    fp = str(tmp_path / "mixed.pdf")
+    _scan(fp, 4, text_pages=(0, 2, 3))
+    with pymupdf.open(fp) as doc:
+        for p, sentence in zip((0, 2, 3), ("The first method trains quickly.", "A second model generalizes well.",
+                                          "The final experiment confirms convergence.")):
+            doc[p].insert_text((72, 500), sentence, fontsize=10)
+        doc.saveIncr()
+    out, js = tmp_path / "selected.txt", tmp_path / "sentences.json"
+    args = ["--pdf", fp, "--pages", "2", "--out", str(out)]
+    if numbered:
+        args += ["--sentences", str(js)]
+    code, report = _stopped(capsys, args)
+    assert code == cli.NO_TEXT_EXIT
+    assert report == {"error": cli.NO_TEXT_LAYER, "pages": 1, "scanned_pages": 1}
+    assert not out.exists() and not js.exists()

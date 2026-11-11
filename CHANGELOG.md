@@ -43,6 +43,8 @@
 
 ### Fixed
 
+- Extracting selected text pages from a mostly scanned PDF no longer rejects them because of scans outside the selection;
+  selecting only scanned pages still asks for OCR, while sentence IDs remain those of the whole document.
 - The model list gives up after 60 s when Claude Code's output does not end, and is asked for again later.
 - The translation check takes a number with a capital magnitude suffix and the same value with 万 or 亿 as one:
   6B and 60 亿, 1.5M and 150 万, 175B and 1750 亿 are no longer reported.
