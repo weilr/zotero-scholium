@@ -843,3 +843,120 @@ def test_the_scores_count_a_resumed_session_once():
     totals = ev.usage_totals([json.loads(l) for l in resumed_lines()])
     assert totals["cost_usd"] == pytest.approx(0.0287, abs=1e-4) and totals["turns"] == 29 and totals["runs"] == 5
     assert totals["output_tokens"] == sum(o for _, _, _, o in RESUMED)   # usage is each run's own: summed as before
+
+
+# ---- every UI language, the prompt's closing line, and the section Zotero 7 draws anew ----
+LOCALES = sorted(os.listdir(os.path.join(ROOT, "plugin", "scholium", "locale")))
+
+
+def test_live_takes_every_ui_language():
+    for loc in LOCALES:
+        assert live.parser({}).parse_args(["--locale", loc]).locale == loc
+    with pytest.raises(SystemExit):
+        live.parser({}).parse_args(["--locale", "xx-XX"])
+
+
+PROMPTS = r"""
+(async () => {
+  const out = {};
+  const init = ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S1' });
+  const result = ev({ type: 'result', subtype: 'success', is_error: false, result: 'x', session_id: 'S1', num_turns: 1 });
+  for (const locale of LOCALES) {
+    const h = harness({ locale, scripts: [[init, result]] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1); await settle(40);
+    const pane = p.pane();
+    pane.tabAnnotate.click(); await settle(10);
+    pane.annotGo.click(); await settle(600);
+    out[locale] = { prompt: h.log.stdin[0] || null, lang: h.runner.lang() };
+    h.runner.stop();
+  }
+  process.stdout.write(JSON.stringify(out));
+})().catch(e => { process.stderr.write(String(e.stack || e)); process.exit(1); });
+"""
+WARNINGS = r"""
+(async () => {
+  process.stdout.write(JSON.stringify(CASES.map(([locale, line]) => harness({ locale }).runner.warningsOf('Done.\n' + line))));
+})().catch(e => { process.stderr.write(String(e.stack || e)); process.exit(1); });
+"""
+
+
+@pytest.fixture(scope="module")
+def plugin_prompts(tmp_path_factory):
+    from plugin_harness import NODE, run_scenarios
+    if NODE is None:
+        pytest.skip("Node.js is required for plugin tests")
+    return run_scenarios("const LOCALES = %s;\n" % json.dumps(LOCALES) + PROMPTS, tmp_path_factory)
+
+
+def test_the_fake_codex_closes_with_the_prompts_label_in_its_language(plugin_prompts, tmp_path_factory):
+    """The plugin's own one-click prompt in each UI language: the fake's closing line is in that language, with the label
+    and the word for none the prompt gives, and the plugin's card reads its warnings back (none, or the count)."""
+    from plugin_harness import run_scenarios
+    fake = load_fake_codex()
+    cases, wants = [], []
+    for loc in LOCALES:
+        prompt = plugin_prompts[loc]["prompt"]
+        assert prompt and fake.is_annotation(prompt), loc
+        assert fake.prompt_locale(prompt) == loc == plugin_prompts[loc]["lang"]
+        label, none, sep = fake.closing_label(prompt)
+        assert label and none and ("“%s: …”" % label in prompt or "“%s：…”" % label in prompt), loc
+        for left in (0, 2):
+            line = fake.closing_line(prompt, 4, 2, 1, "T", left)
+            warnings = "%d%s" % (left, fake.UNITS.get(loc, "")) if left else none
+            assert line == fake.COUNTS[loc].format(h=4, c=2, m=1, t="T") + label + sep + warnings, line
+            assert loc == "en-US" or "highlights" not in line, line   # the counts in the user's language
+            cases.append([loc, line])
+            wants.append(warnings if left else "")
+    got = run_scenarios("const CASES = %s;\n" % json.dumps(cases, ensure_ascii=False) + WARNINGS, tmp_path_factory)
+    assert got == wants
+
+
+def cs_patterns():
+    """The closing-line patterns of the fake Claude Code (fakeclaude.cs), its \\u escapes read as Python reads them."""
+    source = open(os.path.join(SMOKE, "fakeclaude", "fakeclaude.cs"), encoding="utf8").read()
+    found = dict(re.findall(r'const string (Closing\w+) = "((?:[^"\\]|\\.)*)";', source))
+    return {k: v.encode("ascii").decode("unicode_escape") for k, v in found.items()}
+
+
+def test_the_fake_claude_reads_the_closing_label_as_the_fake_codex(plugin_prompts):
+    fake = load_fake_codex()
+    cs = cs_patterns()
+    assert cs == {"ClosingEn": fake.CLOSING_EN.pattern, "ClosingZh": fake.CLOSING_ZH.pattern}
+    for loc in LOCALES:
+        prompt = plugin_prompts[loc]["prompt"]
+        m = re.search(cs["ClosingEn"], prompt) or re.search(cs["ClosingZh"], prompt)
+        assert m and (m.group(1), m.group(2)) == fake.closing_label(prompt)[:2], loc
+
+
+FRESH = r"""
+const src = require('fs').readFileSync(process.argv[1], 'utf8').split('\r\n').join('\n');
+const fn = src.slice(src.indexOf('function fresh(box) {'), src.indexOf('\n}\n', src.indexOf('function fresh(box) {')) + 2);
+const mk = (connected, width, inLibrary, visible = true) => ({ isConnected: connected, getBoundingClientRect: () => ({ width }),
+  checkVisibility: () => visible, closest: sel => (sel === '#zotero-item-pane' && inLibrary ? {} : null) });
+let list = [];
+const boxes = () => list;
+const fresh = eval('(' + fn.replace('function fresh(box)', 'function (box)') + ')');
+const shown = mk(true, 300, true), old = mk(false, 0, true), readerOld = Object.assign(mk(false, 0, false), { __probeInReader: true });
+const readerNew = mk(true, 280, false), hidden = mk(true, 300, true, false);
+const out = [];
+list = [hidden, readerNew, shown];
+out.push(fresh(shown) === shown, fresh(old) === shown, fresh(readerOld) === readerNew, fresh(null) === null);
+list = [];
+out.push(fresh(old) === old);   // none drawn: the old one
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="needs node")
+def test_the_probe_takes_the_section_zotero_drew_anew(tmp_path):
+    probe = open(os.path.join(SMOKE, "probe", "bootstrap.js"), encoding="utf8").read()
+    shot = probe[probe.index("async function shot("):probe.index("// ---- input ----")]
+    assert "box = fresh(box);" in shot and "box = fresh(box);" in probe[probe.index("function cards(box)"):][:80]
+    assert "b.__probeInReader = !!inReader;" in probe
+    live_js = open(os.path.join(SMOKE, "probe", "live.js"), encoding="utf8").read()
+    after = live_js[live_js.index('line("ended"'):]
+    assert after.index("box = fresh(box);") < after.index('line("card"')
+    p = subprocess.run([shutil.which("node"), "-e", FRESH, os.path.join(SMOKE, "probe", "bootstrap.js")], capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0, p.stderr
+    assert json.loads(p.stdout) == [True] * 5

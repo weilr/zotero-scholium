@@ -10,8 +10,10 @@ CODEX_HOME/skills and <cwd>/.agents/skills only, skills/extraRoots/set, thread/s
 turn/start|interrupt|steer) and plays a turn. For the plugin's one-click annotation it reads sentences.txt (or runs
 extract when the plugin's pre-run did not), writes config.json and reading_note.html with placeholder comments, and runs
 the skill's own scholium.py --apply against Zotero at SCHOLIUM_ZOTERO_PORT, refused when that is missing, below 1024 or
-23119 (the user's Zotero). Any other turn gets a one-sentence answer. Every message in and out, and the process's
-arguments, folder and port/uv/Codex variables, go to <SCHOLIUM_FAKE_CODEX_LOG or calls beside this file>/<time>-<pid>.jsonl.
+23119 (the user's Zotero), then ends with the closing line the prompt asks for: in the user's language the prompt names,
+with the prompt's own label for the warnings left and its word for none. Any other turn gets a one-sentence answer.
+Every message in and out, and the process's arguments, folder and port/uv/Codex variables, go to
+<SCHOLIUM_FAKE_CODEX_LOG or calls beside this file>/<time>-<pid>.jsonl.
 """
 import json
 import os
@@ -25,6 +27,32 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 USER_PORT = 23119
 SHELL = r"C:\Program Files\PowerShell\7\pwsh.exe"   # the shell Codex names in a command item (shown only)
 ANNOTATE = re.compile(r"为下面这篇论文做整篇标注|annotate the whole paper below")   # the plugin's one-click prompt
+# the closing line the one-click prompt asks for: its label for the warnings left and its word for none, as the prompt
+# gives them (the plugin's warningsPart), in the English and the Chinese prompt
+CLOSING_EN = re.compile(r"remaining warnings as “(.+?): …” \(“.+?: (.+?)” when there are none\)")
+CLOSING_ZH = re.compile(r"剩余警告，写成“(.+?)：…”（没有时写“.+?：(.+?)”）")
+# the user's language as the prompt names it (the plugin's languageLines); a Chinese prompt without it is zh-CN, an English
+# one en-US
+LANGUAGES = {"Japanese": "ja-JP", "Korean": "ko-KR", "German": "de", "French": "fr-FR", "Spanish": "es-ES", "Russian": "ru-RU",
+             "Brazilian Portuguese": "pt-BR", "European Portuguese": "pt-PT"}
+# the closing line's counts in each language: highlights, core ones, margin notes, the note's title; then the label
+COUNTS = {
+    "zh-CN": "高亮 {h} 条（核心 {c} 条），页边批注 {m} 条，笔记《{t}》，",
+    "zh-TW": "高亮 {h} 條（核心 {c} 條），頁邊批註 {m} 條，筆記《{t}》，",
+    "en-US": "{h} highlights ({c} core), {m} margin notes, note “{t}”, ",
+    "ja-JP": "ハイライト {h} 件（重要 {c} 件）、余白メモ {m} 件、ノート「{t}」、",
+    "ko-KR": "하이라이트 {h}개(핵심 {c}개), 여백 메모 {m}개, 노트 「{t}」, ",
+    "de": "{h} Hervorhebungen ({c} zentral), {m} Randnotizen, Notiz „{t}“, ",
+    "fr-FR": "{h} surlignages ({c} essentiels), {m} notes de marge, note « {t} », ",
+    "es-ES": "{h} resaltados ({c} clave), {m} notas al margen, nota «{t}», ",
+    "ru-RU": "{h} выделений ({c} ключевых), {m} заметок на полях, заметка «{t}», ",
+    "pt-PT": "{h} destaques ({c} essenciais), {m} notas de margem, nota «{t}», ",
+    "pt-BR": "{h} destaques ({c} essenciais), {m} notas de margem, nota «{t}», ",
+}
+UNITS = {"zh-CN": " 条", "zh-TW": " 條", "ja-JP": " 件", "ko-KR": "개"}   # after the count of warnings left
+NOT_WRITTEN = {"zh-CN": "没有写入：", "zh-TW": "沒有寫入：", "en-US": "Nothing written:", "ja-JP": "書き込まれませんでした：",
+               "ko-KR": "기록하지 못함:", "de": "Nichts geschrieben:", "fr-FR": "Rien d'écrit :", "es-ES": "No se escribió nada:",
+               "ru-RU": "Ничего не записано:", "pt-PT": "Nada gravado:", "pt-BR": "Nada gravado:"}
 LOCK = threading.Lock()
 STATE = {"threads": 0, "turns": 0, "items": 0, "interrupted": set(), "done": set()}
 _log = None
@@ -66,6 +94,38 @@ def port_ok(env=None):
 
 def is_annotation(text):
     return bool(ANNOTATE.search(text or ""))
+
+
+def prompt_locale(text):
+    """The user's language of a plugin prompt: Traditional Chinese and the others it names, else the prompt's own."""
+    text = text or ""
+    if "用户使用繁体中文" in text:
+        return "zh-TW"
+    m = re.search(r"The user's language is ([A-Za-z ]+?):", text)
+    if m and m.group(1) in LANGUAGES:
+        return LANGUAGES[m.group(1)]
+    return "zh-CN" if CLOSING_ZH.search(text) or "为下面这篇论文做整篇标注" in text else "en-US"
+
+
+def closing_label(text):
+    """(label, word for none, what follows the label) of the closing line the prompt asks for; the plugin's English or
+    Chinese words when it names none."""
+    m = CLOSING_EN.search(text or "")
+    if m:
+        return m.group(1), m.group(2), ": "
+    m = CLOSING_ZH.search(text or "")
+    if m:
+        return m.group(1), m.group(2), "："
+    return ("剩余警告", "无", "：") if prompt_locale(text) == "zh-CN" else ("remaining warnings", "none", ": ")
+
+
+def closing_line(text, highlights, core, margin, title, left):
+    """The one short line in the user's language the prompt asks for: the counts, then its label and the warnings left
+    (their count, or its word for none)."""
+    loc = prompt_locale(text)
+    label, none, sep = closing_label(text)
+    warnings = "%d%s" % (left, UNITS.get(loc, "")) if left else none
+    return COUNTS.get(loc, COUNTS["en-US"]).format(h=highlights, c=core, m=margin, t=title) + label + sep + warnings
 
 
 def skills_in(root):
@@ -196,10 +256,9 @@ def annotate(thread, turn, text, skill, cwd):
     created = (rep.get("result") or {}).get("created") or {}
     left = len(rep.get("translation_warnings") or []) + len(rep.get("style_warnings") or [])
     if rep.get("applied"):
-        closing = "高亮 %d 条（核心 %d 条），页边批注 %d 条，笔记《%s》，剩余警告：%s" % (
-            created.get("highlight", 0), sum(1 for h in highlights if h["core"]), created.get("text", 0), title, "%d 条" % left if left else "无")
+        closing = closing_line(text, created.get("highlight", 0), sum(1 for h in highlights if h["core"]), created.get("text", 0), title, left)
     else:
-        closing = "没有写入：%s" % (rep.get("apply_error") or output[-200:])
+        closing = "%s %s" % (NOT_WRITTEN.get(prompt_locale(text), NOT_WRITTEN["en-US"]), rep.get("apply_error") or output[-200:])
     say(thread, turn, closing)
     finish(thread, turn, t0)
 

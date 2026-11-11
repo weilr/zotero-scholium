@@ -30,7 +30,7 @@ python scripts/smoke/smoke.py --zotero "C:\Program Files\Zotero\zotero.exe" --po
 | `--plugin` | `plugin/scholium` | the plugin source folder, or a built `.xpi` |
 | `--skill` | `skills/zotero-scholium` | the skill added in `content/skill` when the plugin has none; `""` for none |
 | `--cli` | `<skill>/scripts/scholium.py` | the skill's CLI for the `apply` check |
-| `--locale` | `zh-CN` | `zh-CN` or `en-US` |
+| `--locale` | `zh-CN` | Zotero's UI language, one of the plugin's: `zh-CN`, `en-US`, `zh-TW`, `ja-JP`, `ko-KR`, `de`, `fr-FR`, `es-ES`, `ru-RU`, `pt-PT`, `pt-BR` |
 | `--checks` | `all` | `all`, `fake` (everything but `setup` and `copy`, which need the real programs), or a comma list |
 | `--out` | `%TEMP%\scholium-smoke\<time>` | the run folders |
 | `--minutes` | 10 | the longest one Zotero start may take |
@@ -43,8 +43,12 @@ with `python scripts/build_xpi.py %TEMP%\scholium.xpi` and pass `--plugin %TEMP%
 carries the skill keeps its own.
 
 The checks take the sentences they expect (the not-signed-in text, the PyMuPDF card, the menu item, the button
-labels) from the running plugin's `text()`, so they follow its wording. On top of that they check what does not
-depend on the wording: no "Please run /login", the card names PyMuPDF, the dialog names the local API.
+labels) from the running plugin's `text()`, so they follow its wording, in every UI language. The fake's `annotate-ok`
+run ends with the closing line the plugin's prompt asks for, with the label and the word for none the prompt gives
+(`{{CLOSING}}` in its script). Zotero 7 draws the section anew now and then (after Replace deleted the annotations); the
+probe then takes the section shown in the same place, not the element it held, for its screenshots and cards. On top
+of that they check what does not depend on the wording: no "Please run /login", the card names PyMuPDF, the dialog
+names the local API.
 
 ## Checks
 
@@ -124,7 +128,7 @@ imports a copy into the throwaway's storage.
 | `--zotero` | (required) | the `zotero.exe` to start with a throwaway profile |
 | `--pdf`, `--meta` | (required), none | the paper and its item |
 | `--git` | `HEAD` | the commit to run |
-| `--model`, `--effort`, `--locale` | `haiku`, `low`, `zh-CN` | the plugin's settings for the run |
+| `--model`, `--effort`, `--locale` | `haiku`, `low`, `zh-CN` | the plugin's settings for the run (`--locale`: any of `smoke.py`'s) |
 | `--extra` | `""` | instructions typed above Annotate (none: the one-click run) |
 | `--max-msgs` | 60 | the probe cancels the run after this many API messages (the agent never sees it) |
 | `--max-usd` | 1.00 | the session ends once its runs' cost passes this (from the result lines; a resumed session's total counted once) |
@@ -241,9 +245,11 @@ export's skill into the run's `CODEX_HOME`. It needs `--fake` too, so that no re
 answers the plugin's JSON-RPC requests (initialize, account/read, model/list, skills/list, thread/start, turn/start,
 turn/interrupt, …) and plays the one-click annotation: it reads `sentences.txt`, writes `config.json` and the note with
 placeholder comments, and runs the skill's own `scholium.py --apply` against the throwaway's port (refused when the
-port is missing or 23119); any other turn gets one sentence. `--stop-prerun` first presses ■ during an Annotate's
-pre-run (the skill copy's `status` waits while `<run>\codex-home\SLOW_PRERUN` is there). `shots\facts.json` records each
-process the plugin starts, with its port and `UV_CACHE_DIR`, and the live line's words and step.
+port is missing or 23119), and ends with the closing line the prompt asks for: in the user's language it names, with
+its label for the warnings left and its word for none; any other turn gets one sentence. `--stop-prerun` first presses
+■ during an Annotate's pre-run (the skill copy's `status` waits while `<run>\codex-home\SLOW_PRERUN` is there).
+`shots\facts.json` records each process the plugin starts, with its port and `UV_CACHE_DIR`, and the live line's words
+and step.
 
 ## A live run folder
 

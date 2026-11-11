@@ -5,6 +5,8 @@ import importlib.util
 import json
 import os
 import re
+import shutil
+import subprocess
 import zipfile
 
 import pytest
@@ -249,7 +251,49 @@ def test_the_probe_asks_the_plugin_for_texts_it_has():
 
 
 def test_every_locale_has_a_question():
-    assert set(smoke.QUESTION) == {"zh-CN", "en-US"} and all(smoke.QUESTION.values())
+    # one question per UI language of the plugin (its locale folders): the choices of --locale in smoke.py and live.py
+    locales = set(os.listdir(os.path.join(ROOT, "plugin", "scholium", "locale")))
+    assert set(smoke.QUESTION) == locales and len(locales) >= 10
+    assert all(smoke.QUESTION.values()) and len(set(smoke.QUESTION.values())) == len(locales)
+    assert smoke.QUESTION["zh-CN"] == "这篇论文讲什么？" and smoke.QUESTION["en-US"] == "What is this paper about?"
+
+
+def test_the_fakes_annotation_ends_with_the_prompts_closing_line():
+    # annotate-ok's last message and result are the closing line fakeclaude.cs makes of the prompt ({{CLOSING}})
+    events = [json.loads(l) for l in open(os.path.join(SMOKE, "fakeclaude", "scripts", "annotate-ok.jsonl"), encoding="utf8")
+              if l.strip() and not l.startswith(("#", "//"))]
+    assert events[-1]["type"] == "result" and events[-1]["result"] == "{{CLOSING}}"
+    assert events[-2]["message"]["content"] == [{"type": "text", "text": "{{CLOSING}}"}]
+    source = open(os.path.join(SMOKE, "fakeclaude", "fakeclaude.cs"), encoding="utf8").read()
+    assert '.Replace("{{CLOSING}}", closing)' in source and all(ord(c) < 128 for c in source)   # \u escapes: any code page
+
+
+CSC = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe")
+
+
+@pytest.mark.skipif(not os.path.isfile(CSC), reason="needs the .NET Framework compiler (Windows)")
+def test_the_compiled_fake_writes_the_prompts_closing_line(tmp_path):
+    exe = str(tmp_path / "fakeclaude.exe")
+    c = subprocess.run([CSC, "/nologo", "/out:" + exe, os.path.join(SMOKE, "fakeclaude", "fakeclaude.cs")], capture_output=True, text=True)
+    assert c.returncode == 0, c.stdout + c.stderr
+    fake = tmp_path / "fake"
+    shutil.copytree(os.path.join(SMOKE, "fakeclaude", "scripts"), str(fake / "scripts"))
+    shutil.copy(os.path.join(SMOKE, "fakeclaude", "models.json"), str(fake))
+    (fake / "next.txt").write_text("annotate-ok", encoding="utf8")
+    env = dict(os.environ, SCHOLIUM_FAKE_DIR=str(fake), SCHOLIUM_ZOTERO_PORT="9")
+    prompts = {   # the plugin's closing part (warningsPart) in its English and its Chinese prompt
+        "verbleibende Warnungen: keine": "Use the zotero-scholium skill to annotate the whole paper below: …\nYour final reply is one "
+            "short line in the user's language and nothing else: N highlights (M core), K margin notes, note “title”, remaining "
+            "warnings as “verbleibende Warnungen: …” (“verbleibende Warnungen: keine” when there are none).",
+        "剩餘警告：無": "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：…\n最后的回复只写一行中文，不写别的：高亮 N 条（核心 M 条），页边批注 K 条，"
+            "笔记《标题》，剩余警告，写成“剩餘警告：…”（没有时写“剩餘警告：無”）。",
+        "Smoke run: nothing written.": "Use the zotero-scholium skill to read the paper below and answer the question.",
+    }
+    for want, prompt in prompts.items():
+        p = subprocess.run([exe, "-p", "--output-format", "stream-json"], input=prompt.encode("utf8"), capture_output=True, env=env, timeout=60)
+        events = [json.loads(l) for l in p.stdout.decode("utf8").splitlines() if l.strip()]
+        assert p.returncode == 0 and events[-1]["type"] == "result" and events[-1]["result"] == want, want
+        assert events[-2]["message"]["content"][0]["text"] == want
 
 
 def test_no_personal_paths_in_the_tools():

@@ -820,7 +820,7 @@ def parser(config):
     ap.add_argument("--port", type=int, default=23129, help="the throwaway's local server port (never 23119)")
     ap.add_argument("--model", default="haiku")
     ap.add_argument("--effort", default="low")
-    ap.add_argument("--locale", default="zh-CN", choices=sorted(smoke.QUESTION))
+    ap.add_argument("--locale", default="zh-CN", choices=sorted(smoke.QUESTION), help="Zotero's UI language: " + ", ".join(sorted(smoke.QUESTION)))
     ap.add_argument("--extra", default="", help="extra instructions typed above Annotate (default: none, the one-click run)")
     ap.add_argument("--max-msgs", type=int, default=60, help="the probe cancels the run after this many API messages (the agent is not shown it)")
     ap.add_argument("--max-usd", type=float, default=1.0, help="the session ends once its runs' cost (from the result lines) passes this")

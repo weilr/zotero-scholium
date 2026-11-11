@@ -81,6 +81,7 @@ function scroller(box) { try { return box.closest("item-details")._paneParent; }
 async function shot(name, box = null, w = win()) {
   await IOUtils.write(PathUtils.join(OUT, name + ".png"), await snap(w, null, 1));
   const files = [name + ".png"];
+  box = fresh(box);
   if (box) {
     const sc = scroller(box);
     const left = Math.max(0, (sc ? sc.getBoundingClientRect().left : box.getBoundingClientRect().left) - 12);
@@ -186,7 +187,20 @@ async function toSection(inReader) {
   const s = sections.find(x => !x.closest("#zotero-item-pane") === inReader && x.checkVisibility());
   if (!s) throw new Error("no Scholium section " + (inReader ? "in the reader" : "in the library") + " (" + sections.length + " found)");
   await Promise.race([s.closest("item-details").scrollToPane(R().paneID, "instant"), delay(3000)]);
-  return waitFor(() => { const b = s.querySelector(".scholium-pane"); return b && b.isConnected ? b : null; }, 8000);
+  return waitFor(() => {
+    const b = s.querySelector(".scholium-pane");
+    if (!b || !b.isConnected) return null;
+    b.__probeInReader = !!inReader;   // where fresh() looks for the section drawn anew
+    return b;
+  }, 8000);
+}
+// the section's element as it is now: Zotero 7 draws the section anew (after a redo's Replace deleted the annotations,
+// say), and the element a step holds is then out of the document, its rectangle empty, so drawSnapshot of it fails and
+// its cards are the old ones. The visible section of the same place, the library's item pane or a reader's, replaces it
+function fresh(box) {
+  if (!box || (box.isConnected && box.getBoundingClientRect().width > 0)) return box;
+  const inReader = !!box.__probeInReader;
+  return boxes().find(b => b.isConnected && b.checkVisibility() && !b.closest("#zotero-item-pane") === inReader) || box;
 }
 async function selectItem(it) {
   const w = win();
@@ -223,6 +237,7 @@ async function showTab(box, which) {
 }
 function annotGo(box) { const p = paneOf(box); return (p && p.annotGo) || q(box, ".scholium-send-row .scholium-button.primary"); }
 function cards(box) {
+  box = fresh(box);
   return qa(box, ".scholium-card").map(c => ({ cls: c.className, title: txt(c.querySelector(".scholium-card-title")) || txt(c.firstElementChild),
                                                text: txt(c).slice(0, 300), buttons: [...c.querySelectorAll("button")].map(b => txt(b) || b.title) }));
 }

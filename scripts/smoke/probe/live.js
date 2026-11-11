@@ -58,7 +58,7 @@ async function sampleLive(box, until) {
   let last = null;
   while (!until()) {
     let words = "", title = "";
-    try { const w = box && box.querySelector(".scholium-working"); words = w ? txt(w) : ""; } catch (e) {}
+    try { const b = fresh(box), w = b && b.querySelector(".scholium-working"); words = w ? txt(w) : ""; } catch (e) {}
     try { title = R().job ? R().runningTitle() : ""; } catch (e) {}
     const key = (words + " | " + title).replace(/\d+/g, "#");
     if (key !== last) { last = key; line("live", { words, title }); }
@@ -264,6 +264,7 @@ async function main() {
     await sampler;
     await delay(3000);
     line("ended", { seconds: Math.round((Date.now() - t0run) / 1000), stopped, messages: await apiMessages(D.att) });
+    box = fresh(box);   // the section as Zotero shows it now
     line("card", { cards: cards(box), title: txt(q(box, ".scholium-card-title")), nums: qa(box, ".scholium-card-nums > div").map(txt), usage: txt(q(box, ".scholium-card-usage")) });
     await shot("a1-card", box);
     const anns = allAnns(D.att);

@@ -59,9 +59,13 @@ HOOK = ("\n// smoke probe only: the runner and the toggle where the probe can re
         "startup = async function (data, reason) { await __smokeStartup(data, reason); "
         "Zotero.__scholium = ScholiumRunner; Zotero.__scholiumToggle = ScholiumToggle; };\n")
 
-# the question the signedout check sends in the Chat tab; the sentences a check expects are asked of the running plugin
-# (its text()), so the checks follow its wording
-QUESTION = {"zh-CN": "这篇论文讲什么？", "en-US": "What is this paper about?"}
+# the question the signedout check sends in the Chat tab, in each UI language of the plugin (its locale folders: the
+# choices of --locale here and in live.py); the sentences a check expects are asked of the running plugin (its text()),
+# so the checks follow its wording
+QUESTION = {"zh-CN": "这篇论文讲什么？", "en-US": "What is this paper about?", "zh-TW": "這篇論文講什麼？",
+            "ja-JP": "この論文は何について書かれていますか？", "ko-KR": "이 논문은 무엇에 관한 것인가요?", "de": "Worum geht es in diesem Artikel?",
+            "fr-FR": "De quoi parle cet article ?", "es-ES": "¿De qué trata este artículo?", "ru-RU": "О чём эта статья?",
+            "pt-PT": "De que trata este artigo?", "pt-BR": "Sobre o que é este artigo?"}
 
 # the paper of the throwaway items: two pages of plain sentences
 PDF_PAGES = [
@@ -617,7 +621,7 @@ def main(argv=None):
     ap.add_argument("--skill", default=os.path.join(REPO, "skills", "zotero-scholium"),
                     help="the skill to package in content/skill when the plugin has none ('' for none)")
     ap.add_argument("--cli", default=None, help="the skill's scholium.py for the apply check (default: <skill>/scripts/scholium.py)")
-    ap.add_argument("--locale", default="zh-CN", choices=sorted(QUESTION))
+    ap.add_argument("--locale", default="zh-CN", choices=sorted(QUESTION), help="Zotero's UI language: " + ", ".join(sorted(QUESTION)))
     ap.add_argument("--git", default=None, metavar="REV",
                     help="test plugin/scholium and skills/zotero-scholium as committed at REV (e.g. HEAD), not the working tree")
     ap.add_argument("--checks", default="all", help="all, fake (all but setup and copy), or a comma list of: " + ", ".join(ALL_CHECKS))

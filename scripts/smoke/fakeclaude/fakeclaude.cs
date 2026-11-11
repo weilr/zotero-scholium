@@ -4,7 +4,10 @@
 // folder of the program. In it:
 // - models.json: the answer to the plugin's model-list call (the call with --input-format).
 // - scripts\<name>.jsonl: a recorded stream-json run. <name> is the first line of next.txt (default "answer"). Lines:
-//   a JSON event (printed as is; {{SESSION}} becomes the session id: the --resume argument, else a new one),
+//   a JSON event (printed as is; {{SESSION}} becomes the session id: the --resume argument, else a new one, and
+//   {{CLOSING}} the closing line the plugin's one-click prompt asks for: "<label>: <word for none>" with the label and
+//   the word the prompt gives, in the user's language, since the fake writes nothing; other prompts get "Smoke run:
+//   nothing written."),
 //   "#delay <ms>", "#stream <ms per piece> <text>" (the text as stream_event text deltas, three characters a piece),
 //   "#wait" (until killed), "#exit <code>", "#next <name>" (writes next.txt for the following call), "//" comments.
 // - calls\<n>.txt: each call, numbered: its script name, a line "ENV SCHOLIUM_ZOTERO_PORT=<value>" (the port the
@@ -16,6 +19,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 
 class FakeClaude {
@@ -47,6 +51,8 @@ class FakeClaude {
         string session = Guid.NewGuid().ToString();
         int r = Array.IndexOf(args, "--resume");
         if (r >= 0 && r + 1 < args.Length) session = args[r + 1];
+        string closing = Json(Closing(prompt));
+        closing = closing.Substring(1, closing.Length - 2);   // inside a JSON string of the script
         string script = Path.Combine(dir, "scripts", name + ".jsonl");
         foreach (string raw in File.ReadAllLines(script, utf8)) {
             string line = raw.TrimEnd();
@@ -68,9 +74,22 @@ class FakeClaude {
                 }
                 continue;
             }
-            stdout.WriteLine(line.Replace("{{SESSION}}", session));
+            stdout.WriteLine(line.Replace("{{SESSION}}", session).Replace("{{CLOSING}}", closing));
         }
         return 0;
+    }
+
+    // the plugin's warningsPart in its English and its Chinese prompt (\u escapes: the compiler may read this file in the
+    // system's code page)
+    const string ClosingEn = "remaining warnings as \u201c(.+?): \u2026\u201d \\(\u201c.+?: (.+?)\u201d when there are none\\)";
+    const string ClosingZh = "\u5269\u4f59\u8b66\u544a\uff0c\u5199\u6210\u201c(.+?)\uff1a\u2026\u201d\uff08\u6ca1\u6709\u65f6\u5199\u201c.+?\uff1a(.+?)\u201d\uff09";
+
+    static string Closing(string prompt) {
+        Match en = Regex.Match(prompt, ClosingEn);
+        if (en.Success) return en.Groups[1].Value + ": " + en.Groups[2].Value;
+        Match zh = Regex.Match(prompt, ClosingZh);
+        if (zh.Success) return zh.Groups[1].Value + "\uff1a" + zh.Groups[2].Value;
+        return "Smoke run: nothing written.";
     }
 
     static string Json(string s) {
