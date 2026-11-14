@@ -712,7 +712,12 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
         return inside;
       },
       remove: async p => { if (unremovable.includes(p)) throw Error('NotAllowedError'); log.removed.push(p); delete log.writes[p]; },
-      stat: async p => { if (!(p in log.writes)) throw Error('NotFoundError'); return { lastModified: log.mtimes[p] || 0, size: log.writes[p].length }; },
+      // a test's own files (existing) are there, not empty; written ones have their length
+      stat: async p => {
+        if (p in log.writes) return { type: 'regular', lastModified: log.mtimes[p] || 0, size: log.writes[p].length };
+        if (files.has(p)) return { type: 'regular', lastModified: log.mtimes[p] || 0, size: 1 };
+        throw Error('NotFoundError');
+      },
       readUTF8: async p => {
         if (readFails && p === PROFILE_PATH) throw Error('NotReadableError');
         log.reads.push(p);

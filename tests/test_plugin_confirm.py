@@ -1,9 +1,5 @@
-"""The user's word on what they changed in Zotero: the plugin tells the skill's script that it runs for the plugin
-(SCHOLIUM_PLUGIN_RUN) and where to note the annotations and notes it held back (SCHOLIUM_HELD_BACK). The next message the
-user sends in that conversation, and only that one, confirms them for the script (SCHOLIUM_CONFIRMED); a message sent
-before the run that held them back ended does not, and neither does the run that held them back. Annotate again, whose
-deletion first failed, confirms cleanup_other for the tool's annotations it left. An in-memory Zotero stands in for
-Zotero; nothing reaches a socket."""
+"""Only an explicit pane action authorizes the reported keys. Ordinary messages, including yes/no/partial replies,
+never grant permission. An in-memory Zotero stands in for Zotero; nothing reaches a socket."""
 import pytest
 
 from plugin_harness import NODE, run_scenarios
@@ -44,9 +40,19 @@ SCENARIOS = r"""
     const pane = p.pane();
     pane.input.type('删掉它'); pane.send.click(); await settle(800);
     h.runner.heldBack.set('ATT1/' + pane.shownConv, { keys: { cleanup_other: ['K7', 'K8'] }, seq: h.runner.sendSeq });
-    pane.input.type('确认删除'); pane.send.click(); await settle(800);
+    h.runner.paintPane(pane);
+    if (pane.heldRow) pane.heldRow.children[2].click();
+    await settle(800);
     facts.codex = h.log.codexCalls.map(o => envOf(o.environment));
     h.runner.stop();
+  }
+  facts.text = [];
+  for (const say of ['不要删除', '顺便问一下论文结论', '只确认第一条，第二条保留', '确认删除', 'yes']) {
+    const h = harness(), r = h.runner;
+    const held = { keys: { user_edit: ['K1', 'K2'], cleanup_other: ['K3'] }, seq: 3 };
+    r.heldBack.set('ATT1/C1', held);
+    const confirmed = r.confirmedFor({ conv: 'C1', say, sentSeq: 4 }, 'ATT1');
+    facts.text.push(confirmed);
   }
   // Annotate again: confirmed for the tool's annotations only when deleting them first failed
   for (const [name, eraseFails] of [['cleared', false], ['notCleared', true]]) {
@@ -67,16 +73,20 @@ def facts(tmp_path_factory):
     return run_scenarios(SCENARIOS, tmp_path_factory)
 
 
-def test_only_the_next_message_confirms_what_a_run_held_back(facts):
+def test_neither_queued_nor_later_text_confirms_what_a_run_held_back(facts):
     c = facts["chat"]
     held = c["held"]
     assert held.endswith("/tmp/scholium/ATT1/held_back.json")
     assert c["queued"] == 1 and c["before"] == 2 and c["stdin"] == 4
     assert c["envs"] == [{"run": "1", "held": held, "confirmed": ""},   # the run that held it back
                          {"run": "1", "held": held, "confirmed": ""},   # the message sent while it ran
-                         {"run": "1", "held": held, "confirmed": "user_edit:NEW2"},   # the next one, for NEW2 only
+                         {"run": "1", "held": held, "confirmed": ""},   # even explicit words are not the pane action
                          {"run": "1", "held": held, "confirmed": ""}], "taken by that run"
-    assert c["gone"] and c["left"] == [], "the note is read and removed; nothing is left to confirm"
+    assert c["gone"] and c["left"] == [], "a new ordinary message cancels the previous pending action"
+
+
+def test_refusal_question_partial_and_yes_text_never_authorize(facts):
+    assert facts["text"] == [{}, {}, {}, {}, {}]
 
 
 def test_codexs_server_is_told_the_same(facts):

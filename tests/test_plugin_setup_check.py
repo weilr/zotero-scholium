@@ -18,6 +18,14 @@ SCENARIOS = r"""
   // everything there: the skill in Claude Code's folder, Codex's in the data directory, Python 3.12 with PyMuPDF on PATH
   const good = (extra = {}) => Object.assign({ env: { PATH: '/py/none;/py/new' }, present: [PY, '/home/u/.claude/skills/zotero-scholium/SKILL.md'],
                                                python: { [PY]: '3.12.1\n1.24.10\n' }, codex: { answers: SIGNED_IN } }, extra);
+  // These scenarios model complete skills; the repair suite omits individual workflow resources.
+  const setupHarness = opts => {
+    const h = harness(opts);
+    const roots = (opts.present || []).filter(p => p.endsWith('/zotero-scholium/SKILL.md')).map(p => p.slice(0, -9));
+    if (!opts.codex || opts.codex.skillAt !== null) roots.push('/data/.agents/skills/zotero-scholium');
+    for (const dir of roots) for (const rel of h.runner.SKILL_FILES) h.log.writes[dir + '/' + rel] = 'file ' + rel;
+    return h;
+  };
   const brief = lines => lines.map(l => [l.id, l.state, l.label, l.text].concat(l.action ? [l.action] : []));
   const carried = h => {
     h.zotero.HTTP = { request: async (method, url) => ({ response: new TextEncoder().encode('file ' + url.split('/zotero-scholium/')[1]).buffer }) };
@@ -31,7 +39,7 @@ SCENARIOS = r"""
     return { lines: brief(seen), same: JSON.stringify(returned) === JSON.stringify(seen) };
   };
   const run = async (opts, during = null) => {
-    const h = harness(opts);
+    const h = setupHarness(opts);
     h.runner.start('x');
     const r = await check(h, during);
     r.kept = ['someone@example.com', 'org-1', 'subscriptionType'].some(s => JSON.stringify(h.runner).includes(s) || JSON.stringify(r.lines).includes(s));
@@ -52,7 +60,7 @@ SCENARIOS = r"""
 
   // the local API: off, with its button; the button turns it on
   {
-    const h = harness(good({ prefs: { 'httpServer.localAPI.enabled': false } }));
+    const h = setupHarness(good({ prefs: { 'httpServer.localAPI.enabled': false } }));
     h.runner.start('x');
     const first = await check(h);
     const said = await h.zotero.Scholium.fix(first.lines[0][4]);
@@ -102,7 +110,7 @@ SCENARIOS = r"""
     facts.codexHeld = { during, lines: of(r, 'codex', 'codexSkill'), closed: r.h.log.codexProcs.every(p => p.killed), kills: r.h.log.codexKills };
   }
   {
-    const h = harness(good({ codex: { answers: SIGNED_IN, skillAt: null } }));
+    const h = setupHarness(good({ codex: { answers: SIGNED_IN, skillAt: null } }));
     carried(h);
     h.runner.start('x');
     const line = (await check(h)).lines.find(l => l[0] === 'codexSkill');
@@ -125,7 +133,7 @@ SCENARIOS = r"""
   };
   for (const [name, opts] of Object.entries(skillCases)) facts[name] = of(await run(good(opts)), 'claudeSkill');
   {
-    const h = harness(good({ present: [PY] }));
+    const h = setupHarness(good({ present: [PY] }));
     carried(h);
     h.runner.start('x');
     const line = (await check(h)).lines.find(l => l[0] === 'claudeSkill');
@@ -135,14 +143,14 @@ SCENARIOS = r"""
     h.runner.stop();
   }
   {
-    const h = harness(good({ present: [PY] }));
+    const h = setupHarness(good({ present: [PY] }));
     h.zotero.HTTP = { request: async () => { throw Error('NS_ERROR_FILE_NOT_FOUND'); } };
     h.runner.start('x');
     facts.notCarried = await h.zotero.Scholium.fix({ kind: 'skill', agent: 'claude' });
     h.runner.stop();
   }
   {
-    const h = harness(good({ present: [PY], home: 'none' }));
+    const h = setupHarness(good({ present: [PY], home: 'none' }));
     h.runner.start('x');
     facts.noHome = await h.zotero.Scholium.fix({ kind: 'skill', agent: 'claude' });
     h.runner.stop();
@@ -187,7 +195,7 @@ SCENARIOS = r"""
   };
   {
     const py = { [PY]: 'HOLD' };
-    const h = harness(good({ prefs: { 'httpServer.localAPI.enabled': false }, present: [PY], python: py }));
+    const h = setupHarness(good({ prefs: { 'httpServer.localAPI.enabled': false }, present: [PY], python: py }));
     carried(h);
     h.runner.start('x');
     const p = page(h);
@@ -208,7 +216,7 @@ SCENARIOS = r"""
     h.runner.stop();
   }
   {
-    const h = harness(good({ present: [PY] }));
+    const h = setupHarness(good({ present: [PY] }));
     h.zotero.HTTP = { request: async () => { throw Error('NS_ERROR_FILE_NOT_FOUND'); } };
     h.runner.start('x');
     const p = page(h);
@@ -223,7 +231,7 @@ SCENARIOS = r"""
   // Copy: hidden until a check has ended and while one runs; then the lines shown, with the versions and the system
   for (const [name, locale, os] of [['copy', 'zh-CN', 'Windows 11 26200'], ['copyEnglish', 'en-US', null]]) {
     const py = { [PY]: 'HOLD' };
-    const h = harness(good({ locale, present: [PY], python: py }));
+    const h = setupHarness(good({ locale, present: [PY], python: py }));
     h.runner.start('x');
     h.runner.version = '0.2.2';
     h.zotero.version = '10.0.7';

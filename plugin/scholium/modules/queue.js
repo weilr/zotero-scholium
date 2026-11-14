@@ -137,7 +137,7 @@ Object.assign(ScholiumRunner, {
     return true;
   },
 
-  async annotate(items, { extra = "", confirmed = false, replace = false } = {}) {
+  async annotate(items, { extra = "", confirmed = false, replace = false, agent = this.agent(), queueConsent = null } = {}) {
     let jobs = [];
     let found = 0, readOnly = false;
     for (const item of items || []) {
@@ -171,13 +171,16 @@ Object.assign(ScholiumRunner, {
     const own = jobs.map(j => j.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length);
     const total = own.reduce((a, b) => a + b, 0);
     const replaced = jobs.filter((j, i) => own[i] > 0).map(j => j.att);
-    if (total && !confirmed) {
+    const queues = jobs.map(j => (queueConsent && queueConsent[this.keyOf(j.att)]) || this.annotationQueueSnapshot(this.keyOf(j.att), agent));
+    const queued = queues.reduce((n, rows) => n + rows.length, 0);
+    if ((total && !confirmed) || (queued && !queueConsent)) {
       const shared = replaced.some(a => this.groupOf(a.libraryID));
-      if (!Services.prompt.confirm(win, this.text("redoTitle"), this.text("redo", total, this.clearedNotes(replaced).length, shared))) return 0;
+      const question = [queued ? this.text("redoQueued", queued) : "", total ? this.text("redo", total, this.clearedNotes(replaced).length, shared) : ""].filter(Boolean).join(" ");
+      if (!Services.prompt.confirm(win, this.text("redoTitle"), question)) return 0;
       replace = true;
     }
     for (const [i, j] of jobs.entries()) {
-      Object.assign(j, { own: own[i], extra, agent: this.agent(), annotate: true, asking: false, kind: "annotate" });
+      Object.assign(j, { own: own[i], extra, agent, annotate: true, asking: false, kind: "annotate", annotationQueue: { rows: queues[i] } });
       await this.place(j);
     }
     // another annotation may have been queued for a paper meanwhile
@@ -360,13 +363,21 @@ Object.assign(ScholiumRunner, {
     const pane = view.pane, key = view.shownKey, conv = view.shownConv;
     say = String(say || "").trim();
     if (!pane || !key || !conv || !say || this.busy(key) || !this.localApiReady()) return false;
+    const path = this.convPath(key, conv), id = `${key}/${conv}`;
+    await this.flushLog(path);
+    if (this.pendingLogs.has(path)) {
+      this.notes.set(`${key}/chat`, { text: this.text("logNotSaved"), error: true, at: Date.now(), conv, pendingLog: path });
+      this.refresh();
+      return false;
+    }
     const log = await this.readLog(key, conv);
     const turn = this.turnOf(log, prompt);
     if (!turn) return false;
-    const path = this.convPath(key, conv), id = `${key}/${conv}`;
     let old;
     try { old = await IOUtils.readUTF8(path); } catch (e) { this.log("conversation not read: " + e); return false; }
-    if (this.replaced.has(id)) this.endReplaced(id);   // the edit before: its old text goes now
+    const previous = this.replaced.get(id);
+    if (previous && (previous.restoring || previous.failed)) return false;
+    if (previous) this.endReplaced(id);   // the edit before: its old text goes now
     const agent = this.agent();   // the agent chosen now answers the edited question
     const index = await this.index(key);
     const at = log.turns.indexOf(turn);
@@ -426,43 +437,73 @@ Object.assign(ScholiumRunner, {
   // behind it are held, and the log, the title and the state line come back as they were; Codex archives the fork
   async undoReplace(id) {
     const r = this.replaced.get(id);
-    if (!r) return;
+    if (!r || r.restoring) return;
     clearTimeout(r.timer);
-    this.replaced.delete(id);
-    const mine = j => this.keyOf(j.att) === r.key && (j.kind || "chat") === "chat" && (j.conv || null) === r.conv;
-    for (const j of this.queue) if (j.qid && mine(j)) this.heldQueues.add(this.queueKey(j));
-    this.queue = this.queue.filter(j => j.qid || !mine(j));
-    const running = () => !!this.job && this.job.key === r.key && mine(this.job.source);
-    if (running()) {
-      this.job.source.undone = true;
-      this.cancel();
+    r.restoring = true;
+    r.failed = false;
+    let pending = null;
+    try {
+      const mine = j => this.keyOf(j.att) === r.key && (j.kind || "chat") === "chat" && (j.conv || null) === r.conv;
+      for (const j of this.queue) if (j.qid && mine(j)) this.heldQueues.add(this.queueKey(j));
+      this.queue = this.queue.filter(j => j.qid || !mine(j));
+      const current = () => !!this.job && this.job.key === r.key && mine(this.job.source);
+      if (current()) {
+        r.run = this.job.source.logRun;
+        this.job.source.undone = true;
+        this.cancel();
+      }
+      const running = () => current() || !!(r.run && !r.run.done);
       for (let i = 0; i < 400 && running(); i++) await Zotero.Promise.delay(25);
-    }
-    // the Codex threads made after the edit, which the old log does not use, are archived once the old log is back
-    let now = "";
-    try { now = await IOUtils.readUTF8(r.path); } catch (e) {}
-    const kept = this.codexThreads(r.text);
-    const gone = [...this.codexThreads(now)].filter(thread => !kept.has(thread));
-    try { await IOUtils.writeUTF8(r.path, r.text, { tmpPath: r.path + ".tmp" }); }
-    catch (e) { this.log("conversation not restored: " + e); return; }
-    for (const thread of gone) this.queueArchive(thread);
-    if (r.retitled) {
-      const index = await this.index(r.key);
-      if (r.title === undefined) delete index.titles[r.conv];
-      else index.titles[r.conv] = r.title;
-      await this.saveIndex(r.key);
-    }
-    if (r.note) this.notes.set(`${r.key}/chat`, r.note);
-    else this.notes.delete(`${r.key}/chat`);
-    if (this.transcriptPath === r.path) {
-      const back = await this.readLog(r.key, r.conv);
-      this.transcript = back ? back.entries : [];
-    }
-    this.refresh();
-    for (const pane of [...this.panes.values()]) {
-      if (!pane.keys.includes(r.key)) continue;
-      pane.live = false;   // the run it showed as it went left the conversation: all of it is drawn anew
-      await this.showConversation(pane);
+      if (running()) throw new Error("edited run has not stopped");
+      pending = this.pendingLogs.get(r.path) || { unlogged: [], flushing: null };
+      pending.held = true;
+      pending.restore = r;
+      this.pendingLogs.set(r.path, pending);
+      if (pending.flushing) await pending.flushing;
+      // the Codex threads made after the edit, which the old log does not use, are archived once the old log is back
+      let now = "";
+      try { now = await IOUtils.readUTF8(r.path); } catch (e) {}
+      const kept = this.codexThreads(r.text);
+      const gone = [...this.codexThreads(now)].filter(thread => !kept.has(thread));
+      await IOUtils.writeUTF8(r.path, r.text, { tmpPath: r.path + ".tmp" });
+      pending.unlogged.splice(0);
+      this.parsedLogs.delete(r.path);
+      if (r.retitled) {
+        const index = await this.index(r.key);
+        if (r.title === undefined) delete index.titles[r.conv];
+        else index.titles[r.conv] = r.title;
+        await this.saveIndex(r.key);
+      }
+      this.pendingLogs.delete(r.path);
+      this.replaced.delete(id);
+      for (const thread of gone) this.queueArchive(thread);
+      if (r.note) this.notes.set(`${r.key}/chat`, r.note);
+      else this.notes.delete(`${r.key}/chat`);
+      if (this.transcriptPath === r.path) {
+        try {
+          const back = await this.readLog(r.key, r.conv);
+          this.transcript = back ? back.entries : [];
+        } catch (e) { this.log("restored conversation not read: " + e); }
+      }
+      this.refresh();
+      for (const pane of [...this.panes.values()]) {
+        if (!pane.keys.includes(r.key)) continue;
+        pane.live = false;   // the run it showed as it went left the conversation: all of it is drawn anew
+        await this.showConversation(pane).catch(e => this.log("restored conversation not shown: " + e));
+      }
+    } catch (e) {
+      r.failed = true;
+      pending = this.pendingLogs.get(r.path) || { unlogged: [], flushing: null };
+      pending.held = true;
+      pending.restore = r;
+      this.pendingLogs.set(r.path, pending);
+      this.log("conversation not restored: " + e);
+      this.notes.set(`${r.key}/chat`, { text: this.text("undoNotRestored"), error: true, at: Date.now(), conv: r.conv });
+      this.refresh();
+    } finally {
+      r.restoring = false;
+      // A failed restore keeps the edited tail held until Undo is retried.
+      if (pending && !r.failed) pending.held = false;
     }
   },
 
@@ -471,6 +512,7 @@ Object.assign(ScholiumRunner, {
   undoTimeUp(id) {
     const r = this.replaced.get(id);
     if (!r) return;
+    if (r.restoring || r.failed) return;
     if (this.queue.some(j => j.edited && `${this.keyOf(j.att)}/${j.conv}` === id && !this.started(j))) r.timer = setTimeout(() => this.undoTimeUp(id), this.UNDO_MS);
     else this.endReplaced(id);
   },
@@ -479,6 +521,7 @@ Object.assign(ScholiumRunner, {
   endReplaced(id) {
     const r = this.replaced.get(id);
     if (!r) return;
+    if (r.restoring || r.failed) return;
     clearTimeout(r.timer);
     this.replaced.delete(id);
     this.dropUndo(r.key, r.conv);
@@ -517,7 +560,11 @@ Object.assign(ScholiumRunner, {
       Services.prompt.alert(Zotero.getMainWindow(), this.text("headline"), this.text(this.pdfAttachments([item]).length ? "noFile" : "noPdf"));
       return false;
     }
-    const kind = opts.kind === "annotate" ? "annotate" : "chat";
+    const kind = opts.kind === "annotate" ? "annotate" : "chat", confirmation = opts.confirmation || null;
+    const validConfirmation = () => !confirmation || (this.heldConfirmationCurrent(confirmation)
+      && confirmation.held.confirmation === confirmation && !confirmation.job && confirmation.key === this.keyOf(job.att)
+      && confirmation.conv === opts.conv && confirmation.kind === kind);
+    if (!validConfirmation()) return false;
     // words to the annotation tab write annotations, which a group's library the user cannot edit does not take; a
     // question there is answered
     if (kind === "annotate" && !opts.compact && !this.writable(job.att)) {
@@ -530,9 +577,8 @@ Object.assign(ScholiumRunner, {
     if (busy && (opts.compact || opts.retry || opts.edited)) return false;
     Object.assign(job, { agent: (opts.retry || opts.edited) && opts.agent ? opts.agent : this.agent(), say, own: job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length,
                          kind, retry: !!opts.retry, compact: !!opts.compact, quote: opts.quote || null, rewind: opts.rewind || null,
-                         edited: !!opts.edited,
-                         // a new message, in the order sent (a retry or an edit is none): it may confirm what a run before it
-                         // held back (confirmedFor)
+                         edited: !!opts.edited, confirmation,
+                         // Only a pane action carries confirmation; its sequence must be after the report.
                          sentSeq: opts.retry || opts.edited || opts.compact ? 0 : ++this.sendSeq },
                   // the other papers of a chat's message; without them, a run takes those its conversation's log names
                   kind === "chat" && Array.isArray(opts.papers) ? { papers: opts.papers } : {});
@@ -540,6 +586,8 @@ Object.assign(ScholiumRunner, {
     if (busy) {
       Object.assign(job, { qid: String(++this.qseq), conv: opts.conv || null });
       if (kind === "annotate" && job.conv) job.agent = this.convAgent(job.conv);   // an annotation session's, from now on
+      if (confirmation) confirmation.job = job;
+      else if (job.conv) this.heldBack.delete(`${this.keyOf(job.att)}/${job.conv}`);
       this.queue.splice(this.followUpAt(job), 0, job);
       this.refresh();   // the queue drains already: the run it waits for goes on, or waits in it
       return true;
@@ -552,10 +600,13 @@ Object.assign(ScholiumRunner, {
     // a compaction is the shown conversation's: the chat's by the agent chosen, an annotation session's by its own agent
     if (opts.compact) Object.assign(job, { conv: opts.conv, agent: kind === "annotate" ? this.convAgent(opts.conv) : job.agent });
     await this.place(job);
+    if (!validConfirmation() || (confirmation && job.conv !== confirmation.conv)) return false;
     if (job.compact && !job.resume) return false;
     if (this.busy(this.keyOf(job.att), kind)) return false;
     // ahead of a held queue it is sent past (Send message), else where a conversation's message goes
     const ahead = opts.before ? this.queue.indexOf(opts.before) : -1;
+    if (confirmation) confirmation.job = job;   // accepted: later view changes do not revoke this job's exact report
+    else if (!opts.retry && !opts.compact && job.conv) this.heldBack.delete(`${this.keyOf(job.att)}/${job.conv}`);
     this.enqueue([job], ahead >= 0 ? ahead : this.conversationAt());
     return true;
   },
@@ -623,6 +674,42 @@ Object.assign(ScholiumRunner, {
   // the queue of a conversation (of a tab of a paper): its queued messages go one after another, held together; one
   // queued before its conversation had its log is in the queue of none until the run before it makes one (run)
   queueKey(job) { return `${this.keyOf(job.att)}/${job.kind || "chat"}/${job.conv || ""}`; },
+
+  // An agent's earlier annotation sessions have no history entry; count even rows whose removal can still be undone.
+  annotationQueued(key, agent) {
+    return this.queue.concat([...this.removedQueued.values()].map(r => r.job)).filter(j => j.qid && j.kind === "annotate"
+      && j.conv && this.keyOf(j.att) === key && this.convAgent(j.conv) === agent);
+  },
+
+  annotationQueueSnapshot(key, agent) {
+    return this.annotationQueued(key, agent).map(j => ({ qid: j.qid, conv: j.conv, say: j.say, removed: this.removedQueued.has(j.qid) }));
+  },
+
+  // Only the messages shown in the confirmation can be discarded; expired removal Undo rows may disappear meanwhile.
+  checkedAnnotationQueue(job, key) {
+    const old = this.annotationQueued(key, job.agent).filter(j => j.conv !== job.conv);
+    const rows = job.annotationQueue && job.annotationQueue.rows;
+    if (old.some(j => !Array.isArray(rows) || !rows.some(r => r && r.qid === j.qid && r.conv === j.conv && r.say === j.say
+      && r.removed === this.removedQueued.has(j.qid)))) {
+      const message = this.text("annotationQueueChanged");
+      for (const pane of this.panes.values()) if (pane.keys.includes(key)) this.sayUnderBox(pane, message);
+      throw new Error(message);
+    }
+    return old;
+  },
+
+  // Once the new session's first line is saved, the confirmed old queues can no longer be resumed.
+  discardAnnotationQueued(job, key) {
+    const old = new Set(this.checkedAnnotationQueue(job, key));
+    this.queue = this.queue.filter(j => !old.has(j));
+    for (const [qid, r] of this.removedQueued) {
+      if (!old.has(r.job)) continue;
+      clearTimeout(r.timer);
+      this.removedQueued.delete(qid);
+    }
+    this.tidyHeld();
+    delete job.annotationQueue;
+  },
 
   // whether a job is a message queued to the conversation a tab shows
   shownQueued(pane, job) {
@@ -832,8 +919,7 @@ Object.assign(ScholiumRunner, {
     if (job.conv) {
       const path = this.convPath(key, job.conv);
       const marks = [await this.logEnd(path, "cancelled", this.text("cancelled")), { type: "scholium", subtype: "time", at: Date.now(), waited: true }];
-      try { await IOUtils.writeUTF8(path, JSON.stringify(marks[1]) + "\n", { mode: "append" }); }
-      catch (e) { this.log("end time not logged: " + e); }
+      await this.appendLog({ logPath: path }, [JSON.stringify(marks[1])]);
       if (this.transcriptPath === path) this.appendEntries(marks.flatMap(m => this.entries(m)));
     }
     this.refresh();
@@ -1013,11 +1099,13 @@ Object.assign(ScholiumRunner, {
     if ((job.kind || "chat") === "chat") {
       this.notes.set(`${this.keyOf(job.att)}/chat`, { text: outcome || this.text(ok ? "done" : "failed"), error: !ok, at: Date.now(),
                                               title: detail || "", conv: job.conv || null });
-    } else this.notes.delete(`${this.keyOf(job.att)}/annotate`);
+    } else if (job.logPending) this.notes.set(`${this.keyOf(job.att)}/annotate`, {
+      text: outcome, error: true, at: Date.now(), conv: job.conv || null, pendingLog: job.logPath });
+    else this.notes.delete(`${this.keyOf(job.att)}/annotate`);
     if (!this.focused() && !job.undone) this.notify(title, ok && !answered ? this.brief(summary) : summary || "");
     this.refresh();
     // the sections of the paper take what its log now says of the conversation; without a log, they draw the run ended
-    if (job.logPath) {
+    if (job.logPath && !job.logPending) {
       for (const pane of [...this.panes.values()]) {
         if (pane.keys.includes(this.keyOf(job.att))) this.showConversation(pane).catch(e => this.log("section not shown: " + e));
       }

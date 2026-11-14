@@ -3748,13 +3748,13 @@ def test_the_prompt_names_the_profile_or_the_defaults(facts):
     assert p["en"].endswith("The annotations appear in the open PDF by themselves (the eye button in the reader's toolbar shows or hides "
                             "Scholium's annotations): do not tell the user to close and reopen it.\n"
                             "Your final reply is one short line in the user's language and nothing else: N highlights (M core), "
-                            "K margin notes, note “title”, remaining warnings as “remaining warnings: …” (“remaining warnings: none” when there are none).")
+                            "K margin notes (counts may be 0); include note “title” only if a reading note was actually written; remaining warnings as “remaining warnings: …” (“remaining warnings: none” when there are none).")
     assert facts["prompt"].count("画像：没有；按默认值标注，不要生成或修改画像") == 1
     # a one-click annotation has no user to ask for an exception
     assert p["zh"].count("\n不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。\n") == 1
     assert p["en"].count("\nDo not pass --accept, --allow-warnings or --allow-missed: correct the findings instead.\n") == 1
     assert facts["prompt"].endswith("批注写入后会自己出现在打开的 PDF 里（阅读器工具栏的眼睛按钮显示或隐藏 Scholium 的批注），不要让用户关闭再打开 PDF。\n"
-                                    "最后的回复只写一行中文，不写别的：高亮 N 条（核心 M 条），页边批注 K 条，笔记《标题》，剩余警告，写成“剩余警告：…”（没有时写“剩余警告：无”）。")
+                                    "最后的回复只写一行中文，不写别的：高亮 N 条（核心 M 条），页边批注 K 条（计数可为 0）；仅实际写入阅读笔记时加上“笔记《标题》”；剩余警告，写成“剩余警告：…”（没有时写“剩余警告：无”）。")
 
 
 def test_a_follow_up_says_how_to_change_written_annotations(facts):
@@ -3822,7 +3822,7 @@ def test_a_group_the_user_cannot_edit_and_missing_files_are_not_run(facts):
 def test_annotate_again_opens_a_session_with_the_box_as_extra_instructions(facts):
     a = facts["annotateInConversation"]
     assert a["calls"] == 2 and a["resume"] is None and a["kept"] == "" and a["conversations"] == 2
-    assert a["prompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注：") and "用户的附加要求：\n只标方法部分\n\n批注写入后" in a["prompt"]
+    assert a["prompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文标注（默认整篇）：") and "用户的附加要求：\n只标方法部分\n\n批注写入后" in a["prompt"]
     assert a["prompts"] == ["批注这篇\n附加要求：只标方法部分"], "the annotation tab shows the new session"
 
 
@@ -3865,7 +3865,7 @@ def test_annotate_after_a_question_opens_a_session_of_its_own(facts):
     follow = "接着这次批注修改，例如：第 5 页那条译文改短"   # the annotation tab's box while its run goes, then words to its session
     n = facts["ask"]["annotated"]
     assert n["resume"] is None and n["cleared"] == "", "a new annotation session is not given the chat"
-    assert n["prompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注：")
+    assert n["prompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文标注（默认整篇）：")
     assert "\n- 画像：没有；按默认值标注，不要生成或修改画像\n" in n["prompt"] and "用户的附加要求：\n重点标方法部分\n\n批注写入后" in n["prompt"]
     assert n["lines"] == [{"type": "scholium", "subtype": "prompt", "text": "批注这篇\n附加要求：重点标方法部分", "annotate": True, "extra": "重点标方法部分"}]
     assert n["prompts"] == ["批注这篇\n附加要求：重点标方法部分"]
@@ -3882,7 +3882,7 @@ def test_annotate_after_a_question_opens_a_session_of_its_own(facts):
         "an annotation that starts shows on its own tab, its dot on the state line"
     c = facts["askThenCodex"]
     assert c["claudeCalls"] == 1 and c["threads"] == ["thread/start"] and c["conversations"] == 2, "Codex starts a conversation of its own"
-    assert c["text"] == "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论（论文本身是中文时不加评论）、页边批注、阅读笔记，按画像和默认值。"
+    assert c["text"] == "使用 zotero-scholium 技能，为下面这篇论文标注（默认整篇）：本次附加要求优先于画像，画像优先于技能默认值；只生成所需的输出。需要高亮时，评论只写译文（论文本身是中文时不加评论）。"
     assert c["entries"][0] == "批注这篇" and c["entries"][-1] == CODEX_CARD[1][:30] and "这篇怎么估计后验？" not in c["entries"]
     assert c["placeholder"] == follow
 
@@ -3966,7 +3966,7 @@ def test_conversations_of_earlier_versions_and_the_history_given(facts):
     assert h["boundary"] == [False, True], "excerpts from the eleventh exchange on"
     a = facts["annotateAgain"]
     assert a == {"conversations": 2, "threads": ["thread/start"], "runs": ["批注这篇"],
-                 "text": "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论（论文本身是中文时不加评论）、页边批注、阅读笔记，按画像和默认值。"}
+                 "text": "使用 zotero-scholium 技能，为下面这篇论文标注（默认整篇）：本次附加要求优先于画像，画像优先于技能默认值；只生成所需的输出。需要高亮时，评论只写译文（论文本身是中文时不加评论）。"}
     f = facts["handedFollowUp"]
     assert f["handed"] == ["S1", "AdLN的作用是什么", True, True] and f["resumed"] is True
     assert f["prompt"].startswith("下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。") and "AdLN的作用是什么" in f["prompt"]
@@ -4112,7 +4112,7 @@ def test_a_question_and_its_annotation_go_on_after_a_limit_and_an_update(facts):
     assert lim["paused"] == {"stop": ["■", "停止"], "queued": [["S1", False, ""]]}
     assert run_time(lim["answered"]) == {"prompt": "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。", "session": "Q1", "state": "完成"}
     assert lim["annotating"] == {"stop": ["■", "停止"], "queued": [["S1", False]]}
-    assert lim["annotatePrompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文做整篇标注")
+    assert lim["annotatePrompt"].startswith("使用 zotero-scholium 技能，为下面这篇论文标注（默认整篇）")
     assert lim["continued"] == "额度已恢复。请从中断的地方继续完成上面的任务，规则不变。", "the task is not sent twice"
     assert lim["resumes"] == [False, True, False, True] and lim["session"] == "Q1" and lim["annotSession"] == "S1"
     u = facts["askUpdate"]
@@ -4120,7 +4120,7 @@ def test_a_question_and_its_annotation_go_on_after_a_limit_and_an_update(facts):
                              "prompt": "使用 zotero-scholium 技能读下面这篇论文（status 给出题录，extract 给出正文），回答用户在 Zotero 里提的问题。",
                              "resume": False}
     assert u["annotateSent"] == {"handed": [False, True, "", None, False],
-                                 "prompt": "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论（论文本身是中文时不加评论）、页边批注、阅读笔记，按画像和默认值。",
+                                 "prompt": "使用 zotero-scholium 技能，为下面这篇论文标注（默认整篇）：本次附加要求优先于画像，画像优先于技能默认值；只生成所需的输出。需要高亮时，评论只写译文（论文本身是中文时不加评论）。",
                                  "resume": False}
     assert u["annotateAnswered"] == {"handed": [False, False, "", "Q1", True], "prompt": "插件更新打断了上面的任务。请从中断的地方继续完成，规则不变。",
                                      "resume": True}

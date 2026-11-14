@@ -3,8 +3,21 @@
 
 Object.assign(ScholiumRunner, {
   async run(job) {
+    const logRun = job.logRun = { done: false };
+    try { return await this.runJob(job); }
+    finally { logRun.done = true; }
+  },
+
+  async runJob(job) {
     const started = Date.now();
     const key = this.keyOf(job.att);
+    if (job.conv) {
+      const replaced = this.replaced.get(`${key}/${job.conv}`);
+      if (replaced && (replaced.restoring || replaced.failed)) throw new Error(this.text("undoNotRestored"));
+      const path = this.convPath(key, job.conv);
+      await this.flushLog(path);
+      if (this.pendingLogs.has(path)) throw new Error(this.text("logNotSaved"));
+    }
     const agent = job.agent === "codex" ? "codex" : "claude";
     this.job = { title: job.title, key, libraryID: job.att.libraryID, started, elapsed: 0, agent, step: job.resume && !job.annotate ? "continuing" : "starting",
                  source: job, session: job.resume || null, log: null, asking: this.asking(job), context: null };
@@ -98,9 +111,13 @@ Object.assign(ScholiumRunner, {
       job.paperFiles.push({ key: k, path: this.paperPath(k), title: ref.title || (parent || other).getDisplayTitle() });
     }
     if (this.job !== running || running.stopAsked) return this.halted(job, running);   // the plugin stopped, or ■, meanwhile
-    let made = null;   // an annotation's new session, and the agent's session before it
+    // The pending queue confirmation also keeps the previous session across an update during the first log write.
+    let made = job.annotate && job.annotationQueue && job.annotationQueue.conv === job.conv ? job.annotationQueue : null;
     if (!job.conv) {
-      if (job.annotate) made = { before: (await this.index(key)).annotation[agent] || null };
+      if (job.annotate) {
+        made = job.annotationQueue || { rows: null };
+        made.before = (await this.index(key)).annotation[agent] || null;
+      }
       job.conv = await this.newConv(key, agent, job.say || this.text("annotateThis"), job.kind || "chat");
       if (made) made.conv = job.conv;
       // the messages queued meanwhile go on with this conversation, held still when they were
@@ -134,14 +151,17 @@ Object.assign(ScholiumRunner, {
     if (user !== null) job.turnAt = log ? log.turns.length : 0;   // the turn these words start
     // a log that refuses this line (locked a moment) has nothing of the run: its words go back, no end is logged (drain)
     try {
+      if (job.annotate) this.checkedAnnotationQueue(job, key);
       await IOUtils.writeUTF8(logPath, JSON.stringify(Object.assign({ type: "scholium", subtype: "run", agent, user, at: started },
         job.compact ? { compact: true } : {}, job.rewind && job.resume ? { rewind: job.rewind } : {})) + "\n", { mode: "appendOrCreate" });
+      if (job.annotate) this.discardAnnotationQueued(job, key);
     } catch (e) {
       job.logPath = running.log = null;
       running.logged = false;
       if (made) {
         await this.unmakeConv(key, agent, made).catch(err => this.log("session not undone: " + err));
         job.conv = null;
+        job.logged = false;
         job.typed = made.typed || [];
       }
       throw e;
@@ -169,7 +189,7 @@ Object.assign(ScholiumRunner, {
     // what the agent's run leaves: its result (as Claude Code's result event), a usage limit, the
     // conversation, the exit code and the end of stderr
     const ctx = { job, key, logPath, running, lastStep: -1, result: null, limit: null, session: job.resume || null,
-                  exitCode: null, stderr: "", current: null, applies: {}, commands: {}, missing: null, gone: false, unlogged: [] };
+                  exitCode: null, stderr: "", current: null, applies: {}, commands: {}, missing: null, gone: false };
     if (this.job !== running) return;   // the plugin stopped while the log was written
     // ■ meanwhile: the run ends as a cancel ends it, its words in the log
     // a new annotation's status and extract, run here before the agent starts (preRun); a question's extract of its
@@ -195,8 +215,7 @@ Object.assign(ScholiumRunner, {
     const unfinished = this.unfinished();   // a cancelled run's, which has no end of its own
     if (this.job !== running) return;   // the plugin stopped during the run: nothing more to report
     if (unfinished) {
-      try { await IOUtils.writeUTF8(logPath, JSON.stringify(unfinished) + "\n", { mode: "append" }); }
-      catch (e) { this.log("unfinished message not logged: " + e); }
+      await this.appendLog(ctx, [JSON.stringify(unfinished)]);
       this.appendEntries(this.entries(unfinished));
     }
     const { result, current, exitCode, limit, session } = ctx;
@@ -205,7 +224,7 @@ Object.assign(ScholiumRunner, {
     // opening, the others the run's closing line
     const answered = !!(job.say || job.asked) && exitCode === 0 && !!result && !result.is_error && ctx.lastStep < this.STEPS.indexOf("applying");
     const summary = answered ? this.opening(text) : text.split("\n").pop();
-    let ok = false, message;
+    let ok = false, message, successNotice = null, scannedNotice = false;
     if (current.cancelled) {
       message = this.text("cancelled");
       this.appendEntries(this.entries(await this.logEnd(logPath, "cancelled", message, started)));
@@ -215,8 +234,9 @@ Object.assign(ScholiumRunner, {
       message = job.compact ? (ctx.compacted ? this.compactSizes(ctx.compacted).replace(/^ · /, "") : "") : summary;
       // a scanned PDF the pre-run found: its whole message, as an error
       const scanned = !!(job.pre && job.pre.scanned);
-      this.notice(job, job.compact ? this.text("compactedNotice") : scanned ? this.text("noTextLayer")
-        : [`${this.text("done")} · ${this.duration(Date.now() - started)}`, answered ? summary : this.brief(summary)].filter(Boolean).join("\n"), scanned);
+      successNotice = job.compact ? this.text("compactedNotice") : scanned ? this.text("noTextLayer")
+        : [`${this.text("done")} · ${this.duration(Date.now() - started)}`, answered ? summary : this.brief(summary)].filter(Boolean).join("\n");
+      scannedNotice = scanned;
       // an annotation's end, also of its second try or of its continuation after a pause: the numbers counted in Zotero,
       // the turns and tokens of all of its runs
       if (running.annotation) {
@@ -227,8 +247,7 @@ Object.assign(ScholiumRunner, {
                                      { warnings: none && ctx.missing ? this.text(ctx.missing) : this.warningsOf(text),
                                        turns: spent.turns, tokens: spent.tokens, at: Date.now() },
                                      none && ctx.missing === "noTextLayer" ? { scanned: true } : {});
-        try { await IOUtils.writeUTF8(logPath, JSON.stringify(counts) + "\n", { mode: "append" }); }
-        catch (e) { this.log("counts not logged: " + e); }
+        await this.appendLog(ctx, [JSON.stringify(counts)]);
         this.appendEntries(this.entries(counts));
       }
     } else if (limit) {
@@ -245,7 +264,7 @@ Object.assign(ScholiumRunner, {
       if (job.resume && (ctx.gone || this.gone(message) || (job.rewind && this.rewindRefused(message)))) {
         const again = this.fresh(job);
         const mark = { type: "scholium", subtype: "gone", agent, resent: !!again };
-        await IOUtils.writeUTF8(logPath, JSON.stringify(mark) + "\n", { mode: "append" });
+        await this.appendLog(ctx, [JSON.stringify(mark)]);
         if (again) {
           if (this.job === running) this.job = null;
           this.dropRefused(this.transcript);
@@ -260,7 +279,7 @@ Object.assign(ScholiumRunner, {
       // the connection failed before the agent used a tool, so nothing was written: one more try
       if (!job.retried && !ctx.acted && this.transient(message, ctx.errorInfo)) {
         const mark = { type: "scholium", subtype: "retry" };
-        await IOUtils.writeUTF8(logPath, JSON.stringify(mark) + "\n", { mode: "append" });
+        await this.appendLog(ctx, [JSON.stringify(mark)]);
         this.appendEntries(this.entries(mark));
         if (this.job === running) this.job = null;
         this.settleRun();
@@ -269,10 +288,19 @@ Object.assign(ScholiumRunner, {
       this.notice(job, `${this.text("failed")} · ${message}`, true);
     }
     const time = { type: "scholium", subtype: "time", at: Date.now() };
-    try { await IOUtils.writeUTF8(logPath, JSON.stringify(time) + "\n", { mode: "append" }); }
-    catch (e) { this.log("end time not logged: " + e); }
+    await this.appendLog(ctx, [JSON.stringify(time)]);
     this.appendEntries(this.entries(time));
-    this.finish(job, ok, message, this.outcome(result, current.cancelled), this.tokenDetail(result), answered);
+    const outcome = this.outcome(result, current.cancelled), detail = this.tokenDetail(result);
+    const pending = this.pendingLogs.get(logPath);
+    job.logPending = !!pending;
+    if (pending) {
+      pending.completed = { key, conv: job.conv, kind: job.kind || "chat", outcome, detail, ok };
+      message = this.text("logNotSaved");
+      this.notice(job, message, true);
+    } else if (successNotice) this.notice(job, successNotice, scannedNotice);
+    this.finish(job, ok && !pending, message, pending ? message : outcome, detail, answered && !pending);
+    const note = this.notes.get(`${key}/${job.kind || "chat"}`);
+    if (pending && note && note.conv === job.conv) note.pendingLog = logPath;
     return { exitCode, result, ok, delivered: !!running.delivered, cancelled: !!current.cancelled };
   },
 
@@ -299,15 +327,72 @@ Object.assign(ScholiumRunner, {
   // lines of a run for its log; those the file did not take (locked a moment by a virus scanner or a backup) go with
   // the next ones, and the run goes on
   async appendLog(ctx, lines) {
-    const all = ctx.unlogged.concat(lines);
-    if (!all.length) return;
-    try {
-      await IOUtils.writeUTF8(ctx.logPath, all.join("\n") + "\n", { mode: "append" });
-      ctx.unlogged = [];
-    } catch (e) {
-      ctx.unlogged = all;
-      this.log("log not written, kept for the next lines: " + e);
+    let pending = this.pendingLogs.get(ctx.logPath);
+    if (!pending && !lines.length) return true;
+    if (!pending) {
+      pending = { unlogged: [], flushing: null, held: false };
+      this.pendingLogs.set(ctx.logPath, pending);
     }
+    pending.unlogged.push(...lines);
+    return this.flushLog(ctx.logPath);
+  },
+
+  // Each file has one writer. Failed lines stay in order, including the run's final markers.
+  async flushLog(path) {
+    const pending = this.pendingLogs.get(path);
+    if (!pending) return true;
+    if (pending.flushing) return pending.flushing;
+    if (pending.held) return false;
+    pending.flushing = (async () => {
+      while (pending.unlogged.length && !pending.held) {
+        const lines = pending.unlogged.slice();
+        try { await IOUtils.writeUTF8(path, lines.join("\n") + "\n", { mode: "append" }); }
+        catch (e) {
+          this.log("log not written, kept for retry: " + e);
+          this.scheduleLogRetry();
+          return false;
+        }
+        pending.unlogged.splice(0, lines.length);
+      }
+      if (pending.unlogged.length || pending.held) return false;
+      if (this.pendingLogs.get(path) === pending) this.pendingLogs.delete(path);
+      this.parsedLogs.delete(path);
+      const done = pending.completed;
+      if (done && !this.stopped) {
+        const noteKey = `${done.key}/${done.kind}`;
+        const note = this.notes.get(noteKey);
+        if (note && note.conv === done.conv && (note.pendingLog === path || note.text === this.text("logNotSaved"))) {
+          if (done.kind === "annotate") this.notes.delete(noteKey);
+          else this.notes.set(noteKey, { text: done.outcome, title: done.detail, error: !done.ok, at: Date.now(), conv: done.conv });
+        }
+        this.refresh();
+        for (const pane of this.panes.values()) if (pane.keys.includes(done.key)) {
+          this.showConversation(pane).catch(e => this.log("section not shown: " + e));
+        }
+      }
+      return true;
+    })();
+    try { return await pending.flushing; }
+    finally { pending.flushing = null; }
+  },
+
+  scheduleLogRetry() {
+    if (this.stopped) {
+      const owner = Zotero.ScholiumLogWriter;
+      if (owner && owner !== this && !owner.stopped) owner.scheduleLogRetry();
+      return;
+    }
+    if (this.logRetryTimer) return;
+    this.logRetryTimer = setTimeout(() => {
+      this.logRetryTimer = null;
+      this.retryLogs().catch(e => this.log("logs not retried: " + e));
+    }, 5000);
+  },
+
+  async retryLogs() {
+    for (const path of [...this.pendingLogs.keys()]) await this.flushLog(path);
+    if ([...this.pendingLogs.values()].some(p => !p.held)) this.scheduleLogRetry();
+    if (!this.stopped) this.refresh();
   },
 
   // the end of a run that has no result of its own (cancelled, failed before a result) as the plugin's line in the
@@ -315,8 +400,7 @@ Object.assign(ScholiumRunner, {
   async logEnd(logPath, outcome, text, started = 0, extra = {}) {
     const mark = Object.assign({ type: "scholium", subtype: "end", outcome, text }, extra);
     if (started) mark.duration_ms = Date.now() - started;
-    try { await IOUtils.writeUTF8(logPath, JSON.stringify(mark) + "\n", { mode: "append" }); }
-    catch (e) { this.log("end not logged: " + e); }
+    await this.appendLog({ logPath }, [JSON.stringify(mark)]);
     return mark;
   },
 
@@ -512,14 +596,19 @@ Object.assign(ScholiumRunner, {
     ctx.result = { type: "result", subtype: "success", is_error: false, result: this.text("noTextLayer"), num_turns: 0 };
   },
 
-  // the skill's script refuses --accept user_edit and cleanup_other in the agent's run unless the user confirmed them: in a
-  // message sent after the run that held them back, for those annotations and notes (heldBack), or by Annotate again, for
+  // the skill's script refuses --accept user_edit and cleanup_other unless the user clicked the current report's action
+  // for those annotations and notes (heldBack), or by Annotate again, for
   // the tool's annotations that its deletion first left (taskPrompt's one exception). { kind: [keys] }
   confirmedFor(job, key) {
     const kinds = {};
     if (job.annotate && job.own > 0) kinds.cleanup_other = job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).map(a => a.key);
     const held = job.conv ? this.heldBack.get(`${key}/${job.conv}`) : null;
-    if (held && job.say && !job.compact && !job.annotate && (job.sentSeq || 0) > held.seq) {
+    const confirmation = job.confirmation;
+    if (held && confirmation && held.confirmation === confirmation && confirmation.held === held
+        && confirmation.keys === JSON.stringify(held.keys) && confirmation.job === job
+        && confirmation.key === key && confirmation.conv === job.conv && confirmation.kind === (job.kind || "chat")
+        && job.say && !job.compact && !job.annotate
+        && (job.sentSeq || 0) > held.seq) {
       for (const [kind, keys] of Object.entries(held.keys)) kinds[kind] = [...new Set((kinds[kind] || []).concat(keys))];
       job.confirmedHeld = held;
     }
@@ -528,8 +617,7 @@ Object.assign(ScholiumRunner, {
 
   heldPath(key) { return PathUtils.join(this.outDir(key), "held_back.json"); },
 
-  // what the script noted it held back in the run: kept for the conversation, until the user's next message, which takes
-  // it (a message sent before then does not); one the run took is gone after it
+  // What the script held back belongs to this report. A button can approve it once, and new ordinary words discard it.
   async keepHeld(ctx) {
     const { job, key } = ctx;
     let held = null;
@@ -725,7 +813,8 @@ Object.assign(ScholiumRunner, {
               if (waiting) {
                 rpc.pending.delete(id);
                 // Codex's answer that the request failed, unlike the end of the server
-                if (msg.error) waiting.reject(Object.assign(new Error(String(msg.error.message || JSON.stringify(msg.error))), { refused: true }));
+                if (msg.error) waiting.reject(Object.assign(new Error(String(msg.error.message || JSON.stringify(msg.error))),
+                                                           { refused: true, code: msg.error.code, data: msg.error.data }));
                 else waiting.resolve(msg.result);
               }
               continue;
@@ -752,6 +841,17 @@ Object.assign(ScholiumRunner, {
   async codexHello(rpc) {
     await rpc.request("initialize", { clientInfo: { name: "scholium", title: "Scholium", version: this.version || "0" } });
     rpc.notify("initialized");
+  },
+
+  // Only an explicitly missing session (or a fork point/API the server cannot use) needs history replay.
+  // Permission, configuration and temporary RPC failures leave the original session available for another try.
+  codexResumeGone(error, fork) {
+    if (!error || !error.refused) return false;
+    const message = String(error.message || "");
+    if (/no rollout found for thread|\bthread not found(?:\s*:|\s*$)|\b(?:thread|session) \S+ is archived\b|\brollout file (?:does not exist|not found)\b/i.test(message)
+        || /failed to resolve rollout path [^\r\n]+: file does not exist\b/i.test(message)) return true;
+    return !!fork && (error.code === -32601
+      || /\bturn not found:|\blastTurnId '[^']+' (?:was not found|is not a persisted canonical turn) in the source thread\b|\b(?:unknown|unsupported) method ["'`]?thread\/fork\b/i.test(message));
   },
 
   // a question from Codex during an unattended run: its automatic reviewer has decided on what it
@@ -1077,15 +1177,14 @@ Object.assign(ScholiumRunner, {
       if (skill && job.pre && job.pre.script && !this.sameDir(PathUtils.parent(PathUtils.parent(job.pre.script)), PathUtils.parent(skill.path))) job.pre = null;
       let opened = null;
       if (job.resume) {
-        // a thread that Codex refuses to resume is one it no longer has: a new one goes on with the conversation; an
-        // edited question forks the thread through the turn before it, and a refused fork does the same
+        // a missing thread is rebuilt with the conversation; an edited question forks through the turn before it
         // the turns stay with the server: a long conversation is not sent back whole
         const fork = job.rewind && job.rewind.turnId;
         try {
           opened = fork ? await this.codexOpen(rpc, "thread/fork", Object.assign({ threadId: job.resume, lastTurnId: fork, excludeTurns: true }, settings))
                         : await this.codexOpen(rpc, "thread/resume", Object.assign({ threadId: job.resume, excludeTurns: true }, settings));
         }
-        catch (e) { ctx.gone = !!(e && e.refused); throw e; }
+        catch (e) { ctx.gone = this.codexResumeGone(e, fork); throw e; }
       } else {
         opened = await this.codexOpen(rpc, "thread/start", settings);
         if (!model && opened) this.noteCodexDefault(String(opened.model || ""));
@@ -1137,6 +1236,7 @@ Object.assign(ScholiumRunner, {
       }
     } catch (e) {
       failure = String((e && e.message) || e);
+      ctx.errorInfo = e && e.data && e.data.codexErrorInfo || null;
       this.log("codex run failed: " + failure);
     } finally {
       clearTimeout(state.timer);
@@ -1375,6 +1475,22 @@ Object.assign(ScholiumRunner, {
   start(pluginID, update = false) {
     this.pluginID = pluginID;
     this.stopped = false;
+    // Zotero keeps this recovery queue while a plugin copy is disabled or replaced.
+    this.pendingLogs = Zotero.ScholiumPendingLogs || this.pendingLogs;
+    Zotero.ScholiumPendingLogs = this.pendingLogs;
+    Zotero.ScholiumLogWriter = this;
+    for (const [path, pending] of this.pendingLogs) {
+      const r = pending.restore;
+      if (r) {
+        this.replaced.set(`${r.key}/${r.conv}`, r);
+        this.notes.set(`${r.key}/chat`, { text: this.text("undoNotRestored"), error: true, at: Date.now(), conv: r.conv });
+      } else if (pending.completed) {
+        const done = pending.completed;
+        this.notes.set(`${done.key}/${done.kind}`, { text: this.text("logNotSaved"), error: true, at: Date.now(), conv: done.conv,
+          pendingLog: path });
+      }
+    }
+    if (this.pendingLogs.size) this.scheduleLogRetry();
     this.registerPane(pluginID);
     try {
       // a handler left registered (see unregisterReaderListener) does nothing once this copy stopped
@@ -1412,7 +1528,7 @@ Object.assign(ScholiumRunner, {
                           logged: !!j.logged, throttled: !!j.throttled, retried: !!j.retried, retryAt: j.retryAt || 0, kind: j.kind || "chat",
                           compact: !!j.compact, qid: j.qid || null, failed: !!j.failed, quote: j.quote || null, rewind: j.rewind || null,
                           turnAt: Number.isInteger(j.turnAt) ? j.turnAt : null, leftAt: this.leftOf(j.leftAt),
-                          papers: Array.isArray(j.papers) ? j.papers : null });
+                          papers: Array.isArray(j.papers) ? j.papers : null, annotationQueue: j.annotationQueue || null });
     const jobs = [];
     if (running && running.source) {
       const j = running.source;
@@ -1454,7 +1570,8 @@ Object.assign(ScholiumRunner, {
                            conv: typeof s.conv === "string" && s.conv ? s.conv : null, asking: !!(s.asking || s.question),
                            logged: !!s.logged, interrupted: !!s.interrupted, throttled: !!s.throttled, retried: !!s.retried,
                            retryAt: Number(s.retryAt) || 0, kind, compact: !!s.compact, qid, failed: !!(qid && s.failed),
-                           quote: this.quoteOf(s.quote), rewind: this.pointOf(s.rewind),
+                            quote: this.quoteOf(s.quote), rewind: this.pointOf(s.rewind),
+                            annotationQueue: s.annotationQueue && typeof s.annotationQueue === "object" ? s.annotationQueue : null,
                            turnAt: Number.isInteger(s.turnAt) ? s.turnAt : null, leftAt: this.leftOf(s.leftAt) },
                     Array.isArray(s.papers) ? { papers: s.papers.filter(r => r && typeof r.key === "string" && r.key) } : {});
       if (qid) this.qseq = Math.max(this.qseq, Number(qid) || 0);
@@ -1503,12 +1620,16 @@ Object.assign(ScholiumRunner, {
   // The running paper's log records that its run was interrupted.
   stop(update = false) {
     this.stopped = true;
+    if (Zotero.ScholiumLogWriter === this) delete Zotero.ScholiumLogWriter;
     const running = this.job;
     if (running && running.log) {
       const mark = { type: "scholium", subtype: "end", outcome: "interrupted", text: this.text("interruptedLine"),
                      duration_ms: Date.now() - running.started };
-      IOUtils.writeUTF8(running.log, JSON.stringify(mark) + "\n", { mode: "append" }).catch(() => {});
+      this.appendLog({ logPath: running.log }, [JSON.stringify(mark)]).catch(() => {});
     }
+    clearTimeout(this.logRetryTimer);
+    this.logRetryTimer = null;
+    this.retryLogs().catch(e => this.log("logs not saved while stopping: " + e));
     // a conversation deleted a moment ago goes now, as it would have, its queued messages first: they are not handed over
     for (const path of [...this.deleting.keys()]) this.finishDelete(path).catch(() => {});
     if (update) this.carryOver(running);
@@ -1522,6 +1643,7 @@ Object.assign(ScholiumRunner, {
     // an edit's old conversation can no longer come back: the threads only it used are archived
     for (const r of this.replaced.values()) {
       clearTimeout(r.timer);
+      if (r.failed || r.restoring) continue;
       try { this.archiveReplaced(r); } catch (e) {}
     }
     this.replaced.clear();

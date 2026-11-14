@@ -1222,6 +1222,8 @@ Object.assign(ScholiumRunner, {
     // a question in place of a dialog, above the words
     pane.confirmRow = div("scholium-confirm");
     this.show(pane.confirmRow, false);
+    pane.heldRow = div("scholium-confirm");
+    this.show(pane.heldRow, false);
     // the passage of the reader's selection that goes with the next message, and the other papers of the conversation
     pane.quoteBox = div("scholium-quote");
     pane.papersBox = div("scholium-papers");
@@ -1244,7 +1246,7 @@ Object.assign(ScholiumRunner, {
     // the annotation tab's button: Annotate, or Annotate again once the tab shows a session
     pane.annotGo = this.paneButton(doc, this.text("annotateThis"), () => { this.annotateFromPane(pane); }, "primary small");
     pane.sendRow.append(pane.hint, pane.ring, pane.send, pane.annotGo);
-    talk.append(pane.queueBox, pane.confirmRow, pane.papersBox, pane.quoteBox, pane.input, pane.sendRow);
+    talk.append(pane.queueBox, pane.confirmRow, pane.heldRow, pane.papersBox, pane.quoteBox, pane.input, pane.sendRow);
     box.append(head, line, pane.chatView, pane.annotView, pane.saved, talk);
     body.append(box);
     this.fitPane(pane);

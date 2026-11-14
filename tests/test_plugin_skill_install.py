@@ -42,7 +42,7 @@ SCENARIOS = r"""
                      text: h.log.writes['/home/u/.claude/skills/zotero-scholium/SKILL.md'], again: h.log.calls.length - runs };
     h.runner.stop();
   }
-  // a skill already there is not touched: the run goes again
+  // a skill already there keeps its own files; only the packaged files it lacks are added, then the run goes again
   {
     const h = harness({ script: noSkill });
     carried(h);
@@ -125,9 +125,10 @@ def test_the_skill_is_installed_into_claude_codes_skills_folder_and_the_run_goes
     assert c["again"] == 1
 
 
-def test_a_skill_already_there_is_left_as_it_is(facts):
+def test_a_skill_already_there_keeps_its_own_files_and_gets_only_the_missing_ones(facts):
     t = facts["there"]
-    assert t["own"] == "the user's own" and t["written"] == [SKILL_DIR + "SKILL.md"] and t["fetched"] == 0
+    assert t["own"] == "the user's own", "the user's SKILL.md is not replaced"
+    assert sorted(t["written"]) == sorted(SKILL_DIR + f for f in skill_files())
     assert t["again"] == 1
 
 

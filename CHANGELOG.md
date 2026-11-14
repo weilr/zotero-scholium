@@ -4,6 +4,15 @@
 
 ### Changed
 
+- What the agent held back (the user's own changes, or annotations a cleanup would delete) is approved with Confirm
+  changes above the message box, or left with Keep unchanged; an ordinary reply approves nothing and drops the pending
+  report. The agent's report names these buttons; for a partial approval it narrows the configuration and reports again.
+- A one-click annotation's prompt lets extra instructions limit what it makes (the whole paper by default; extra
+  instructions over the profile, the profile over the skill's defaults); its closing line may give counts of 0 and
+  names a note only when one was written.
+- A conversation handed to a new session or to the other agent is at most 40,000 characters: recent whole turns first,
+  then excerpts of earlier ones; the local log stays complete.
+- Annotate again with messages still queued in earlier annotation sessions asks before it discards them.
 - The live runner takes `--user-edit TAG` (the user adds that tag to one of the tool's highlights after the run) and
   `--followup WORDS`, repeatable: words to the annotation session, or `@confirm` / `@keep` for the held-back row's buttons.
 - Pages with many vector drawings lay out faster: figure detection splits the drawings at gaps before clustering them,
@@ -22,11 +31,10 @@
 - A one-click annotation is told not to pass `--accept`, `--allow-warnings` or `--allow-missed` but to correct what
   `--apply` holds back; words to its session may let a finding through only when they ask for that exception.
 - The agent never passes `--accept user_edit` or `--accept cleanup_other` on its own judgement: it keeps those
-  annotations and notes, or writes nothing and names them, and overwrites or deletes them only after the user says so
-  in a later message (the prompts and the skill). It asks in the user's terms: what it would delete or overwrite, and
-  that a reply such as "Yes, delete it" goes ahead.
+  annotations and notes, or writes nothing and names them, and overwrites or deletes them only after the user approves
+  (the prompts and the skill). It asks in the user's terms: what it would delete or overwrite.
 - In a run of the plugin's agent, `--accept user_edit` and `--accept cleanup_other` (and `--allow-warnings`) go through only
-  for the annotations and notes the user confirmed in a message sent after the run that held them back; `--list` names
+  for the annotations and notes the user approved with Confirm changes after the run that held them back; `--list` names
   the tool's annotations the user changed, with what they changed.
 - A new annotation's `status` and `extract` are run by the plugin before the agent starts, and given to it in the
   prompt; a scanned PDF ends the run there, without an agent.
@@ -49,6 +57,12 @@
 
 ### Fixed
 
+- A conversation log line that could not be written (the file locked a moment) is kept and written again every 5 s,
+  also across a plugin update; the conversation says its record is not saved yet, and its next run waits for it.
+- Codex: only a thread Codex reports missing, or a fork point it cannot use, is rebuilt from the conversation; a refused
+  permission, a configuration error or a temporary failure keeps the thread for another try.
+- An Undo whose earlier conversation could not be restored says so and can be tried again; so does a conversation that
+  could not be deleted.
 - `extract` of a PDF with some scanned pages starts its output with how many of the selected pages are scanned and
   that OCR would add their text, and prints the same after its summary line.
 - An explicit rectangle whose text does not fit it gets a layout warning, as an overlapping one does; the rectangle and
@@ -103,6 +117,8 @@
 
 ### Added
 
+- The setup check names skill files that are missing or empty and offers Repair, which adds the packaged files that are
+  missing to the user's skills folder and keeps every file already there.
 - When Zotero's local API is turned off, Annotate, a question or an edited question asks once whether to turn it on.
 - When the agent does not find the zotero-scholium skill, the failure offers **Install the skill and retry**: the plugin
   copies the skill it carries into Claude Code's or Codex's skills folder and runs again. A skill already there is left

@@ -182,42 +182,26 @@ def test_annotate_again_deletes_first_and_names_the_exception_only_when_that_fai
             "--accept above).\n") in en["prompt"]
 
 
-# the user's own changes in Zotero (user_edit) and annotations a cleanup would delete (cleanup_other) are never the agent's
-# to override: kept as they are, or the run stops and asks the user in their terms, who confirms in a message of their own
-ANNOTATE_ZH = ("--apply 报告 user_edit 或 cleanup_other 时，在用户确认之前不要尝试 --accept：在配置里保留这些批注和笔记的现状（报告写了怎么做）；"
-               "做不到时不要写入，最后的回复不写下面那一行，改为用用户的话说明写入会删掉或覆盖哪些批注或笔记（页码、开头几个字、用户改了什么），"
-               "并告诉用户回复“确认删除”（或“确认覆盖”）之类的话即可继续；不要提参数、脚本、命令行、权限或“自动模式”。")
-ANNOTATE_EN = ("When --apply reports user_edit or cleanup_other, do not try --accept for them before the user confirms: keep those annotations and "
-               "notes as they are in the configuration (the report says how); where you cannot, write nothing and, in place of the closing line "
-               "below, your final reply says in the user's terms what writing would delete or overwrite (page, first words, what they changed) and "
-               "that they can reply, for example, “Yes, delete it” in their language to go ahead; never mention flags, scripts, shells, permissions "
-               "or “auto mode”.")
-FOLLOW_ZH = ("user_edit 和 cleanup_other 不适用上面的例外，在用户确认之前不要尝试 --accept：--apply 报告它们时，保留这些批注和笔记的现状仍能完成"
-             "用户的要求，就在配置里保留（报告写了怎么做）；否则停下，不要写入，在回复里用用户的话说明写入会删掉或覆盖哪些批注或笔记"
-             "（页码、开头几个字、用户改了什么），并告诉用户回复“确认删除”（或“确认覆盖”）之类的话即可继续；不要提参数、脚本、命令行、"
-             "权限或“自动模式”。只有用户之后的消息明确确认，才对你说明的那些批注或笔记加 --accept user_edit 或 --accept cleanup_other"
-             "（在那之前脚本不放行）。")
-FOLLOW_EN = ("That exception does not cover user_edit and cleanup_other: do not try --accept for them before the user confirms. When --apply "
-             "reports them, keep those annotations and notes as they are in the configuration (the report says how) where that still does what "
-             "the user asked; otherwise stop without writing, and in your reply say in the user's terms what writing would delete or overwrite "
-             "(page, first words, what they changed) and that they can reply, for example, “Yes, delete it” in their language to go ahead; never "
-             "mention flags, scripts, shells, permissions or “auto mode”. Only a later message of theirs that confirms it allows --accept "
-             "user_edit or --accept cleanup_other, for the annotations and notes you named (the script refuses them before then).")
-
-
+# Keep prompt contracts focused on safety rules; behavioral coverage lives in test_plugin_confirm*.py.
 def test_the_agent_never_overrides_the_users_own_changes_without_their_word(plugin_facts):
-    for name in ("cleared", "notCleared"):
-        zh, en = plugin_facts["zh-CN-" + name], plugin_facts["en-US-" + name]
-        # the annotation task: after the rule on --accept, before the redo's one exception
-        assert zh["prompt"].count("\n不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。\n" + ANNOTATE_ZH + "\n") == 1, name
-        assert en["prompt"].count("\nDo not pass --accept, --allow-warnings or --allow-missed: correct the findings instead.\n"
-                                  + ANNOTATE_EN + "\n") == 1, name
-        # a follow-up in the annotation's session: the user's words allow the other kinds, never these two
-        assert zh["followUp"].count("\n除非用户的话要求这个例外，否则不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。\n"
-                                    + FOLLOW_ZH + "\n") == 1, name
-        assert en["followUp"].count("\nDo not pass --accept, --allow-warnings or --allow-missed unless the user's message asks for that "
-                                    "exception: correct the findings instead.\n" + FOLLOW_EN + "\n") == 1, name
-    # the redo's exception still follows them, unchanged
-    zh, en = plugin_facts["zh-CN-notCleared"]["prompt"], plugin_facts["en-US-notCleared"]["prompt"]
-    assert zh.index(ANNOTATE_ZH) < zh.index("--accept cleanup_other（上面不要用 --accept 的唯一例外）。")
-    assert en.index(ANNOTATE_EN) < en.index("pass --accept cleanup_other (the one exception to the rule on --accept above).")
+    for locale, rules in (
+        ('zh-CN', ('在用户确认之前不要尝试 --accept', '确认修改', '保留原样', '普通回复不会授权',
+                   '缩小配置并重新报告', '等待新按钮确认', '页码、开头几个字、用户改了什么', '脚本、命令行、权限或“自动模式”')),
+        ('en-US', ('do not try --accept for them before the user confirms', 'Confirm changes', 'Keep unchanged',
+                   'Ordinary replies grant no permission', 'narrow the configuration and report again',
+                   'wait for the new button confirmation', 'page, first words, what they changed',
+                   'Never mention flags, scripts, shells, permissions or “auto mode”')),
+    ):
+        for name in ('cleared', 'notCleared'):
+            facts = plugin_facts[locale + '-' + name]
+            for field in ('prompt', 'followUp'):
+                text = facts[field]
+                assert 'user_edit' in text and 'cleanup_other' in text
+                assert text.count(rules[0]) == 1
+                for rule in rules:
+                    assert rule in text, (locale, name, field, rule)
+            assert 'SCHOLIUM_CONFIRMED' in facts['followUp']
+        # The complete-redo exception remains after the confirmation rule.
+        prompt = plugin_facts[locale + '-notCleared']['prompt']
+        exception = '--accept cleanup_other（' if locale == 'zh-CN' else 'pass --accept cleanup_other ('
+        assert prompt.index(rules[0]) < prompt.index(exception)

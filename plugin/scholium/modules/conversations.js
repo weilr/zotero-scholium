@@ -22,6 +22,7 @@ Object.assign(ScholiumRunner, {
     if (typed && pane.tab === "annotate" && !pane.annot.shownConv && !pane.busy) { this.annotateFromPane(pane); return; }
     const say = String(typed ? pane.input.value || "" : text).trim();
     if (!say || !pane.item || pane.sending === say) return;
+    this.clearHeldFromPane(pane);
     if (pane.busy && this.followUpFor(pane, invert) === "steer" && this.steerable(pane)) {
       const quote = pane.tab === "chat" ? pane.quote : null, key = this.unsentKey(pane);
       pane.sending = say;
@@ -56,18 +57,20 @@ Object.assign(ScholiumRunner, {
 
   // the words to the paper's conversation of the tab: sent, or queued behind the run under way (send); typed words
   // leave the box once they went
-  queueFromPane(pane, say, { before = null, typed = true } = {}) {
+  queueFromPane(pane, say, { before = null, typed = true, confirmation = null } = {}) {
     const view = this.viewOf(pane, pane.tab);
+    if (!confirmation) this.clearHeldFromPane(pane);
     const att = view.shownKey && this.attOf(pane.item.libraryID, view.shownKey);   // the paper of the tab's conversation
-    const quote = pane.tab === "chat" ? pane.quote : null, tab = pane.tab, key = this.unsentKey(pane);
+    const quote = !confirmation && pane.tab === "chat" ? pane.quote : null, tab = pane.tab, key = this.unsentKey(pane);
     if (typed) pane.sending = say;
     // a chat's message goes with the other papers above the box
     const papers = pane.tab === "chat" ? (pane.others || []).slice() : undefined;
-    return this.send(att || pane.item, say, { kind: pane.tab, conv: view.shownConv, before, quote, papers })
+    return this.send(att || pane.item, say, { kind: pane.tab, conv: view.shownConv, before, quote, papers, confirmation })
       .then(sent => {
-        if (!sent) return;
+        if (!sent) return false;
         if (typed) this.clearSent(pane, tab, say, key);
         if (quote && pane.quote === quote) { pane.quote = null; this.paintQuote(pane); }
+        return true;
       })
       .finally(() => { if (pane.sending === say) pane.sending = null; });
   },
@@ -100,13 +103,17 @@ Object.assign(ScholiumRunner, {
     const key = pane.annot.shownKey || pane.keys[0];
     const att = key && pane.item && this.attOf(pane.item.libraryID, key);
     if (!att) return;
-    const go = (replace = false) => this.annotate([att], { extra, confirmed: true, replace })
+    const agent = this.agent();
+    const queued = this.annotationQueueSnapshot(key, agent);
+    const go = (replace = false) => this.annotate([att], { extra, confirmed: true, replace, agent, queueConsent: { [key]: queued } })
       .then(n => { if (n && String(pane.input.value || "").trim() === extra) this.clearInput(pane); })
       .catch(e => this.log("annotate failed: " + e));
     const own = att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length;
-    if (!own) { go(); return; }
-    this.askInPlace(pane, this.text("redoInline", own, this.clearedNotes([att]).length, !!this.groupOf(att.libraryID)),
-                    [[this.text("cancelButton"), "quiet small", () => {}], [this.text("replace"), "small danger", () => go(true)]]);
+    if (!own && !queued.length) { go(); return; }
+    const question = [queued.length ? this.text("redoQueued", queued.length) : "",
+      own ? this.text("redoInline", own, this.clearedNotes([att]).length, !!this.groupOf(att.libraryID)) : ""].filter(Boolean).join(" ");
+    this.askInPlace(pane, question, [[this.text("cancelButton"), "quiet small", () => {}],
+      [this.text(own ? "replace" : "redoTitle"), "small danger", () => go(true)]]);
   },
 
   // a question above the box in place of a dialog: its line and its buttons, each of which closes it first
@@ -116,6 +123,60 @@ Object.assign(ScholiumRunner, {
     text.className = "scholium-confirm-text";
     text.textContent = line;
     row.replaceChildren(text, ...choices.map(([label, cls, fn]) => this.paneButton(doc, label, () => { this.show(row, false); fn(); }, cls)));
+    this.show(row, true);
+  },
+
+  // A report is approved only by its own pane action. Any new words cancel that pending action; a narrower request
+  // may produce a new report, which has its own action. Neither path consumes words still in the message box.
+  clearHeldFromPane(pane) {
+    const view = this.viewOf(pane, pane.tab);
+    if (view.shownKey && view.shownConv) this.heldBack.delete(`${view.shownKey}/${view.shownConv}`);
+    this.paintHeld(pane);
+  },
+
+  heldConfirmationCurrent(confirmation) {
+    if (!confirmation || typeof confirmation !== "object") return false;
+    const { pane, key, conv, kind, held, keys } = confirmation;
+    if (!pane || this.panes.get(pane.body) !== pane || pane.tab !== kind) return false;
+    const view = this.viewOf(pane, kind);
+    return view.shownKey === key && view.shownConv === conv && this.heldBack.get(`${key}/${conv}`) === held
+      && JSON.stringify(held.keys) === keys;
+  },
+
+  paintHeld(pane) {
+    const row = pane.heldRow;
+    if (!row) return;
+    const view = this.viewOf(pane, pane.tab), key = view.shownKey, conv = view.shownConv;
+    const held = key && conv && this.heldBack.get(`${key}/${conv}`);
+    const claimed = held && held.confirmation;
+    if (claimed && !claimed.sending && !(this.draining && !this.job) && !(this.job && this.job.source.confirmation === claimed)
+        && !this.queue.some(job => job.confirmation === claimed)) delete held.confirmation;
+    if (!held || held.confirmation || this.busy(key)) { pane.heldAction = null; this.show(row, false); return; }
+    // Keep the controls while this report stays visible; a claimed or hidden action gets a new token next time.
+    if (pane.heldAction && this.heldConfirmationCurrent(pane.heldAction)) { this.show(row, true); return; }
+    const confirmation = pane.heldAction = { pane, key, conv, kind: pane.tab, held, keys: JSON.stringify(held.keys) };
+    const text = pane.doc.createElement("span");
+    text.className = "scholium-confirm-text";
+    text.textContent = this.text("heldConfirmLine", new Set(Object.values(held.keys).flat()).size);
+    const keep = this.paneButton(pane.doc, this.text("heldKeep"), () => {
+      if (!this.heldConfirmationCurrent(confirmation)) return;
+      this.heldBack.delete(`${key}/${conv}`);
+      this.refresh();
+    }, "quiet small");
+    const confirm = this.paneButton(pane.doc, this.text("heldConfirm"), () => {
+      if (!this.heldConfirmationCurrent(confirmation) || held.confirmation || this.busy(key)) return;
+      held.confirmation = confirmation;   // claimed synchronously, including across windows
+      confirmation.sending = true;
+      this.refresh();
+      this.queueFromPane(pane, this.text("heldConfirmMessage"), { typed: false, confirmation })
+        .then(sent => { if (!sent && held.confirmation === confirmation) delete held.confirmation; })
+        .catch(e => {
+          if (held.confirmation === confirmation) delete held.confirmation;
+          this.log("confirmation failed: " + e);
+        })
+        .finally(() => { confirmation.sending = false; this.refresh(); });
+    }, "small danger");
+    row.replaceChildren(text, keep, confirm);
     this.show(row, true);
   },
 
@@ -426,18 +487,27 @@ Object.assign(ScholiumRunner, {
   async readLog(key, id) {
     if (!id) return null;
     const path = this.convPath(key, id);
+    const pending = this.pendingLogs.get(path);
+    if (pending && pending.flushing) await pending.flushing;
+    const tail = pending && pending.unlogged.length ? pending.unlogged.join("\n") + "\n" : "";
     let stat = null;
     try { stat = await IOUtils.stat(path); } catch (e) { return null; }
     // a conversation that goes on appends to its log, so an unchanged one (same time and size) is not parsed again; the
     // sections that ask for it at once share one reading
     let cached = this.parsedLogs.get(path);
-    if (!cached || cached.at !== stat.lastModified || cached.size !== stat.size) {
-      cached = { at: stat.lastModified, size: stat.size, log: this.parseLog(path, this.convAgent(id)) };
+    if (!cached || cached.at !== stat.lastModified || cached.size !== stat.size || cached.tail !== tail) {
+      cached = { at: stat.lastModified, size: stat.size, tail, log: this.parseLog(path, this.convAgent(id), tail) };
       this.parsedLogs.delete(path);
       this.parsedLogs.set(path, cached);
       if (this.parsedLogs.size > 20) this.parsedLogs.delete(this.parsedLogs.keys().next().value);   // the oldest
     }
     const log = await cached.log;
+    const remaining = this.pendingLogs.get(path);
+    const currentTail = remaining && remaining.unlogged.length ? remaining.unlogged.join("\n") + "\n" : "";
+    if (currentTail !== tail) {
+      this.parsedLogs.delete(path);
+      return this.readLog(key, id);
+    }
     if (!log) {
       if (this.parsedLogs.get(path) === cached) this.parsedLogs.delete(path);
       return null;
@@ -451,9 +521,10 @@ Object.assign(ScholiumRunner, {
 
   // what readLog gives of a log, read once; null when it cannot be read. agent: whose the runs of a log without run
   // lines are (a log of an earlier version)
-  async parseLog(path, agent = "claude") {
+  async parseLog(path, agent = "claude", tail = "") {
     let text;
     try { text = await IOUtils.readUTF8(path); } catch (e) { return null; }
+    text += tail;
     const entries = [], turns = [];
     const own = a => (a === "claude" || a === "codex" ? a : null);
     // each agent's own session of the conversation: the session, the last turn it saw (-1: none), the point an edited
@@ -670,25 +741,72 @@ Object.assign(ScholiumRunner, {
     return s.slice(0, end) + "…";
   },
 
-  // a conversation for a new session of it, as llm-for-zotero gives one: beyond HISTORY_FROM exchanges the latest
-  // HISTORY_WHOLE whole and the earlier ones as excerpts; each answer is the run's last message, with the agent that gave
-  // it. from: the number of turns before the first given
+  // A bounded handoff, shared by new sessions and missed exchanges. Keep recent whole turns first, then as many
+  // earlier excerpts as fit. from is the number of turns before these; the local log is never changed.
   historyParts(turns, from = 0) {
     const zh = this.zh();
     const answer = t => t.reply || (t.done ? (zh ? "（没有文字回答）" : "(no text)")
       : zh ? `（没有完成${t.ended ? "：" + this.cut(t.ended, 300) : ""}）` : `(not finished${t.ended ? ": " + this.cut(t.ended, 300) : ""})`);
-    let whole = turns.map((t, i) => ({ n: t.n || from + i + 1, user: (t.quote ? this.quoteTag(t.quote) : "") + String(t.user || ""), answer: answer(t),
-                                       agent: t.agent }));
-    let summary = "";
-    if (whole.length > this.HISTORY_FROM) {
-      const early = whole.slice(0, -this.HISTORY_WHOLE);
-      whole = whole.slice(-this.HISTORY_WHOLE);
-      const name = t => this.agentName(t.agent);
-      summary = [zh ? `之前的 ${early.length} 轮对话（摘录）：` : `Earlier conversation (${early.length} exchanges):`,
-                 ...early.map(t => (zh ? `用户：${this.cut(t.user, this.EXCERPT_USER)}\n回答（${name(t)}）：${this.cut(t.answer, this.EXCERPT_ANSWER)}`
-                                       : `User: ${this.cut(t.user, this.EXCERPT_USER)}\nAnswer (${name(t)}): ${this.cut(t.answer, this.EXCERPT_ANSWER)}`))].join("\n\n");
+    const clip = (s, n, tail = false) => {
+      s = String(s || "");
+      if (!tail || s.length <= n) return this.cut(s, n);
+      const head = this.cut(s, Math.ceil(n / 2));
+      let start = s.length - (n - head.length);
+      const c = s.charCodeAt(start);
+      if (c >= 0xdc00 && c <= 0xdfff) start++;   // keep both ends without splitting a surrogate pair
+      return head + s.slice(start);
+    };
+    const user = (t, n = Infinity, tail = false) => {
+      const full = (t.quote ? this.quoteTag(t.quote) : "") + String(t.user || "");
+      if (full.length <= n) return full;
+      // Quotes have their own allowance and are wrapped after clipping, so they cannot hide the question or lose
+      // their closing quote. A very long recent question retains its beginning and end.
+      const quote = t.quote ? this.quoteTag(Object.assign({}, t.quote, { page: this.cut(t.quote.page, 80),
+        text: clip(t.quote.text, Math.floor(n / 3), tail) })) : "";
+      return quote + clip(t.user, Math.max(1, n - quote.length), tail);
+    };
+    const part = i => ({ n: turns[i].n || from + i + 1, user: user(turns[i]), answer: answer(turns[i]), agent: turns[i].agent });
+    const size = t => Math.max(this.turnLines({ whole: [t] })[0].length + 2,
+      JSON.stringify([this.historyMessage("user", t.user), this.historyMessage("assistant", t.answer)]).length + 1);
+    // Covers the larger missedText header/footer, excerpt heading/omission notice, and the items' acknowledgment.
+    let left = this.HISTORY_MAX_CHARS - 1024, i = turns.length - 1, shortened = false;
+    const whole = [], early = [], recent = turns.length > this.HISTORY_FROM ? turns.length - this.HISTORY_WHOLE : 0;
+    for (; i >= recent; i--) {
+      let t = part(i), cost = size(t);
+      if (cost > left) {
+        if (whole.length) break;
+        // Even a single exchange can exceed the budget. Clip its fields together, measuring JSON escaping too.
+        let limit = Math.floor(left / 2);
+        do {
+          t = Object.assign({}, t, { user: user(turns[i], limit, true), answer: clip(answer(turns[i]), limit, true) });
+          cost = size(t);
+          limit = Math.floor(limit * 0.8);
+        } while (cost > left);
+        shortened = true;
+      }
+      whole.push(t);
+      left -= cost;
     }
-    return { summary, whole };
+    for (; i >= 0; i--) {
+      const t = turns[i], u = user(t, this.EXCERPT_USER), a = this.cut(answer(t), this.EXCERPT_ANSWER);
+      const line = zh ? `用户：${u}\n回答（${this.agentName(t.agent)}）：${a}`
+                      : `User: ${u}\nAnswer (${this.agentName(t.agent)}): ${a}`;
+      const cost = JSON.stringify(line).length + 4;
+      if (cost > left) break;
+      early.push(line);
+      left -= cost;
+    }
+    const summary = [];
+    if (i >= 0 || shortened) {
+      summary.push(zh ? `交接长度受限：${i >= 0 ? `已省略 ${i + 1} 轮较早对话` : "超长轮次的部分内容已省略"}${i >= 0 && shortened ? "，并截短了超长轮次" : ""}。需要完整内容时，请回看 Zotero 中这段对话的本地完整记录。`
+                      : `Handoff length is limited: ${i >= 0 ? `${i + 1} earlier exchanges were omitted` : "part of an oversized exchange was omitted"}${i >= 0 && shortened ? "; an oversized exchange was also shortened" : ""}. Consult this conversation's full local history in Zotero when needed.`);
+    }
+    if (early.length) summary.push(zh ? `之前的 ${early.length} 轮对话（摘录）：` : `Earlier conversation (${early.length} exchanges):`, ...early.reverse());
+    return { summary: summary.join("\n\n"), whole: whole.reverse() };
+  },
+
+  historyMessage(role, text) {
+    return { type: "message", role, content: [{ type: role === "user" ? "input_text" : "output_text", text: text || "[Empty message]" }] };
   },
 
   // Codex: the conversation as items of the new thread
@@ -696,10 +814,9 @@ Object.assign(ScholiumRunner, {
     if (!turns.length) return [];
     const zh = this.zh();
     const { summary, whole } = this.historyParts(turns);
-    const message = (role, text) => ({ type: "message", role, content: [{ type: role === "user" ? "input_text" : "output_text", text: text || "[Empty message]" }] });
     const items = [];
-    if (summary) items.push(message("user", summary), message("assistant", zh ? "明白，我已了解之前的对话。" : "Understood. I have the earlier conversation context."));
-    for (const t of whole) items.push(message("user", t.user), message("assistant", t.answer));
+    if (summary) items.push(this.historyMessage("user", summary), this.historyMessage("assistant", zh ? "明白，我已了解之前的对话。" : "Understood. I have the earlier conversation context."));
+    for (const t of whole) items.push(this.historyMessage("user", t.user), this.historyMessage("assistant", t.answer));
     return items;
   },
 
@@ -1238,16 +1355,35 @@ Object.assign(ScholiumRunner, {
     if (!entry || entry.finishing) return;
     entry.finishing = true;
     clearTimeout(entry.timer);
+    const pending = this.pendingLogs.get(path);
+    const wasHeld = pending && pending.held;
+    if (pending) {
+      pending.held = true;
+      if (pending.flushing) await pending.flushing;
+    }
     // its queued messages go with it
     const rows = this.queue.filter(j => j.qid && this.keyOf(j.att) === entry.key && j.conv === entry.id);
     if (rows.length) this.dropQueued(rows);
     // the Codex threads of the conversation are archived at the next Codex run, once its log is gone
     let threads = new Set();
-    try { threads = this.codexThreads(await IOUtils.readUTF8(path)); } catch (e) {}
+    try { threads = this.codexThreads((await IOUtils.readUTF8(path)) + (pending ? pending.unlogged.join("\n") : "")
+      + (pending && pending.restore ? pending.restore.text : "")); } catch (e) {}
     try {
       await IOUtils.remove(path);
+      this.pendingLogs.delete(path);
+      if (pending && pending.restore) this.replaced.delete(`${pending.restore.key}/${pending.restore.conv}`);
       for (const thread of threads) this.queueArchive(thread);
-    } catch (e) { this.log("conversation not deleted: " + e); }
+    } catch (e) {
+      this.log("conversation not deleted: " + e);
+      if (pending) { pending.held = wasHeld; if (!wasHeld) this.scheduleLogRetry(); }
+      this.deleting.delete(path);
+      const index = await this.index(entry.key);
+      if (entry.wasCurrent && index.chat === null) { index.chat = entry.id; await this.saveIndex(entry.key); }
+      this.notes.set(`${entry.key}/chat`, { text: this.text("conversationNotDeleted"), error: true, at: Date.now(), conv: entry.id });
+      this.refresh();
+      for (const pane of this.panes.values()) if (pane.keys.includes(entry.key)) await this.showConversation(pane);
+      return;
+    }
     this.parsedLogs.delete(path);
     const index = await this.index(entry.key);
     delete index.titles[entry.id];
@@ -1837,6 +1973,8 @@ Object.assign(ScholiumRunner, {
     try {
       const tab = pane.tab;
       const running = this.job && pane.keys.includes(this.job.key) && (this.job.source.kind || "chat") === tab;
+      const view = this.viewOf(pane, tab);
+      const pending = view.shownPath && this.pendingLogs.get(view.shownPath);
       const queuedAt = this.queue.findIndex(j => pane.keys.includes(this.keyOf(j.att)) && (j.kind || "chat") === tab && !this.isHeld(j));
       // a chat's outcome is its conversation's; the annotation tab's line has a deletion's only (an annotation's is its card)
       const latest = notes => notes.filter(Boolean).sort((a, b) => b.at - a.at)[0] || null;
@@ -1854,6 +1992,9 @@ Object.assign(ScholiumRunner, {
       if (running) {
         lines.push(this.runningState());
         kind = "running";
+      } else if (pending && (pending.unlogged.length || pending.restore)) {
+        lines.push(this.text(pending.restore ? "undoNotRestored" : "logNotSaved"));
+        kind = "error";
       } else if (queuedAt >= 0 && this.queue[queuedAt].retryAt > Date.now()) {
         lines.push(this.text("retryWait"));
         kind = "paused";
@@ -1906,6 +2047,7 @@ Object.assign(ScholiumRunner, {
       // version's annotation), and while such a run goes or waits
       pane.busy = this.busyKind(pane, tab);
       this.show(pane.composer, !readOnly);
+      this.paintHeld(pane);
       this.paintSaved(pane);
       // the annotation tab: extra wishes and Annotate until it shows a session; then words to the session, with Annotate
       // again beside the send button; while its run goes or waits, ■

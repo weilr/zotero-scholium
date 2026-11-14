@@ -126,16 +126,41 @@ Object.assign(ScholiumRunner, {
     return base ? PathUtils.join(base, "skills") : "";
   },
 
-  // the skill the plugin carries, copied into the agent's skills folder byte for byte; a zotero-scholium skill already
-  // there is left as it is. A text key: skillInstalled, skillThere, or what kept it from being installed
+  // Files used by the skill's workflow; agents/openai.yaml is optional display metadata. Check only file presence and
+  // empty/non-file resources, not the syntax or contents of customized files.
+  async missingSkillFiles(dir, files = this.SKILL_FILES) {
+    const missing = [];
+    for (const rel of files) {
+      if (rel.startsWith("agents/")) continue;
+      try {
+        const stat = await IOUtils.stat(PathUtils.join(dir, ...rel.split("/")));
+        if (stat.type === "directory" || stat.size === 0) missing.push(rel);
+      } catch (e) { missing.push(rel); }
+    }
+    return missing;
+  },
+
+  async checkSkill(say, agent, dir) {
+    if (!dir) return say(agent + "Skill", "bad", this.text("checkSkillMissing"), { kind: "skill", agent });
+    const missing = await this.missingSkillFiles(dir);
+    if (!missing.length) return say(agent + "Skill", "ok", this.text("checkSkillAt", dir));
+    const own = this.skillsDir(agent);
+    if (!own) return say(agent + "Skill", "bad", this.text("skillNoHome"));
+    say(agent + "Skill", "bad", this.text("checkSkillIncomplete", dir, missing.join(", "),
+        PathUtils.join(own, "zotero-scholium")), { kind: "skill", agent, repair: true });
+  },
+
+  // Install or repair only the user's skills folder, never a project or package cache. Add missing packaged files
+  // byte for byte; every existing file, including a customized SKILL.md, stays untouched.
   async installSkill(agent) {
     const dir = this.skillsDir(agent);
     if (!dir) return "skillNoHome";
     const dest = PathUtils.join(dir, "zotero-scholium");
-    if (await this.exists(PathUtils.join(dest, "SKILL.md"))) return "skillThere";
+    if (!(await this.missingSkillFiles(dest)).length) return "skillThere";
     const files = [];
     try {
       for (const rel of this.SKILL_FILES) {
+        if (await this.exists(PathUtils.join(dest, ...rel.split("/")))) continue;
         const xhr = await Zotero.HTTP.request("GET", this.chrome + "skill/zotero-scholium/" + rel, { responseType: "arraybuffer" });
         files.push([rel, new Uint8Array(xhr.response)]);
       }
@@ -145,9 +170,11 @@ Object.assign(ScholiumRunner, {
     }
     for (const [rel, bytes] of files) {
       const path = PathUtils.join(dest, ...rel.split("/"));
+      if (await this.exists(path)) continue;
       await IOUtils.makeDirectory(PathUtils.parent(path), { createAncestors: true, ignoreExisting: true });
-      await IOUtils.write(path, bytes);
+      await IOUtils.write(path, bytes, { mode: "create" });
     }
+    if ((await this.missingSkillFiles(dest)).length) return "skillIncomplete";
     return "skillInstalled";
   },
 
@@ -241,7 +268,7 @@ Object.assign(ScholiumRunner, {
     const lines = [];
     const say = (id, state, text, action = null) => {
       const line = { id, state, label: this.text("checkLabel", id), text };
-      if (action) line.action = Object.assign({ label: this.text(action.kind === "localApi" ? "checkTurnOn" : "checkInstall") }, action);
+      if (action) line.action = Object.assign({ label: this.text(action.kind === "localApi" ? "checkTurnOn" : action.repair ? "checkRepair" : "checkInstall") }, action);
       lines.push(line);
       try { if (onLine) onLine(line); } catch (e) { this.log("setup check line not shown: " + e); }
     };
@@ -351,9 +378,7 @@ Object.assign(ScholiumRunner, {
     if (signedIn === null) say("claude", "unknown", this.text("checkSignInUnknown", this.text("checkAuthSilent")));
     else if (signedIn) say("claude", "ok", this.text("checkSignedIn"));
     else say("claude", "bad", this.text("checkSignedOut", "claude"));
-    const dir = await this.claudeSkillDir();
-    if (dir) say("claudeSkill", "ok", this.text("checkSkillAt", dir));
-    else say("claudeSkill", "bad", this.text("checkSkillMissing"), { kind: "skill", agent: "claude" });
+    await this.checkSkill(say, "claude", await this.claudeSkillDir());
   },
 
   // the folder of the zotero-scholium skill Claude Code finds: in its skills folder, in the data directory's project skills
@@ -363,9 +388,13 @@ Object.assign(ScholiumRunner, {
     const user = this.skillsDir("claude");
     const dirs = (user ? [PathUtils.join(user, "zotero-scholium")] : [])
       .concat([PathUtils.join(Zotero.DataDirectory.dir, ".claude", "skills", "zotero-scholium")]);
-    for (const dir of dirs) if (await this.exists(PathUtils.join(dir, "SKILL.md"))) return dir;
-    if (!user) return null;
-    let level = [PathUtils.join(PathUtils.parent(user), "plugins", "cache")];
+    let incomplete = null;
+    for (const dir of dirs) {
+      if (!(await this.exists(PathUtils.join(dir, "SKILL.md")))) continue;
+      if (!(await this.missingSkillFiles(dir)).length) return dir;
+      if (!incomplete) incomplete = dir;
+    }
+    let level = user ? [PathUtils.join(PathUtils.parent(user), "plugins", "cache")] : [];
     for (let depth = 0; depth < 3 && level.length; depth++) {
       const next = [];
       for (const dir of level) { try { next.push(...await IOUtils.getChildren(dir)); } catch (e) {} }
@@ -383,9 +412,11 @@ Object.assign(ScholiumRunner, {
       for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
       return x.length > y.length;
     };
-    let best = null;
-    for (const f of found) if (!best || newer(f[0], best[0])) best = f;
-    return best ? best[1] : null;
+    found.sort((a, b) => newer(a[0], b[0]) ? -1 : newer(b[0], a[0]) ? 1 : 0);
+    for (const f of found) {
+      if (!(await this.missingSkillFiles(f[1])).length) return f[1];
+    }
+    return incomplete || (found.length ? found[0][1] : null);
   },
 
   // Codex: the program a run uses, through `codex app-server` started as a run starts it: whether it is signed in
@@ -414,8 +445,7 @@ Object.assign(ScholiumRunner, {
       else if (this.codexNoAccount(account)) say("codex", "bad", this.text("checkSignedOut", "codex"));
       else say("codex", "ok", this.text("checkSignedIn"));
       const skill = await this.within(this.codexSkill(rpc, cwd), this.CHECK_MS, late);
-      if (skill) say("codexSkill", "ok", this.text("checkSkillAt", PathUtils.parent(skill.path)));
-      else say("codexSkill", "bad", this.text("checkSkillMissing"), { kind: "skill", agent: "codex" });
+      await this.checkSkill(say, "codex", skill ? PathUtils.parent(skill.path) : null);
     } catch (e) {
       this.log("setup check of Codex: " + e);
       // a server that ended: the first line it wrote to stderr (a config.toml error, say), else the error's first line
@@ -549,7 +579,7 @@ Object.assign(ScholiumRunner, {
     }
     for (const dir of dirs) {
       const script = PathUtils.join(dir, "scripts", "scholium.py");
-      if ((await this.exists(PathUtils.join(dir, "SKILL.md"))) && (await this.exists(script))) return script;
+      if (!(await this.missingSkillFiles(dir, ["SKILL.md", "scripts/scholium.py"])).length) return script;
     }
     return null;
   },

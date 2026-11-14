@@ -242,9 +242,10 @@ WARNINGS = {"en-US": ("remaining warnings", "none"), "zh-CN": ("剩余警告", "
             "ko-KR": ("남은 경고", "없음"), "de": ("verbleibende Warnungen", "keine"), "fr-FR": ("avertissements restants", "aucun"),
             "es-ES": ("advertencias pendientes", "ninguna"), "ru-RU": ("оставшиеся предупреждения", "нет"),
             "pt-BR": ("avisos restantes", "nenhum"), "pt-PT": ("avisos restantes", "nenhum")}
-CLOSING_EN = ("Your final reply is one short line in the user's language and nothing else: N highlights (M core), K margin notes, "
-              "note “title”, remaining warnings as “remaining warnings: …” (“remaining warnings: none” when there are none).")
-CLOSING_ZH = "最后的回复只写一行中文，不写别的：高亮 N 条（核心 M 条），页边批注 K 条，笔记《标题》，剩余警告，写成“剩余警告：…”（没有时写“剩余警告：无”）。"
+CLOSING_EN = ("Your final reply is one short line in the user's language and nothing else: N highlights (M core), K margin notes "
+              "(counts may be 0); include note “title” only if a reading note was actually written; "
+              "remaining warnings as “remaining warnings: …” (“remaining warnings: none” when there are none).")
+CLOSING_ZH = "最后的回复只写一行中文，不写别的：高亮 N 条（核心 M 条），页边批注 K 条（计数可为 0）；仅实际写入阅读笔记时加上“笔记《标题》”；剩余警告，写成“剩余警告：…”（没有时写“剩余警告：无”）。"
 
 
 @pytest.mark.parametrize("lang", ["en-US", "zh-CN"] + LANGS)

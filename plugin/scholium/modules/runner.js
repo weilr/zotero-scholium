@@ -43,11 +43,13 @@ var ScholiumRunner = {
   removedQueued: new Map(), // qid -> { job, next, timer }: a queued message deleted a moment ago, until it can no longer be brought back;
                             // next: the qid of the row of its queue that followed it
   replaced: new Map(),      // "key/conv" -> the conversation before an edited question, until Undo can no longer bring it back
+  pendingLogs: new Map(),   // log path -> lines awaiting a successful write; shared across plugin reloads
+  logRetryTimer: null,
   qseq: 0,                  // the number of the latest queued message
   sendSeq: 0,               // the number of the latest message the user sent (send's sentSeq)
   heldBack: new Map(),      // "key/conv" -> { keys: { user_edit: [...], cleanup_other: [...] }, seq }: what a run of the conversation
-                            // held back for the user to confirm, and the latest message sent then; the next message the user
-                            // sends may confirm it (confirmedFor)
+                            // held back for the user to confirm with that report's pane action, and the latest message
+                            // sent then (confirmedFor)
   pendingQuotes: new Map(), // attachment key -> { quote: { text, page }, at }: a passage asked about before the section was drawn
   QUOTE_MS: 30000,          // how long such a passage waits for its section
   pendingPapers: new Map(), // attachment key -> { papers, at }: the other papers of a question about several (askPapers), until
@@ -85,6 +87,7 @@ var ScholiumRunner = {
   // earlier ones as excerpts of the user's words and of the answer
   HISTORY_FROM: 10,
   HISTORY_WHOLE: 5,
+  HISTORY_MAX_CHARS: 40000, // handoff only, including text or serialized item wrappers; local logs stay complete
   EXCERPT_USER: 250,
   EXCERPT_ANSWER: 400,
   UNDO_MS: 6000,            // a deleted conversation can be brought back this long
@@ -244,6 +247,7 @@ var ScholiumRunner = {
                       : "Off, so Scholium cannot read papers: press Turn on, or tick “Allow other applications on this computer to communicate with Zotero” in Settings → Advanced.",
       checkTurnOn: zh ? "打开" : "Turn on",
       checkInstall: zh ? "安装" : "Install",
+      checkRepair: zh ? "修复" : "Repair",
       checkNoProgram: agent => zh ? `未找到：安装 ${this.agentName(agent)}，或在上方指定它的程序。` : `Not found: install ${this.agentName(agent)}, or set its program above.`,
       checkProgramGone: zh ? "上方指定的程序不存在：改正路径，或清空以自动查找。" : "The program set above does not exist: correct the path, or clear it to find the program automatically.",
       checkSignedIn: zh ? "已登录。" : "Signed in.",
@@ -255,6 +259,9 @@ var ScholiumRunner = {
       checkCodexFailed: msg => zh ? `出错：${msg}` : `Failed: ${msg}`,
       checkNoAnswer: s => zh ? `${s} 秒内没有回答` : `no answer in ${s} s`,
       checkSkillAt: dir => zh ? `已找到：${dir}` : `Found: ${dir}`,
+      checkSkillIncomplete: (dir, missing, target) => zh ? `技能文件不完整：${dir}；缺少或不可用 ${missing}。修复将向 ${target} 补充缺少的文件，保留已有文件。`
+        : `Skill files are incomplete at ${dir}; missing or unusable: ${missing}. Repair adds missing files to ${target} and keeps existing files.`,
+      skillIncomplete: zh ? "技能文件仍不完整，请在环境检查中查看缺失或不可用的文件。" : "Skill files are still incomplete. Check the missing or unusable files in the setup check.",
       checkSkillMissing: zh ? "未找到：点“安装”，或在终端运行 npx skills add weilr/zotero-scholium -g -y。"
                             : "Not found: press Install, or run npx skills add weilr/zotero-scholium -g -y in a terminal.",
       checkUv: (v, path) => zh ? `${v}：${path}` : `${v} at ${path}`,
@@ -297,6 +304,7 @@ var ScholiumRunner = {
       annotateThis: zh ? "批注这篇" : "Annotate",
       deleteThis: zh ? "删除批注" : "Delete annotations",
       logButton: zh ? "打开日志" : "Show log",
+      logNotSaved: zh ? "记录尚未保存，将自动重试。关闭 Zotero 可能丢失最近内容。" : "Record not saved yet. Retrying automatically. Closing Zotero may lose recent content.",
       saveNote: zh ? "存为笔记" : "Save as note",
       noteSaved: zh ? "已存为这篇论文的笔记" : "Saved as a note of the paper",
       noteNotSaved: why => zh ? `没有存为笔记：${why}` : `Not saved as a note: ${why}`,
@@ -428,6 +436,10 @@ var ScholiumRunner = {
                          : "Highlights key sentences (translated when the paper is in another language), adds margin notes and a reading note.",
       annotExtraHint: zh ? "附加要求（可不填），例如：只批注第 3–5 页" : "Extra instructions (optional), e.g. only pages 3–5",
       annotFollowUpHint: zh ? "接着这次批注修改，例如：第 5 页那条译文改短" : "Continue this annotation, e.g. shorten the translation on page 5",
+      annotationQueueChanged: zh ? "旧批注会话的待发送消息已变化，请重新点击“重新批注”确认。"
+        : "Queued messages from earlier annotation sessions have changed. Choose Annotate again to confirm them.",
+      redoQueued: n => zh ? `重新批注会清空旧批注会话中尚未发送的 ${n} 条消息。`
+        : `Annotating again will discard unsent messages from earlier annotation sessions: ${n}.`,
       redoInline: (n, notes, group = false) => zh ? `重新批注会先删除这篇的 ${n} 条 Scholium 批注${notes ? `，${notes} 篇阅读笔记移到回收站` : ""}（你自己的不动）。`
           + (group ? groupShared : "")
         : `Annotating again first deletes this paper's ${plural(n, "Scholium annotation", "Scholium annotations")}`
@@ -441,6 +453,12 @@ var ScholiumRunner = {
       // the label of the warnings left in an annotation's closing line, and its word for none (warningsPart, warningsOf)
       warningsLabel: zh ? "剩余警告" : "remaining warnings",
       warningsNone: zh ? "无" : "none",
+      heldConfirmLine: n => zh ? `确认修改将允许删除或覆盖上次报告中待确认的 ${n} 项批注或笔记。`
+        : `Confirm changes allows deleting or overwriting all ${n} annotations or notes pending in the last report.`,
+      heldConfirm: zh ? "确认修改" : "Confirm changes",
+      heldKeep: zh ? "保留原样" : "Keep unchanged",
+      heldConfirmMessage: zh ? "我已点击‘确认修改’，同意删除或覆盖上次报告中待确认的整组批注和笔记。"
+        : "I clicked “Confirm changes” to approve deleting or overwriting the whole group of annotations and notes pending in the last report.",
       annotNone: zh ? "没有写入批注" : "No annotations written",
       annotNoneWarn: w => zh ? `没有写入批注：${w}` : `No annotations written: ${w}`,
       annotNoneScan: w => zh ? `没有写入批注：${w}` : `No annotations written. ${w}`,   // w: a whole sentence (noTextLayer)
@@ -477,6 +495,8 @@ var ScholiumRunner = {
       deleteConv: zh ? "删除这段对话" : "Delete this conversation",
       convDeleted: title => zh ? `已删除「${title}」` : `Deleted “${title}”`,
       undo: zh ? "撤销" : "Undo",
+      undoNotRestored: zh ? "未能恢复原对话，请重试撤销。" : "Could not restore the original conversation. Try Undo again.",
+      conversationNotDeleted: zh ? "未能删除对话，请重试。" : "Could not delete the conversation. Try again.",
       citePage: p => zh ? `第 ${p} 页` : `Page ${p}`,
       // a page as a citation gives it: the quoted passage's and a cited sentence's chip
       pageRef: p => `p.${p}`,

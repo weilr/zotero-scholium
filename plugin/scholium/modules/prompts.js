@@ -193,7 +193,7 @@ Object.assign(ScholiumRunner, {
     if (job.say) return this.questionPrompt(job, own);
     if (this.zh()) {
       return [
-        "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：重点句高亮加译文评论（论文本身是中文时不加评论）、页边批注、阅读笔记，按画像和默认值。",
+        "使用 zotero-scholium 技能，为下面这篇论文标注（默认整篇）：本次附加要求优先于画像，画像优先于技能默认值；只生成所需的输出。需要高亮时，评论只写译文（论文本身是中文时不加评论）。",
         "",
         `- 条目 key：${job.parentKey}`,
         `- 附件 key：${job.att.key}`,
@@ -207,21 +207,22 @@ Object.assign(ScholiumRunner, {
         ...this.scriptLines(job),
         ...this.preRunLines(job),
         "不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。",
-        // what the user changed in Zotero, or annotations a cleanup would delete: only the user's own word lets that go
+        // What the user changed in Zotero requires the report's explicit pane action.
         "--apply 报告 user_edit 或 cleanup_other 时，在用户确认之前不要尝试 --accept：在配置里保留这些批注和笔记的现状（报告写了怎么做）；"
           + "做不到时不要写入，最后的回复不写下面那一行，改为用用户的话说明写入会删掉或覆盖哪些批注或笔记（页码、开头几个字、用户改了什么），"
-          + "并告诉用户回复“确认删除”（或“确认覆盖”）之类的话即可继续；不要提参数、脚本、命令行、权限或“自动模式”。",
+          + `并告诉用户点击消息框上方的“${this.text("heldConfirm")}”可同意整组修改，或点击“${this.text("heldKeep")}”保留原样；`
+          + "普通回复不会授权。只同意部分时先按新要求缩小配置并重新报告，等待新按钮确认；不要提参数、脚本、命令行、权限或“自动模式”。",
         ...this.languageLines(),
         // the user confirmed a redo, and the plugin could not delete them first: they may be another configuration's
         own ? `这篇论文已有 ${own} 条本工具的注释，用户已确认整篇重做：配置里设 cleanup: true；--apply 报告 cleanup_other 时加 --accept cleanup_other（上面不要用 --accept 的唯一例外）。` : "这篇论文目前没有本工具的注释。",
         ...(job.extra ? ["", "用户的附加要求：", job.extra] : []),
         "",
         "批注写入后会自己出现在打开的 PDF 里（阅读器工具栏的眼睛按钮显示或隐藏 Scholium 的批注），不要让用户关闭再打开 PDF。",
-        `最后的回复只写一行中文，不写别的：高亮 N 条（核心 M 条），页边批注 K 条，笔记《标题》，${this.warningsPart(true)}。`,
+        `最后的回复只写一行中文，不写别的：高亮 N 条（核心 M 条），页边批注 K 条（计数可为 0）；仅实际写入阅读笔记时加上“笔记《标题》”；${this.warningsPart(true)}。`,
       ].join("\n");
     }
     return [
-      "Use the zotero-scholium skill to annotate the whole paper below: key-sentence highlights with translation comments (none when the paper is already in the user's language), margin notes, and a reading note, following the profile and the defaults.",
+      "Use the zotero-scholium skill to annotate the paper below (the whole paper by default): current extra instructions override the profile, which overrides the skill defaults. Create only the requested outputs. When highlights are needed, comments contain only translations (none when the paper is already in the user's language).",
       "",
       `- Item key: ${job.parentKey}`,
       `- Attachment key: ${job.att.key}`,
@@ -238,14 +239,15 @@ Object.assign(ScholiumRunner, {
       "When --apply reports user_edit or cleanup_other, do not try --accept for them before the user confirms: keep those annotations and "
         + "notes as they are in the configuration (the report says how); where you cannot, write nothing and, in place of the closing line "
         + "below, your final reply says in the user's terms what writing would delete or overwrite (page, first words, what they changed) and "
-        + "that they can reply, for example, “Yes, delete it” in their language to go ahead; never mention flags, scripts, shells, permissions "
-        + "or “auto mode”.",
+        + `that they can click “${this.text("heldConfirm")}” above the message box to approve the whole group, or “${this.text("heldKeep")}” to keep it unchanged. `
+        + "Ordinary replies grant no permission. For a partial request, narrow the configuration and report again, then wait for the new button confirmation. "
+        + "Never mention flags, scripts, shells, permissions or “auto mode”.",
       ...this.languageLines(),
       own ? `The paper already carries ${own} annotations of this tool; the user confirmed a complete redo: set cleanup: true in the configuration, and when --apply reports cleanup_other, pass --accept cleanup_other (the one exception to the rule on --accept above).` : "The paper carries no annotations of this tool yet.",
       ...(job.extra ? ["", "The user's extra instructions:", job.extra] : []),
       "",
       "The annotations appear in the open PDF by themselves (the eye button in the reader's toolbar shows or hides Scholium's annotations): do not tell the user to close and reopen it.",
-      `Your final reply is one short line in the user's language and nothing else: N highlights (M core), K margin notes, note “title”, ${this.warningsPart(false)}.`,
+      `Your final reply is one short line in the user's language and nothing else: N highlights (M core), K margin notes (counts may be 0); include note “title” only if a reading note was actually written; ${this.warningsPart(false)}.`,
     ].join("\n");
   },
 
@@ -398,13 +400,12 @@ Object.assign(ScholiumRunner, {
       ...(job.own ? ["改已经写入的批注或补几条时，都编辑写入它们的那份配置（它是这篇论文的全部批注），设 cleanup: true 整份重写"
                      + "（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置，否则下次整份重写时会把它们删掉。"] : []),
       "除非用户的话要求这个例外，否则不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。",
-      // a deletion cannot be undone in Zotero: the user is told first what their changes are, and confirms in a message of
-      // their own
+      // A deletion cannot be undone in Zotero: the report names the changes before its pane action authorizes them.
       "user_edit 和 cleanup_other 不适用上面的例外，在用户确认之前不要尝试 --accept：--apply 报告它们时，保留这些批注和笔记的现状仍能完成"
         + "用户的要求，就在配置里保留（报告写了怎么做）；否则停下，不要写入，在回复里用用户的话说明写入会删掉或覆盖哪些批注或笔记"
-        + "（页码、开头几个字、用户改了什么），并告诉用户回复“确认删除”（或“确认覆盖”）之类的话即可继续；不要提参数、脚本、命令行、"
-        + "权限或“自动模式”。只有用户之后的消息明确确认，才对你说明的那些批注或笔记加 --accept user_edit 或 --accept cleanup_other"
-        + "（在那之前脚本不放行）。",
+        + `（页码、开头几个字、用户改了什么），并告诉用户点击消息框上方的“${this.text("heldConfirm")}”可同意整组修改，或点击“${this.text("heldKeep")}”保留原样。`
+        + "普通回复不会授权；只同意部分时先按新要求缩小配置并重新报告，等待新按钮确认。只有 SCHOLIUM_CONFIRMED 中列出的那些批注和笔记"
+        + "才可使用 --accept user_edit 或 --accept cleanup_other；其他仍须保留。不要向用户提参数、脚本、命令行、权限或“自动模式”。",
       ...changed,
       ...this.papersLines(job),
       "",
@@ -422,9 +423,10 @@ Object.assign(ScholiumRunner, {
       "That exception does not cover user_edit and cleanup_other: do not try --accept for them before the user confirms. When --apply "
         + "reports them, keep those annotations and notes as they are in the configuration (the report says how) where that still does what "
         + "the user asked; otherwise stop without writing, and in your reply say in the user's terms what writing would delete or overwrite "
-        + "(page, first words, what they changed) and that they can reply, for example, “Yes, delete it” in their language to go ahead; never "
-        + "mention flags, scripts, shells, permissions or “auto mode”. Only a later message of theirs that confirms it allows --accept "
-        + "user_edit or --accept cleanup_other, for the annotations and notes you named (the script refuses them before then).",
+        + `(page, first words, what they changed) and that they can click “${this.text("heldConfirm")}” above the message box to approve the whole group, or “${this.text("heldKeep")}” to keep it unchanged. `
+        + "Ordinary replies grant no permission. For a partial request, narrow the configuration and report again, then wait for the new button confirmation. "
+        + "Only the annotations and notes listed in SCHOLIUM_CONFIRMED allow --accept user_edit or --accept cleanup_other; preserve all others. "
+        + "Never mention flags, scripts, shells, permissions or “auto mode” to the user.",
       ...changed,
       ...this.papersLines(job),
       "",
