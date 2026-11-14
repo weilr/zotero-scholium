@@ -342,7 +342,7 @@ def column_bounds(doc, sample=60):
     pages, of each page's own robust extents. None when no page has enough text."""
     xs0, xs1 = [], []
     n = len(doc)
-    for i in range(0, n, max(1, n // sample)):
+    for i in range(0, n, max(1, (n + sample - 1) // sample)):
         page = doc[i]
         H = page.rect.height
         body = [w for w in page.get_text("words") if len(w[4]) > 1 and w[1] > 40 and w[3] < H - 30]
@@ -367,7 +367,31 @@ def page_figure_rects(page, min_size=8.0):
     except Exception:
         pass
     try:
-        rects.extend(page.cluster_drawings())
+        # A gap wider than the clustering tolerance on either axis cannot be crossed
+        # by a cluster's growing rectangle. Split there before the quadratic native
+        # clustering, keeping tiny paths together until their whole group is known.
+        groups = [page.get_drawings()]
+        for start, end in ((0, 2), (1, 3)):
+            separated = []
+            for group in groups:
+                part, edge = [], float("-inf")
+                for drawing in sorted(group, key=lambda d: d["rect"][start]):
+                    r = drawing["rect"]
+                    if part and r[start] > edge + 3:
+                        separated.append(part)
+                        part = []
+                    part.append(drawing)
+                    edge = max(edge, r[end])
+                if part:
+                    separated.append(part)
+            groups = separated
+        vectors = []
+        for group in groups:
+            if any(max(d["rect"][end] for d in group) - min(d["rect"][start] for d in group) < min_size
+                   for start, end in ((0, 2), (1, 3))):
+                continue
+            vectors.extend(page.cluster_drawings(drawings=group))
+        rects.extend(sorted(vectors, key=lambda r: (r.y1, r.x0)))
     except Exception:
         try:
             rects.extend(pymupdf.Rect(d["rect"]) for d in page.get_drawings())
@@ -649,7 +673,7 @@ def smaller_sizes(sp):
 def layout_page_summaries(pi, specs, page_obstacles, missed):
     """Lay out one page's summaries and return their annotations.
 
-    Order: explicit rectangles (never moved; an overlap is only reported), then top/bottom bands across the text
+    Order: explicit rectangles (never moved; overlaps and overflow are reported), then top/bottom bands across the text
     column, then margin boxes and sticky notes beside their anchors. Every placed box joins the obstacle set of the
     following groups. Bands avoid the page's text lines; a band without room even at its smallest font size becomes
     a sticky note beside the column's first text line (top) or its last above the footer (bottom). Margin boxes lie
@@ -666,6 +690,12 @@ def layout_page_summaries(pi, specs, page_obstacles, missed):
         if sp["kind"] == "note":
             rect = [x0, pi.H - y0 - NOTE_ICON, x0 + NOTE_ICON, pi.H - y0]
         warn = "explicit rectangle overlaps a text line, figure or annotation" if _intersects(rect, occupied + text_lines) else None
+        if sp["kind"] == "text":
+            # Explicit line breaks add lines; count the box padding only once.
+            height = sum(_box_height(dict(sp, text=line or " "), x1 - x0) - 6
+                         for line in sp["text"].splitlines()) + 6
+            if height > y1 - y0 + 1e-6:
+                warn = ((warn + "; ") if warn else "") + "text does not fit the explicit rectangle; enlarge it or shorten the text"
         anns.append(_summary_annotation(pi, sp, rect, warn)); occupied.append(rect)
     # 2. bands across the text column
     bx0, bx1 = pi.body_x0, pi.body_x1
@@ -2198,18 +2228,24 @@ def extract_main(argv):
         json.dump({"pdf": pdf, "pdf_sha256": pdf_hash, "sentences": [it for it in items if "id" in it],
                    "headings": [it for it in items if "id" not in it]}, open(args.sentences, "w", encoding="utf8"), ensure_ascii=False, indent=0)
         text = render_sentences([it for it in items if not pages or it["page"] in pages])
-        if args.out:
-            text = indexed(text)
-        summary = f"{n} sentences -> {args.sentences}; {text.count(chr(10))} lines, {len(text)} characters"
+        summary = f"{n} sentences -> {args.sentences}; "
     else:
         text = extract_text(pdf, pages=pages, keep_references=args.keep_references)
         if not pages and not re.sub(r"--- p\.\d+.*? ---|\s", "", text):
             no_text_layer(total, scanned)
-        summary = f"{text.count(chr(10))} lines, {len(text)} characters"
+        summary = ""
+    notice = (f"Warning: scanned image content on {scanned} of {total} selected pages was not extracted. "
+              "Run OCR to include it.\n\n") if scanned else ""
+    text = notice + text
+    if args.sentences and args.out:
+        text = indexed(text)
+    summary += f"{text.count(chr(10))} lines, {len(text)} characters"
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
         open(args.out, "w", encoding="utf8").write(text)
         print(f"{args.out}: {summary}")
+        if notice:
+            print(notice.rstrip())
     else:
         print(text)
     return 0

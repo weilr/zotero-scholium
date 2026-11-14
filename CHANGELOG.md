@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Pages with many vector drawings lay out faster: figure detection splits the drawings at gaps before clustering them,
+  and the column bounds read at most 60 pages.
 - The reading-note template distinguishes training stages from alternative baselines and checks claimed omissions
   against the paper; the Chinese writing guide also checks translation qualifiers and unreported experimental details.
 - The annotation's and a question's prompts say how the skill's script runs on this computer: with `uv run` when uv
@@ -45,6 +47,10 @@
 
 ### Fixed
 
+- `extract` of a PDF with some scanned pages starts its output with how many of the selected pages are scanned and
+  that OCR would add their text, and prints the same after its summary line.
+- An explicit rectangle whose text does not fit it gets a layout warning, as an overlapping one does; the rectangle and
+  its font size stay as given.
 - Extracting selected text pages from a mostly scanned PDF no longer rejects them because of scans outside the selection;
   selecting only scanned pages still asks for OCR, while sentence IDs remain those of the whole document.
 - The live-run environment check rejects Windows paths on another drive with its normal isolation error instead of
