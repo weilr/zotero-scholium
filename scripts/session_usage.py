@@ -8,6 +8,8 @@ input is the context sent on each call (cached part included), so the sum is wha
 A Claude Code transcript (assistant lines with message.usage) is read the same way: input = input_tokens
 + cache_read + cache_creation per call. Tool calls are counted by kind (scholium dry-run / apply / --list /
 extract, zotero API, read file, write file, other) with the size of their outputs.
+Repeated message/tool IDs and cumulative token events are counted once. Records without IDs or cumulative
+usage retain per-record accounting; equal token counts alone do not identify a repeated call.
 """
 import argparse, collections, datetime, glob, json, os, sys
 
@@ -39,7 +41,9 @@ def _text(x):
 
 def read_codex(path):
     calls, inp, cached, out, peak = 0, 0, 0, 0, 0
-    tools, outputs, pending = collections.Counter(), 0, {}
+    tools, outputs, seen_calls = collections.Counter(), 0, set()
+    previous, current, seen_events, seen_outputs, session = {}, {}, set(), set(), None
+    fields = ("input_tokens", "cached_input_tokens", "output_tokens")
     with open(path, encoding="utf8", errors="ignore") as f:
         for line in f:
             try:
@@ -47,22 +51,66 @@ def read_codex(path):
             except Exception:
                 continue
             t, p = rec.get("type"), rec.get("payload") or {}
+            if t == "session_meta" and p.get("id") and p["id"] != session:
+                session, previous, current = p["id"], {}, {}
             if t == "event_msg" and p.get("type") == "token_count":
-                last = (p.get("info") or {}).get("last_token_usage") or {}
-                if last.get("input_tokens"):
-                    calls += 1; inp += last["input_tokens"]; cached += last.get("cached_input_tokens", 0) or 0
-                    out += last.get("output_tokens", 0) or 0; peak = max(peak, last["input_tokens"])
+                info = p.get("info") or {}
+                event_id = rec.get("id") or rec.get("uuid")
+                if not event_id and rec.get("timestamp"):
+                    event_id = (rec["timestamp"], json.dumps(info, sort_keys=True))
+                if event_id:
+                    event_key = (session, event_id)
+                    if event_key in seen_events:
+                        continue
+                    seen_events.add(event_key)
+                last = info.get("last_token_usage") or {}
+                total = {k: v for k, v in (info.get("total_token_usage") or {}).items()
+                         if k in fields and v is not None}
+                common = total.keys() & previous.keys()
+                if any(total[k] < previous[k] for k in common):
+                    previous, current = {}, {}   # a reset starts a new cumulative segment
+                same_call = bool(current) and "input_tokens" in total and total["input_tokens"] == previous.get("input_tokens")
+                # At the start (or after a reset), last excludes any history before this file.
+                delta = {k: total[k] - previous[k] if k in total and k in previous
+                         else last.get(k) if last.get(k) is not None else total.get(k, 0) for k in fields}
+                if same_call:
+                    for k in fields:
+                        if k not in total or k not in previous:
+                            value = last.get(k) if last.get(k) is not None else total.get(k)
+                            delta[k] = value - current[k] if value is not None else 0
+                for k in fields:
+                    if k in total:
+                        previous[k] = total[k]
+                    elif k in previous:
+                        previous[k] += delta[k]   # do not count a last-only gap again at the next total
+                if any(delta.values()):
+                    if same_call:
+                        current = {k: current[k] + delta[k] for k in fields}
+                    else:
+                        calls += 1
+                        current = delta
+                    inp += delta["input_tokens"]; cached += delta["cached_input_tokens"]
+                    out += delta["output_tokens"]; peak = max(peak, current["input_tokens"])
             elif t == "response_item":
+                call_id = p.get("call_id")
+                call_key = (session, call_id)
                 if p.get("type") in ("function_call", "custom_tool_call"):
+                    if call_id and call_key in seen_calls:
+                        continue
                     args = _text(p.get("arguments") or p.get("input") or "")
                     try:
                         cmd = json.loads(args).get("cmd") or args
                     except Exception:
                         cmd = args
                     kind = classify(cmd) if p.get("name") not in ("spawn_agent", "wait_agent", "list_agents") else "sub-agent control"
-                    tools[kind] += 1; pending[p.get("call_id")] = kind
-                elif p.get("type") in ("function_call_output", "custom_tool_call_output") and p.get("call_id") in pending:
-                    outputs += len(_text(p.get("output") or ""))
+                    tools[kind] += 1; seen_calls.add(call_key)
+                elif p.get("type") in ("function_call_output", "custom_tool_call_output") and call_key in seen_calls:
+                    text = _text(p.get("output") or "")
+                    output_id = rec.get("id") or rec.get("uuid")
+                    output_key = (call_key, ("id", output_id) if output_id else ("text", text))
+                    if not call_id or output_key not in seen_outputs:
+                        outputs += len(text)
+                        seen_outputs.add(output_key)
     return {"harness": "codex", "calls": calls, "input": inp, "cached": cached, "output": out, "peak": peak,
             "tools": dict(tools), "tool_output_chars": outputs}
 
@@ -70,21 +118,30 @@ def read_codex(path):
 def read_claude(path):
     calls, inp, cached, out, peak = 0, 0, 0, 0, 0
     tools, outputs = collections.Counter(), 0
+    messages, seen_tools, seen_outputs, seen_records = {}, set(), set(), set()
     with open(path, encoding="utf8", errors="ignore") as f:
         for line in f:
             try:
                 rec = json.loads(line)
             except Exception:
                 continue
+            record_id = rec.get("uuid") or rec.get("id")
+            if record_id:
+                if record_id in seen_records:
+                    continue
+                seen_records.add(record_id)
             m = rec.get("message") or {}
             if rec.get("type") == "assistant":
                 u = m.get("usage") or {}
-                if u.get("input_tokens") is not None:
-                    total = (u.get("input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0) + (u.get("cache_creation_input_tokens") or 0)
-                    calls += 1; inp += total; cached += u.get("cache_read_input_tokens") or 0
-                    out += u.get("output_tokens") or 0; peak = max(peak, total)
+                # Each streamed content block repeats usage. Keep the final known fields per message.
+                mid = m.get("id") or object()
+                messages.setdefault(mid, {}).update({k: v for k, v in u.items() if v is not None})
                 for c in m.get("content") or []:
                     if isinstance(c, dict) and c.get("type") == "tool_use":
+                        if c.get("id") and c["id"] in seen_tools:
+                            continue
+                        if c.get("id"):
+                            seen_tools.add(c["id"])
                         name, arg = (c.get("name") or "").lower(), c.get("input") or {}
                         kind = {"read": "read file", "write": "write file", "edit": "write file", "multiedit": "write file",
                                 "agent": "sub-agent control"}.get(name) or (classify(arg.get("command", "")) if name == "bash" else name)
@@ -92,7 +149,16 @@ def read_claude(path):
             elif rec.get("type") == "user" and isinstance(m.get("content"), list):
                 for c in m["content"]:
                     if isinstance(c, dict) and c.get("type") == "tool_result":
-                        outputs += len(_text(c.get("content") or ""))
+                        text = _text(c.get("content") or "")
+                        output_key = (c.get("tool_use_id"), text)
+                        if not c.get("tool_use_id") or output_key not in seen_outputs:
+                            outputs += len(text)
+                            seen_outputs.add(output_key)
+    for u in messages.values():
+        if any(k in u for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens")):
+            total = (u.get("input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0) + (u.get("cache_creation_input_tokens") or 0)
+            calls += 1; inp += total; cached += u.get("cache_read_input_tokens") or 0
+            out += u.get("output_tokens") or 0; peak = max(peak, total)
     return {"harness": "claude", "calls": calls, "input": inp, "cached": cached, "output": out, "peak": peak,
             "tools": dict(tools), "tool_output_chars": outputs}
 

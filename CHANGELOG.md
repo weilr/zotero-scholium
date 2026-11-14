@@ -51,6 +51,7 @@
   that OCR would add their text, and prints the same after its summary line.
 - An explicit rectangle whose text does not fit it gets a layout warning, as an overlapping one does; the rectangle and
   its font size stay as given.
+- `scripts/session_usage.py` counts a repeated message, tool call or cumulative token event once.
 - Extracting selected text pages from a mostly scanned PDF no longer rejects them because of scans outside the selection;
   selecting only scanned pages still asks for OCR, while sentence IDs remain those of the whole document.
 - The live-run environment check rejects Windows paths on another drive with its normal isolation error instead of
