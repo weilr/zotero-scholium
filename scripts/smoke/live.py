@@ -713,6 +713,7 @@ def session(a):
     config = {"shots": d["shots"], "run": run, "pdf": a.pdf, "chainPdf": smoke.make_pdf(os.path.join(d["chain"], "chain.pdf")),
               "extra": a.extra, "port": a.port, "paper": paper, "limitMin": a.limit, "locale": a.locale, "flags": flags,
               "maxMsgs": a.max_msgs, "stopFile": stop_file, "checks": [], "openReader": bool(a.open_reader), "chat": a.chat or "",
+              "userEdit": a.user_edit or "", "followups": list(a.followup or []),
               # Claude Code's skill folder as the plugin sees it: the export's, so that --add-dir and the pre-run's script
               # are the commit's, not a skill the user installed
               "claudeSkills": os.path.join(export, "skills"),
@@ -832,6 +833,11 @@ def parser(config):
     ap.add_argument("--limit", type=float, default=20, help="minutes the agent run may take before the probe cancels it")
     ap.add_argument("--minutes", type=float, default=30, help="minutes the whole Zotero session may take")
     ap.add_argument("--chat", default="", help="a question for the Chat tab after the run")
+    ap.add_argument("--user-edit", default="", metavar="TAG",
+                    help="after the run the user adds this tag to one of the tool's highlights (a yellow one if any)")
+    ap.add_argument("--followup", action="append", default=[], metavar="WORDS",
+                    help="words sent to the annotation session after the run, in order (repeatable); @confirm or @keep "
+                         "clicks that button of the held-back row instead")
     ap.add_argument("--open-reader", action="store_true", help="a reader tab before and after the run, the eye button's pref never set")
     ap.add_argument("--from-run", help="start from a copy of this finished run's profile and data (only read)")
     ap.add_argument("--tag", default=None, help="the run's name (default: the time)")

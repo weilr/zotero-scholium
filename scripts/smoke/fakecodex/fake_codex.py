@@ -26,7 +26,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 USER_PORT = 23119
 SHELL = r"C:\Program Files\PowerShell\7\pwsh.exe"   # the shell Codex names in a command item (shown only)
-ANNOTATE = re.compile(r"为下面这篇论文做整篇标注|annotate the whole paper below")   # the plugin's one-click prompt
+ANNOTATE = re.compile(r"为下面这篇论文(?:做整篇标注|标注（默认整篇）)|annotate the (?:whole paper below|paper below \(the whole paper by default\))")
 # the closing line the one-click prompt asks for: its label for the warnings left and its word for none, as the prompt
 # gives them (the plugin's warningsPart), in the English and the Chinese prompt
 CLOSING_EN = re.compile(r"remaining warnings as “(.+?): …” \(“.+?: (.+?)” when there are none\)")

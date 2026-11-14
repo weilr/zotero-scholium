@@ -720,14 +720,15 @@ def test_the_fake_codex_refuses_the_users_port(fake):
     assert fake.port_ok({}) is False
 
 
-def test_the_fake_codex_plays_the_plugins_annotation_prompt():
-    from plugin_harness import plugin_source
-    src = plugin_source()
+def test_the_fake_codex_plays_the_plugins_annotation_prompt(plugin_prompts):
     fake = load_fake_codex()
-    for words in ("为下面这篇论文做整篇标注", "annotate the whole paper below"):   # the plugin's one-click prompt, both languages
-        assert words in src, words
-        assert fake.is_annotation("使用 zotero-scholium 技能，" + words + "：…")
+    # Current prompts emitted by the plugin, and earlier openings still used by smoke-test baselines.
+    for prompt in (plugin_prompts["zh-CN"]["prompt"], plugin_prompts["en-US"]["prompt"],
+                   "使用 zotero-scholium 技能，为下面这篇论文做整篇标注：…",
+                   "Use the zotero-scholium skill to annotate the whole paper below: …"):
+        assert fake.is_annotation(prompt), prompt
     assert not fake.is_annotation("使用 zotero-scholium 技能读下面这篇论文，回答用户在 Zotero 里提的问题。")
+    assert not fake.is_annotation("Use the zotero-scholium skill to read the paper below and answer the user's question.")
 
 
 def test_an_interrupt_completes_the_turn_once(fake):
@@ -871,6 +872,16 @@ def test_live_takes_every_ui_language():
         assert live.parser({}).parse_args(["--locale", loc]).locale == loc
     with pytest.raises(SystemExit):
         live.parser({}).parse_args(["--locale", "xx-XX"])
+
+
+def test_live_takes_a_user_edit_and_follow_ups_in_order():
+    a = live.parser({}).parse_args(["--user-edit", "重要", "--followup", "把黄色高亮都删掉", "--followup", "@confirm"])
+    assert a.user_edit == "重要" and a.followup == ["把黄色高亮都删掉", "@confirm"]
+    a = live.parser({}).parse_args([])
+    assert a.user_edit == "" and a.followup == []
+    with open(os.path.join(ROOT, "scripts", "smoke", "probe", "live.js"), encoding="utf8") as f:
+        probe = f.read()
+    assert "CFG.userEdit" in probe and "CFG.followups" in probe and '"@confirm"' in probe
 
 
 PROMPTS = r"""

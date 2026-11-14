@@ -6,8 +6,10 @@
    session's cost reached its stop). Every agent process must get SCHOLIUM_ZOTERO_PORT = CFG.port in its environment, and
    Claude Code's arguments get CFG.flags and never --max-budget-usd; otherwise the run is cancelled. Afterwards: the card,
    the annotations and notes in the database (db.json), the final replies and the conversation logs. Options:
-   CFG.openReader (a reader tab before and after the run, from a never-set eye-button preference) and CFG.chat (a
-   question in the Chat tab afterwards). */
+   CFG.openReader (a reader tab before and after the run, from a never-set eye-button preference), CFG.userEdit (a tag the
+   user adds to one of the tool's highlights afterwards), CFG.followups (words to the annotation session afterwards, in
+   order; "@confirm" or "@keep" clicks that button of the held-back row) and CFG.chat (a question in the Chat tab
+   afterwards). */
 let lastEnv = null;
 let promptN = 0;
 const prompts = [];
@@ -283,6 +285,62 @@ async function main() {
     try { win().Zotero_Tabs.select("zotero-pane"); } catch (e) {}
     await delay(1200);
   });
+
+  // the user changes one of the tool's highlights: a tag added, as with Zotero's tag box (a yellow one if any)
+  let edited = null;
+  if (CFG.userEdit && !(await stopAsked())) await step("user-edit", async () => {
+    const own = D.att.getAnnotations().filter(a => a.annotationType === "highlight" && a.getTags().some(t => t.tag === "zotero-scholium"));
+    const a = own.find(x => String(x.annotationColor).toLowerCase() === "#ffd400") || own[0];
+    if (!a) { line("userEdit", { none: true }); return; }
+    a.addTag(CFG.userEdit);
+    await a.saveTx();
+    edited = { key: a.key, page: a.annotationPageLabel, color: a.annotationColor, text: (a.annotationText || "").slice(0, 80) };
+    line("userEdit", edited);
+  });
+
+  // each follow-up to the annotation session: words typed and sent, or a click on the held-back row's button; then the
+  // row, the card, the last reply and what became of the annotations (the edited highlight among them)
+  const heldRow = b => { const p = paneOf(fresh(b)); return p && p.heldRow; };
+  const shownEl = el => !!el && !el.hidden && el.style.display !== "none";
+  for (const [i, say] of (CFG.followups || []).entries()) {
+    if (await stopAsked()) break;
+    await step("followup-" + (i + 1), async () => {
+      box = await selectItem(D);
+      await showTab(box, "annot");
+      await delay(800);
+      const before = new Set(allAnns(D.att).map(a => a.key));
+      const t1 = Date.now();
+      if (/^@(confirm|keep)$/.test(say)) {
+        const row = heldRow(box);
+        const btn = shownEl(row) ? row.querySelector(say === "@confirm" ? ".danger" : ".quiet") : null;
+        line("followup", { n: i + 1, click: say, row: shownEl(row) ? txt(row) : null, button: btn && txt(btn) });
+        if (!btn) return;
+        await realClick(btn);
+      } else {
+        typeIn(q(box, ".scholium-input"), say);
+        await delay(300);
+        line("followup", { n: i + 1, say });
+        await realClick(q(box, ".scholium-round"));
+      }
+      await started(30000);
+      while (busy()) {
+        if (Date.now() - t1 > CFG.limitMin * 60000 || await stopAsked()) { line("stop", { reason: "followup" }); try { r.cancel(); } catch (e) {} break; }
+        await delay(2000);
+      }
+      await delay(3000);
+      box = fresh(box);
+      const row = heldRow(box), anns = allAnns(D.att), after = new Set(anns.map(a => a.key));
+      const e = edited && anns.find(a => a.key === edited.key);
+      line("followupDone", { n: i + 1, seconds: Math.round((Date.now() - t1) / 1000),
+                             held: shownEl(row) ? { text: txt(q(row, ".scholium-confirm-text")), buttons: qa(row, "button").map(txt) } : null,
+                             edited: edited ? (e ? { present: true, tags: e.tags, comment: e.comment.slice(0, 80) } : { present: false }) : null,
+                             annotations: anns.length, kept: [...before].filter(k => after.has(k)).length,
+                             removed: [...before].filter(k => !after.has(k)).length, added: [...after].filter(k => !before.has(k)).length,
+                             card: cards(box).slice(-1), reply: (await finalReply(D.att)).slice(-1) });
+      await shot(`f${i + 1}-followup`, box);
+    });
+  }
+  if ((CFG.followups || []).length) await IOUtils.writeUTF8(PathUtils.join(OUT, "db-after-followups.json"), JSON.stringify({ anns: allAnns(D.att) }, null, 1));
 
   if (CFG.chat && !(await stopAsked())) await step("chat", async () => {
     box = await selectItem(D);

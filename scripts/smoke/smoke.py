@@ -224,6 +224,12 @@ def profile_matches(cmdline, profile):
     """Whether a process's command line names this profile folder (and not another whose name starts the same)."""
     if not cmdline:
         return False
+    if str(profile).startswith("/") and not ntpath.splitdrive(str(profile))[0]:
+        prof = re.escape(str(profile).rstrip("/") or "/")
+        # ps flattens argv: an unquoted path ends only at the end or our runner's final flag, not any space.
+        pattern = (rf'''(?:^|\s)-profile\s+(?:"{prof}/?"(?=\s|$)|'{prof}/?'(?=\s|$)|'''
+                   rf"{prof}/?(?=\s*$|\s+-ZoteroDebugText\s*$))")
+        return re.search(pattern, str(cmdline)) is not None
     line, prof = str(cmdline).replace("/", "\\").lower(), _norm(profile).lower()
     start = line.find(prof)
     while start >= 0:
@@ -388,16 +394,29 @@ def netstat_user_port():
 
 def zotero_processes():
     """(pid, command line) of every zotero process."""
+    pids = None
     if os.name == "nt":
         ps = ("Get-CimInstance Win32_Process -Filter \"Name='zotero.exe'\" | "
               "ForEach-Object { [string]$_.ProcessId + \"`t\" + [string]$_.CommandLine }")
         out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True).stdout
     else:
-        out = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True, text=True).stdout.replace(" ", "\t", 1)
+        names = subprocess.run(["ps", "-A", "-ww", "-o", "pid=", "-o", "ucomm="], capture_output=True, text=True).stdout
+        pids = set()
+        for line in names.splitlines():
+            parts = line.split(None, 1)
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].strip().lower() in ("zotero", "zotero-bin"):
+                pids.add(parts[0])
+        if not pids:
+            return []
+        out = subprocess.run(["ps", "-ww", "-p", ",".join(sorted(pids, key=int)), "-o", "pid=", "-o", "args="],
+                             capture_output=True, text=True).stdout
     rows = []
     for l in out.splitlines():
-        pid, _, cmd = l.strip().partition("\t")
-        if pid.strip().isdigit() and ("zotero" in cmd.lower() or os.name == "nt"):
+        parts = l.split(None, 1)
+        if len(parts) != 2:
+            continue
+        pid, cmd = parts
+        if pid.isdigit() and (pids is None or pid in pids):
             rows.append((int(pid), cmd))
     return rows
 
