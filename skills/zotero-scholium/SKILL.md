@@ -11,7 +11,7 @@ Create only the output types and paper scope the user requests. Current instruct
 
 | Output | Form | Rules |
 |---|---|---|
-| Key-sentence highlights | native `highlight` annotations | The comment is a translation of the sentence into the user's language, not an interpretation; a paper already in the user's language gets no comments. Default colours: `#ff6666` (red) for *core* statements — the enumerated contributions, headline results, the central claim (about 10–15 per paper); `#ffd400` (yellow) for *other* points — method details, setup, limitations, useful observations. Colours are not assigned by topic. |
+| Key-sentence highlights | native `highlight` annotations | The comment translates the sentence (see Writing rules). Default colours: `#ff6666` (red) for *core* statements — the enumerated contributions, headline results, the central claim (about 10–15 per paper); `#ffd400` (yellow) for *other* points — method details, setup, limitations, useful observations. Colours are not assigned by topic. |
 | Margin notes | native `text` annotations in the page margin beside the paragraph | Blue `#1a73e8`, 8 pt, no hard line breaks. At most one per paragraph, one or two sentences, a reader's own remark. |
 | Page summary | `text` annotation across the top of page 1 (`place: "top"`) | Only when the profile or the user asks for it: three or four sentences, `font_size` 9. |
 | Reading note | child note (HTML) under the item | What a researcher records after reading: assessments, open questions, specific figures. |
@@ -52,8 +52,8 @@ Extraction creates the output directories and binds `sentences.json` to the PDF'
 
 Write one configuration from `examples/config.template.json`, including only requested outputs; unknown keys are refused. When the task includes the reading note, first read `examples/reading_note.template.html` (and `references/style-zh.md` for Chinese) and follow its title and sections. Without `cleanup` a run only adds, and text the tool already wrote on a page is refused as `duplicate_existing`. Set `cleanup: true` for a complete redo, and to change or add to annotations already written: edit the configuration they were written from, which holds the paper's whole set, and apply it whole, not a separate configuration with only new entries. The tool's earlier annotations are then replaced (`cleanup_removes` counts them). When the reading note is rewritten too, `note_replace: true` moves the tool's earlier notes to the trash once the new one is written; the user's notes are never touched.
 
-- `highlights[]`: `id` (one sentence) or `ids: [first, last]` (consecutive sentences on one page), `core`, and `comment` (the translation; left out when the paper is in the user's language). Core: the contributions enumerated in the introduction, the main claim of the abstract, the first quantitative sentence of each results subsection, the summary sentence of the conclusion. Each sentence at most once.
-- `summaries[]`: `id` (a sentence of the paragraph) and `text`; omit paragraphs with nothing substantive to say.
+- `highlights[]`: `id` (one sentence) or `ids: [first, last]` (consecutive sentences on one page), `core`, and `comment` (the translation; left out when the paper is in the user's language). Core: the contributions enumerated in the introduction, the main claim of the abstract, the first quantitative sentence of each results subsection, the summary sentence of the conclusion. Every stated contribution and every method or theory subsection gets at least one highlight; a repeated claim, one. Each sentence at most once.
+- `summaries[]`: `id` (the sentence it comments on) and `text`; omit paragraphs with nothing substantive to say.
 - `note_html`: the reading note.
 - Take banned phrases and the expected number of core highlights from the profile's rules (`banned_phrases`, `core_range`); adjust or omit `core_range` for a limited scope. `sentences` is the JSON written above (default `<out_dir>/sentences.json`). Other fields (colour levels, underlines, sticky notes, placement): `references/configuration.md`, only when the task needs one.
 
@@ -83,9 +83,9 @@ Annotate one paper per agent context; a single paper is annotated directly. Befo
 ## Writing rules
 
 - **Translations**: comments contain only a faithful translation of the highlighted sentence, without reader judgements or questions. Expand fragments to a full sentence when needed. Preserve numbers and model names. The full Chinese translation prompt is in `references/style-zh.md`; for other languages, translate naturally with technical precision.
-- **Margin notes**: complete sentences; no `label: content` form, arrows, circled numbers or bracketed tags. Reactions, questions and cross-references are appropriate; no filler; usually 15–40 words.
+- **Margin notes**: complete sentences; no `label: content` form, arrows, circled numbers or bracketed tags. Reactions, questions and cross-references are appropriate (read the next paragraph before raising a doubt); no filler; usually 15–40 words.
 - **Mathematics**: in comments use Unicode and `<sub>`/`<sup>` (`d<sub>k</sub>`, `x<sup>2</sup>`, √, ×, ≤, α); the reader renders only `<b> <i> <sub> <sup>`. Margin text on the page shows no tags: the tool writes `<sub>`/`<sup>` there as Unicode (dₖ, x²) or with `_`/`^` (π_ref). In the reading note use the editor's math nodes, rendered with KaTeX: `<span class="math">$d_k$</span>` inline, `<pre class="math">$$…$$</pre>` for a display equation.
 - **Reading note**: paragraphs rather than labelled bullet lists; concrete figures; first-person assessments and open questions; limitations in the authors' words and the reader's own; at the end the citation (from `status`) and the code link when the paper gives one, no sign-off. Look nothing up on the web or in Zotero's database. No stock phrases, em-dash asides, emoji, or aphoristic closing sentences.
-- Before applying, read every requested output once more: comments must stay faithful to the source; reader judgements and questions belong in margin notes and reading notes.
+- Before applying, read every requested output once more.
 
 Read `references/configuration.md` only for an option or report field not described here, and `references/zotero-annotations.md` (annotation data formats) only when investigating a write problem.

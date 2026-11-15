@@ -7,6 +7,11 @@
 - What the agent held back (the user's own changes, or annotations a cleanup would delete) is approved with Confirm
   changes above the message box, or left with Keep unchanged; an ordinary reply approves nothing and drops the pending
   report. The agent's report names these buttons; for a partial approval it narrows the configuration and reports again.
+- The skill highlights every stated contribution and every method or theory subsection, a repeated claim once; a
+  margin note sits beside the sentence it comments on, and a doubt is raised only after the next paragraph is read. The
+  Chinese guide asks for every clause, intensifier, connective and "Table N shows" in a translation, and for the
+  system, baseline, and absolute and relative values with each figure in the note; the note template says the same and
+  checks a claim that the paper leaves something out by searching `sentences.txt`.
 - A one-click annotation makes highlights, margin notes and a reading note of the whole paper by default; extra
   instructions (over the profile, the profile over the skill's defaults) may ask for only some of them. Its closing
   line may give counts of 0 and names a note only when one was written.
