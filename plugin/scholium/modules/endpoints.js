@@ -240,6 +240,11 @@ var ScholiumEndpoints = {
         if ("text" in u && (ann.annotationType === "highlight" || ann.annotationType === "underline")) ann.annotationText = String(u.text || "");
         if ("pageLabel" in u) ann.annotationPageLabel = String(u.pageLabel);
         if ("sortIndex" in u) ann.annotationSortIndex = String(u.sortIndex);
+        // the tool's own tags as the configuration has them; the tool's tag and the user's are never removed
+        if (u.tags && typeof u.tags === "object") {
+          for (const t of (Array.isArray(u.tags.remove) ? u.tags.remove : [])) if (typeof t === "string" && !ownTags.has(t)) ann.removeTag(t);
+          for (const t of (Array.isArray(u.tags.add) ? u.tags.add : [])) if (typeof t === "string" && t.trim() && !ownTags.has(t.trim())) ann.addTag(t.trim());
+        }
         if (u.position) {
           const pos = Object.assign({}, u.position);
           if (ann.annotationType === "note") { delete pos.fontSize; delete pos.rotation; const r = pos.rects[0]; pos.rects = [[r[0], r[3] - 22, r[0] + 22, r[3]]]; }

@@ -1615,6 +1615,24 @@ def _tool_label(key, last):
     return (_written(last).get(key) or {}).get("pageLabel")
 
 
+def _tool_tags(key, last):
+    """The tags besides its own that the tool wrote on an annotation, as the output folder's last record keeps them."""
+    return list((_written(last).get(key) or {}).get("tags") or [])
+
+
+def _tags_after(had, fields):
+    """The tool's tags once a change in place is made (its "tags": what to add and remove)."""
+    t = fields.get("tags") if isinstance(fields.get("tags"), dict) else None
+    if not t:
+        return list(had)
+    return [x for x in had if x not in t.get("remove", [])] + [x for x in t.get("add", []) if x not in had]
+
+
+def _with_tags(prints, tags):
+    """A record's entry with the tool's tags besides its own."""
+    return dict(prints, tags=list(tags))
+
+
 def _user_changes(old, last):
     """What the user changed in a listed annotation of the tool since the tool wrote it, as {what: (then, now)}: the fields
     of written_fields that differ from the output folder's last record of it, and "tags" for tags of the user's (any but
@@ -1625,15 +1643,21 @@ def _user_changes(old, last):
         changes = {f: (then.get(f), v) for f, v in written_fields(old).items() if then.get(f) != v}
     else:
         changes = {"other": (None, None)} if _changed_by_user(old) else {}
-    tags = sorted(set(old.get("tags") or []) - OWN_TAGS)
+    tool = set((then or {}).get("tags") or [])
+    now = set(old.get("tags") or [])
+    tags = sorted(now - OWN_TAGS - tool)
     if tags:
         changes["tags"] = ([], tags)
+    gone = sorted(tool - now)
+    if gone:
+        changes["tags_removed"] = (gone, [])
     return changes
 
 
 # the fields of a rewrite in place (rewrite_plan) that would undo each change of the user's; the user's tags, and a page
 # label they set, a rewrite never changes
-CLASHES = {"comment": ("comment",), "color": ("color",), "text": ("text",), "place": ("position", "sortIndex")}
+CLASHES = {"comment": ("comment",), "color": ("color",), "text": ("text",), "place": ("position", "sortIndex"),
+           "tags_removed": ("tags",)}
 
 
 USER_EDIT_ASK = ("stop and ask the user; pass --accept user_edit only after a later message of theirs confirms deleting or overwriting "
@@ -1645,12 +1669,14 @@ CLEANUP_OTHER_ASK = ("stop and ask the user; pass --accept cleanup_other only af
 def _changes_text(changes):
     """What the user changed, in words: "added the tag “important” and changed the page label 1 → ii"."""
     said = []
-    for what in ("tags", "pageLabel", "comment", "color", "text", "place", "type", "other"):
+    for what in ("tags", "tags_removed", "pageLabel", "comment", "color", "text", "place", "type", "other"):
         if what not in changes:
             continue
         then, now = changes[what]
         if what == "tags":
             said.append(f"added the tag{'s' if len(now) > 1 else ''} " + ", ".join(f"“{t}”" for t in now))
+        elif what == "tags_removed":
+            said.append(f"removed the tag{'s' if len(then) > 1 else ''} " + ", ".join(f"“{t}”" for t in then))
         elif what in ("pageLabel", "color", "type"):
             said.append(f"changed {({'pageLabel': 'the page label', 'color': 'the colour', 'type': 'its type'})[what]} {then} → {now}")
         else:
@@ -1761,6 +1787,11 @@ def rewrite_plan(out, cfg, listing, last=None, note_html=None):
             # the configuration has no page labels: one the user set stays, as their tags do (no field sets those)
             if a.get("pageLabel") and a["pageLabel"] != o.get("pageLabel") and "pageLabel" not in _user_changes(o, last):
                 fields["pageLabel"] = a["pageLabel"]
+            # the tool's own tags as the configuration now has them (its record says which it wrote); the user's stay
+            had, want, now = set(_tool_tags(o["key"], last)), set(a.get("tags") or []), set(o.get("tags") or [])
+            add, remove = sorted(want - now), sorted((had - want) & now)
+            if add or remove:
+                fields["tags"] = {"add": add, "remove": remove}
             (plan["update"].append({"key": o["key"], "index": i, "fields": fields}) if fields
              else plan["keep"].append({"key": o["key"], "index": i}))
         plan["remove"] = [o["key"] for o in free]
@@ -2592,8 +2623,18 @@ def api_apply(cfg, out, api, plan=None):
                 raise RuntimeError(f"the tool's annotations on the attachment changed since they were read ({k}); run again")
             if seen.get("version") is not None:
                 version[k] = seen["version"]
-        changes = [dict({"key": u["key"], "version": version[u["key"]]},
-                        **{API_FIELDS[f]: json.dumps(v) if f == "position" else v for f, v in u["fields"].items()}) for u in plan["update"]]
+        listed_tags = {r["key"]: [t["tag"] for t in r["data"].get("tags", [])] for r in rows}
+
+        def api_change(u):
+            change = {"key": u["key"], "version": version[u["key"]]}
+            for f, v in u["fields"].items():
+                if f == "tags":
+                    keep = [t for t in listed_tags.get(u["key"], []) if t not in v.get("remove", [])]
+                    change["tags"] = [{"tag": t} for t in keep + [t for t in v.get("add", []) if t not in keep]]
+                else:
+                    change[API_FIELDS[f]] = json.dumps(v) if f == "position" else v
+            return change
+        changes = [api_change(u) for u in plan["update"]]
         to_delete = list(plan["remove"])
         result.update(updatedKeys=[], keptKeys=[k["key"] for k in plan["keep"]])
         out = [out[i] for i in plan["create"]]
@@ -2975,6 +3016,10 @@ await Zotero.DB.executeTransaction(async function () {{
     if ("text" in u && (ann.annotationType === "highlight" || ann.annotationType === "underline")) ann.annotationText = u.text;
     if ("pageLabel" in u) ann.annotationPageLabel = u.pageLabel;
     if ("sortIndex" in u) ann.annotationSortIndex = u.sortIndex;
+    if (u.tags) {{
+      for (let t of (u.tags.remove || [])) if (t !== TAG) ann.removeTag(t);
+      for (let t of (u.tags.add || [])) if (t !== TAG) ann.addTag(t);
+    }}
     if ("position" in u) {{
       let pos = Object.assign({{}}, u.position);
       if (ann.annotationType === "note") {{ delete pos.fontSize; delete pos.rotation; let r = pos.rects[0]; pos.rects = [[r[0], r[3] - 22, r[0] + 22, r[3]]]; }}
@@ -3559,10 +3604,11 @@ def _plan_prints(written, last, plan, listing, channel):
         prints.pop(k, None)
     for k in written["keptKeys"]:
         if k in old:
-            prints[k] = written_fields(old[k], _tool_label(k, last))
+            prints[k] = _with_tags(written_fields(old[k], _tool_label(k, last)), _tool_tags(k, last))
     for u in (plan or {}).get("update", []):
         if u["key"] in old and u["key"] in written["updatedKeys"]:
-            prints[u["key"]] = written_fields(_expected(old[u["key"]], u["fields"], channel), _label_of(u["key"], u["fields"], last))
+            prints[u["key"]] = _with_tags(written_fields(_expected(old[u["key"]], u["fields"], channel), _label_of(u["key"], u["fields"], last)),
+                                          _tags_after(_tool_tags(u["key"], last), u["fields"]))
     written["written"] = prints
     written["notes"] = dict((last or {}).get("notes") or {})
 
@@ -3585,15 +3631,15 @@ def _record_prints(written, lst, last, note_html, plan=None, listing=None, chann
             continue
         k = a["key"]
         if k in created:
-            prints[k] = written_fields(a)
+            prints[k] = _with_tags(written_fields(a), [t for t in a.get("tags") or [] if t not in OWN_TAGS])
         elif k in expect:
             if _same_content(a, expect[k]):
-                prints[k] = written_fields(a, _label_of(k, fields[k], last))
+                prints[k] = _with_tags(written_fields(a, _label_of(k, fields[k], last)), _tags_after(_tool_tags(k, last), fields[k]))
                 done.append(k)
             elif _same_content(a, old[k]):
-                prints[k] = written_fields(old[k], _tool_label(k, last))
+                prints[k] = _with_tags(written_fields(old[k], _tool_label(k, last)), _tool_tags(k, last))
         elif k in kept and k in old:
-            prints[k] = written_fields(old[k], _tool_label(k, last))
+            prints[k] = _with_tags(written_fields(old[k], _tool_label(k, last)), _tool_tags(k, last))
         elif k in before:
             prints[k] = before[k]
     written["written"] = prints

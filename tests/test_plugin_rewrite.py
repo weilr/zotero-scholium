@@ -35,6 +35,8 @@ class Item {
   }
   getTags() { return this.tags; }
   setTags(tags) { this.tags = tags; }
+  addTag(tag) { if (!this.tags.some(t => t.tag === tag)) this.tags.push({ tag }); }
+  removeTag(tag) { this.tags = this.tags.filter(t => t.tag !== tag); }
   getNote() { return this.note; }
   setNote(html) { this.note = html; }
   getNoteTitle() { const m = /<h1[^>]*>(.*?)<\/h1>/i.exec(this.note); return m ? m[1] : ''; }
@@ -218,3 +220,23 @@ def test_a_new_annotation_gets_the_tools_tag_then_its_own_and_never_a_tool_tag_t
     assert out["result"]["ok"], out
     made = [i for i in out["items"] if i["key"].startswith("NEW")]
     assert [i["tags"] for i in made] == [["zotero-scholium", "方法", "结果"]]
+
+
+TAGGED = [{"key": "A1", "type": "highlight", "text": "First.", "comment": "旧译文。", "tags": OWN + ["方法", "重要"]},
+          {"key": "A2", "type": "highlight", "text": "Second.", "comment": "第二句。", "tags": OWN}]
+
+
+def test_a_change_of_the_tools_tags_keeps_the_tools_tag_and_the_users():
+    change = {"key": "A1", "tags": {"add": ["结果"], "remove": ["方法", "zotero-scholium"]}}
+    out = zotero(request(updates=[change], keep=["A2"]), TAGGED)
+    assert out["result"]["ok"], out
+    assert by_key(out)["A1"]["tags"] == ["zotero-scholium", "重要", "结果"]
+
+
+def test_the_javascript_file_changes_the_tools_tags_alike():
+    cfg = dict(cli.DEFAULTS, item_key="PARENT01", attachment_key="ATTACH01", cleanup=True)
+    plan = {"create": [], "update": [{"key": "A1", "index": 0, "fields": {"tags": {"add": ["结果"], "remove": ["方法"]}}}],
+            "keep": [{"key": "A2", "index": 1}], "remove": [], "note": None}
+    out = zotero(script=cli.render_js(cfg, [dict(NEW, text="First."), dict(NEW, text="Second.")], plan), existing=TAGGED)
+    assert "error" not in out, out.get("error")
+    assert by_key(out)["A1"]["tags"] == ["zotero-scholium", "重要", "结果"]
