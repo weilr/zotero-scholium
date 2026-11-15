@@ -226,7 +226,9 @@ var ScholiumEndpoints = {
         const pos = Object.assign({}, a.position);
         if (type === "note") { delete pos.fontSize; delete pos.rotation; const r = pos.rects[0]; pos.rects = [[r[0], r[3] - 22, r[0] + 22, r[3]]]; }
         ann.annotationPosition = JSON.stringify(pos);
-        if (tag) ann.setTags([{ tag }]);
+        // the tool's tag, then the annotation's own (never one of the tool's)
+        if (tag) ann.setTags([{ tag }].concat((Array.isArray(a.tags) ? a.tags : [])
+          .filter(t => typeof t === "string" && t.trim() && !ownTags.has(t.trim())).map(t => ({ tag: t.trim() }))));
         await ann.save();
         created[type]++;
         createdKeys.push(ann.key);

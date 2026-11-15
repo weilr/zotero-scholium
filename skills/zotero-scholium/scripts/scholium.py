@@ -448,6 +448,50 @@ NOTE_ICON = 22.0         # side of a sticky-note icon in the Zotero reader (pt)
 MIN_BOX_WIDTH = 30.0     # narrowest usable text box (pt)
 ROTATED_PAGE = "the page is rotated; annotations on rotated pages are not supported yet: leave out the entries on this page"
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+# Zotero's eight annotation colours, by the names a configuration may use for them
+ZOTERO_COLORS = {"red": "#ff6666", "orange": "#f19837", "yellow": "#ffd400", "green": "#5fb236",
+                 "blue": "#2ea8e5", "purple": "#a28ae5", "magenta": "#e56eee", "gray": "#aaaaaa"}
+
+
+def zotero_color(v):
+    """A colour as Zotero takes it: one of its eight by name (any case), or #rrggbb; in lower case."""
+    v = str(v).strip().lower()
+    return ZOTERO_COLORS.get(v, v)
+
+
+def is_color(v):
+    """Whether a configuration's colour is #rrggbb or one of Zotero's colour names."""
+    return isinstance(v, str) and bool(HEX_COLOR_RE.match(zotero_color(v)))
+
+
+def clean_tags(v):
+    """The tags of an annotation: stripped, without repeats, in order; None unless a list of non-empty strings."""
+    if not isinstance(v, list) or not all(isinstance(t, str) and t.strip() for t in v):
+        return None
+    out = []
+    for t in (t.strip() for t in v):
+        if t not in out:
+            out.append(t)
+    return out
+
+
+def _item_tags(cfg, item):
+    """The tags an annotation gets besides the tool's own: the configuration's, then the item's, without repeats."""
+    return clean_tags(list(cfg.get("tags") or []) + list((item or {}).get("tags") or [])) or []
+
+
+def normalize_config(cfg):
+    """Colour names in the configuration as #rrggbb (levels, the default colours and every item's); returns cfg."""
+    if isinstance(cfg.get("levels"), dict):
+        cfg["levels"] = {k: zotero_color(v) if is_color(v) else v for k, v in cfg["levels"].items()}
+    for k in ("core_color", "other_color", "text_color"):
+        if is_color(cfg.get(k)):
+            cfg[k] = zotero_color(cfg[k])
+    for k in ("highlights", "summaries", "regions"):
+        for item in cfg.get(k) or []:
+            if isinstance(item, dict) and is_color(item.get("color")):
+                item["color"] = zotero_color(item["color"])
+    return cfg
 
 
 def normalise_summary(item, cfg, page_sizes):
@@ -476,9 +520,9 @@ def normalise_summary(item, cfg, page_sizes):
     kind = item.get("kind", cfg.get("summary_kind", "text"))
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {', '.join(KINDS)}")
-    color = str(item.get("color") or cfg.get("text_color") or DEFAULTS["text_color"])
+    color = zotero_color(item.get("color") or cfg.get("text_color") or DEFAULTS["text_color"])
     if not HEX_COLOR_RE.match(color):
-        raise ValueError("color must be a #rrggbb value")
+        raise ValueError("color must be a #rrggbb value or one of " + ", ".join(ZOTERO_COLORS))
     color = color.lower()   # in lower case, the only form Zotero takes
     try:
         font_size = float(item.get("font_size", cfg.get("font_size", DEFAULTS["font_size"])))
@@ -517,7 +561,7 @@ def normalise_summary(item, cfg, page_sizes):
         text = page_text(text)
     return {"page": page, "text": text, "place": place, "side": side, "kind": kind, "color": color,
             "font_size": font_size, "min_font_size": min_font_size, "rect": rect, "anchor": anchor,
-            "occurrence": int(item.get("occurrence") or 0) or None}
+            "occurrence": int(item.get("occurrence") or 0) or None, "tags": _item_tags(cfg, item)}
 
 
 OBSTACLE_TYPES = ("text", "note", "image", "ink")
@@ -623,6 +667,8 @@ def _summary_annotation(pi, sp, rect, warning=None):
     ann = {"type": sp["kind"], "color": sp["color"], "comment": sp["text"], "pageLabel": pi.label(),
            "sortIndex": f"{p:05d}|{offset:06d}|{top:05d}",
            "position": {"pageIndex": p, "rects": [[round(v, 2) for v in rect]]}}
+    if sp.get("tags"):
+        ann["tags"] = list(sp["tags"])
     if sp["kind"] == "text":
         ann["position"]["fontSize"] = sp["font_size"]
         ann["position"]["rotation"] = 0
@@ -830,6 +876,7 @@ def build(cfg, obstacles=None):
     `obstacles` maps a page index to rectangles already occupied by other annotations (see
     existing_obstacles); margin boxes are laid out around them and around the page's figures.
     """
+    normalize_config(cfg)
     doc = pymupdf.open(cfg["pdf"])
     # the column extents only matter for margin notes; without them only the highlighted pages are read
     bounds = column_bounds(doc) if cfg.get("summaries") else None
@@ -930,11 +977,13 @@ def build(cfg, obstacles=None):
         top = int(round(pi.H - rects[0][3]))
         # colour precedence: explicit "color", then named "level" (resolved through cfg["levels"]), then legacy core/other;
         # written in lower case, the only form Zotero takes
-        color = (h.get("color") or cfg.get("levels", {}).get(h.get("level", ""), None) or
-                 (cfg["core_color"] if h.get("core") else cfg["other_color"])).lower()
+        color = zotero_color(h.get("color") or cfg.get("levels", {}).get(h.get("level", ""), None) or
+                             (cfg["core_color"] if h.get("core") else cfg["other_color"]))
         ann = {"type": h.get("type", "highlight") if h.get("type") in ("highlight", "underline") else "highlight",
                "color": color, "text": " ".join(w[4] for w in ws), "comment": h.get("comment", ""), "pageLabel": pi.label(),
                "sortIndex": f"{p:05d}|{pi.offset(ws[0]):06d}|{top:05d}", "position": {"pageIndex": p, "rects": rects}}
+        if _item_tags(cfg, h):
+            ann["tags"] = _item_tags(cfg, h)
         if snapped:
             ann["snapped"] = snapped
         n = pi.count(ann["text"])
@@ -2498,6 +2547,21 @@ API_FIELDS = {"comment": "annotationComment", "color": "annotationColor", "text"
               "pageLabel": "annotationPageLabel", "sortIndex": "annotationSortIndex"}
 
 
+def api_items(cfg, out):
+    """The local API's item JSON of the annotations to create: the tool's tag first, then the annotation's own tags."""
+    items = []
+    for a in out:
+        it = {"itemType": "annotation", "parentItem": cfg["attachment_key"], "annotationType": a["type"],
+              "annotationComment": a.get("comment", ""), "annotationColor": a["color"],
+              "annotationPageLabel": a["pageLabel"], "annotationSortIndex": a["sortIndex"],
+              "annotationPosition": json.dumps(a["position"]),
+              "tags": [{"tag": TAG}] + [{"tag": t} for t in a.get("tags") or [] if t not in OWN_TAGS]}
+        if a["type"] in ("highlight", "underline"):
+            it["annotationText"] = a.get("text", "")
+        items.append(it)
+    return items
+
+
 def api_apply(cfg, out, api, plan=None):
     # An item_key that is not the attachment's parent is refused before anything is written, as the plugin refuses it.
     item_key, att_key = cfg.get("item_key"), cfg["attachment_key"]
@@ -2561,15 +2625,7 @@ def api_apply(cfg, out, api, plan=None):
             else:
                 note = {"itemType": "note", "parentItem": cfg["item_key"], "note": html, "tags": [{"tag": TAG}]}
     # (2) annotations
-    items = []
-    for a in out:
-        it = {"itemType": "annotation", "parentItem": cfg["attachment_key"], "annotationType": a["type"],
-              "annotationComment": a.get("comment", ""), "annotationColor": a["color"],
-              "annotationPageLabel": a["pageLabel"], "annotationSortIndex": a["sortIndex"],
-              "annotationPosition": json.dumps(a["position"]), "tags": [{"tag": TAG}]}
-        if a["type"] in ("highlight", "underline"):
-            it["annotationText"] = a.get("text", "")
-        items.append(it)
+    items = api_items(cfg, out)
     created_keys, failed = api.create(items)
     result["createdKeys"] = created_keys
     if failed or len(set(created_keys)) != len(items):
@@ -2908,7 +2964,7 @@ await Zotero.DB.executeTransaction(async function () {{
     let pos = Object.assign({{}}, a.position);
     if (type === "note") {{ delete pos.fontSize; delete pos.rotation; let r = pos.rects[0]; pos.rects = [[r[0], r[3] - 22, r[0] + 22, r[3]]]; }}
     ann.annotationPosition = JSON.stringify(pos);
-    ann.setTags([{{tag: TAG}}]);
+    ann.setTags([{{tag: TAG}}].concat((a.tags || []).map(t => ({{tag: t}}))));
     await ann.save();
     created[type]++;
   }}
@@ -3423,10 +3479,10 @@ def samples_main(argv):
 
 
 ADVISORY_STYLE = {"core_count"}   # style warnings that inform without blocking --apply
-CONFIG_KEYS = set(DEFAULTS) | {"pdf", "item_key", "attachment_key", "out_dir", "highlights", "summaries", "data_dir", "snap",
+CONFIG_KEYS = set(DEFAULTS) | {"pdf", "item_key", "attachment_key", "out_dir", "highlights", "summaries", "data_dir", "snap", "tags",
                                "group_id", "library_id"}
-HIGHLIGHT_KEYS = {"id", "ids", "page", "text", "occurrence", "core", "level", "color", "comment", "type"}
-SUMMARY_KEYS = {"id", "page", "anchor", "text", "place", "side", "kind", "color", "font_size", "rect", "occurrence"}
+HIGHLIGHT_KEYS = {"id", "ids", "page", "text", "occurrence", "core", "level", "color", "comment", "type", "tags"}
+SUMMARY_KEYS = {"id", "page", "anchor", "text", "place", "side", "kind", "color", "font_size", "rect", "occurrence", "tags"}
 
 
 def paper_library(cfg):
@@ -3606,7 +3662,20 @@ def config_problems(raw):
             problems.append(f"{k} must be a number from 1 (as paper.json gives it)")
 
     def colour(v):
-        return isinstance(v, str) and HEX_COLOR_RE.match(v)
+        return is_color(v)
+
+    def colour_problem(at, v):
+        near = difflib.get_close_matches(str(v).strip().lower(), list(ZOTERO_COLORS), 1)
+        return (f"{at} must be #rrggbb or one of {', '.join(ZOTERO_COLORS)}" + (f" (did you mean {near[0]}?)" if near else ""))
+
+    def tags_problems(at, v):
+        tags = clean_tags(v)
+        if tags is None:
+            return [f"{at}: tags must be a list of non-empty texts"]
+        return [f"{at}: tags must not include {t} (the tool writes it)" for t in tags if t in OWN_TAGS]
+
+    if "tags" in raw and raw["tags"] is not None:
+        problems.extend(tags_problems("tags", raw["tags"]))
 
     levels = raw.get("levels") or {}
     if not isinstance(levels, dict):
@@ -3614,10 +3683,10 @@ def config_problems(raw):
         levels = {}
     for name, v in levels.items():
         if not colour(v):
-            problems.append(f"levels: {name!r} must be a #rrggbb colour")
+            problems.append(colour_problem(f"levels: {name!r}", v))
     for k in ("core_color", "other_color", "text_color"):
         if raw.get(k) is not None and not colour(raw[k]):
-            problems.append(f"{k} must be a #rrggbb colour")
+            problems.append(colour_problem(k, raw[k]))
     for i, h in enumerate(raw.get("highlights") or []):
         if not isinstance(h, dict):
             problems.append(f"highlights[{i}] must be an object")
@@ -3641,14 +3710,20 @@ def config_problems(raw):
         if h.get("core") is not None and not isinstance(h["core"], bool):
             problems.append(f"{at}: core must be true or false")
         if "color" in h and not colour(h["color"]):
-            problems.append(f"{at}: color must be a #rrggbb colour")
+            problems.append(colour_problem(f"{at}: color", h["color"]))
         if "level" in h and h["level"] not in levels:
             problems.append(f"{at}: unknown level {h['level']!r} (levels: {', '.join(levels) or 'none defined'})")
         if h.get("type", "highlight") not in ("highlight", "underline"):
             problems.append(f"{at}: type must be highlight or underline")
+        if "tags" in h:
+            problems.extend(tags_problems(at, h["tags"]))
     for i, s in enumerate(raw.get("summaries") or []):
         if isinstance(s, dict):
             unknown(s, SUMMARY_KEYS, f" in summaries[{i}]")
+            if "color" in s and not colour(s["color"]):
+                problems.append(colour_problem(f"summaries[{i}]: color", s["color"]))
+            if "tags" in s:
+                problems.extend(tags_problems(f"summaries[{i}]", s["tags"]))
     note = raw.get("note_html")
     if note is not None and not (isinstance(note, str) and "<" not in note and os.path.isfile(note)):
         problems.append("note_html must be the path of an existing HTML file, not the HTML itself")
@@ -3694,6 +3769,7 @@ def main(argv=None):
     if problems:
         sys.exit("config error: " + "; ".join(problems))
     cfg = dict(DEFAULTS); cfg.update({k: v for k, v in raw.items() if v is not None})   # null keeps the default
+    normalize_config(cfg)
     cfg.update(paper_library(cfg))
     if pymupdf is None and not args.list:
         sys.exit(PYMUPDF_MISSING)

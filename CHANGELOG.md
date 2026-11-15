@@ -122,6 +122,9 @@
 
 ### Added
 
+- A configuration may give annotations tags of their own (`tags` on a highlight or margin note, or at the top for all),
+  written beside the tool's tag; `color` takes Zotero's colour names (red, orange, yellow, green, blue, purple,
+  magenta, gray) as well as `#rrggbb`.
 - The setup check names skill files that are missing or empty and offers Repair, which adds the packaged files that are
   missing to the user's skills folder and keeps every file already there.
 - When Zotero's local API is turned off, Annotate, a question or an edited question asks once whether to turn it on.

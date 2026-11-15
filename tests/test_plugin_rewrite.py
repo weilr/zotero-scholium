@@ -210,3 +210,11 @@ def test_the_javascript_file_rewrites_the_reading_note_in_place(tmp_path):
     assert "error" not in out, out.get("error")
     assert by_key(out)["N1"]["note"] == "<h1>Paper</h1><p>New.</p>" and out["trashed"] == [] and out["saves"] == ["N1"]
     assert "rewritten in place" in out["result"]
+
+
+def test_a_new_annotation_gets_the_tools_tag_then_its_own_and_never_a_tool_tag_twice():
+    new = dict(NEW, tags=["方法", "zotero-scholium", " 结果 ", ""])
+    out = zotero(request(rewrite=False, cleanup=False, annotations=[new]), EXISTING)
+    assert out["result"]["ok"], out
+    made = [i for i in out["items"] if i["key"].startswith("NEW")]
+    assert [i["tags"] for i in made] == [["zotero-scholium", "方法", "结果"]]

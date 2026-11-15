@@ -467,7 +467,7 @@ def test_normalise_summary_resolves_defaults_from_cfg():
     sp = cli.normalise_summary({"page": 1, "anchor": "a phrase", "text": "note"}, _cfg(font_size=9, text_color="#123456"),
                                [(612.0, 792.0)])
     assert sp == {"page": 0, "text": "note", "place": "margin", "side": "auto", "kind": "text", "color": "#123456",
-                  "font_size": 9.0, "min_font_size": 8.0, "rect": None, "anchor": "a phrase", "occurrence": None}
+                  "font_size": 9.0, "min_font_size": 8.0, "rect": None, "anchor": "a phrase", "occurrence": None, "tags": []}
     sp = cli.normalise_summary({"page": 1, "place": "top", "text": "band", "color": "#ff0000", "font_size": 10, "side": "left"},
                                _cfg(margin_side="right", summary_kind="text"), [(612.0, 792.0)])
     assert sp["place"] == "top" and sp["anchor"] is None and sp["side"] == "left" and sp["color"] == "#ff0000" and sp["font_size"] == 10.0
@@ -483,7 +483,7 @@ def test_normalise_summary_resolves_defaults_from_cfg():
     ({"page": 1, "anchor": "a", "text": "t", "side": "outer"}, "side"),
     ({"page": 1, "anchor": "a", "text": "t", "kind": "sticky"}, "kind"),
     ({"page": 1, "place": "top", "text": "t", "kind": "note"}, "anchor"),               # a sticky note needs an anchor
-    ({"page": 1, "anchor": "a", "text": "t", "color": "red"}, "color"),
+    ({"page": 1, "anchor": "a", "text": "t", "color": "crimson"}, "color"),
     ({"page": 1, "anchor": "a", "text": "t", "font_size": 60}, "font_size"),
     ({"page": 1, "rect": [0, 0, 700, 50], "text": "t"}, "outside the page"),
     ({"page": 1, "rect": [10, 10, 30, 50], "text": "t"}, "narrower"),
