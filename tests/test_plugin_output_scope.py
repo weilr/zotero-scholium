@@ -68,12 +68,16 @@ def test_one_click_output_scope_defers_to_current_instructions_then_profile(fact
     for mode, result in facts[locale].items():
         prompt = result["prompt"]
         opening = prompt.splitlines()[0]
+        # the defaults are named (without them a one-click run left out the margin notes and the reading note), and a
+        # narrower request wins
         if zh:
-            assert "本次附加要求优先于画像，画像优先于技能默认值" in opening
-            assert "只生成所需的输出" in opening
+            assert "默认做重点句高亮（评论只写译文，论文本身是中文时不加评论）、页边批注和阅读笔记" in opening
+            assert "本次附加要求优先于画像，画像优先于技能默认值，它们只要其中一部分时只做那部分" in opening
         else:
-            assert "current extra instructions override the profile, which overrides the skill defaults" in opening
-            assert "Create only the requested outputs" in opening
+            assert "by default key-sentence highlights (comments contain only translations; " in opening
+            assert "margin notes and a reading note" in opening
+            assert ("current extra instructions override the profile, which overrides the skill defaults, "
+                    "and when they ask for only some of these, make only those") in opening
         assert result["calls"] == 1
         if mode == "defaults":
             assert result["profile"] is None

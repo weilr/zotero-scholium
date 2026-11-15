@@ -7,9 +7,9 @@
 - What the agent held back (the user's own changes, or annotations a cleanup would delete) is approved with Confirm
   changes above the message box, or left with Keep unchanged; an ordinary reply approves nothing and drops the pending
   report. The agent's report names these buttons; for a partial approval it narrows the configuration and reports again.
-- A one-click annotation's prompt lets extra instructions limit what it makes (the whole paper by default; extra
-  instructions over the profile, the profile over the skill's defaults); its closing line may give counts of 0 and
-  names a note only when one was written.
+- A one-click annotation makes highlights, margin notes and a reading note of the whole paper by default; extra
+  instructions (over the profile, the profile over the skill's defaults) may ask for only some of them. Its closing
+  line may give counts of 0 and names a note only when one was written.
 - A conversation handed to a new session or to the other agent is at most 40,000 characters: recent whole turns first,
   then excerpts of earlier ones; the local log stays complete.
 - Annotate again with messages still queued in earlier annotation sessions asks before it discards them.

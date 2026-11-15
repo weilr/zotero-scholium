@@ -193,7 +193,7 @@ Object.assign(ScholiumRunner, {
     if (job.say) return this.questionPrompt(job, own);
     if (this.zh()) {
       return [
-        "使用 zotero-scholium 技能，为下面这篇论文标注（默认整篇）：本次附加要求优先于画像，画像优先于技能默认值；只生成所需的输出。需要高亮时，评论只写译文（论文本身是中文时不加评论）。",
+        "使用 zotero-scholium 技能，为下面这篇论文标注（默认整篇）：默认做重点句高亮（评论只写译文，论文本身是中文时不加评论）、页边批注和阅读笔记；本次附加要求优先于画像，画像优先于技能默认值，它们只要其中一部分时只做那部分。",
         "",
         `- 条目 key：${job.parentKey}`,
         `- 附件 key：${job.att.key}`,
@@ -222,7 +222,7 @@ Object.assign(ScholiumRunner, {
       ].join("\n");
     }
     return [
-      "Use the zotero-scholium skill to annotate the paper below (the whole paper by default): current extra instructions override the profile, which overrides the skill defaults. Create only the requested outputs. When highlights are needed, comments contain only translations (none when the paper is already in the user's language).",
+      "Use the zotero-scholium skill to annotate the paper below (the whole paper by default): by default key-sentence highlights (comments contain only translations; none when the paper is already in the user's language), margin notes and a reading note; current extra instructions override the profile, which overrides the skill defaults, and when they ask for only some of these, make only those.",
       "",
       `- Item key: ${job.parentKey}`,
       `- Attachment key: ${job.att.key}`,
