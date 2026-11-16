@@ -11,7 +11,9 @@
 | `sentences` | | the JSON written by `extract --sentences` (default `<out_dir>/sentences.json`); needed by `id` or `ids`. Its PDF fingerprint must match the current file; re-extract legacy caches without a fingerprint or after changing the PDF |
 | `highlights[]` | | see below |
 | `summaries[]` | | see below |
+| `regions[]` | | see below |
 | `levels` | | named colours, e.g. `{"claim": "#ff6666", "term": "#ffd400"}`, referenced by `level` in highlights |
+| `tags` | | tags for every annotation written, besides the tool's own `zotero-scholium` (which they may not name); per item too |
 | `note_html`, `note_title_prefix` | | HTML file of the child note; the prefix identifies an existing note with the same title, which then gets a versioned title. A note of the tool with the same text is not written again |
 | `core_color`, `other_color`, `text_color` | | defaults `#ff6666`, `#ffd400`, `#1a73e8` |
 | `font_size` | | margin text size in points (default 8) |
@@ -29,7 +31,9 @@
 
 ### `highlights[]`
 
-One of `id` (a sentence number from `sentences.txt`), `ids` (`[first, last]`, consecutive sentences on one page), or `page` + `text` (a verbatim phrase; a long span may give its first and last words separated by `…`, and `occurrence: N` selects the N-th appearance on the page). Colour: `core: true/false`, or `level` (a name in `levels`), or `color`. `comment` is the translation. Optional `type: "underline"`.
+One of `id` (a sentence number from `sentences.txt`), `ids` (`[first, last]`, consecutive sentences on one page), or `page` + `text` (a verbatim phrase; a long span may give its first and last words separated by `…`, and `occurrence: N` selects the N-th appearance on the page). Colour: `core: true/false`, or `level` (a name in `levels`), or `color`. `comment` is the translation. Optional `type: "underline"` and `tags`.
+
+Every colour (`color`, `levels`, `core_color`, `other_color`, `text_color`) is `#rrggbb` or one of Zotero's names: red `#ff6666`, orange `#f19837`, yellow `#ffd400`, green `#5fb236`, blue `#2ea8e5`, purple `#a28ae5`, magenta `#e56eee`, gray `#aaaaaa`.
 
 Keys outside this table, misspelt ones included, end the run with a config error naming the nearest valid key. Include only requested output types. For limited-scope work, adjust or omit `core_range` rather than adding highlights to meet a whole-paper target. With `cleanup: false`, avoid sentences that are already highlighted.
 
@@ -37,7 +41,11 @@ Ids require an exact text match. If a sentence also appears inside another sente
 
 ### `summaries[]`
 
-`text` and one of `id` (a sentence of the paragraph), `page` + `anchor` (a unique phrase locating the paragraph; `occurrence` when it repeats), or `page` + `place: "top"` / `"bottom"` (a band across the text column at that end of the page). Optional `side` (`left`, `right`), `color`, `font_size`, `kind: "note"` (sticky note), `rect` (`[x0, y0, x1, y1]` in points from the top-left corner, for a fixed position).
+`text` and one of `id` (a sentence of the paragraph), `page` + `anchor` (a unique phrase locating the paragraph; `occurrence` when it repeats), or `page` + `place: "top"` / `"bottom"` (a band across the text column at that end of the page). Optional `side` (`left`, `right`), `color`, `font_size`, `kind: "note"` (sticky note), `rect` (`[x0, y0, x1, y1]` in points from the top-left corner, for a fixed position), `tags`.
+
+### `regions[]`
+
+An image annotation framing part of a page, for a figure or table to mark. One of `figure` (`"Figure 3"`; `Fig. 3`, `图 3` alike) or `table` (`"Table 2"`, `表 2`), found by its caption: the caption with its drawings and images, or a table's rules and rows; `page` picks the page when the label repeats (an appendix's Figure 3). Or `page` + `rect` (`[x0, y0, x1, y1]` in points from the top-left corner) for anything else, such as an equation. Optional `comment` (shown in the annotations pane; in the user's language), `color` (default `other_color`), `tags`. A label not found or found on several pages is reported in `missed` (kind `region`) and nothing is written. `extract --sentences` lists the labels it finds in its index (`figures:`). Margin notes keep clear of the regions on their page.
 
 ## Customisation
 
@@ -48,6 +56,10 @@ Ids require an exact text match. If a sentence also appears inside another sente
 | a short summary at the start of each section | `id` of the section's first sentence, default placement |
 | notes on the left or right margin | `"margin_side": "left"` or `"right"` (per item: `side`) |
 | a larger or smaller font, another colour | `font_size`, `color` (global, or per item) |
+| underline instead of highlight | `"type": "underline"` in the highlight |
+| frame a figure or table, with a remark | `{"figure": "Figure 3", "comment": "…"}` in `regions` (`table` likewise; `page` + `rect` for anything else) |
+| another of Zotero's colours | `color`: red, orange, yellow, green, blue, purple, magenta, gray, or `#rrggbb` |
+| tags on annotations | `tags` per item, or at the top for all |
 | sticky notes instead of margin text | `"summary_kind": "note"` (per item: `kind`) |
 | the summary in the reading note rather than on the page | `note_html` |
 
@@ -78,7 +90,7 @@ Without `--verbose` the report leaves out empty lists and zero counts, `js`, `pd
 |---|---|
 | `highlights`, `underlines`, `margin_texts`, `sticky_notes` | counts |
 | `colors` | highlights per colour |
-| `missed` | entries that could not be placed: an unknown `id`, a phrase not found (with `closest`, `similarity`, and a page `hint` when the closest passage is on a neighbouring page), an invalid summary, or an item on a rotated page, where nothing is written (`reason`) |
+| `missed` | entries that could not be placed: an unknown `id`, a phrase not found (with `closest`, `similarity`, and a page `hint` when the closest passage is on a neighbouring page), an invalid summary, a region whose label is not found or repeats (kind `region`), or an item on a rotated page, where nothing is written (`reason`) |
 | `style_warnings` | `{kind, page, text, reason}` (`user_edit` and `cleanup_other` with the `keys` they name); kinds `latex`, `math_format`, `tag`, `label`, `symbol`, `line_break`, `banned_phrase`, `duplicate`, `overlap`, `user_overlap`, `duplicate_existing`, `user_edit` (with `cleanup`: a tool's annotation the user changed in Zotero after it was written, which the rewrite would delete, or change in what the user changed: its comment, colour, text or place; the reason names the change; with `note_replace`: the reading note this folder wrote, changed by the user since), `cleanup_other` (with `cleanup`: the tool's annotations the cleanup would delete that neither this configuration file's last write created nor the new set holds again on their page, by text, comment or place; `--accept cleanup_other` for a complete redo the user asked for), `core_count` (advisory), `note_title` (a reading note that does not start with its `<h1>` title, or an empty one), `note_math` |
 | `cleanup_removes` | how many of the tool's earlier annotations a run with `cleanup: true` deletes (`null` when they could not be read) |
 | `translation_warnings` | comments with terms or numbers absent from the highlighted text (a comment in a Latin-script language: its numbers and its acronyms, CamelCase names and words with digits or Greek letters only), or a CJK-per-word ratio far outside the usual range |

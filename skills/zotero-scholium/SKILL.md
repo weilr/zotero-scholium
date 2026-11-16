@@ -55,7 +55,7 @@ Write one configuration from `examples/config.template.json`, including only req
 - `highlights[]`: `id` (one sentence) or `ids: [first, last]` (consecutive sentences on one page), `core`, and `comment` (the translation; left out when the paper is in the user's language). Core: the contributions enumerated in the introduction, the main claim of the abstract, the first quantitative sentence of each results subsection, the summary sentence of the conclusion. Every stated contribution and every method or theory subsection gets at least one highlight; a repeated claim, one. Each sentence at most once.
 - `summaries[]`: `id` (the sentence it comments on) and `text`; omit paragraphs with nothing substantive to say.
 - `note_html`: the reading note.
-- Take banned phrases and the expected number of core highlights from the profile's rules (`banned_phrases`, `core_range`); adjust or omit `core_range` for a limited scope. `sentences` is the JSON written above (default `<out_dir>/sentences.json`). Other fields (colour levels, underlines, sticky notes, placement): `references/configuration.md`, only when the task needs one.
+- Take banned phrases and the expected number of core highlights from the profile's rules (`banned_phrases`, `core_range`); adjust or omit `core_range` for a limited scope. `sentences` is the JSON written above (default `<out_dir>/sentences.json`). Other fields (colours, underlines, framed figures or tables, tags, sticky notes, placement): `references/configuration.md`, only when the task needs one.
 
 ### 3. Apply, then review the report
 
@@ -74,7 +74,7 @@ The report names each problem and its fix; `scholium.py`'s source need not be re
 
 Open readers show the new annotations by themselves; do not ask the user to reopen the PDF. The apply output already read the result back: do not run `status` or `--list` after a successful write. `applied: false` names the cause in `apply_error` (`references/backends.md`). If a write partially succeeded or read-back failed, run `--list` to see what is stored before retrying. Do not re-read `annotations.json` or the configuration; you already have the comments.
 
-Only annotations with the tool's current or legacy tags are ever replaced. A note with the same title as an existing one gets a versioned title. Iterate by editing the configuration; never edit the generated JavaScript.
+Only annotations with the tool's current or legacy tags are ever replaced. Iterate by editing the configuration; never edit the generated JavaScript.
 
 ## Several papers, reviews
 

@@ -130,6 +130,9 @@
   tags; a label not found, or found on several pages without `page`, is reported under `missed` and nothing is
   written. Every write channel creates them, a re-apply keeps them, and margin notes keep clear of them; the report
   counts them (`regions`).
+- The skill points to the configuration reference for underlines, framed figures or tables, Zotero's colour names and
+  tags, which it uses when the user asks; the reference gives `regions[]`, `tags`, the colour names and four rows of its
+  table of requests.
 - The annotation card counts framed figures and tables (框选 N, N areas) when a run left some; the core colour of a
   configuration may be one of Zotero's colour names.
 - `extract --sentences` lists the figures and tables it finds by their captions in its index (`figures: p.3 Figure 1,
