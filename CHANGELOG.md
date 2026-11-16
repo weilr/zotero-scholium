@@ -125,6 +125,8 @@
 - A configuration may give annotations tags of their own (`tags` on a highlight or margin note, or at the top for all),
   written beside the tool's tag; `color` takes Zotero's colour names (red, orange, yellow, green, blue, purple,
   magenta, gray) as well as `#rrggbb`.
+- `extract --sentences` lists the figures and tables it finds by their captions in its index (`figures: p.3 Figure 1,
+  p.6 Table 2`).
 - The output folder's record names the tags the tool wrote on each annotation: they are never taken for the user's, a
   rewrite in place adds and removes them as the configuration now has them while the user's tags stay, and one the
   user removed counts as their change.

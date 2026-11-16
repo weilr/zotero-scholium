@@ -406,6 +406,196 @@ def page_figure_rects(page, min_size=8.0):
     return out
 
 
+# a figure's or table's caption: the label at the start of a text block, then a colon, a full stop or a capitalised word
+# ("Figure 3: …", "Fig. 3. …", "Table 2 | …", "图 3：…"); "Figure 3 shows …" in a sentence is none
+FIG_WORD = r"((?i:fig(?:ure)?s?\.?|tab(?:le)?\.?)|图|表)"
+FIG_NUM = r"([A-Z]?\d+(?:\.\d+)?|[A-Z]\.\d+)"
+CAPTION_RE = re.compile(r"^\s*" + FIG_WORD + r"\s*" + FIG_NUM + r"\s*(?:[:.|：．]|\s+[A-Z一-鿿]|$)")
+FIG_LABEL_RE = re.compile(r"^\s*" + FIG_WORD + r"\s*" + FIG_NUM + r"\s*$")
+
+
+def figure_label(s):
+    """("figure" or "table", number) of a label as a configuration gives it: Figure 3, Fig. 3, fig 3, 图 3, Table S1,
+    表 2, Table A.2; None for anything else."""
+    m = FIG_LABEL_RE.match(str(s or ""))
+    if not m:
+        return None
+    word, num = m.group(1).lower(), m.group(2)
+    return ("table" if word.startswith("tab") or word == "表" else "figure"), (num.upper() if num[0].isalpha() else num)
+
+
+def _x_overlap(a, b):
+    """How much of the narrower of two rectangles' widths they share."""
+    return (min(a[2], b[2]) - max(a[0], b[0])) / max(1e-6, min(a[2] - a[0], b[2] - b[0]))
+
+
+def _union(a, b):
+    return [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])]
+
+
+def _page_rules(page):
+    """Horizontal rules on a page (top-left origin): drawn lines, and rectangles at most 2 pt high, 40 pt wide or more."""
+    out = []
+    try:
+        drawings = page.get_drawings()
+    except Exception:
+        return out
+    for d in drawings:
+        for item in d.get("items") or []:
+            if item[0] == "l":
+                p, q = item[1], item[2]
+                if abs(p.y - q.y) < 1.5 and abs(p.x - q.x) >= 40:
+                    out.append([min(p.x, q.x), min(p.y, q.y) - 0.5, max(p.x, q.x), max(p.y, q.y) + 0.5])
+            elif item[0] == "re":
+                r = item[1]
+                if r.height <= 2 and r.width >= 40:
+                    out.append([r.x0, r.y0, r.x1, r.y1])
+    return out
+
+
+def _figure_body(c, figs, up):
+    """The drawings and images next to a caption `c` on one side (above it when `up`): the nearest group in its column
+    (at most 60 pt away, parts at most 20 pt apart). (region, gap) or None."""
+    col = [f for f in figs if _x_overlap(f, c) > 0.3]
+    cand = (sorted((f for f in col if f[3] <= c[1] + 3), key=lambda f: -f[3]) if up
+            else sorted((f for f in col if f[1] >= c[3] - 3), key=lambda f: f[1]))
+    gap = (c[1] - cand[0][3] if up else cand[0][1] - c[3]) if cand else None
+    if gap is None or gap > 60:
+        return None
+    region = list(cand[0])
+    for f in cand[1:]:
+        if (region[1] - f[3] if up else f[1] - region[3]) > 20:
+            break
+        region = _union(region, f)
+    return region, gap
+
+
+def _column_width(c, blocks):
+    """The width of the column a caption sits in: its widest text block that shares the caption's place across."""
+    return max([b[2] - b[0] for b in blocks if _x_overlap(b, c) > 0.3] + [c[2] - c[0]])
+
+
+def _is_paragraph(b, width, left):
+    """A block of the main text: three lines or more across most of its column, from the column's left edge (a figure's
+    or table's own text is set in from it)."""
+    return (abs(b[0] - left) <= 3 and b[2] - b[0] >= 0.9 * width
+            and len([l for l in b[4].split("\n") if l.strip()]) >= 3)
+
+
+def _table_body(c, rules, blocks, captions, up):
+    """The content between rules next to a caption `c` on one side (a table's rows, or a figure set as text between rules):
+    the first rule at most 40 pt away; each next one at most 120 pt on, or farther when only the content's own text lies
+    between; never past another caption or a paragraph of the main text; with the text between them. (region, gap) or
+    None without rules."""
+    col = [r for r in rules if _x_overlap(r, c) > 0.3]
+    width = _column_width(c, blocks)
+    left = min([b[0] for b in blocks if _x_overlap(b, c) > 0.3] + [c[0]])
+    cand = (sorted((r for r in col if r[3] <= c[1] + 1), key=lambda r: -r[3]) if up
+            else sorted((r for r in col if r[1] >= c[3] - 1), key=lambda r: r[1]))
+    gap = (c[1] - cand[0][3] if up else cand[0][1] - c[3]) if cand else None
+    if gap is None or gap > 40:
+        return None
+    group = [cand[0]]
+    for r in cand[1:]:
+        step = group[-1][1] - r[3] if up else r[1] - group[-1][3]
+        lo, hi = (r[3], group[-1][1]) if up else (group[-1][3], r[1])
+        between = [b for b in blocks if lo - 1 <= b[1] and b[3] <= hi + 1 and _x_overlap(b, c) > 0.3]
+        if any(lo <= o[1] <= hi and _x_overlap(o, c) > 0.3 for o in captions) or (step > 120 and (step > 500 or any(_is_paragraph(b, width, left) for b in between))):
+            break
+        group.append(r)
+    region = group[0]
+    for r in group[1:]:
+        region = _union(region, r)
+    top, bottom = (region[1] - 1, c[1]) if up else (c[3], region[3] + 1)
+    for b in blocks:
+        if top - 1 <= b[1] and b[3] <= bottom + 1 and _x_overlap(b, region) > 0.3:
+            region = _union(region, b)
+    return region, gap
+
+
+def _text_table(cap, blocks, captions, up):
+    """A table (or a figure) set as text without rules next to its caption on one side: the text block at most 12 pt away
+    in its column whose lines are short, as a table's cells are, or narrower than the column's text, with the next such
+    blocks at most 6 pt on. (region, gap) or None."""
+    width = _column_width(cap, blocks)
+
+    def tabular(b):
+        lines = [l for l in b[4].split("\n") if l.strip()]
+        return len(lines) >= 2 and (sum(len(l) for l in lines) / len(lines) <= 30 or b[2] - b[0] <= 0.85 * width)
+
+    side = sorted((b for b in blocks if b is not cap and not any(b is o for o in captions) and _x_overlap(b, cap) > 0.3
+                   and (b[3] <= cap[1] + 1 if up else b[1] >= cap[3] - 1)),
+                  key=lambda b: cap[1] - b[3] if up else b[1] - cap[3])
+    gap = (cap[1] - side[0][3] if up else side[0][1] - cap[3]) if side else None
+    if gap is None or gap > 12 or not tabular(side[0]):
+        return None
+    region = list(side[0][:4])
+    for b in side[1:]:
+        if (region[1] - b[3] if up else b[1] - region[3]) > 6 or not tabular(b):
+            break
+        region = _union(region, b)
+    return region, gap
+
+
+def find_figures(doc):
+    """The figures and tables of a document found by their captions: [{"kind": "figure" | "table", "number", "page"
+    (1-based), "rect": [x0, y0, x1, y1] in points from the page's top-left corner}], the caption and the content beside
+    it, with 2 pt around, in page order. A table's content is its rules and rows, else its text, else a drawing; a
+    figure's is its drawings or images, else its rules or text. A document puts its captions on one side of their
+    figures (and of its tables): the side most captions of the kind have their content nearer on is taken first, the
+    other one when a caption has nothing there. A label may repeat (an appendix's Figure 3): each place is listed."""
+    found = []
+    for pno, page in enumerate(doc):
+        if page.rotation % 360:
+            continue
+        W, H = page.rect.width, page.rect.height
+        try:
+            blocks = [list(b[:4]) + [b[4]] for b in page.get_text("blocks") if b[6] == 0 and b[4].strip()]
+        except Exception:
+            continue
+        caps = [(b, m) for b in blocks for m in [CAPTION_RE.match(b[4].strip().split("\n")[0])] if m]
+        if not caps:
+            continue
+        figs = [[r[0], H - r[3], r[2], H - r[1]] for r in page_figure_rects(page)]
+        rules = _page_rules(page)
+        captions = [b for b, _ in caps]
+        for b, m in caps:
+            word, num = m.group(1).lower(), m.group(2)
+            kind = "table" if word.startswith("tab") or word == "表" else "figure"
+            c = b[:4]
+            sides = {}
+            for up in (True, False):
+                tries = ((lambda: _table_body(c, rules, blocks, captions, up), lambda: _text_table(b, blocks, captions, up),
+                          lambda: _figure_body(c, figs, up)) if kind == "table" else
+                         (lambda: _figure_body(c, figs, up), lambda: _table_body(c, rules, blocks, captions, up),
+                          lambda: _text_table(b, blocks, captions, up)))
+                sides[up] = next((r for r in (t() for t in tries) if r is not None), None)
+            found.append({"kind": kind, "number": num.upper() if num[0].isalpha() else num, "page": pno + 1,
+                          "caption": c, "sides": sides, "size": (W, H)})
+    # the side this document puts its content on, for each kind: where most captions have it nearer (else the usual side)
+    prefer = {}
+    for kind, usual in (("figure", True), ("table", False)):
+        votes = [min((s for s in (True, False) if f["sides"][s]), key=lambda s: f["sides"][s][1])
+                 for f in found if f["kind"] == kind and (f["sides"][True] or f["sides"][False])]
+        ups = sum(votes)
+        prefer[kind] = usual if ups * 2 == len(votes) else ups * 2 > len(votes)
+    out = []
+    for f in found:
+        side = f["sides"][prefer[f["kind"]]] or f["sides"][not prefer[f["kind"]]]
+        if side is None:
+            continue
+        (W, H), r = f["size"], _union(f["caption"], side[0])
+        r = [max(0.0, r[0] - 2), max(0.0, r[1] - 2), min(W, r[2] + 2), min(H, r[3] + 2)]
+        out.append({"kind": f["kind"], "number": f["number"], "page": f["page"], "rect": [round(float(v), 1) for v in r]})
+    return out
+
+
+def figure_names(figures, pages=None):
+    """The index's list of a document's figures and tables: "p.3 Figure 1, p.6 Table 2" (only the given pages)."""
+    return ", ".join(f"p.{f['page']} {'Table' if f['kind'] == 'table' else 'Figure'} {f['number']}"
+                     for f in figures if not pages or f["page"] in pages)
+
+
 def user_space_shift(page):
     """(dx, dy) from the tool's page coordinates (x from the left edge of the visible page, y up from its bottom
     edge) to PDF user space, in which Zotero stores positions; not zero when the page's crop box or media box does
@@ -2162,13 +2352,14 @@ PAGE_MARK_RE = re.compile(r"--- p\.(\d+)\b")
 SENTENCE_LINE_RE = re.compile(r"\d+ \| ")
 
 
-def indexed(listing):
+def indexed(listing, figures=""):
     """The listing as the file extract writes: first an index of the file's line numbers, where each page starts and,
     when they are found, where the main text ends, the references start, the text after them starts and an appendix
     after them starts, so that a part can be read by its lines. The text after the references starts at the first line
     after the removed bibliography that is neither a page marker nor a marker line, or with the references kept at the
     first heading after theirs; it is listed when sentences follow and it does not start where the appendix does. The
-    appendix is a heading that starts with Appendix, Appendices or Supplementary after the references."""
+    appendix is a heading that starts with Appendix, Appendices or Supplementary after the references. `figures`: the
+    figures and tables found by their captions (figure_names), listed after the pages."""
     lines = listing.rstrip("\n").split("\n")
     pages, refs, after, appendix, page = [], None, None, None, None
     sentences_after = False
@@ -2191,7 +2382,7 @@ def indexed(listing):
         return listing
     if not sentences_after or (appendix and after[0] == appendix[0]):
         after = None
-    head = 3 + (2 if refs else 0) + (1 if after else 0) + (1 if appendix else 0)   # the index's lines and the blank one after
+    head = 3 + (2 if refs else 0) + (1 if after else 0) + (1 if appendix else 0) + (1 if figures else 0)   # and the blank line
     at = lambda i: i + 1 + head
     index = ["Index (line numbers of this file)"]
     if refs:
@@ -2200,7 +2391,7 @@ def indexed(listing):
         index.append(f"after the references: from line {at(after[0])} (p.{after[1]})")
     if appendix:
         index.append(f"appendix: from line {at(appendix[0])} (p.{appendix[1]})")
-    index += ["pages: " + ", ".join(f"p.{p} {at(i)}" for p, i in pages), ""]
+    index += ["pages: " + ", ".join(f"p.{p} {at(i)}" for p, i in pages)] + ([f"figures: {figures}"] if figures else []) + [""]
     return "\n".join(index + lines) + "\n"
 
 
@@ -2318,7 +2509,8 @@ def extract_main(argv):
               "Run OCR to include it.\n\n") if scanned else ""
     text = notice + text
     if args.sentences and args.out:
-        text = indexed(text)
+        with pymupdf.open(pdf) as fdoc:
+            text = indexed(text, figure_names(find_figures(fdoc), pages))
     summary += f"{text.count(chr(10))} lines, {len(text)} characters"
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
