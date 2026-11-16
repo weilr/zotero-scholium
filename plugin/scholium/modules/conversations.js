@@ -1648,7 +1648,7 @@ Object.assign(ScholiumRunner, {
     const title = doc.createElement("div");
     title.className = "scholium-card-title";
     // a run that left the paper none of the tool's annotations and notes says so, with what it said was left
-    const none = !(e.highlights || e.margin || e.notes || e.readingNotes);
+    const none = !(e.highlights || e.margin || e.notes || e.readingNotes || e.areas);
     if (none) node.className += " none";
     // a scanned PDF's: its message, without a row of zeros
     title.textContent = none && e.scanned ? this.text("annotNoneScan", e.warnings)
@@ -1656,7 +1656,9 @@ Object.assign(ScholiumRunner, {
       : e.warnings === "" ? this.text("annotDoneClean") : e.warnings ? this.text("annotDoneWarn", e.warnings) : this.text("annotDone");
     const nums = doc.createElement("div");
     nums.className = "scholium-card-nums";
-    for (const [n, label] of [[e.highlights, "numHighlights"], [e.margin, "numMargin"], [e.notes, "numNotes"], [e.readingNotes, "numReading"]]) {
+    // framed figures and tables have a cell only when the run left some
+    for (const [n, label] of [[e.highlights, "numHighlights"], [e.margin, "numMargin"], [e.notes, "numNotes"], [e.readingNotes, "numReading"]]
+                             .concat(e.areas > 0 ? [[e.areas, "numAreas"]] : [])) {
       const cell = doc.createElement("div");
       const b = doc.createElement("b");
       b.textContent = String(n || 0);

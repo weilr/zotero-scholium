@@ -242,7 +242,7 @@ Object.assign(ScholiumRunner, {
       if (running.annotation) {
         const spent = (await this.spentOn(key, job.conv)) || { turns: result.num_turns || 0, tokens: this.tokenCounts(result).reduce((n, [, c]) => n + c, 0) };
         const own = await this.countOwn(job.att);
-        const none = !(own.highlights || own.margin || own.notes || own.readingNotes);
+        const none = !(own.highlights || own.margin || own.notes || own.readingNotes || own.areas);
         const counts = Object.assign({ type: "scholium", subtype: "counts" }, own,
                                      { warnings: none && ctx.missing ? this.text(ctx.missing) : this.warningsOf(text),
                                        turns: spent.turns, tokens: spent.tokens, at: Date.now() },
@@ -1351,14 +1351,16 @@ Object.assign(ScholiumRunner, {
     let readingNotes = 0;
     try { if (att.parentID) readingNotes = this.ownNotes(Zotero.Items.get(att.parentID)).length; } catch (e) {}
     return { highlights: marks.length, core: marks.filter(a => String(a.annotationColor || "").toLowerCase() === core).length,
-             margin: own.filter(a => a.annotationType === "text").length, notes: own.filter(a => a.annotationType === "note").length, readingNotes };
+             margin: own.filter(a => a.annotationType === "text").length, notes: own.filter(a => a.annotationType === "note").length, readingNotes,
+             areas: own.filter(a => a.annotationType === "image").length };
   },
 
   // the core colour of the configuration the paper was written with last; Zotero's red without one
   async coreColor(key) {
     const applied = await this.readApplied(key);
     try {
-      const c = applied && JSON.parse(await IOUtils.readUTF8(applied.config)).core_color;
+      let c = applied && JSON.parse(await IOUtils.readUTF8(applied.config)).core_color;
+      if (typeof c === "string") c = this.ZOTERO_COLORS[c.trim().toLowerCase()] || c.trim();
       if (typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c)) return c.toLowerCase();
     } catch (e) {}
     return "#ff6666";

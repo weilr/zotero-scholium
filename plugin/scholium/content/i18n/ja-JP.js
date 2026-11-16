@@ -222,6 +222,7 @@ var texts = h => {
     numMargin: n => "余白メモ",
     numNotes: n => "付箋",
     numReading: n => "読書メモ",
+    numAreas: n => "領域",
     appliedBy: (a, d) => `前回の書き込み：${a}（${d}）`,
     newChat: "新しいチャット",
     historyButton: "履歴",

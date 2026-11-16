@@ -1030,7 +1030,8 @@ def test_the_annotation_tab(facts):
     assert re.fullmatch(r"26 轮 · 2,568k tokens · \d\d:\d\d", f["usage"])
     assert f["go"] == "重新批注" and f["placeholder"] == "接着这次批注修改，例如：第 5 页那条译文改短"
     assert f["sendShown"] is True and f["state"] is None, "the card has the outcome; the state line is for runs going on or waiting"
-    assert f["counts"] == [{"highlights": 3, "core": 2, "margin": 1, "notes": 1, "readingNotes": 1, "warnings": "", "turns": 26, "tokens": 2568179}]
+    assert f["counts"] == [{"highlights": 3, "core": 2, "margin": 1, "notes": 1, "readingNotes": 1, "areas": 0, "warnings": "", "turns": 26,
+                            "tokens": 2568179}]
     assert a["ask"] == {"shown": True, "text": ["重新批注会先删除这篇的 5 条 Scholium 批注，1 篇阅读笔记移到回收站（你自己的不动）。", "取消", "替换"],
                         "dialogs": 0}
     assert a["cancelled"] == {"hidden": True, "queued": 0, "kept": "只批注第 3 页", "erased": 0}, "Cancel deletes nothing"

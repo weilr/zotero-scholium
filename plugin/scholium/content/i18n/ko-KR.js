@@ -224,6 +224,7 @@ var texts = h => {
     numMargin: n => "여백 메모",
     numNotes: n => "스티커 메모",
     numReading: n => "읽기 노트",
+    numAreas: n => "영역",
     appliedBy: (a, d) => `마지막 기록: ${a} · ${d}`,
     newChat: "새 채팅",
     historyButton: "기록",

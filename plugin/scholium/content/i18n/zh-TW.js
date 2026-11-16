@@ -218,6 +218,7 @@ var texts = h => {
     numMargin: n => "頁邊標註",
     numNotes: n => "便利貼",
     numReading: n => "閱讀筆記",
+    numAreas: n => "框選",
     appliedBy: (a, d) => `上次由 ${a} 於 ${d} 寫入`,
     newChat: "新對話",
     historyButton: "歷史記錄",

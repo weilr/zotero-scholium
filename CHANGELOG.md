@@ -130,6 +130,8 @@
   tags; a label not found, or found on several pages without `page`, is reported under `missed` and nothing is
   written. Every write channel creates them, a re-apply keeps them, and margin notes keep clear of them; the report
   counts them (`regions`).
+- The annotation card counts framed figures and tables (框选 N, N areas) when a run left some; the core colour of a
+  configuration may be one of Zotero's colour names.
 - `extract --sentences` lists the figures and tables it finds by their captions in its index (`figures: p.3 Figure 1,
   p.6 Table 2`).
 - The output folder's record names the tags the tool wrote on each annotation: they are never taken for the user's, a

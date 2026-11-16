@@ -213,6 +213,7 @@ Object.assign(ScholiumRunner, {
     if (event.type === "scholium" && event.subtype === "counts") {
       const n = k => Number(event[k]) || 0;
       out.push({ kind: "counts", highlights: n("highlights"), core: n("core"), margin: n("margin"), notes: n("notes"), readingNotes: n("readingNotes"),
+                 areas: n("areas"),
                  warnings: typeof event.warnings === "string" ? event.warnings : null, turns: n("turns"), tokens: n("tokens"), at: n("at"),
                  scanned: event.scanned === true });   // a PDF without a text layer
     }

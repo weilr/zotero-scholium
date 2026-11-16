@@ -55,6 +55,9 @@ var ScholiumRunner = {
   pendingPapers: new Map(), // attachment key -> { papers, at }: the other papers of a question about several (askPapers), until
                             // the first paper's section takes them, within QUOTE_MS
   MAX_PAPERS: 8,            // the most papers a question asks about together
+  // Zotero's eight annotation colours by the names a configuration may use (as the skill's script reads them)
+  ZOTERO_COLORS: { red: "#ff6666", orange: "#f19837", yellow: "#ffd400", green: "#5fb236", blue: "#2ea8e5", purple: "#a28ae5",
+                   magenta: "#e56eee", gray: "#aaaaaa" },
   itemMenus: new Map(),     // main window -> { item, popup, showing }: Ask Scholium (N papers) in its items list's context menu
   // the skill's files as the plugin carries them in content/skill/zotero-scholium (added when the package is built);
   // SKILL.md is written last, so that a copy cut short is not taken for a skill
@@ -467,6 +470,7 @@ var ScholiumRunner = {
       numMargin: n => zh ? "页边批注" : word(n, "margin note", "margin notes"),
       numNotes: n => zh ? "便签" : word(n, "sticky note", "sticky notes"),
       numReading: n => zh ? "阅读笔记" : word(n, "reading note", "reading notes"),
+      numAreas: n => zh ? "框选" : word(n, "area", "areas"),
       appliedBy: (a, d) => zh ? `上次由 ${a} 在 ${d} 写入` : `Last written by ${a} on ${d}`,
       newChat: zh ? "新对话" : "New chat",
       historyButton: zh ? "历史" : "History",

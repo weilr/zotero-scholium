@@ -230,6 +230,7 @@ var texts = h => {
     numMargin: n => word(n, "nota al margen", "notas al margen"),
     numNotes: n => word(n, "nota adhesiva", "notas adhesivas"),
     numReading: n => word(n, "nota de lectura", "notas de lectura"),
+    numAreas: n => word(n, "área", "áreas"),
     appliedBy: (a, d) => `Última escritura: ${a}, el ${d}`,
     newChat: "Nuevo chat",
     historyButton: "Historial",
