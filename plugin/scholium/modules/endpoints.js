@@ -202,8 +202,8 @@ var ScholiumEndpoints = {
     }
 
     // (2) the note and the annotations, then the old ones go, in one transaction: a failure leaves the paper as it was
-    const created = { highlight: 0, underline: 0, text: 0, note: 0 };
-    const allowed = new Set(["highlight", "underline", "text", "note"]);
+    const created = { highlight: 0, underline: 0, text: 0, note: 0, image: 0 };
+    const allowed = new Set(["highlight", "underline", "text", "note", "image"]);
     await Zotero.DB.executeTransaction(async () => {
       if (newNote) await newNote.save();
       if (rewriteNote) {

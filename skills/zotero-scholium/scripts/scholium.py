@@ -1180,6 +1180,51 @@ def build(cfg, obstacles=None):
         if n > 1 and not occ:                     # the first occurrence was highlighted without being asked for
             ann["occurrences"] = n
         out.append(ann)
+    # regions: image annotations framing a figure or table found by its label, or a rectangle given on a page; what
+    # they cover is occupied space for the margin notes of their page
+    figures, region_rects = None, {}
+    for r in cfg.get("regions") or []:
+        if not isinstance(r, dict):
+            continue
+        entry = dict({k: r[k] for k in ("figure", "table", "page", "rect") if k in r}, kind="region")
+        label = None
+        if "rect" in r:
+            p = int(r["page"]) - 1
+            if not 0 <= p < len(doc):
+                missed.append(dict(entry, reason=f"the PDF has no page {p + 1}"))
+                continue
+            x0, y0, x1, y1 = (float(v) for v in r["rect"])
+            if x0 < 0 or y0 < 0 or x1 > doc[p].rect.width or y1 > doc[p].rect.height:
+                missed.append(dict(entry, reason="rect reaches outside the page"))
+                continue
+        else:
+            want = figure_label(r.get("figure") or r.get("table"))
+            label = f"{'Table' if want[0] == 'table' else 'Figure'} {want[1]}"
+            if figures is None:
+                figures = find_figures(doc)
+            hits = [f for f in figures if (f["kind"], f["number"]) == want and (not r.get("page") or f["page"] == int(r["page"]))]
+            pages = sorted({f["page"] for f in hits})
+            if len(hits) != 1:
+                missed.append(dict(entry, reason=(f"{label} not found" + (f" on page {r['page']}" if r.get("page") else "") if not hits
+                                                  else f"{label} found on pages {', '.join(map(str, pages))}: give page" if len(pages) > 1
+                                                  else f"{label} found more than once on page {pages[0]}: give page and rect")))
+                continue
+            p = hits[0]["page"] - 1
+            x0, y0, x1, y1 = hits[0]["rect"]
+        if doc[p].rotation % 360:
+            missed.append(dict(entry, reason=ROTATED_PAGE))
+            continue
+        pi = page_index(p)
+        rect = [round(x0, 2), round(pi.H - y1, 2), round(x1, 2), round(pi.H - y0, 2)]
+        ann = {"type": "image", "color": zotero_color(r.get("color") or cfg["other_color"]), "comment": r.get("comment", ""),
+               "pageLabel": pi.label(), "sortIndex": f"{p:05d}|{pi.offset_near(rect):06d}|{int(round(pi.H - rect[3])):05d}",
+               "position": {"pageIndex": p, "rects": [rect]}}
+        if label:
+            ann["label"] = label
+        if _item_tags(cfg, r):
+            ann["tags"] = _item_tags(cfg, r)
+        out.append(ann)
+        region_rects.setdefault(p, []).append(rect)
     page_sizes = [(pg.rect.width, pg.rect.height) for pg in doc] if cfg.get("summaries") else []
     specs = []
     for s in cfg.get("summaries", []):
@@ -1201,7 +1246,8 @@ def build(cfg, obstacles=None):
         pi = page_index(p)
         # existing annotations (in PDF user space) and figures are occupied space for every summary on the page
         dx, dy = user_space_shift(doc[p])
-        page_obstacles = [shift_rect(r, -dx, -dy) for r in (obstacles or {}).get(p, [])] + page_figure_rects(doc[p])
+        page_obstacles = ([shift_rect(r, -dx, -dy) for r in (obstacles or {}).get(p, [])] + page_figure_rects(doc[p])
+                          + region_rects.get(p, []))
         out.extend(layout_page_summaries(pi, page_specs, page_obstacles, missed))
     for a in out:   # soft hyphens and zero-width spaces copied from the PDF into a comment are left out
         if a.get("comment"):
@@ -3180,7 +3226,7 @@ if (NOTE_HTML) {{
   }}
 }}
 
-var created = {{highlight: 0, underline: 0, text: 0, note: 0}};
+var created = {{highlight: 0, underline: 0, text: 0, note: 0, image: 0}};
 await Zotero.DB.executeTransaction(async function () {{
   for (let a of ANNOTATIONS) {{
     let ann = new Zotero.Item("annotation");
@@ -3226,7 +3272,7 @@ if (trash.length) await Zotero.Items.trashTx(trash);
 return "removed " + old.length + " old annotations (kept " + kept + " of yours)" + (REWRITE ? "; changed " + changes.length + ", left " + REWRITE.keep.length + " as they were" : "") +
   "; note: " + (NOTE_HTML ? (noteCreated ? "created" : noteUpdated ? "rewritten in place" : noteSame ? "the same text exists already" : "not created") : "none") +
   (trash.length ? "; " + trash.length + " earlier notes of the tool moved to the trash" : "") +
-  "; created " + created.highlight + " highlights, " + (created.underline ? created.underline + " underlines, " : "") + created.text + " margin texts" + (created.note ? ", " + created.note + " sticky notes" : "") + ".";
+  "; created " + created.highlight + " highlights, " + (created.underline ? created.underline + " underlines, " : "") + created.text + " margin texts" + (created.note ? ", " + created.note + " sticky notes" : "") + (created.image ? ", " + created.image + " framed areas" : "") + ".";
 """
 
 
@@ -3716,10 +3762,11 @@ def samples_main(argv):
 
 
 ADVISORY_STYLE = {"core_count"}   # style warnings that inform without blocking --apply
-CONFIG_KEYS = set(DEFAULTS) | {"pdf", "item_key", "attachment_key", "out_dir", "highlights", "summaries", "data_dir", "snap", "tags",
+CONFIG_KEYS = set(DEFAULTS) | {"pdf", "item_key", "attachment_key", "out_dir", "highlights", "summaries", "regions", "data_dir", "snap", "tags",
                                "group_id", "library_id"}
 HIGHLIGHT_KEYS = {"id", "ids", "page", "text", "occurrence", "core", "level", "color", "comment", "type", "tags"}
 SUMMARY_KEYS = {"id", "page", "anchor", "text", "place", "side", "kind", "color", "font_size", "rect", "occurrence", "tags"}
+REGION_KEYS = {"figure", "table", "page", "rect", "comment", "color", "tags"}
 
 
 def paper_library(cfg):
@@ -3962,6 +4009,35 @@ def config_problems(raw):
                 problems.append(colour_problem(f"summaries[{i}]: color", s["color"]))
             if "tags" in s:
                 problems.extend(tags_problems(f"summaries[{i}]", s["tags"]))
+    for i, r in enumerate(raw.get("regions") or []):
+        at = f"regions[{i}]"
+        if not isinstance(r, dict):
+            problems.append(f"{at} must be an object")
+            continue
+        unknown(r, REGION_KEYS, f" in {at}")
+        ways = [k for k in ("figure", "table", "rect") if k in r]
+        if len(ways) != 1:
+            problems.append(f"{at}: give one of figure, table, or page with rect")
+        elif "rect" in r:
+            if not whole(r.get("page")):
+                problems.append(f"{at}: rect needs its 1-based page")
+            rect = r["rect"]
+            if not (isinstance(rect, list) and len(rect) == 4 and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in rect)
+                    and rect[0] < rect[2] and rect[1] < rect[3]):
+                problems.append(f"{at}: rect must be [x0, y0, x1, y1] in points from the page's top-left corner, x0 < x1 and y0 < y1")
+        else:
+            k = ways[0]
+            label = figure_label(r[k]) if isinstance(r[k], str) else None
+            if label is None or label[0] != k:
+                problems.append(f"{at}: {k} must be a {k}'s label, such as {'Figure 3' if k == 'figure' else 'Table 2'}")
+            if r.get("page") is not None and not whole(r["page"]):
+                problems.append(f"{at}: page must be a number from 1")
+        if "comment" in r and not isinstance(r["comment"], str):
+            problems.append(f"{at}: comment must be text")
+        if "color" in r and not colour(r["color"]):
+            problems.append(colour_problem(f"{at}: color", r["color"]))
+        if "tags" in r:
+            problems.extend(tags_problems(at, r["tags"]))
     note = raw.get("note_html")
     if note is not None and not (isinstance(note, str) and "<" not in note and os.path.isfile(note)):
         problems.append("note_html must be the path of an existing HTML file, not the HTML itself")
@@ -4061,7 +4137,7 @@ def main(argv=None):
     js_path = os.path.join(cfg["out_dir"], "create_annotations.js")
     open(js_path, "w", encoding="utf8").write(render_js(cfg, out, plan))
     report = {"highlights": by_type.get("highlight", 0), "underlines": by_type.get("underline", 0),
-              "margin_texts": by_type.get("text", 0), "sticky_notes": by_type.get("note", 0),
+              "margin_texts": by_type.get("text", 0), "sticky_notes": by_type.get("note", 0), "regions": by_type.get("image", 0),
               "colors": dict(collections.Counter(a["color"] for a in out if a["type"] in ("highlight", "underline"))),
               "cleanup_removes": ((len(plan["remove"]) if plan else len(own_now)) if listing else None) if cfg.get("cleanup") else 0,
               "missed": missed, "translation_warnings": check_translations(out),
