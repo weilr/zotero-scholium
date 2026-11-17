@@ -1,9 +1,29 @@
 # Changelog
 
-## Unreleased
+## 0.2.3 (2026-11-17)
 
 ### Added
 
+- A configuration may give annotations tags of their own (`tags` on a highlight or margin note, or at the top for all),
+  written beside the tool's tag; `color` takes Zotero's colour names (red, orange, yellow, green, blue, purple,
+  magenta, gray) as well as `#rrggbb`.
+- `regions` in a configuration frame a figure or table (`{"figure": "Figure 3"}`, `{"table": "Table 2"}`, found by its
+  caption) or a rectangle on a page (`page` with `rect`) as an image annotation, with an optional comment, colour and
+  tags; a label not found, or found on several pages without `page`, is reported under `missed` and nothing is
+  written. Every write channel creates them, a re-apply keeps them, and margin notes keep clear of them; the report
+  counts them (`regions`).
+- The skill points to the configuration reference for underlines, framed figures or tables, Zotero's colour names and
+  tags, which it uses when the user asks; the reference gives `regions[]`, `tags`, the colour names and four rows of its
+  table of requests.
+- The annotation card counts framed figures and tables (框选 N, N areas) when a run left some; the core colour of a
+  configuration may be one of Zotero's colour names.
+- `extract --sentences` lists the figures and tables it finds by their captions in its index (`figures: p.3 Figure 1,
+  p.6 Table 2`).
+- The output folder's record names the tags the tool wrote on each annotation: they are never taken for the user's, a
+  rewrite in place adds and removes them as the configuration now has them while the user's tags stay, and one the
+  user removed counts as their change.
+- The setup check names skill files that are missing or empty and offers Repair, which adds the packaged files that are
+  missing to the user's skills folder and keeps every file already there.
 - **Codex home folder** on the settings page, as in llm-for-zotero: empty, the plugin's Codex runs use `~/.codex`; a
   folder of its own keeps their threads, sign-in and setup there, and needs a sign-in there (`codex login` with
   `CODEX_HOME` set), which the setup check and a sign-in error give.
@@ -156,26 +176,6 @@
 
 ### Added
 
-- A configuration may give annotations tags of their own (`tags` on a highlight or margin note, or at the top for all),
-  written beside the tool's tag; `color` takes Zotero's colour names (red, orange, yellow, green, blue, purple,
-  magenta, gray) as well as `#rrggbb`.
-- `regions` in a configuration frame a figure or table (`{"figure": "Figure 3"}`, `{"table": "Table 2"}`, found by its
-  caption) or a rectangle on a page (`page` with `rect`) as an image annotation, with an optional comment, colour and
-  tags; a label not found, or found on several pages without `page`, is reported under `missed` and nothing is
-  written. Every write channel creates them, a re-apply keeps them, and margin notes keep clear of them; the report
-  counts them (`regions`).
-- The skill points to the configuration reference for underlines, framed figures or tables, Zotero's colour names and
-  tags, which it uses when the user asks; the reference gives `regions[]`, `tags`, the colour names and four rows of its
-  table of requests.
-- The annotation card counts framed figures and tables (框选 N, N areas) when a run left some; the core colour of a
-  configuration may be one of Zotero's colour names.
-- `extract --sentences` lists the figures and tables it finds by their captions in its index (`figures: p.3 Figure 1,
-  p.6 Table 2`).
-- The output folder's record names the tags the tool wrote on each annotation: they are never taken for the user's, a
-  rewrite in place adds and removes them as the configuration now has them while the user's tags stay, and one the
-  user removed counts as their change.
-- The setup check names skill files that are missing or empty and offers Repair, which adds the packaged files that are
-  missing to the user's skills folder and keeps every file already there.
 - When Zotero's local API is turned off, Annotate, a question or an edited question asks once whether to turn it on.
 - When the agent does not find the zotero-scholium skill, the failure offers **Install the skill and retry**: the plugin
   copies the skill it carries into Claude Code's or Codex's skills folder and runs again. A skill already there is left
