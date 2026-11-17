@@ -4044,7 +4044,56 @@ def config_problems(raw):
     return problems
 
 
+class ApplyLock:
+    """One --apply at a time per output folder: runs of a paper at once (the plugin's chat and annotation) read the
+    attachment, write it and record what they wrote in turn, so that neither record loses the other's. A lock older than
+    STALE seconds was left by a write that died and is taken over."""
+    WAIT = 120.0
+    STALE = 600.0
+
+    def __init__(self):
+        self.path = None
+
+    def take(self, out_dir, wait=None):
+        path = os.path.join(out_dir, ".apply.lock")
+        os.makedirs(out_dir, exist_ok=True)
+        end = time.monotonic() + (self.WAIT if wait is None else wait)
+        while True:
+            try:
+                fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode())
+                os.close(fd)
+                self.path = path
+                return True
+            except FileExistsError:
+                try:
+                    if time.time() - os.path.getmtime(path) > self.STALE:
+                        os.remove(path)
+                        continue
+                except OSError:
+                    continue
+            if time.monotonic() >= end:
+                sys.exit(f"another write to this paper is still going on ({path}); run --apply again in a moment")
+            time.sleep(0.2)
+
+    def release(self):
+        if self.path:
+            try:
+                os.remove(self.path)
+            except OSError:
+                pass
+            self.path = None
+
+
 def main(argv=None):
+    lock = ApplyLock()
+    try:
+        return _main(argv, lock)
+    finally:
+        lock.release()
+
+
+def _main(argv, lock):
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
@@ -4105,6 +4154,8 @@ def main(argv=None):
         print(json.dumps(res if res else {"error": err}, ensure_ascii=False, indent=1))
         sys.exit(0 if res else 1)
 
+    if args.apply:   # from the read of what is on the attachment to the record of what the write left
+        lock.take(cfg["out_dir"])
     obstacles, existing_info, listing, unread = {}, "not consulted (--ignore-existing)", None, None
     if not args.ignore_existing:
         name, handle, why = pick_backend(args.backend if args.backend != "js" else "auto", cfg)

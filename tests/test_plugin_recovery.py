@@ -34,12 +34,13 @@ const undoRecord = () => ({ key: 'ATT1', conv: 'claude-20261001-120000', path: P
     const h = harness({ logs: { [PATH]: NEW } });
     h.runner.start('x');
     h.runner.replaced.set(ID, undoRecord());
-    h.runner.job = { key: 'ATT1', source: { att: h.att1, conv: 'claude-20261001-120000', kind: 'chat' } };
+    h.runner.runs.set('rU', { id: 'rU', key: 'ATT1', kind: 'chat', conv: 'claude-20261001-120000',
+                              source: { att: h.att1, conv: 'claude-20261001-120000', kind: 'chat' } });
     h.runner.cancel = () => {};
     h.zotero.Promise.delay = async () => {};
     await h.runner.undoReplace(ID);
     const timedOut = { kept: h.runner.replaced.has(ID), same: h.log.writes[PATH] === NEW };
-    h.runner.job = null;
+    h.runner.runs.clear();
     await h.runner.undoReplace(ID);
     facts.undoTimeout = { timedOut, restored: h.log.writes[PATH] === OLD, kept: h.runner.replaced.has(ID) };
   }
@@ -176,7 +177,8 @@ const undoRecord = () => ({ key: 'ATT1', conv: 'claude-20261001-120000', path: P
     const writing = h.runner.appendLog({ logPath: PATH }, [JSON.stringify({ type: 'result', result: 'Edited answer' })]);
     await settle(10);
     h.runner.replaced.set(ID, undoRecord());
-    h.runner.job = { key: 'ATT1', source: { att: h.att1, conv: 'claude-20261001-120000', kind: 'chat' } };
+    h.runner.runs.set('rU', { id: 'rU', key: 'ATT1', kind: 'chat', conv: 'claude-20261001-120000',
+                              source: { att: h.att1, conv: 'claude-20261001-120000', kind: 'chat' } });
     h.runner.cancel = () => {};
     h.zotero.Promise.delay = async () => {};
     await h.runner.undoReplace(ID);

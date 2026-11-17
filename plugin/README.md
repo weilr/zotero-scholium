@@ -33,8 +33,11 @@ the plugin shows them again in open readers.
 ## One-click annotation
 
 **Annotate** in the *Scholium* section of the item pane starts the Claude Code CLI or the Codex CLI
-in the background for the selected paper; papers started while another runs wait in a queue and run
-one at a time, and a paper moved to the trash meanwhile is left out. A regular item is annotated through its
+in the background for the selected paper. Different conversations run at the same time: different papers, a paper's
+Chat and its annotation, several conversations of one paper; up to **Runs at once** (default 3) run together and the
+rest wait in a queue. Messages to one conversation go one after another, and a paper has one annotation at a time. A
+paper moved to the trash meanwhile is left out. The runs of a paper at once keep apart what they hold back and their
+configurations (one file per conversation), and their writes to Zotero go one after another. A regular item is annotated through its
 best PDF attachment. A paper in a group library is annotated as one in My Library, into the group's library, where
 every member sees the annotations: the first annotation in each group asks once, and **Annotate again** and **Delete
 annotations** say that the change is the group's. When the user cannot edit the group's library or its files, the
@@ -200,8 +203,8 @@ history and the annotation sessions are those of that PDF.
   closes when the question is gone or another conversation is shown.
 - The question and everything after it are replaced. **Undo** under the new question brings them back for six seconds,
   until another message of the conversation starts, with the conversation's title, and stops the new answer without a
-  notice. An edited question asked while another paper's run or this paper's annotation goes on waits for it, with
-  **Undo** until it starts; **Undo** takes it out of the queue. The Codex threads only the replaced
+  notice. An edited question that waits in the queue (every **Runs at once** taken) keeps **Undo** until it starts;
+  **Undo** takes it out of the queue. The Codex threads only the replaced
   part used are archived at the next Codex run after the **Undo** window ends or the plugin stops; **Undo** archives
   those only the new part used, at the next Codex run.
 - The agent chosen answers. Each agent whose session went past the question goes back to its point before it: Claude
@@ -323,6 +326,7 @@ The Scholium page of Zotero's settings holds:
 | Send shortcut | Enter / Ctrl + Enter for multiline prompts / Always use Ctrl + Enter | Always use Ctrl + Enter |
 | Follow-up behavior | Queue / Steer | Queue |
 | Show context window usage | on / off | on |
+| Runs at once | 1 to 6 | 3 |
 | Claude Code program | a path, or **Browse…** | empty: found automatically |
 | Codex program | a path, or **Browse…** | empty: found automatically |
 
@@ -351,7 +355,8 @@ Zotero window, whose state line says the same.
 
 When a run fails on the connection to the agent's service (a timeout, a lost connection, an
 overloaded or failing server) before the agent has used any tool, the paper is tried once more after
-30 seconds; it waits at the head of the queue meanwhile, and ■ ends the wait. The transcript
+30 seconds; it waits at the head of the queue meanwhile (its conversation's later messages behind it), and ■ ends the
+wait. The transcript
 and the log keep the failed try.
 
 When the agent reports that the usage limit is reached, that agent's runs wait, and with them a message queued
@@ -363,8 +368,8 @@ your usage limit”) is named as such, and that agent's runs wait as long as its
 section ends that agent's wait at once. Only sections whose next run waits for that limit show the pause; "Queued, N
 ahead" counts neither held messages nor runs waiting for another limit.
 
-When the plugin is updated while a paper runs, the run ends and its log records the interruption; the
-new version continues that paper's conversation, then runs the papers still waiting, and a pause for a
+When the plugin is updated while papers run, each run ends and its log records the interruption; the
+new version continues each of those conversations, then runs the papers still waiting, and a pause for a
 limit or a wait for a second try goes on; a paper whose agent had not yet received its prompt is handed
 over as it was queued, the user's words with it; a compaction under way is handed over as a compaction, with what
 to keep, and runs again. Disabling the plugin or quitting Zotero ends a run the same way, without handing the papers
@@ -398,6 +403,7 @@ no value of its own for. It then clears every preference of Scholium Bridge.
 | `extensions.scholium.sendShortcut` | `cmdAlways` | `enter`, `cmdIfMultiline` or `cmdAlways`; set on the settings page |
 | `extensions.scholium.followUpMode` | `queue` | `queue` or `steer`; set on the settings page |
 | `extensions.scholium.contextRing` | `true` | whether the context ring shows; set on the settings page |
+| `extensions.scholium.maxRuns` | `3` | how many runs go on at once, 1 to 6; set on the settings page |
 | `extensions.scholium.savedPrompts` | empty (the four built-in prompts) | the saved prompts as a JSON array of `{label, prompt}`; set in the Scholium section |
 
 ## Deleting the tool's annotations

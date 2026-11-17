@@ -61,7 +61,7 @@ async function sampleLive(box, until) {
   while (!until()) {
     let words = "", title = "";
     try { const b = fresh(box), w = b && b.querySelector(".scholium-working"); words = w ? txt(w) : ""; } catch (e) {}
-    try { title = R().job ? R().runningTitle() : ""; } catch (e) {}
+    try { title = R().job ? R().runningTitle(R().job) : ""; } catch (e) {}
     const key = (words + " | " + title).replace(/\d+/g, "#");
     if (key !== last) { last = key; line("live", { words, title }); }
     await delay(500);

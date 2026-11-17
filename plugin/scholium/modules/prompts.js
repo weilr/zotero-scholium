@@ -98,9 +98,10 @@ Object.assign(ScholiumRunner, {
   },
 
   // how a session's commands name the paper: through paper.json, which is the plugin's, never with the PDF's path or the
-  // paper's metadata; the agent's configuration is a file of its own
-  paperRule(key) {
-    const paper = this.paperPath(key), own = PathUtils.join(this.outDir(key), "config.json");
+  // paper's metadata; the agent's configuration is a file of its own, one per conversation (runs of a paper at once do
+  // not share it)
+  paperRule(key, conv = null) {
+    const paper = this.paperPath(key), own = PathUtils.join(this.outDir(key), conv ? `config-${conv}.json` : "config.json");
     // paper.json of another library than My Library also names it (library_id, and group_id for a group)
     const n = /_g\d+$/.test(key) ? 6 : /_l\d+$/.test(key) ? 5 : 4;
     return this.zh() ? `${paper} 是插件的文件，只读，不要修改：只有 extract（代替 --pdf）和 --list 用 --config ${paper}。`
@@ -203,7 +204,7 @@ Object.assign(ScholiumRunner, {
         job.profile ? `- 画像：${job.profile}` : "- 画像：没有；按默认值标注，不要生成或修改画像",
         "",
         "这是从 Zotero 里一键启动的无人值守任务：不要向用户提问，不要启动子代理，由你独立完成第 1–3 步并写入 Zotero。",
-        this.paperRule(this.keyOf(job.att)),
+        this.paperRule(this.keyOf(job.att), job.conv),
         ...this.scriptLines(job),
         ...this.preRunLines(job),
         "不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。",
@@ -232,7 +233,7 @@ Object.assign(ScholiumRunner, {
       job.profile ? `- Profile: ${job.profile}` : "- Profile: none; annotate with the defaults and do not create or change a profile",
       "",
       "This is an unattended task started from Zotero with one click: do not ask the user anything and do not start sub-agents; complete steps 1-3 yourself and write to Zotero.",
-      this.paperRule(this.keyOf(job.att)),
+      this.paperRule(this.keyOf(job.att), job.conv),
       ...this.scriptLines(job),
       ...this.preRunLines(job),
       "Do not pass --accept, --allow-warnings or --allow-missed: correct the findings instead.",
@@ -269,7 +270,7 @@ Object.assign(ScholiumRunner, {
       ...this.papersLines(job),
       "",
       "这是从 Zotero 里发来的无人值守任务：不要向用户提问，不要启动子代理。只回答，不写批注和笔记；用户在问题里明确要求时，才按技能的流程写入 Zotero。",
-      this.paperRule(this.keyOf(job.att)),
+      this.paperRule(this.keyOf(job.att), job.conv),
       ...this.scriptLines(job),
       ...this.questionPreLines(job),
       ...this.languageLines(),
@@ -297,7 +298,7 @@ Object.assign(ScholiumRunner, {
       "",
       "This is an unattended task sent from Zotero: do not ask the user anything and do not start sub-agents. Only answer; write no annotations "
         + "and no note unless the question asks for them, and then write to Zotero as the skill describes.",
-      this.paperRule(this.keyOf(job.att)),
+      this.paperRule(this.keyOf(job.att), job.conv),
       ...this.scriptLines(job),
       ...this.questionPreLines(job),
       ...this.languageLines(),
@@ -613,34 +614,34 @@ Object.assign(ScholiumRunner, {
     return h ? `${h}h ${two(m)}m ${two(s)}s` : m ? `${m}m ${two(s)}s` : `${s}s`;
   },
 
-  stepText(step) {
+  stepText(step, run = null) {
     const i = this.STEPS.indexOf(step);
     if (i >= 0) return this.text("stepOf", i + 1, this.STEPS.length, this.text(step));
-    return step && step !== "starting" ? this.text(step) : this.text("starting", this.agentName(this.job && this.job.agent));
+    return step && step !== "starting" ? this.text(step) : this.text("starting", this.agentName(run && run.agent));
   },
 
-  // the running paper's state line: its dot, with the attempt while the connection is tried again; the step and the
-  // time are in the tooltip, the time also on the run's line in the transcript
-  runningState() {
-    const retry = this.job.retry;
+  // a run's state line: its dot, with the attempt while the connection is tried again; the step and the time are in the
+  // tooltip, the time also on the run's line in the transcript
+  runningState(run) {
+    const retry = run && run.retry;
     return retry ? this.text("reconnecting", retry.attempt, retry.max) : "";
   },
 
   // the same with the time so far, for the line's tooltip
-  runningTitle() {
-    if (this.job.source && this.job.source.compact) return this.text("compactingState", this.durationWords(this.elapsed()));
-    const retry = this.job.retry;
-    const step = (this.job.preRun && !this.STEPS.includes(this.job.step) ? this.text("preRun") : this.job.asking ? this.text("working") : this.stepText(this.job.step))
+  runningTitle(run) {
+    if (!run) return "";
+    if (run.source && run.source.compact) return this.text("compactingState", this.durationWords(this.elapsed(run)));
+    const retry = run.retry;
+    const step = (run.preRun && !this.STEPS.includes(run.step) ? this.text("preRun") : run.asking ? this.text("working") : this.stepText(run.step, run))
       + (retry ? " · " + this.text("reconnecting", retry.attempt, retry.max) : "");
-    return this.text("running", step, this.durationWords(this.elapsed()));
+    return this.text("running", step, this.durationWords(this.elapsed(run)));
   },
 
-  // the running paper's time so far in whole seconds, one value for its live line and its state line's tooltip: taken
-  // from the run's start when it starts and once a second by tick (fresh)
-  elapsed(fresh = false) {
-    const job = this.job;
-    if (!job) return 0;
-    if (fresh || !(job.elapsed >= 0)) job.elapsed = Math.max(0, Math.round((Date.now() - job.started) / 1000)) * 1000;
-    return job.elapsed;
+  // a run's time so far in whole seconds, one value for its live line and its state line's tooltip: taken from the run's
+  // start when it starts and once a second by tick (fresh)
+  elapsed(run, fresh = false) {
+    if (!run) return 0;
+    if (fresh || !(run.elapsed >= 0)) run.elapsed = Math.max(0, Math.round((Date.now() - run.started) / 1000)) * 1000;
+    return run.elapsed;
   },
 });

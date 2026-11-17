@@ -297,7 +297,7 @@ SCENARIOS = r"""
     const pane = p.pane();
     const f = { chatBefore: pane.list.children.length, introBefore: pane.annot.list.children.includes(pane.annotIntro) };
     await h.runner.annotate([h.item1]); await settle(200);
-    f.kind = h.runner.transcriptKind;
+    f.kind = h.runner.job && h.runner.job.kind;
     f.chatTab = { entries: pane.list.children.length, state: p.view().state, annotDot: pane.tabAnnotateDot.hidden === false,
                   chatDot: pane.tabChatDot.hidden === false };
     pane.tabAnnotate.click(); await settle(10);
@@ -577,7 +577,7 @@ SCENARIOS = r"""
     await h.runner.annotate([h.item1]); await settle(200);
     const head = () => pane.list.children.at(-1).children.find(c => c.className === 'scholium-fold').children[0];
     head().click(); await settle(5);
-    facts.otherKindFold = { live: pane.live, kind: h.runner.transcriptKind, running: !!h.runner.job, head: head().textContent,
+    facts.otherKindFold = { live: pane.live, kind: h.runner.job && h.runner.job.kind, running: !!h.runner.job, head: head().textContent,
                             views: [pane.pane === pane, pane.annot.pane === pane] };
     h.runner.cancel(); await settle(300);
   }
@@ -641,9 +641,9 @@ SCENARIOS = r"""
     const first = place();
     pane.list.children[1].children.find(c => c.className === 'scholium-fold').children[0].click(); await settle(5);
     const clicked = place();   // the running run's steps opened: the message stays with it
-    h.runner.appendEntries([{ kind: 'info', text: '一条提示' }]);
+    h.runner.appendEntries(h.runner.job, [{ kind: 'info', text: '一条提示' }]);
     const line = place();
-    h.runner.appendEntries([{ kind: 'prompt', text: '插一句' }]);
+    h.runner.appendEntries(h.runner.job, [{ kind: 'prompt', text: '插一句' }]);
     facts.draftPlace = { parts, thinking, earlier, first, clicked, line, run: place() };
     h.runner.cancel(); await settle(300);
   }
@@ -711,7 +711,7 @@ SCENARIOS = r"""
       const other = p2.pane().annot.list.children[0];
       await h.runner.annotate([h.item1, h.item2]); await settle(300);
       ended.paused = [h.runner.job, !!h.runner.paused, headOf(p1.pane().annot), p2.pane().annot.list.children[0] === other];
-      h.runner.appendEntries([{ kind: 'info', text: '一条提示' }]);
+      h.runner.appendEntries({ key: 'ATT1', kind: 'annotate', conv: null, entries: [], gone: true }, [{ kind: 'info', text: '一条提示' }]);
       ended.lineWhilePaused = headOf(p1.pane().annot);
       clearTimeout(h.runner.paused.timer);
     }
@@ -759,10 +759,12 @@ SCENARIOS = r"""
     const pane = p.pane(), r = h.runner;
     const t0 = Date.now() - 100000;
     const simple = (at, words) => [{ kind: 'run', at }, { kind: 'prompt', text: words }, { kind: 'text', text: '答' + words }, { kind: 'time', at: at + 500, text: '' }];
+    const run = { id: 'rT', key: 'ATT1', kind: 'chat', conv: null, entries: [], draft: null, draftTimer: null };
+    r.runs.set(run.id, run);
     const show = entries => {
-      r.transcript = entries; r.transcriptKey = 'ATT1'; r.transcriptKind = 'chat';
-      Object.assign(pane, { shownKey: 'ATT1', live: true, foldOpen: new Map() });
-      r.renderTranscript(pane, r.transcript, false);
+      run.entries = entries;
+      Object.assign(pane, { shownKey: 'ATT1', shownConv: null, live: true, foldOpen: new Map() });
+      r.renderTranscript(pane, run.entries, false);
     };
     const prompts = () => pane.list.children.map(n => n.children[0].textContent);
     // the first run goes and the steps opened in the second stay open
@@ -771,22 +773,24 @@ SCENARIOS = r"""
     show(simple(t0, 'A').concat(B));
     pane.list.children[1].children.find(c => c.className === 'scholium-fold').children[0].click();
     r.MAX_ENTRIES = B.length + 1;
-    r.appendEntries([{ kind: 'info', text: '一条提示' }]);
+    r.appendEntries(run, [{ kind: 'info', text: '一条提示' }]);
     const kept = [prompts(), pane.list.children[0].children.find(c => c.className === 'scholium-fold').children.length];
     // the first run goes in the call that brings a run: as many runs as before, but not the same ones
     show(simple(t0, 'A').concat(simple(t0 + 2000, 'B')));
     r.MAX_ENTRIES = 5;
-    r.appendEntries([{ kind: 'prompt', text: 'C' }]);
+    r.appendEntries(run, [{ kind: 'prompt', text: 'C' }]);
     facts.trimmed = { kept, shifted: prompts() };
     r.MAX_ENTRIES = 3000;
+    r.runs.delete(run.id);
   }
   // the words of a run's line, in both languages
   {
     const hr = harness(), r = hr.runner;
     const step = (name, text) => ({ kind: 'tool', name, text });
-    const foldView = hh => ({ doc: hh.paneDoc, foldOpen: new Map(), kind: 'chat' });
+    const foldView = hh => ({ doc: hh.paneDoc, foldOpen: new Map(), kind: 'chat', shownKey: 'ATT1', shownConv: null });
+    const going = () => ({ id: 'rW', key: 'ATT1', kind: 'chat', conv: null, started: Date.now() - 12000 });   // the live line's time is its run's
     r.models.codex = [{ value: '', label: 'Codex 默认' }, { value: 'gpt-6-luna', label: 'GPT-6-Luna' }];
-    r.job = { started: Date.now() - 12000 };   // the live line's time is the running paper's
+    r.runs.set('rW', going());
     facts.words = {
       live: [step('Read', 'Read(D:/x/sentences.txt)'), step('Bash', 'Bash(python scholium.py extract)'), undefined]
         .map(st => r.foldNode(foldView(hr), { start: Date.now() - 12000, end: 0, steps: st ? [st] : [] }, 0, true).children[0].textContent),
@@ -796,13 +800,13 @@ SCENARIOS = r"""
                r.modelLabel('Codex · gpt-x')],
       runLines: [r.entries({ type: 'scholium', subtype: 'run', agent: 'claude', at: 5 }), r.entries({ type: 'scholium', subtype: 'run', agent: 'claude' })],
     };
-    r.job = null;
+    r.runs.clear();
     const he = harness({ locale: 'en-US' }), e = he.runner;
-    e.job = { started: Date.now() - 12000 };
+    e.runs.set('rW', going());
     facts.words.english = [e.foldNode(foldView(he), { start: Date.now() - 12000, end: 0, steps: [step('Read', 'Read(a/b.txt)')] }, 0, true).children[0].textContent,
                            e.workedText({ start: 1000, end: 378000 }), e.workedText({ start: 0, end: 0 }),
                            ...[59400, 377000, 3725000].map(ms => e.durationWords(ms))];
-    e.job = null;
+    e.runs.clear();
   }
   // History is a layer of this PDF's conversations; a row opens one and closes the layer; an empty chat offers questions
   {
@@ -1153,14 +1157,14 @@ def test_the_settings_page_binds_every_preference():
     src = (PLUGIN / "settings.xhtml").read_text(encoding="utf8")
     root = ET.fromstring("<root xmlns='%s' xmlns:html='%s'>%s</root>" % (ns["x"], ns["h"], src))
     prefs = {el.get("preference") for el in root.iter() if el.get("preference")}
-    assert prefs == {"extensions.scholium." + p for p in ("sendShortcut", "followUpMode", "contextRing", "claudePath", "codexPath")}
+    assert prefs == {"extensions.scholium." + p for p in ("sendShortcut", "followUpMode", "contextRing", "maxRuns", "claudePath", "codexPath")}
     ids = {el.get("data-l10n-id") for el in root.iter() if el.get("data-l10n-id")}
     for locale in ("en-US", "zh-CN"):
         ftl = (PLUGIN / "locale" / locale / "scholium.ftl").read_text(encoding="utf8")
         defined = set(re.findall(r"^([a-z][\w-]*)\s*=", ftl, re.M))
         assert ids <= defined, (locale, ids - defined)
     defaults = (PLUGIN / "prefs.js").read_text(encoding="utf8")
-    for p, v in (("sendShortcut", '"cmdAlways"'), ("followUpMode", '"queue"'), ("contextRing", "true"),
+    for p, v in (("sendShortcut", '"cmdAlways"'), ("followUpMode", '"queue"'), ("contextRing", "true"), ("maxRuns", '"3"'),
                  ("claudePath", '""'), ("codexPath", '""'), ("savedPrompts", '""')):
         assert f'pref("extensions.scholium.{p}", {v});' in defaults
 
@@ -1185,8 +1189,11 @@ def test_the_settings_page_controls_show_their_words():
     src = (PLUGIN / "settings.xhtml").read_text(encoding="utf8")
     root = ET.fromstring("<root xmlns='%s' xmlns:html='%s'>%s</root>" % (ns["x"], ns["h"], src))
     controls = {"{%s}%s" % (ns["x"], t) for t in ("menuitem", "radio", "checkbox", "button")}
-    labelled = [el.get("data-l10n-id") for el in root.iter() if el.tag in controls]
+    labelled = [el.get("data-l10n-id") for el in root.iter() if el.tag in controls and el.get("data-l10n-id")]
     assert len(labelled) == 10
+    numbers = [el.get("label") for el in root.iter() if el.tag in controls and not el.get("data-l10n-id")]
+    assert numbers == [str(n) for n in range(1, 7)], "the number of runs at once: its numbers"
+
     picker = re.findall(r'"(scholium-settings-[a-z-]+)"', (PLUGIN / "settings.js").read_text(encoding="utf8"))
     assert picker == ["scholium-settings-claude", "scholium-settings-codex", "scholium-settings-not-found"]
     for locale in ("en-US", "zh-CN"):

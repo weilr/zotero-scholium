@@ -4,8 +4,16 @@
 
 ### Changed
 
+- Different conversations run at the same time: different papers, a paper's Chat and its annotation, several
+  conversations of one paper. **Runs at once** on the settings page sets how many (1 to 6, default 3); the rest wait in
+  the queue. Messages to one conversation still go one after another, a paper has one annotation at a time, and ■ or
+  Esc stops the run of the conversation shown. An update hands every run over.
+- The runs of a paper at once keep what the script holds back in one file per conversation (`held_back-<conversation>.json`),
+  and the agent is asked to write its configuration to `config-<conversation>.json`; the pre-run's extract of a paper
+  runs once for them, the plugin's writes to one attachment go one after another, and the script's `--apply` waits for
+  another `--apply` in the same output folder (`.apply.lock`).
 - ✓ on an edited question whose words and quote were left as they were closes the box without asking again.
-- A question can be edited while the paper's annotation runs or waits: the edit waits behind it, with Undo.
+- A question can be edited while the paper's annotation runs or waits.
 - Citations side by side that point to one page are one chip, whose card lists their sentences and whose Locate shows
   them all; the chips keep the brackets and punctuation around them on their line.
 - A chat list at its end stays at its end when a queued message or a longer message box takes room below it.

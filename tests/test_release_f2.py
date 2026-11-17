@@ -3,6 +3,7 @@ paths that a shell expands or that are not there; the paper handed to the agent 
 stays off command lines; Codex's MCP servers and default model learnt without reading its configuration; whole-file
 rewrites of a conversation and of the profile made atomic; the citations cache bounded."""
 import json
+import re
 
 import pymupdf
 import pytest
@@ -357,17 +358,17 @@ def test_the_paper_is_handed_over_in_paper_json_not_on_a_command_line(facts):
     assert p["file"] == {"pdf": "D:/Zotero/storage/ATT1/paper.pdf", "item_key": "ITEM1", "attachment_key": "ATT1", "out_dir": OUT}
     assert p["atomic"] is True
     assert facts["paperQuestion"] == p["file"], "a question's run writes it too"
-    prompt = p["prompt"]
+    prompt = re.sub(r"config-[\w-]+\.json", "config-CONV.json", p["prompt"])
     assert "D:/Zotero/storage/ATT1/paper.pdf" not in prompt, "the PDF's path only in paper.json"
     assert f"- 论文：{PAPER}（PDF 的路径、两个 key 和输出目录）" in prompt
     assert (f"{PAPER} 是插件的文件，只读，不要修改：只有 extract（代替 --pdf）和 --list 用 --config {PAPER}。"
-            f"你的配置另写一个文件，放在输出目录里（如 {OUT}/config.json），从 {PAPER} 的四个键写起，--apply 用它。"
+            f"你的配置另写一个文件，放在输出目录里（如 {OUT}/config-CONV.json），从 {PAPER} 的四个键写起，--apply 用它。"
             "不要把 PDF 路径、论文标题或其他题录写进命令行。") in prompt
-    en = facts["paperEn"]
+    en = re.sub(r"config-[\w-]+\.json", "config-CONV.json", facts["paperEn"])
     assert "D:/Zotero/storage/ATT1/paper.pdf" not in en
     assert f"- Paper: {PAPER} (the PDF's path, the two keys and the output directory)" in en
     assert (f"{PAPER} is the plugin's and read-only; do not edit it. Only extract (in place of --pdf) and --list take --config {PAPER}. "
-            f"Write your configuration to a file of your own in the output directory (e.g. {OUT}/config.json), starting from the four keys "
+            f"Write your configuration to a file of your own in the output directory (e.g. {OUT}/config-CONV.json), starting from the four keys "
             f"of {PAPER}, and give that one to --apply. Never put the PDF's path, the paper's title or other metadata "
             "on a command line.") in en
     assert f"list them with --config {PAPER} --list --full." in en

@@ -19,10 +19,11 @@ Object.assign(ScholiumRunner, {
       if (this.pendingLogs.has(path)) throw new Error(this.text("logNotSaved"));
     }
     const agent = job.agent === "codex" ? "codex" : "claude";
-    this.job = { title: job.title, key, libraryID: job.att.libraryID, started, elapsed: 0, agent, step: job.resume && !job.annotate ? "continuing" : "starting",
-                 source: job, session: job.resume || null, log: null, asking: this.asking(job), context: null };
-    this.transcriptKind = job.kind || "chat";   // the tab whose run this is, from its start
-    const running = this.job;
+    const running = { id: "r" + (++this.runSeq), title: job.title, key, libraryID: job.att.libraryID, started, elapsed: 0, agent,
+                      step: job.resume && !job.annotate ? "continuing" : "starting", source: job, session: job.resume || null, log: null,
+                      asking: this.asking(job), context: null, kind: job.kind || "chat", conv: job.conv || null, entries: [], path: null,
+                      current: null, draft: null, draftTimer: null };
+    this.runs.set(running.id, running);
     // the conversation goes on in its log; a new one starts its own when the run is under way
     const log = job.conv ? await this.readLog(key, job.conv) : null;
     const mine = log ? log.agents[agent] : null;   // the agent's own session of the conversation
@@ -62,29 +63,28 @@ Object.assign(ScholiumRunner, {
     job.since = mine ? mine.lastAt : 0;
     job.sinceEnd = mine ? mine.lastEnd : 0;
     job.applied = await this.readApplied(key);
-    if (this.job !== running) return;   // the plugin stopped meanwhile
+    if (!this.alive(running)) return;   // the plugin stopped meanwhile
     // the run is one of the transcript's from its start; its line goes into the log once the log is there. One that goes
     // on with the turn before is an annotation's when that turn is: its state line counts the steps its list names
-    this.transcript = (log ? log.entries : []).concat(this.entries({ type: "scholium", subtype: "run", at: started, compact: !!job.compact,
-                                                                                     user: job.compact || again || continuation ? null : "" }));
-    const runs = this.runsOf(this.transcript), turn = runs[runs.length - 1].turn;
+    running.entries = (log ? log.entries : []).concat(this.entries({ type: "scholium", subtype: "run", at: started, compact: !!job.compact,
+                                                                                       user: job.compact || again || continuation ? null : "" }));
+    const runs = this.runsOf(running.entries), turn = runs[runs.length - 1].turn;
     running.annotation = !!job.annotate || !!(turn && turn.annotate);
-    this.transcriptKey = key;
-    this.transcriptPath = log ? log.path : null;
+    running.path = log ? log.path : null;
     running.context = mine ? mine.context : null;
     // another run of a conversation whose question was edited a moment ago: the edit can no longer be undone
     if (!job.edited && job.conv) this.endReplaced(`${key}/${job.conv}`);
-    this.startPanes(key, this.transcriptKind);
+    this.startPanes(running);
     this.notice(job, this.text(job.compact ? "compacting" : job.annotate || (!job.say && !job.resume) ? "typical" : job.question ? "askNotice" : "continuedNotice"));
     this.refresh();
     this.tick(running).catch(() => {});
     if (running.stopAsked) return this.halted(job, running);   // ■ while the log was read
     const program = agent === "codex" ? await this.findCodex() : await this.findClaude();
-    if (this.job !== running || running.stopAsked) return this.halted(job, running);   // the plugin stopped, or ■, while the program was looked up
+    if (!this.alive(running) || running.stopAsked) return this.halted(job, running);   // the plugin stopped, or ■, while the program was looked up
     if (!program) {
       const missing = this.text(agent === "codex" ? "noCodex" : "noClaude");
       this.handBack(job, false);
-      this.appendEntries([{ kind: "final", text: missing, error: true }]);
+      this.appendEntries(running, [{ kind: "final", text: missing, error: true }]);
       this.notice(job, missing, true);
       this.finish(job, false, missing);
       return { ok: false, delivered: false };
@@ -92,7 +92,7 @@ Object.assign(ScholiumRunner, {
     job.scriptRun = await this.scriptProgram();   // the prompt says how the script runs here
     job.script = job.scriptRun.name;
     await IOUtils.makeDirectory(this.outDir(key), { createAncestors: true, ignoreExisting: true });
-    if (this.job !== running || running.stopAsked) return this.halted(job, running);   // the plugin stopped, or ■, while the folder was prepared
+    if (!this.alive(running) || running.stopAsked) return this.halted(job, running);   // the plugin stopped, or ■, while the folder was prepared
     await this.writePaper(job.att, job.path, job.parentKey);
     // the other papers of a question about several: the message's, else those the conversation's log names; each gets its
     // paper.json as one paper does. A paper whose PDF is gone is left out
@@ -110,7 +110,7 @@ Object.assign(ScholiumRunner, {
       await this.writePaper(other, pdf, parent ? parent.key : "");
       job.paperFiles.push({ key: k, path: this.paperPath(k), title: ref.title || (parent || other).getDisplayTitle() });
     }
-    if (this.job !== running || running.stopAsked) return this.halted(job, running);   // the plugin stopped, or ■, meanwhile
+    if (!this.alive(running) || running.stopAsked) return this.halted(job, running);   // the plugin stopped, or ■, meanwhile
     // The pending queue confirmation also keeps the previous session across an update during the first log write.
     let made = job.annotate && job.annotationQueue && job.annotationQueue.conv === job.conv ? job.annotationQueue : null;
     if (!job.conv) {
@@ -129,12 +129,13 @@ Object.assign(ScholiumRunner, {
       }
     }
     const logPath = this.convPath(key, job.conv);
-    if (this.transcriptPath !== logPath) {
-      this.transcriptPath = logPath;
-      this.livePanes(key, job.conv);
+    running.conv = job.conv;
+    if (running.path !== logPath) {
+      running.path = logPath;
+      this.livePanes(running);
     }
     job.logPath = logPath;
-    if (this.job !== running || running.stopAsked) {   // the plugin stopped, or ■, while the log was prepared
+    if (!this.alive(running) || running.stopAsked) {   // the plugin stopped, or ■, while the log was prepared
       if (made) {
         job.logPath = null;
         await this.unmakeConv(key, agent, made).catch(err => this.log("session not undone: " + err));
@@ -184,39 +185,39 @@ Object.assign(ScholiumRunner, {
       const made = this.entries(mark);
       // the turn's words know their turn, as the log's do once it is read
       for (const e of made) if (e.kind === "prompt" && !e.steer) e.turn = log ? log.turns.length : 0;
-      this.appendEntries(made);
+      this.appendEntries(running, made);
     }
     // what the agent's run leaves: its result (as Claude Code's result event), a usage limit, the
     // conversation, the exit code and the end of stderr
     const ctx = { job, key, logPath, running, lastStep: -1, result: null, limit: null, session: job.resume || null,
                   exitCode: null, stderr: "", current: null, applies: {}, commands: {}, missing: null, gone: false };
-    if (this.job !== running) return;   // the plugin stopped while the log was written
+    if (!this.alive(running)) return;   // the plugin stopped while the log was written
     // ■ meanwhile: the run ends as a cancel ends it, its words in the log
     // a new annotation's status and extract, run here before the agent starts (preRun); a question's extract of its
     // papers without sentences.txt (preRunQuestion)
     const question = (job.kind || "chat") === "chat" && !!job.say && !job.resume && !job.compact && !job.annotate;
     job.pre = running.stopAsked ? null : job.annotate && !job.say && !job.compact ? await this.preRun(job, ctx)
       : question ? await this.preRunQuestion(job, ctx) : null;
-    if (this.job !== running) return;   // the plugin stopped meanwhile
+    if (!this.alive(running)) return;   // the plugin stopped meanwhile
     if (job.pre && job.pre.status && !running.stopAsked) this.advance(ctx, "reading");   // the agent reads the sentences next
     // what the user confirmed of what a run before held back (confirmedFor), once for the message, also for its second try;
     // the file where this run notes what it holds back starts empty (keepHeld)
     if (job.confirmed === undefined) job.confirmed = this.confirmedFor(job, key);
-    if (await this.exists(this.heldPath(key))) await IOUtils.remove(this.heldPath(key), { ignoreAbsent: true }).catch(() => {});
+    if (await this.exists(this.heldPath(key, job.conv))) await IOUtils.remove(this.heldPath(key, job.conv), { ignoreAbsent: true }).catch(() => {});
     if (running.stopAsked || (job.pre && job.pre.cancelled)) ctx.current = { key, proc: null, cancelled: true };
     else if (job.pre && job.pre.scanned && !question) this.scannedEnd(ctx);   // a question goes on, told the PDF is a scan
     else if (agent === "codex") await this.runCodex(program, ctx);
     else await this.runClaude(program, ctx);
     await this.appendLog(ctx, []);   // what the log could not take during the run
     await this.keepHeld(ctx);
-    this.current = null;
+    running.current = null;
     // an annotation that wrote, the first for a user who never used the reader's eye button: the annotations are shown
     if (running.annotation && ctx.wrote) await ScholiumToggle.showOnce().catch(e => this.log("annotations not shown: " + e));
-    const unfinished = this.unfinished();   // a cancelled run's, which has no end of its own
-    if (this.job !== running) return;   // the plugin stopped during the run: nothing more to report
+    const unfinished = this.unfinished(running);   // a cancelled run's, which has no end of its own
+    if (!this.alive(running)) return;   // the plugin stopped during the run: nothing more to report
     if (unfinished) {
       await this.appendLog(ctx, [JSON.stringify(unfinished)]);
-      this.appendEntries(this.entries(unfinished));
+      this.appendEntries(running, this.entries(unfinished));
     }
     const { result, current, exitCode, limit, session } = ctx;
     const text = result && typeof result.result === "string" ? result.result.trim() : "";
@@ -227,7 +228,7 @@ Object.assign(ScholiumRunner, {
     let ok = false, message, successNotice = null, scannedNotice = false;
     if (current.cancelled) {
       message = this.text("cancelled");
-      this.appendEntries(this.entries(await this.logEnd(logPath, "cancelled", message, started)));
+      this.appendEntries(running, this.entries(await this.logEnd(logPath, "cancelled", message, started)));
       if (!job.undone) this.notice(job, message, true);   // Undo of an edit stops it without a word
     } else if (exitCode === 0 && result && !result.is_error) {
       ok = true;
@@ -248,7 +249,7 @@ Object.assign(ScholiumRunner, {
                                        turns: spent.turns, tokens: spent.tokens, at: Date.now() },
                                      none && ctx.missing === "noTextLayer" ? { scanned: true } : {});
         await this.appendLog(ctx, [JSON.stringify(counts)]);
-        this.appendEntries(this.entries(counts));
+        this.appendEntries(running, this.entries(counts));
       }
     } else if (limit) {
       // a limit of the service ("not your usage limit") names no reset time, its message may name a wait
@@ -266,30 +267,30 @@ Object.assign(ScholiumRunner, {
         const mark = { type: "scholium", subtype: "gone", agent, resent: !!again };
         await this.appendLog(ctx, [JSON.stringify(mark)]);
         if (again) {
-          if (this.job === running) this.job = null;
-          this.dropRefused(this.transcript);
-          this.settleRun();
+          this.endRun(running);
+          this.dropRefused(running.entries);
+          this.settleRun(running);
           return { exitCode, result, fresh: again };
         }
         message = this.text("goneStopped", agent);
       }
       if (!(result && this.entries(result).length)) {
-        this.appendEntries(this.entries(await this.logEnd(logPath, "failed", message, started, ctx.noSkill ? { skill: ctx.noSkill } : {})));
+        this.appendEntries(running, this.entries(await this.logEnd(logPath, "failed", message, started, ctx.noSkill ? { skill: ctx.noSkill } : {})));
       }
       // the connection failed before the agent used a tool, so nothing was written: one more try
       if (!job.retried && !ctx.acted && this.transient(message, ctx.errorInfo)) {
         const mark = { type: "scholium", subtype: "retry" };
         await this.appendLog(ctx, [JSON.stringify(mark)]);
-        this.appendEntries(this.entries(mark));
-        if (this.job === running) this.job = null;
-        this.settleRun();
+        this.appendEntries(running, this.entries(mark));
+        this.endRun(running);
+        this.settleRun(running);
         return { exitCode, result, retry: true };
       }
       this.notice(job, `${this.text("failed")} · ${message}`, true);
     }
     const time = { type: "scholium", subtype: "time", at: Date.now() };
     await this.appendLog(ctx, [JSON.stringify(time)]);
-    this.appendEntries(this.entries(time));
+    this.appendEntries(running, this.entries(time));
     const outcome = this.outcome(result, current.cancelled), detail = this.tokenDetail(result);
     const pending = this.pendingLogs.get(logPath);
     job.logPending = !!pending;
@@ -480,32 +481,46 @@ Object.assign(ScholiumRunner, {
   preRunner(job, ctx, script, env) {
     const runner = job.scriptRun || {}, running = ctx.running, key = ctx.key;
     return async (args, ms, workdir) => {
-      if (running.stopAsked || this.job !== running) return null;
+      if (running.stopAsked || !this.alive(running)) return null;
       const proc = await this.subprocess().call(Object.assign({ command: runner.command, arguments: runner.prefix.concat([script], args),
                                                                  workdir }, env));
-      if (running.stopAsked || this.job !== running) {   // the plugin stopped, or ■, while the process was being created
+      if (running.stopAsked || !this.alive(running)) {   // the plugin stopped, or ■, while the process was being created
         try { proc.kill(); } catch (e) {}
         ctx.current = { key, proc, cancelled: true };
         return null;
       }
-      this.current = ctx.current = { key, proc, cancelled: false };
+      running.current = ctx.current = { key, proc, cancelled: false };
       try { return await this.readOutput(proc, ms); }
-      finally { this.current = null; }
+      finally { running.current = null; }
     };
   },
 
   // `extract` of a paper (its key of keyOf) into its output folder by a preRunner: { lines (of sentences.txt) }; { scanned }
   // for a PDF without a text layer (exit code 3); { cancelled } after ■; null when it failed or did not end in time
+  // Another run of the paper that extracts it now: this one waits for that extract and takes what it wrote.
   async preExtract(run, ctx, k, ms) {
     const out = this.outDir(k), txt = PathUtils.join(out, "sentences.txt");
-    const extract = await run(["extract", "--config", this.paperPath(k), "--sentences", PathUtils.join(out, "sentences.json"), "--out", txt],
-                              ms, out);
-    if (ctx.current && ctx.current.cancelled) return { cancelled: true };
-    if (!extract || extract.late) return null;
-    if (extract.exitCode === 3) return { scanned: true };
-    if (extract.exitCode !== 0) return null;
-    const text = await IOUtils.readUTF8(txt);
-    return { lines: text.split(/\r?\n/).length - (/\n$/.test(text) ? 1 : 0) };
+    const lines = async () => {
+      const text = await IOUtils.readUTF8(txt);
+      return { lines: text.split(/\r?\n/).length - (/\n$/.test(text) ? 1 : 0) };
+    };
+    const other = this.extracting.get(k);
+    if (other) {
+      await other.catch(() => null);
+      if (await this.exists(txt)) return lines();
+    }
+    const mine = (async () => {
+      const extract = await run(["extract", "--config", this.paperPath(k), "--sentences", PathUtils.join(out, "sentences.json"), "--out", txt],
+                                ms, out);
+      if (ctx.current && ctx.current.cancelled) return { cancelled: true };
+      if (!extract || extract.late) return null;
+      if (extract.exitCode === 3) return { scanned: true };
+      if (extract.exitCode !== 0) return null;
+      return lines();
+    })();
+    this.extracting.set(k, mine);
+    try { return await mine; }
+    finally { if (this.extracting.get(k) === mine) this.extracting.delete(k); }
   },
 
   // an annotation's first steps, run by the plugin before the agent starts, by the skill's script the agent runs
@@ -520,7 +535,7 @@ Object.assign(ScholiumRunner, {
     const group = this.groupOf(job.att.libraryID);
     running.preRun = true;
     this.refresh();
-    this.settleRun();
+    this.settleRun(running);
     try {
       // a PDF without a parent item is named by its own key, which status takes too
       const status = await run(["status", job.parentKey || job.att.key].concat(group ? ["--group", String(group)] : []), this.PRE_STATUS_MS,
@@ -539,7 +554,7 @@ Object.assign(ScholiumRunner, {
     } finally {
       running.preRun = false;
       this.refresh();
-      this.settleRun();
+      this.settleRun(running);
     }
   },
 
@@ -560,17 +575,17 @@ Object.assign(ScholiumRunner, {
       else papers.push(f);
     }
     const script = papers.length && job.scriptRun && job.scriptRun.command ? await this.skillScript(job.agent) : null;
-    if (!script || this.job !== running) return null;
+    if (!script || !this.alive(running)) return null;
     const run = this.preRunner(job, ctx, script, await this.agentEnv(job.agent === "codex"));
     const until = Date.now() + this.PRE_EXTRACT_MS;
     let pre = null;
     running.preRun = true;
     this.refresh();
-    this.settleRun();
+    this.settleRun(running);
     try {
       for (const f of papers) {
         const left = until - Date.now();
-        if (left < 1000 || running.stopAsked || this.job !== running) break;   // the rest are the agent's
+        if (left < 1000 || running.stopAsked || !this.alive(running)) break;   // the rest are the agent's
         const done = await this.preExtract(run, ctx, f ? f.key : key, left);
         if (done && done.cancelled) return done;
         if (f) Object.assign(f, done && done.lines >= 0 ? { sentences: true } : done && done.scanned ? { scanned: true } : {});
@@ -584,7 +599,7 @@ Object.assign(ScholiumRunner, {
     } finally {
       running.preRun = false;
       this.refresh();
-      this.settleRun();
+      this.settleRun(running);
     }
   },
 
@@ -615,15 +630,17 @@ Object.assign(ScholiumRunner, {
     return kinds;
   },
 
-  heldPath(key) { return PathUtils.join(this.outDir(key), "held_back.json"); },
+  // what a conversation's runs hold back, one file per conversation: runs of a paper at once do not share it
+  heldPath(key, conv = null) { return PathUtils.join(this.outDir(key), conv ? `held_back-${conv}.json` : "held_back.json"); },
 
   // What the script held back belongs to this report. A button can approve it once, and new ordinary words discard it.
   async keepHeld(ctx) {
     const { job, key } = ctx;
     let held = null;
-    if (await this.exists(this.heldPath(key))) {
-      try { held = JSON.parse(await IOUtils.readUTF8(this.heldPath(key))); } catch (e) {}
-      await IOUtils.remove(this.heldPath(key), { ignoreAbsent: true }).catch(() => {});
+    const path = this.heldPath(key, job.conv);
+    if (await this.exists(path)) {
+      try { held = JSON.parse(await IOUtils.readUTF8(path)); } catch (e) {}
+      await IOUtils.remove(path, { ignoreAbsent: true }).catch(() => {});
     }
     const keys = {};
     for (const kind of ["user_edit", "cleanup_other"]) {
@@ -639,7 +656,7 @@ Object.assign(ScholiumRunner, {
   // back, and what the user confirmed (empty otherwise, whatever Zotero's own environment says)
   runEnv(ctx) {
     const confirmed = Object.entries(ctx.job.confirmed || {}).filter(([, keys]) => keys.length).map(([kind, keys]) => `${kind}:${keys.join(",")}`);
-    return { SCHOLIUM_PLUGIN_RUN: "1", SCHOLIUM_HELD_BACK: this.heldPath(ctx.key), SCHOLIUM_CONFIRMED: confirmed.join(";") };
+    return { SCHOLIUM_PLUGIN_RUN: "1", SCHOLIUM_HELD_BACK: this.heldPath(ctx.key, ctx.job.conv), SCHOLIUM_CONFIRMED: confirmed.join(";") };
   },
 
   // Claude Code: `claude -p` with the prompt on stdin and its stream-json events on stdout
@@ -653,12 +670,12 @@ Object.assign(ScholiumRunner, {
     const proc = await this.subprocess().call(Object.assign({
       command: claude, arguments: await this.args(job), workdir: Zotero.DataDirectory.dir, stderr: "pipe",
     }, env));
-    if (this.job !== ctx.running || ctx.running.stopAsked) {   // the plugin stopped, or ■, while the process was being created
+    if (!this.alive(ctx.running) || ctx.running.stopAsked) {   // the plugin stopped, or ■, while the process was being created
       try { proc.kill(); } catch (e) {}
       ctx.current = { key, proc, cancelled: true };
       return;
     }
-    this.current = ctx.current = { key, proc, cancelled: false };
+    ctx.running.current = ctx.current = { key, proc, cancelled: false };
     this.refresh();
     const drainErr = (async () => {
       for (;;) { const s = await proc.stderr.readString(); if (!s) break; ctx.stderr = (ctx.stderr + s).slice(-2000); }
@@ -686,23 +703,23 @@ Object.assign(ScholiumRunner, {
           if (event.type === "stream_event") {
             this.reconnected(ctx);
             const e = event.event || {};
-            if (!event.parent_tool_use_id && e.type === "message_start") this.dropDraft();   // a message begun again starts afresh
+            if (!event.parent_tool_use_id && e.type === "message_start") this.dropDraft(ctx.running);   // a message begun again starts afresh
             if (!event.parent_tool_use_id && e.type === "content_block_delta" && e.delta && e.delta.type === "text_delta") {
-              this.growDraft(String(e.delta.text || ""), e.index);
+              this.growDraft(ctx.running, String(e.delta.text || ""), e.index);
             }
             continue;
           }
-          if (event.type === "assistant") this.dropDraft();   // the whole message replaces its draft
+          if (event.type === "assistant") this.dropDraft(ctx.running);   // the whole message replaces its draft
           if (event.type === "assistant" || event.type === "result") this.deliver(ctx);   // the agent has the prompt
           // a compaction answers with its status and boundary
           if (job.compact && event.type === "system" && (event.subtype === "compact_boundary" || (event.subtype === "status" && event.status === "compacting"))) {
             ctx.running.delivered = true;
           }
           if (event.type === "result") {
-            const unfinished = this.unfinished();
+            const unfinished = this.unfinished(ctx.running);
             if (unfinished) {
               kept.push(JSON.stringify(unfinished));
-              this.appendEntries(this.entries(unfinished));
+              this.appendEntries(ctx.running, this.entries(unfinished));
             }
           }
           kept.push(event.type === "user" ? this.slim(event, raw) : raw);
@@ -738,7 +755,7 @@ Object.assign(ScholiumRunner, {
           if (event.type === "assistant" && event.error === "authentication_failed") ctx.failure = this.text("notSignedIn", "claude");
           if (event.type === "system" && event.subtype === "api_retry") this.reconnecting(ctx, event.attempt, event.max_retries);
           else if (["assistant", "user", "result"].includes(event.type)) this.reconnected(ctx);
-          this.appendEntries(this.entries(event));
+          this.appendEntries(ctx.running, this.entries(event));
           this.advance(ctx, this.step(event));
         }
         if (kept.length) await this.appendLog(ctx, kept);
@@ -1135,14 +1152,14 @@ Object.assign(ScholiumRunner, {
           this.reconnecting(ctx, n && n[1], n && n[2]);
         } else if (/^item\//.test(String(msg.method || ""))) this.reconnected(ctx);
         // the message as it is written, until the whole message replaces it
-        if (msg.method === "item/agentMessage/delta") this.growDraft(String(p.delta || ""), p.itemId);
-        if (msg.method === "item/completed" && item.type === "agentMessage") this.dropDraft();
-        this.appendEntries(this.entries(msg));
+        if (msg.method === "item/agentMessage/delta") this.growDraft(ctx.running, String(p.delta || ""), p.itemId);
+        if (msg.method === "item/completed" && item.type === "agentMessage") this.dropDraft(ctx.running);
+        this.appendEntries(ctx.running, this.entries(msg));
         if (msg.method === "item/started" && !["userMessage", "agentMessage", "reasoning", "plan", "hookPrompt"].includes(item.type)) ctx.acted = true;
         this.advance(ctx, this.codexStep(msg));
       }
     }, this.runEnv(ctx));
-    if (this.job !== ctx.running || ctx.running.stopAsked) {   // the plugin stopped, or ■, while the server was being started
+    if (!this.alive(ctx.running) || ctx.running.stopAsked) {   // the plugin stopped, or ■, while the server was being started
       rpc.close();
       ctx.current = { key, proc: rpc.proc, cancelled: true };
       return;
@@ -1155,7 +1172,7 @@ Object.assign(ScholiumRunner, {
       else rpc.close();
       state.timer = setTimeout(() => rpc.close(), 5000);
     };
-    this.current = ctx.current = { key, proc: rpc.proc, cancelled: false, stop };
+    ctx.running.current = ctx.current = { key, proc: rpc.proc, cancelled: false, stop };
     this.refresh();
     try {
       await this.codexHello(rpc);
@@ -1195,7 +1212,7 @@ Object.assign(ScholiumRunner, {
       // the start of a run, as Claude Code's log has it: the model and the conversation
       const init = { type: "system", subtype: "init", agent: "codex", model: (opened && opened.model) || model, session_id: thread };
       await this.appendLog(ctx, [JSON.stringify(init)]);
-      this.appendEntries(this.entries(init));
+      this.appendEntries(ctx.running, this.entries(init));
       // a new thread of a conversation is given its turns as items of the thread when all the answers are Codex's own, or
       // as text before the message, each answer with its agent, when another agent gave one or Codex does not take items
       let asText = true;
@@ -1243,7 +1260,7 @@ Object.assign(ScholiumRunner, {
       rpc.close();
       await rpc.done.catch(() => {});
       // the servers named from an earlier session, or not at all: listed again now, off the run's path
-      if (state.listAfter && this.job === ctx.running) this.refreshCodexServers(codex).catch(e => this.log("MCP servers not listed: " + e));
+      if (state.listAfter && this.alive(ctx.running)) this.refreshCodexServers(codex).catch(e => this.log("MCP servers not listed: " + e));
     }
     const turn = state.done;
     if (!turn || ctx.current.cancelled) {
@@ -1261,17 +1278,17 @@ Object.assign(ScholiumRunner, {
                    result: failed ? String(error.message || turn.status) : state.text, session_id: state.thread,
                    duration_ms: turn.durationMs > 0 ? turn.durationMs : Date.now() - ctx.running.started, num_turns: state.calls,
                    usage: this.codexUsage(state.usage) };
-    const unfinished = this.unfinished();   // what the turn showed of a message it did not finish, before its end
+    const unfinished = this.unfinished(ctx.running);   // what the turn showed of a message it did not finish, before its end
     await this.appendLog(ctx, (unfinished ? [JSON.stringify(unfinished)] : []).concat(JSON.stringify(ctx.result)));
-    if (unfinished) this.appendEntries(this.entries(unfinished));
-    this.appendEntries(this.entries(ctx.result));
+    if (unfinished) this.appendEntries(ctx.running, this.entries(unfinished));
+    this.appendEntries(ctx.running, this.entries(ctx.result));
     // the sizes before and after the compaction, as the plugin's own line
     if (job.compact && !failed) {
       const after = ctx.running.context && ctx.running.context.used;
       const mark = { type: "scholium", subtype: "compacted", pre: state.before || 0, post: after && after !== state.before ? after : 0 };
       await this.appendLog(ctx, [JSON.stringify(mark)]);
       ctx.compacted = this.entries(mark)[0];
-      this.appendEntries([ctx.compacted]);
+      this.appendEntries(ctx.running, [ctx.compacted]);
     }
     ctx.exitCode = 0;
   },
@@ -1288,15 +1305,19 @@ Object.assign(ScholiumRunner, {
   },
 
   // stops the run under way; one still starting, before its agent's process, stops at its next step (run)
-  cancel() {
-    const current = this.current;
-    if (!current) {
-      if (this.job) this.job.stopAsked = true;
-      return !!this.job;
+  // ■ of a run; without one, of every run going on
+  cancel(run = null) {
+    const runs = run ? [run] : [...this.runs.values()];
+    let any = false;
+    for (const r of runs) {
+      if (!this.alive(r)) continue;
+      any = true;
+      const current = r.current;
+      if (!current) { r.stopAsked = true; continue; }
+      current.cancelled = true;
+      try { if (current.stop) current.stop(); else current.proc.kill(); } catch (e) {}
     }
-    current.cancelled = true;
-    try { if (current.stop) current.stop(); else current.proc.kill(); } catch (e) {}
-    return true;
+    return any;
   },
 
   // every PDF attachment of a selected regular item, and selected PDF attachments themselves
@@ -1323,7 +1344,7 @@ Object.assign(ScholiumRunner, {
   // other PDF is being annotated or waits, as a deletion leaves them
   clearedNotes(atts) {
     const keys = new Set(atts.map(a => this.keyOf(a)));
-    const busy = new Set(this.queue.filter(j => !this.isHeld(j)).map(j => j.att).concat(this.job ? [this.attOf(this.job.libraryID, this.job.key)] : [])
+    const busy = new Set(this.queue.filter(j => !this.isHeld(j)).map(j => j.att).concat([...this.runs.values()].map(r => this.attOf(r.libraryID, r.key)))
       .filter(a => a && !keys.has(this.keyOf(a)) && a.parentID).map(a => a.parentID));
     return this.ownNotesOf(atts.filter(a => !busy.has(a.parentID)));
   },
@@ -1412,7 +1433,7 @@ Object.assign(ScholiumRunner, {
   // queued is left alone, notes included; messages held after a stop do not count. The outcome is the annotation tab's.
   async removeAnnotations(items) {
     const win = Zotero.getMainWindow();
-    const busy = new Set(this.queue.filter(j => !this.isHeld(j)).map(j => this.keyOf(j.att)).concat(this.job ? [this.job.key] : []));
+    const busy = new Set(this.queue.filter(j => !this.isHeld(j)).map(j => this.keyOf(j.att)).concat([...this.runs.values()].map(r => r.key)));
     // a group's library the user cannot edit keeps its annotations
     const all = this.pdfAttachments(items), atts = all.filter(a => this.writable(a));
     if (all.length && !atts.length) { Services.prompt.alert(win, this.text("deleteTitle"), this.text("groupReadOnly")); return 0; }
@@ -1523,7 +1544,7 @@ Object.assign(ScholiumRunner, {
   // the papers still to do when an update replaces this copy, the running one first, as a preference that the new
   // copy reads when it starts (restoreQueue): the running paper continues its conversation, the others start; a pause
   // for a limit and a wait for a second try go on
-  carryOver(running) {
+  carryOver(runs) {
     const plain = j => ({ key: j.att.key, libraryID: j.att.libraryID, agent: j.agent, extra: j.extra || "", say: j.say || "",
                           resume: j.resume || null, asked: !!j.asked, question: !!j.question, annotate: !!j.annotate, own: j.own || 0,
                           interrupted: !!j.interrupted, updated: !!j.updated, fresh: !!j.fresh, conv: j.conv || null, asking: !!j.asking,
@@ -1532,7 +1553,8 @@ Object.assign(ScholiumRunner, {
                           turnAt: Number.isInteger(j.turnAt) ? j.turnAt : null, leftAt: this.leftOf(j.leftAt),
                           papers: Array.isArray(j.papers) ? j.papers : null, annotationQueue: j.annotationQueue || null });
     const jobs = [];
-    if (running && running.source) {
+    for (const running of [].concat(runs || [])) {
+      if (!running || !running.source) continue;
       const j = running.source;
       // once the agent has answered to the prompt the conversation holds it, and the paper continues there (a queued
       // message that was sent, too: no row); before that the paper is handed over as it was queued, the user's words with
@@ -1623,11 +1645,12 @@ Object.assign(ScholiumRunner, {
   stop(update = false) {
     this.stopped = true;
     if (Zotero.ScholiumLogWriter === this) delete Zotero.ScholiumLogWriter;
-    const running = this.job;
-    if (running && running.log) {
+    const running = [...this.runs.values()].filter(r => !r.gone);
+    for (const r of running) {
+      if (!r.log) continue;
       const mark = { type: "scholium", subtype: "end", outcome: "interrupted", text: this.text("interruptedLine"),
-                     duration_ms: Date.now() - running.started };
-      this.appendLog({ logPath: running.log }, [JSON.stringify(mark)]).catch(() => {});
+                     duration_ms: Date.now() - r.started };
+      this.appendLog({ logPath: r.log }, [JSON.stringify(mark)]).catch(() => {});
     }
     clearTimeout(this.logRetryTimer);
     this.logRetryTimer = null;
@@ -1655,9 +1678,10 @@ Object.assign(ScholiumRunner, {
     this.qseq = 0;
     this.heldBack.clear();   // a confirmation is the next message's to this copy
     this.cancel();
-    try { if (this.current) this.current.proc.kill(); } catch (e) {}   // without waiting for Codex to end its turn
-    clearTimeout(this.draftTimer);
-    this.draft = this.draftTimer = null;
+    for (const r of running) {
+      try { if (r.current) r.current.proc.kill(); } catch (e) {}   // without waiting for Codex to end its turn
+      this.endRun(r);
+    }
     this.katexLib = undefined;
     this.i18n = {};
     this.mathCache.clear();
@@ -1684,6 +1708,7 @@ Object.assign(ScholiumRunner, {
     this.settingsApi = null;
     for (const body of [...this.panes.keys()]) this.dropPane(body);
     this.notes.clear();
-    this.job = null;
+    this.runs.clear();
+    this.active.clear();
   },
 });

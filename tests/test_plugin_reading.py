@@ -446,15 +446,15 @@ SCENARIOS = r"""
     facts.citeLive = [pane.live, all(pane.list).filter(n => n.className === 'scholium-cite').map(n => n.textContent)];
     // a live view shown anew while the sentences changed: drawn at once, then again with the new sentences
     h.log.writes['/data/tmp/scholium/ATT1/sentences.json'] = JSON.stringify({ sentences: [{ id: 12, page: 7, para: 3, text: 'S2 is longer.' }] });
-    h.runner.showLive(pane, 'ATT1', 'chat'); await settle(30);
+    h.runner.showLive(pane, h.runner.job); await settle(30);
     facts.citeLive.push(all(pane.list).filter(n => n.className === 'scholium-cite').map(n => n.textContent));
     // the draft being written stays in the last run through that redraw, and keeps growing
-    h.runner.growDraft('草稿', 0); h.runner.paintDraft();
+    h.runner.growDraft(h.runner.job, '草稿', 0); h.runner.paintDraft(h.runner.job);
     h.log.writes['/data/tmp/scholium/ATT1/sentences.json'] = JSON.stringify({ sentences: [{ id: 12, page: 8, para: 3, text: 'S3 is longer still.' }] });
-    h.runner.showLive(pane, 'ATT1', 'chat'); await settle(30);
+    h.runner.showLive(pane, h.runner.job); await settle(30);
     const text = n => (n.children || []).map(text).join('') + (n.children && n.children.length ? '' : n.textContent || '');
     const atOnce = text(pane.list.children.at(-1)).includes('草稿');   // before anything paints it again
-    h.runner.growDraft('续写', 0); h.runner.paintDraft();
+    h.runner.growDraft(h.runner.job, '续写', 0); h.runner.paintDraft(h.runner.job);
     facts.citeDraft = [all(pane.list).filter(n => n.className === 'scholium-cite').map(n => n.textContent), atOnce, text(pane.list.children.at(-1)).includes('草稿续写')];
     h.log.release(); await settle(300);
   }

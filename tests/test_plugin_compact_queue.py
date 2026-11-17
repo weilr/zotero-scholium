@@ -152,10 +152,9 @@ SCENARIOS = r"""
     g.runner.refresh();
     const between = [gp.liveTime.node.textContent, gp.state.title];
     // a question that reconnects has the reconnecting on its line, and the time in the tooltip
-    const rr = g.runner, saved = rr.job;
-    rr.job = { asking: true, retry: { attempt: 2, max: 5 }, step: 'reading', started: Date.now() - 12000, source: {} };
-    const reconnect = { state: rr.runningState(), title: rr.runningTitle() };
-    rr.job = saved;
+    const rr = g.runner;
+    const reconnecting = { asking: true, retry: { attempt: 2, max: 5 }, step: 'reading', started: Date.now() - 12000, source: {} };
+    const reconnect = { state: rr.runningState(reconnecting), title: rr.runningTitle(reconnecting) };
     gp.tabAnnotate.click(); await pause(40);
     const annot = gp.state.textContent;
     g.log.release(); await settle(300);
@@ -1304,8 +1303,8 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1); await settle(40);
     const pane = p.pane();
     const append = h.runner.appendEntries;
-    h.runner.appendEntries = function (entries) {
-      append.call(this, entries);
+    h.runner.appendEntries = function (run, entries) {
+      append.call(this, run, entries);
       if (entries.some(e => e.kind === 'prompt')) { this.appendEntries = append; this.stopFromPane(pane); }
     };
     pane.input.type('问题一'); pane.send.click(); await settle(300);

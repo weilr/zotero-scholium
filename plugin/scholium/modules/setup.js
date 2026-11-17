@@ -34,26 +34,28 @@ Object.assign(ScholiumRunner, {
   // after the first one's result
   canSteer(agent) { return agent === "codex"; },
 
-  // whether the words of a tab can go into the run under way: the tab's paper runs a turn of the tab's kind (no
-  // compaction) that takes them; given a job, it is of that paper and kind
+  // whether the words of a tab can go into the run under way: the run of the conversation the tab shows (or of a queued
+  // job's conversation) is a turn (no compaction) that takes them
   steerable(pane, job = null) {
-    const run = this.job;
-    if (!run || !pane.keys.includes(run.key) || (run.source.kind || "chat") !== pane.tab || run.source.compact) return false;
-    if (job && (this.keyOf(job.att) !== run.key || (job.kind || "chat") !== (run.source.kind || "chat"))) return false;
+    const key = job ? this.keyOf(job.att) : null, kind = job ? job.kind || "chat" : null;
+    const run = !job ? this.paneRun(pane)
+      : job.conv ? this.runOfConv(key, kind, job.conv) : this.paperRuns(key).find(r => r.kind === kind) || null;
+    if (!run || !pane.keys.includes(run.key) || run.kind !== pane.tab || run.source.compact) return false;
     // a turn being stopped takes no more words
-    return this.canSteer(run.agent) && !!this.current && !this.current.cancelled && typeof this.current.steer === "function";
+    const current = run.current;
+    return this.canSteer(run.agent) && !!current && !current.cancelled && typeof current.steer === "function";
   },
 
   // words into the answer under way, as Codex's Steer: given to the agent without stopping it, and logged as the user's
   async steerFromPane(pane, say, quote = null) {
     if (!this.steerable(pane)) return false;
-    const running = this.job;
-    try { await this.current.steer(this.said({ say, quote })); }
+    const running = this.paneRun(pane);
+    try { await running.current.steer(this.said({ say, quote })); }
     catch (e) { this.log("steer refused: " + e); return false; }
     const mark = Object.assign({ type: "scholium", subtype: "steer", text: say }, quote ? { quote } : {});
     try { if (running.log) await IOUtils.writeUTF8(running.log, JSON.stringify(mark) + "\n", { mode: "append" }); }
     catch (e) { this.log("steer not logged: " + e); }
-    if (this.job === running) this.appendEntries(this.entries(mark));
+    if (this.alive(running)) this.appendEntries(running, this.entries(mark));
     return true;
   },
 

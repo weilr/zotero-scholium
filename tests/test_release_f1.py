@@ -134,13 +134,13 @@ const resumeOf = c => (c.opts.arguments.includes('--resume') ? c.opts.arguments[
     await h.runner.send(h.att1, 'question on A'); await settle(600);
     const limited = { paused: Object.keys(h.runner.paused || {}), stateA: pa.view().state, resumeA: !pa.view().resumeHidden };
     h.runner.choose('agent', 'codex');
-    h.runner.draining = true;   // the queue is looked at before it goes on
+    h.runner.pumpHeld = true;   // the queue is looked at before it goes on
     await h.runner.send(h.att1, 'question on A, to Codex');
     await h.runner.send(h.att2, 'question on B, to Codex');
     const queued = { queue: h.runner.queue.map(j => [j.att.key, j.agent, !!j.qid]), stateA: pa.view().state, stateB: pb.view().state,
                      resumeA: !pa.view().resumeHidden, resumeB: !pb.view().resumeHidden };
-    h.runner.draining = false;
-    h.runner.drain(); await settle(800);
+    h.runner.pumpHeld = false;
+    h.runner.pump(); await settle(800);
     const others = { codexTurns: h.log.codexTurns, claudeCalls: h.log.calls.length, queue: h.runner.queue.map(j => [j.att.key, j.agent, !!j.qid]),
                      stateA: pa.view().state, stateB: pb.view().state, resumeA: !pa.view().resumeHidden, resumeB: !pb.view().resumeHidden };
     pa.pane().resume.click(); await settle(800);

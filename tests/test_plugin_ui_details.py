@@ -45,8 +45,7 @@ const card = pane => {
   facts.tooltip = {};
   for (const locale of ['zh-CN', 'en-US', 'de', 'ja-JP']) {
     const h = harness({ locale });
-    h.runner.job = { started: Date.now() - 65000, step: 'reading', source: {}, asking: false };
-    facts.tooltip[locale] = h.runner.runningTitle();
+    facts.tooltip[locale] = h.runner.runningTitle({ started: Date.now() - 65000, step: 'reading', source: {}, asking: false });
   }
   // U6: a stopped annotation's card; U7: the eye button's English
   for (const locale of ['en-US', 'de', 'zh-CN']) {

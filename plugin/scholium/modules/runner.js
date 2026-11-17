@@ -64,9 +64,25 @@ var ScholiumRunner = {
   SKILL_FILES: ["agents/openai.yaml", "examples/config.template.json", "examples/reading_note.template.html", "references/backends.md",
                 "references/batch.md", "references/configuration.md", "references/profile.md", "references/style-zh.md",
                 "references/zotero-annotations.md", "scripts/scholium.py", "SKILL.md"],
-  current: null,            // { key, proc, cancelled }
-  draining: false,
-  job: null,                // { title, key, libraryID, started, step } of the running paper
+  // the runs going on, by id: each { id, title, key, libraryID, started, elapsed, agent, step, source (the job), session,
+  // log, asking, context, kind, conv (null until a new conversation has one), entries (its transcript's display entries),
+  // path (its log), current ({ key, proc, cancelled, stop, steer } of its process), draft ({ text, block }: the message the
+  // agent is writing), draftTimer, stopAsked, delivered, logged, preRun, retry, annotation, gone }
+  runs: new Map(),
+  runSeq: 0,
+  extracting: new Map(),    // attachment key -> the pre-run's extract of the paper under way (preExtract)
+  lastEntries: new Map(),   // log path -> the display entries of its latest finished run (they may hold what the log lacks:
+                            // a failure before the log had it); the 20 latest
+  // the run started last that goes on, and its process (for tests and diagnostics: the modules look a run up by its
+  // conversation, runOfConv, or hold their own)
+  get job() { let last = null; for (const r of this.runs.values()) if (!r.gone) last = r; return last; },
+  get current() { const r = this.job; return r ? r.current : null; },
+  get transcript() { const r = this.job || this.lastRun; return r ? r.entries : []; },
+  lastRun: null,            // the run that ended last (for tests and diagnostics)
+  get draft() { const r = this.job; return r ? r.draft : null; },
+  active: new Set(),        // the jobs going on: from their start (a queued message placed first) to the end of their outcome
+  pumpHeld: false,          // while true no queued job starts (tests look at the queue as it is)
+  retryWait: false,         // whether the queue is looked at again for a job waiting for its second try
   last: null,               // { ok, title, key, libraryID, summary, log, at } of the latest finished paper
   notes: new Map(),         // <attachment key>/<kind> -> { text, error, at, title, conv }: the latest outcome of each kind
   indexes: new Map(),       // attachment key -> { chat, current, titles: { id: title }, annotation }: its conversations
@@ -98,12 +114,8 @@ var ScholiumRunner = {
   CONTEXT_WARN: 0.8,        // the share of the context window from which its gauge warns
   TICK_MS: 1000,            // the running paper's state line, with its time so far, is set again this often
   NOTICE_MS: 6000,
-  transcript: [],           // display entries of the running or latest paper
-  transcriptKey: null,      // attachment whose run the transcript belongs to
-  transcriptPath: null,     // the log of the conversation it belongs to; null until a new conversation has one
-  draft: null,              // { text, block }: the message the agent is writing, until the whole message arrives
-  draftTimer: null,
   DRAFT_MS: 80,             // the draft is set again at most this often
+  MAX_RUNS_DEFAULT: 3,      // runs going on at once, until the settings choose another number (1-6)
   MAX_ENTRIES: 3000,
   paneID: null,
   citations: new Map(),     // attachment key -> { at, size, map } the paper's numbered sentences, as sentences.json has them;

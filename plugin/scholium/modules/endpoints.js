@@ -11,6 +11,19 @@ var ScholiumEndpoints = {
 
   log(msg) { Zotero.debug("[scholium] " + msg); },
 
+  // writes to one attachment one after another: runs of a paper at once do not interleave theirs; a refused write does not
+  // hold up the next
+  applyQueues: new Map(),
+  applyInTurn(data) {
+    const key = String((data && data.attachmentKey) || "");
+    const before = this.applyQueues.get(key) || Promise.resolve();
+    const mine = before.then(() => this.apply(data));
+    const tail = mine.catch(() => {});
+    this.applyQueues.set(key, tail);
+    tail.then(() => { if (this.applyQueues.get(key) === tail) this.applyQueues.delete(key); });
+    return mine;
+  },
+
   // the token of scholium.token; without that file, the one of scholium-bridge.token (Scholium Bridge 0.1.9's), else a
   // new one. Both files hold it: the skill of Scholium Bridge 0.1.9 reads the second
   async loadToken() {
@@ -292,7 +305,7 @@ var ScholiumEndpoints = {
       supportedDataTypes = ["application/json"];
       init = async (options) => {
         if (!self.authorized(options)) return self.reply(401, { ok: false, error: "unauthorized" });
-        try { return self.reply(200, await self.apply(self.parse(options))); }
+        try { return self.reply(200, await self.applyInTurn(self.parse(options))); }
         catch (e) { return self.reply(500, { ok: false, error: String(e && e.message || e) }); }
       };
     }

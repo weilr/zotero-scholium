@@ -149,7 +149,7 @@ Object.assign(ScholiumRunner, {
     const view = this.viewOf(pane, pane.tab), key = view.shownKey, conv = view.shownConv;
     const held = key && conv && this.heldBack.get(`${key}/${conv}`);
     const claimed = held && held.confirmation;
-    if (claimed && !claimed.sending && !(this.draining && !this.job) && !(this.job && this.job.source.confirmation === claimed)
+    if (claimed && !claimed.sending && ![...this.active].some(j => j.confirmation === claimed)
         && !this.queue.some(job => job.confirmation === claimed)) delete held.confirmation;
     if (!held || held.confirmation || this.busy(key)) { pane.heldAction = null; this.show(row, false); return; }
     // Keep the controls while this report stays visible; a claimed or hidden action gets a new token next time.
@@ -270,7 +270,8 @@ Object.assign(ScholiumRunner, {
       line.append(t, this.iconButton(doc, "play", this.text("queueGoOn"), () => this.releaseQueue(jobs[0])));
       nodes.push(line);
     }
-    const sending = this.job && mine(this.job.source) && !this.job.delivered ? this.job.source : null;
+    const sendingRun = [...this.runs.values()].find(r => !r.gone && mine(r.source) && !r.delivered);
+    const sending = sendingRun ? sendingRun.source : null;
     if (sending) { nodes.push(this.queuedRow(pane, sending, { sending: true })); qids.push("sending " + sending.qid); }
     for (const j of jobs) { nodes.push(this.queuedRow(pane, j, { held })); qids.push(j.qid); }
     for (const [qid, r] of this.removedQueued) {
@@ -888,8 +889,19 @@ Object.assign(ScholiumRunner, {
   // to (none after New chat); and on its annotation tab, the annotation session
   async showConversation(pane) {
     const seq = pane.showing = (pane.showing || 0) + 1;
-    const liveHere = () => this.job && pane.keys.includes(this.job.key) && (this.job.source.kind || "chat") === "chat";
-    if (liveHere()) { this.showLive(pane, this.job.key, "chat"); await this.showAnnotation(pane); return; }
+    // a chat run of the paper: the one of the conversation its messages go to, else one whose new conversation has no id yet
+    const current = {};
+    for (const k of pane.keys) current[k] = await this.currentConv(k);
+    const liveRun = () => {
+      for (const k of pane.keys) {
+        const r = this.paperRuns(k).filter(x => x.kind === "chat");
+        const run = r.find(x => (x.conv || null) === (current[k] || null)) || r.find(x => !x.conv) || r[0];
+        if (run) return run;
+      }
+      return null;
+    };
+    if (this.panes.get(pane.body) !== pane || pane.showing !== seq) return;
+    if (liveRun()) { this.showLive(pane, liveRun()); await this.showAnnotation(pane); return; }
     const agent = this.agent();
     const keys = pane.preferKey && pane.keys.includes(pane.preferKey) ? [pane.preferKey].concat(pane.keys.filter(k => k !== pane.preferKey)) : pane.keys;
     let shown = null;
@@ -900,13 +912,14 @@ Object.assign(ScholiumRunner, {
     const log = shown ? await this.readLog(shown.key, shown.id) : null;
     if (shown) await this.loadCitations(shown.key);
     if (this.panes.get(pane.body) !== pane || pane.showing !== seq) return;   // rendered or shown anew meanwhile
-    if (liveHere()) { this.showLive(pane, this.job.key, "chat"); await this.showAnnotation(pane); return; }   // a run started meanwhile
+    if (liveRun()) { this.showLive(pane, liveRun()); await this.showAnnotation(pane); return; }   // a run started meanwhile
     const before = this.unsentKey(pane);
     const path = shown ? this.convPath(shown.key, shown.id) : null;
     // the latest run's own transcript, which has what its log may lack (a failure before the run had one); a section that
     // showed the run as it went has it already
-    const memory = !!path && path === this.transcriptPath && this.transcriptKind === "chat";
-    const kept = memory && pane.live && pane.shownPath === path && this.transcript.length > 0;
+    const finished = path ? this.lastEntries.get(path) : null;
+    const memory = !!finished;
+    const kept = memory && pane.live && pane.shownPath === path && finished.length > 0;
     if (pane.shownPath !== path) pane.foldOpen = new Map();   // the steps a reader opened are of the conversation shown
     // the other papers: those Ask Scholium (N papers) chose stay for the conversation shown first; another conversation
     // has those its log records, a new one none
@@ -917,7 +930,7 @@ Object.assign(ScholiumRunner, {
                           context: log ? log.agents[agent].context : null, draft: null });
     pane.past = log && log.result ? { text: this.text("lastRun") + this.outcome(log.result), error: !this.succeeded(log.result),
                                       title: this.tokenDetail(log.result) } : null;
-    const entries = memory ? this.transcript : log ? log.entries : [];
+    const entries = memory ? finished : log ? log.entries : [];
     // the run shown as it went is drawn again as finished; anything else anew, at the latest, so that what follows is followed
     if (kept) this.refreshRun(pane, pane.runCount - 1);
     else if (entries.length) this.renderTranscript(pane, entries, false);
@@ -942,7 +955,8 @@ Object.assign(ScholiumRunner, {
     if (id) await this.loadCitations(key);
     if (view.showing !== seq) return;   // shown anew meanwhile
     // the paper's annotation runs, or started meanwhile
-    if (this.job && key === this.job.key && this.job.source.kind === "annotate") { this.showLive(pane, key, "annotate"); return; }
+    const annotating = key ? this.paperRuns(key).find(r => r.kind === "annotate") : null;
+    if (annotating) { this.showLive(pane, annotating); return; }
     const before = this.unsentKey(pane);
     const path = log ? log.path : null;
     if (view.shownPath !== path) view.foldOpen = new Map();   // the steps a reader opened are of the session shown
@@ -1144,28 +1158,25 @@ Object.assign(ScholiumRunner, {
     this.saveSavedPrompts(list);
   },
 
-  // the running paper's transcript, as it goes on
-  showLive(pane, key, kind = this.transcriptKind) {
-    const view = this.viewOf(pane, kind);
+  // a run's transcript as it goes on, on the tab of its kind
+  showLive(pane, run) {
+    const view = this.viewOf(pane, run.kind);
     const before = this.unsentKey(pane);
-    const job = this.job && this.job.key === key ? this.job.source : null;
-    const ours = this.transcriptKey === key;   // a run that has only just started shows its transcript a moment later
-    const conv = (job && job.conv) || null;
+    const key = run.key, conv = run.conv || null;
     if (view.shownKey !== key || view.shownConv !== conv) view.foldOpen = new Map();   // the steps opened are of the conversation shown
-    Object.assign(view, { shownKey: key, shownConv: conv, shownAgent: (job && job.agent) || this.agent(),
-                          shownPath: ours ? this.transcriptPath : null, live: true,
+    Object.assign(view, { shownKey: key, shownConv: conv, shownAgent: run.agent || this.agent(), shownPath: run.path, live: true,
                           history: false, past: null, draft: null });
     try {
-      this.renderTranscript(view, ours ? this.transcript : [], true);
-      if (ours && this.draft) this.paintDraft();
+      this.renderTranscript(view, run.entries, true);
+      if (run.draft) this.paintDraft(run);
     } catch (e) {}
     // the sentences the answers cite, read now: drawn again with their chips
     const had = this.citations.get(key);
     this.loadCitations(key).then(() => {
-      if (this.citations.get(key) === had || !view.live || view.shownKey !== key) return;
+      if (this.citations.get(key) === had || !view.live || this.runOfView(view) !== run) return;
       view.draft = null;   // the redraw detaches the draft's node
-      this.renderTranscript(view, this.transcriptKey === key ? this.transcript : [], true);
-      if (this.draft) this.paintDraft();
+      this.renderTranscript(view, run.entries, true);
+      if (run.draft) this.paintDraft(run);
     }).catch(e => this.log("citations failed: " + e));
     this.swapUnsent(pane, before);
     if (view !== pane) this.paintPane(pane);
@@ -1173,10 +1184,11 @@ Object.assign(ScholiumRunner, {
 
   // the sections that show a run's transcript, once the new conversation it started has its log; the words typed
   // there meanwhile go on with it
-  livePanes(key, id) {
+  livePanes(run) {
+    const key = run.key, id = run.conv;
     for (const pane of this.panes.values()) {
-      const view = this.viewOf(pane, this.transcriptKind);
-      if (!view.live || view.shownKey !== key) continue;
+      const view = this.viewOf(pane, run.kind);
+      if (!view.live || view.shownKey !== key || (view.shownConv && view.shownConv !== id)) continue;
       const before = this.unsentKey(pane, view);
       view.shownConv = id;
       view.shownPath = this.convPath(key, id);
@@ -1724,9 +1736,9 @@ Object.assign(ScholiumRunner, {
       const more = doc.createElement("span");
       more.className = "scholium-fold-more";
       more.textContent = " " + this.text("details") + (open ? " ⌄" : " ›");
-      head.append(this.workingNode(view, this.liveKey(run)), more);
+      head.append(this.workingNode(view, this.liveKey(run, view)), more);
     } else if (live) {
-      head.append(this.workingNode(view, this.liveKey(run)));
+      head.append(this.workingNode(view, this.liveKey(run, view)));
       if (open) head.append(doc.createTextNode(" ⌄"));
     } else {
       head.textContent = this.workedText(run) + (open ? " ⌄" : " ›");
@@ -1760,14 +1772,15 @@ Object.assign(ScholiumRunner, {
     span.className = "scholium-working";
     // every redraw of the line starts the sweep at the same phase
     span.style.animationDelay = -(Date.now() % 2000) + "ms";
-    span.textContent = this.text(key, this.durationWords(this.elapsed()));
+    span.textContent = this.text(key, this.durationWords(this.elapsed(this.runOfView(view))));
     view.liveTime = { node: span, key };
     return span;
   },
 
   // the words of a run under way: the PDF read before the agent starts (preRun), a compaction, or the agent's work
-  liveKey(run) {
-    return this.job && this.job.preRun ? "preRun" : this.compactingNow(run) ? "compactingFor" : "workingFor";
+  liveKey(run, view) {
+    const going = this.runOfView(view);
+    return going && going.preRun ? "preRun" : this.compactingNow(run) ? "compactingFor" : "workingFor";
   },
 
   // whether the agent compacts its context now, in a run under way: its last compaction line is the start of one
@@ -1837,10 +1850,8 @@ Object.assign(ScholiumRunner, {
   // then the first run is the one that grows); it changes when the transcript's first run goes
   headOf(runs) { return runs.length > 1 ? runs[0].last : null; },
 
-  // whether a view shows the run going on: of the running paper, the view of the run's kind
-  showsRun(view) {
-    return !!this.job && this.job.key === view.shownKey && this.viewOf(view.pane, this.transcriptKind) === view;
-  },
+  // whether a view shows a run going on: the run of the conversation it shows
+  showsRun(view) { return !!this.runOfView(view); },
 
   // one run drawn again, when its steps are opened or closed or it ended; live while it is the view's running run
   refreshRun(view, index) {
@@ -1854,29 +1865,35 @@ Object.assign(ScholiumRunner, {
     });
   },
 
-  // the views of the latest run draw its last run again once the agent no longer works on it (a pause, the wait for a
-  // second try, an end before the run had its log), or when an annotation reaches a step
-  settleRun() {
+  // the views of a paper's tab (a run, or { key, kind } of a job) draw their last run again once the agent no longer
+  // works on it (a pause, the wait for a second try, an end before the run had its log), or when an annotation reaches a
+  // step
+  settleRun(of) {
+    if (!of) return;
     for (const pane of this.panes.values()) {
-      const view = this.viewOf(pane, this.transcriptKind);
-      if (view.shownKey === this.transcriptKey) this.refreshRun(view, view.runCount - 1);
+      const view = this.viewOf(pane, of.kind || "chat");
+      if (view.shownKey === of.key) this.refreshRun(view, view.runCount - 1);
     }
   },
 
-  // entries of the running paper's transcript: the views that show it draw its last run again, or all of it once
-  // another run begins
-  appendEntries(entries) {
-    const added = this.addEntries(this.transcript, entries);
+  // the views that show a run's conversation, live: whether this view does
+  showingRun(view, run) {
+    return !!view.live && view.shownKey === run.key && (view.kind || "chat") === run.kind && (view.shownConv || null) === (run.conv || null);
+  },
+
+  // entries of a run's transcript: the views that show it draw its last run again, or all of it once another run begins
+  appendEntries(run, entries) {
+    const added = this.addEntries(run.entries, entries);
     if (!added.length) return;
-    if (this.transcript.length > this.MAX_ENTRIES) this.transcript.splice(0, this.transcript.length - this.MAX_ENTRIES);
+    if (run.entries.length > this.MAX_ENTRIES) run.entries.splice(0, run.entries.length - this.MAX_ENTRIES);
     for (const pane of this.panes.values()) {
-      const view = this.viewOf(pane, this.transcriptKind);
-      if (!view.live || view.shownKey !== this.transcriptKey) continue;
+      const view = this.viewOf(pane, run.kind);
+      if (!this.showingRun(view, run)) continue;
       try {
         const list = view.list;
         const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
-        const runs = this.runsOf(this.transcript), live = this.showsRun(view);
-        if (runs.length !== view.runCount || this.headOf(runs) !== view.head) this.renderTranscript(view, this.transcript, live);
+        const runs = this.runsOf(run.entries), live = this.alive(run);
+        if (runs.length !== view.runCount || this.headOf(runs) !== view.head) this.renderTranscript(view, run.entries, live);
         else {
           const old = list.children[runs.length - 1];
           this.redraw(view, old, () => old.replaceWith(this.renderRun(view, runs[runs.length - 1], runs.length - 1, live)));
@@ -1887,43 +1904,40 @@ Object.assign(ScholiumRunner, {
     }
   },
 
-  // a piece of the message the agent is writing: block names the message part it belongs to; the
-  // panes show it a moment later, together with the pieces that follow
-  growDraft(piece, block) {
+  // a piece of the message a run's agent is writing: block names the message part it belongs to; the panes show it a
+  // moment later, together with the pieces that follow
+  growDraft(run, piece, block) {
     if (!piece) return;
-    if (!this.draft) this.draft = { text: "", block };
-    else if (this.draft.block !== block) this.draft.text += "\n\n";
-    this.draft.text += piece;
-    this.draft.block = block;
-    if (!this.draftTimer) this.draftTimer = setTimeout(() => { this.draftTimer = null; this.paintDraft(); }, this.DRAFT_MS);
+    if (!run.draft) run.draft = { text: "", block };
+    else if (run.draft.block !== block) run.draft.text += "\n\n";
+    run.draft.text += piece;
+    run.draft.block = block;
+    if (!run.draftTimer) run.draftTimer = setTimeout(() => { run.draftTimer = null; this.paintDraft(run); }, this.DRAFT_MS);
   },
 
-  // what a run showed of a message it ended before finishing (cancelled, failed), as the plugin's line for
-  // the log; null when no message was being written. The draft goes.
-  unfinished() {
-    const text = this.draft ? this.draft.text.trim() : "";
-    this.dropDraft();
+  // what a run showed of a message it ended before finishing (cancelled, failed), as the plugin's line for the log; null
+  // when no message was being written. The draft goes.
+  unfinished(run) {
+    const text = run.draft ? run.draft.text.trim() : "";
+    this.dropDraft(run);
     return text ? { type: "scholium", subtype: "unfinished", text } : null;
   },
 
-  dropDraft() {
-    if (!this.draft) return;
-    this.draft = null;
-    clearTimeout(this.draftTimer);
-    this.draftTimer = null;
-    this.paintDraft();
+  dropDraft(run) {
+    if (!run.draft) return;
+    run.draft = null;
+    clearTimeout(run.draftTimer);
+    run.draftTimer = null;
+    this.paintDraft(run);
   },
 
-  // the draft at the end of each pane that shows the running paper's transcript, set as Markdown
-  paintDraft() {
+  // a run's draft at the end of each view that shows its conversation, set as Markdown
+  paintDraft(run) {
     for (const pane of this.panes.values()) {
       try {
-        const view = this.viewOf(pane, this.transcriptKind);
-        // the other view's draft goes with the run it belonged to
-        for (const v of this.paneViews(pane)) {
-          if (v !== view && v.draft) { v.draft.node.remove(); v.draft = null; }
-        }
-        if (!this.draft || !view.live || view.shownKey !== this.transcriptKey) {
+        const view = this.viewOf(pane, run.kind);
+        if (!this.showingRun(view, run)) continue;
+        if (!run.draft) {
           if (view.draft) view.draft.node.remove();
           view.draft = null;
           continue;
@@ -1939,15 +1953,15 @@ Object.assign(ScholiumRunner, {
         const win = pane.doc.defaultView;
         const sel = win && typeof win.getSelection === "function" ? win.getSelection() : null;
         if (sel && !sel.isCollapsed && sel.containsNode(view.draft.node, true)) continue;
-        view.draft.content.replaceChildren(...this.renderMarkdown(pane.doc, this.draft.text));
+        view.draft.content.replaceChildren(...this.renderMarkdown(pane.doc, run.draft.text));
         if (atBottom) list.scrollTop = list.scrollHeight;
       } catch (e) {}
     }
   },
 
-  // a run of this paper replaces whatever the panes of the paper show with its transcript
-  startPanes(key, kind = this.transcriptKind) {
-    for (const pane of this.panes.values()) if (pane.keys.includes(key)) this.showLive(pane, key, kind);
+  // a run replaces whatever the panes of its paper show on its tab with its transcript
+  startPanes(run) {
+    for (const pane of this.panes.values()) if (pane.keys.includes(run.key)) this.showLive(pane, run);
   },
 
   succeeded(result) {
@@ -1994,8 +2008,10 @@ Object.assign(ScholiumRunner, {
   paintSection(pane) {
     try {
       const tab = pane.tab;
-      const running = this.job && pane.keys.includes(this.job.key) && (this.job.source.kind || "chat") === tab;
       const view = this.viewOf(pane, tab);
+      // the run of the tab: of the conversation shown, else one of the paper's of this kind
+      const run = this.runOfView(view) || pane.keys.map(k => this.paperRuns(k).find(r => r.kind === tab)).find(Boolean) || null;
+      const running = !!run;
       const pending = view.shownPath && this.pendingLogs.get(view.shownPath);
       const queuedAt = this.queue.findIndex(j => pane.keys.includes(this.keyOf(j.att)) && (j.kind || "chat") === tab && !this.isHeld(j));
       // a chat's outcome is its conversation's; the annotation tab's line has a deletion's only (an annotation's is its card)
@@ -2012,7 +2028,7 @@ Object.assign(ScholiumRunner, {
       const lines = [];
       let kind = "info", title = "";
       if (running) {
-        lines.push(this.runningState());
+        lines.push(this.runningState(run));
         kind = "running";
       } else if (pending && (pending.unlogged.length || pending.restore)) {
         lines.push(this.text(pending.restore ? "undoNotRestored" : "logNotSaved"));
@@ -2023,7 +2039,7 @@ Object.assign(ScholiumRunner, {
       } else if (queuedAt >= 0) {
         // ahead of it, what runs first: not a held message, nor a run that waits for another limit
         const ahead = this.queue.slice(0, queuedAt).filter(j => !this.isHeld(j) && [null, hold].includes(this.heldByLimit(j))).length;
-        if (!(paused && ahead === 0)) lines.push(this.text("queuedThis", ahead + (this.job ? 1 : 0)));
+        if (!(paused && ahead === 0)) lines.push(this.text("queuedThis", ahead + this.runs.size));
         if (paused) { lines.push(paused); kind = "paused"; }
       } else if (readOnly) {
         lines.push(this.text("groupReadOnly"));
@@ -2035,7 +2051,7 @@ Object.assign(ScholiumRunner, {
       pane.state.className = `scholium-state ${kind}`;
       // one line, cut where the pane is narrow: the whole of it in the tooltip, with the tokens' detail of a finished run
       pane.state.textContent = lines.join(" · ");
-      pane.state.title = [running ? this.runningTitle() : lines.join(" · "), title].filter(Boolean).join("\n");
+      pane.state.title = [running ? this.runningTitle(run) : lines.join(" · "), title].filter(Boolean).join("\n");
       this.show(pane.state, lines.length > 0);
       const busy = !!running || queuedAt >= 0;
       // any run of the paper, of either tab
@@ -2064,7 +2080,7 @@ Object.assign(ScholiumRunner, {
       pane.newChat.disabled = busy || !pane.shownConv;
       pane.historyButton.disabled = busy;
       if (busy) this.closePopover(pane, "history");
-      const asking = running ? !!this.job.asking : queuedAt >= 0 && this.asking(this.queue[queuedAt]);
+      const asking = running ? !!run.asking : queuedAt >= 0 && this.asking(this.queue[queuedAt]);
       // a question while the conversation is a question's; a follow-up once it has turns of another kind (an earlier
       // version's annotation), and while such a run goes or waits
       pane.busy = this.busyKind(pane, tab);

@@ -585,17 +585,23 @@ Object.assign(ScholiumRunner, {
       this.stopFromPane(pane);
     } else {
       pane.escAt = Date.now();
-      pane.escRun = this.job;
+      pane.escRun = this.paneRun(pane) || "waiting";
       setTimeout(() => this.paintHint(pane), this.ESC_MS + 50);
     }
     this.paintHint(pane);
     return true;
   },
 
+  // the run of the tab a section shows: of the conversation shown, else one of its paper's of the tab's kind
+  paneRun(pane) {
+    const view = this.viewOf(pane, pane.tab);
+    return this.runOfView(view) || pane.keys.map(k => this.paperRuns(k).find(r => r.kind === pane.tab)).find(Boolean) || null;
+  },
+
   // whether a first Esc asks to stop: pressed a moment ago, on the run that still goes on. Once that run ends or another
   // starts, the press is forgotten, and paintPane's hint says so
   escArmed(pane) {
-    return !!pane.escAt && Date.now() - pane.escAt < this.ESC_MS && pane.escRun === this.job;
+    return !!pane.escAt && Date.now() - pane.escAt < this.ESC_MS && pane.escRun === (this.paneRun(pane) || "waiting");
   },
 
   // the run of the tab shown stops; a paper of it that only waits there leaves the queue, the other tab's wait stays. The
@@ -603,7 +609,8 @@ Object.assign(ScholiumRunner, {
   stopFromPane(pane) {
     const mine = j => pane.keys.includes(this.keyOf(j.att)) && (j.kind || "chat") === pane.tab;
     for (const j of this.queue) if (j.qid && mine(j)) this.heldQueues.add(this.queueKey(j));
-    if (this.job && mine(this.job.source)) this.cancel();
+    const run = this.paneRun(pane);
+    if (run) this.cancel(run);
     else this.dequeue(pane.keys, pane.tab, { rows: false });
   },
 
@@ -627,7 +634,8 @@ Object.assign(ScholiumRunner, {
   // the context ring: an arc of the window's share the shown conversation's session takes up; its tooltip in Codex's words
   paintRing(pane) {
     const view = this.viewOf(pane, pane.tab);
-    const c = view.live && this.showsRun(view) ? this.job.context : view.context;
+    const going = view.live ? this.runOfView(view) : null;
+    const c = going ? going.context : view.context;
     const used = c && c.used > 0 ? c.used : 0, win = c && c.window > 0 ? c.window : 0;
     const shown = this.contextRingOn() && used > 0 && win > 0;
     this.show(pane.ring, shown);
@@ -643,7 +651,8 @@ Object.assign(ScholiumRunner, {
   openContextLayer(pane, focus = false) {
     if (this.closePopover(pane, "context")) return;
     const view = this.viewOf(pane, pane.tab);
-    const c = (view.live && this.showsRun(view) ? this.job.context : view.context) || {};
+    const going = view.live ? this.runOfView(view) : null;
+    const c = (going ? going.context : view.context) || {};
     this.openPopover(pane, "context", pane.ring, node => {
       const doc = pane.doc;
       const row = (cls, ...kids) => { const d = doc.createElement("div"); d.className = cls; d.append(...kids); return d; };
@@ -1056,7 +1065,8 @@ Object.assign(ScholiumRunner, {
 
   // whether a section's paper has a run of this kind going on or waiting; a held queued message does not wait for a run
   busyKind(pane, kind) {
-    return !!(this.job && pane.keys.includes(this.job.key) && (this.job.source.kind || "chat") === kind)
+    return [...this.active].some(j => pane.keys.includes(this.keyOf(j.att)) && (j.kind || "chat") === kind)
+      || pane.keys.some(k => this.paperRuns(k).some(r => r.kind === kind))
       || this.queue.some(j => pane.keys.includes(this.keyOf(j.att)) && (j.kind || "chat") === kind && !this.isHeld(j));
   },
 
@@ -1254,7 +1264,7 @@ Object.assign(ScholiumRunner, {
     this.watchFit(pane);
     this.watchOpen(pane);
     // the running paper's transcript at once; another conversation once its log is read (loadHistory)
-    if (this.job && keys.includes(this.job.key)) this.showLive(pane, this.job.key, this.job.source.kind || "chat");
+    for (const k of keys) for (const r of this.paperRuns(k)) this.showLive(pane, r);
     this.paintPane(pane);
     // a passage or papers asked about before the section was drawn: the words to them go in the box
     if (pending || papers) { try { pane.input.focus(); } catch (e) {} }

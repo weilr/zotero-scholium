@@ -280,7 +280,7 @@ Object.assign(ScholiumRunner, {
   },
 
   // the user's words in place as a box, with their quote: ✓ or the send shortcut asks again, ✕ or Esc leaves them, as
-  // does ✓ on the words and quote as they were. The paper's annotation leaves the chat free: an edit waits behind it
+  // does ✓ on the words and quote as they were. The paper's annotation leaves the chat free
   startEdit(view, run, said) {
     if (view.pane && this.busy(view.shownKey, "chat")) return;
     if (view.editing) this.stopEdit(view);
@@ -426,7 +426,7 @@ Object.assign(ScholiumRunner, {
     if (this.replaced.get(id) === r) r.timer = setTimeout(() => this.undoTimeUp(id), this.UNDO_MS);
     // an edit that waits behind another run (another paper's, the paper's annotation): the sections show the
     // conversation cut, with Undo
-    if (!(this.job && this.job.key === key && (this.job.source.kind || "chat") === "chat")) {
+    if (!this.runOfConv(key, "chat", conv)) {
       for (const p of [...this.panes.values()]) if (p.keys.includes(key)) await this.showConversation(p);
     }
     return true;
@@ -450,11 +450,13 @@ Object.assign(ScholiumRunner, {
       const mine = j => this.keyOf(j.att) === r.key && (j.kind || "chat") === "chat" && (j.conv || null) === r.conv;
       for (const j of this.queue) if (j.qid && mine(j)) this.heldQueues.add(this.queueKey(j));
       this.queue = this.queue.filter(j => j.qid || !mine(j));
-      const current = () => !!this.job && this.job.key === r.key && mine(this.job.source);
+      const runOf = () => [...this.runs.values()].find(x => !x.gone && x.key === r.key && mine(x.source)) || null;
+      const current = () => !!runOf();
       if (current()) {
-        r.run = this.job.source.logRun;
-        this.job.source.undone = true;
-        this.cancel();
+        const x = runOf();
+        r.run = x.source.logRun;
+        x.source.undone = true;
+        this.cancel(x);
       }
       const running = () => current() || !!(r.run && !r.run.done);
       for (let i = 0; i < 400 && running(); i++) await Zotero.Promise.delay(25);
@@ -472,6 +474,7 @@ Object.assign(ScholiumRunner, {
       await IOUtils.writeUTF8(r.path, r.text, { tmpPath: r.path + ".tmp" });
       pending.unlogged.splice(0);
       this.parsedLogs.delete(r.path);
+      this.lastEntries.delete(r.path);   // the conversation as its log has it again
       if (r.retitled) {
         const index = await this.index(r.key);
         if (r.title === undefined) delete index.titles[r.conv];
@@ -483,12 +486,6 @@ Object.assign(ScholiumRunner, {
       for (const thread of gone) this.queueArchive(thread);
       if (r.note) this.notes.set(`${r.key}/chat`, r.note);
       else this.notes.delete(`${r.key}/chat`);
-      if (this.transcriptPath === r.path) {
-        try {
-          const back = await this.readLog(r.key, r.conv);
-          this.transcript = back ? back.entries : [];
-        } catch (e) { this.log("restored conversation not read: " + e); }
-      }
       this.refresh();
       for (const pane of [...this.panes.values()]) {
         if (!pane.keys.includes(r.key)) continue;
@@ -665,7 +662,45 @@ Object.assign(ScholiumRunner, {
   // not for a run: it leaves the paper free
   busy(key, kind = null) {
     const of = j => !kind || (j.kind || "chat") === kind;
-    return !!(this.job && this.job.key === key && of(this.job.source)) || this.queue.some(j => this.keyOf(j.att) === key && of(j) && !this.isHeld(j));
+    return [...this.active].some(j => this.keyOf(j.att) === key && of(j)) || this.paperRuns(key).some(r => !kind || r.kind === kind)
+      || this.queue.some(j => this.keyOf(j.att) === key && of(j) && !this.isHeld(j));
+  },
+
+  // the run of a job going on, and the paper and tab a job is of
+  runOfJob(job) { for (const r of this.runs.values()) if (r.source === job) return r; return null; },
+  tabOf(job) { return { key: this.keyOf(job.att), kind: job.kind || "chat" }; },
+
+  // whether a run still goes on: not ended, not dropped by a stop
+  alive(run) { return !!run && !run.gone && this.runs.get(run.id) === run; },
+
+  // the run going on of a conversation: a paper's key, its tab's kind and the conversation's id; null as the id is the tab's
+  // new conversation, whose run has no id for it yet
+  runOfConv(key, kind = "chat", conv = null) {
+    for (const r of this.runs.values()) if (!r.gone && r.key === key && r.kind === kind && (r.conv || null) === (conv || null)) return r;
+    return null;
+  },
+
+  // the run of the conversation a view shows
+  runOfView(view) {
+    return view && view.shownKey ? this.runOfConv(view.shownKey, view.kind || "chat", view.shownConv || null) : null;
+  },
+
+  // the runs of a paper going on
+  paperRuns(key) { return [...this.runs.values()].filter(r => !r.gone && r.key === key); },
+
+  // a run ends: it no longer goes on, its draft goes with it
+  endRun(run) {
+    if (!run) return;
+    if (!run.gone && run.path) {
+      this.lastEntries.delete(run.path);
+      this.lastEntries.set(run.path, run.entries);
+      if (this.lastEntries.size > 20) this.lastEntries.delete(this.lastEntries.keys().next().value);
+    }
+    if (!run.gone) this.lastRun = run;
+    run.gone = true;
+    clearTimeout(run.draftTimer);
+    run.draftTimer = null;
+    if (this.runs.get(run.id) === run) this.runs.delete(run.id);
   },
 
   // where a follow-up joins the queue: after what is queued for its conversation, else where a conversation's message goes
@@ -772,7 +807,7 @@ Object.assign(ScholiumRunner, {
     const timer = setTimeout(() => { this.removedQueued.delete(qid); this.refresh(); }, this.QUEUE_UNDO_MS);
     this.removedQueued.set(qid, { job, next: this.nextRow(job, i), timer });
     this.refresh();
-    if (!this.draining) this.drain();
+    this.pump();
   },
 
   undoRemoveQueued(qid) {
@@ -782,7 +817,7 @@ Object.assign(ScholiumRunner, {
     this.removedQueued.delete(qid);
     this.queue.splice(this.backAt(r.job, r.next), 0, r.job);
     this.refresh();
-    if (!this.draining) this.drain();
+    this.pump();
   },
 
   // a queued message back in the box, before what is typed there; the messages behind a failed one go on
@@ -797,7 +832,7 @@ Object.assign(ScholiumRunner, {
     this.fitInput(pane);
     try { pane.input.focus(); } catch (e) {}
     this.refresh();
-    if (!this.draining) this.drain();
+    this.pump();
   },
 
   // Send on a row of a held queue: that message first, and the queue goes on
@@ -816,14 +851,14 @@ Object.assign(ScholiumRunner, {
     if (!job) return;
     job.failed = false;
     this.refresh();
-    if (!this.draining) this.drain();
+    this.pump();
   },
 
   // Resume: the held queue goes on
   releaseQueue(job) {
     this.heldQueues.delete(this.queueKey(job));
     this.refresh();
-    if (!this.draining) this.drain();
+    this.pump();
   },
 
   // Clear queue: its messages go, and with them its hold (tidyHeld)
@@ -847,7 +882,7 @@ Object.assign(ScholiumRunner, {
     if (this.stopped) return;
     this.queue.splice(Math.min(at, this.queue.length), 0, ...jobs);
     this.refresh();
-    if (!this.draining) this.drain();
+    this.pump();
   },
 
   // take papers out of the queue, their runs of one kind only when given, and their queued messages unless `rows` is
@@ -924,87 +959,119 @@ Object.assign(ScholiumRunner, {
       const path = this.convPath(key, job.conv);
       const marks = [await this.logEnd(path, "cancelled", this.text("cancelled")), { type: "scholium", subtype: "time", at: Date.now(), waited: true }];
       await this.appendLog({ logPath: path }, [JSON.stringify(marks[1])]);
-      if (this.transcriptPath === path) this.appendEntries(marks.flatMap(m => this.entries(m)));
+      const kept = this.lastEntries.get(path);   // the run that waited, as it was shown: with its end
+      if (kept) this.addEntries(kept, marks.flatMap(m => this.entries(m)));
     }
     this.refresh();
     for (const pane of [...this.panes.values()]) if (pane.keys.includes(key)) await this.showConversation(pane);
   },
 
-  // one paper at a time; `draining` also covers the moments before a process exists. An agent's usage limit
-  // pauses that agent's runs.
-  async drain() {
-    this.draining = true;
+  // the runs going on at once: the settings' number, 1 to 6
+  maxRuns() {
+    const n = Number(this.getPref("maxRuns"));
+    return Number.isInteger(n) && n >= 1 && n <= 6 ? n : this.MAX_RUNS_DEFAULT;
+  },
+
+  // whether a queued job may start now: not held (Resume, a failed message before it, a usage limit of its agent), not
+  // waiting for its second try, not already starting; nothing of its conversation going on or queued before it, and no
+  // other annotation of its paper going on or queued before it
+  mayStart(job) {
+    if (this.active.has(job) || this.isHeld(job) || this.heldByLimit(job) || (job.retryAt || 0) > Date.now()) return false;
+    const key = this.keyOf(job.att), kind = job.kind || "chat", conv = job.conv || null;
+    const blocks = j => {
+      if (this.keyOf(j.att) !== key) return false;
+      const k = j.kind || "chat";
+      return (k === kind && (j.conv || null) === conv) || (kind === "annotate" && k === "annotate");
+    };
+    for (const a of this.active) if (blocks(a)) return false;
+    // a held message (Resume, a usage limit) holds its own conversation only
+    for (const q of this.queue) { if (q === job) break; if (!this.isHeld(q) && !this.heldByLimit(q) && blocks(q)) return false; }
+    return true;
+  },
+
+  // every queued job that may start starts, in the queue's order, until as many run as the settings allow; one waiting
+  // for its second try starts when its time comes. An agent's usage limit holds that agent's jobs only
+  pump() {
+    if (this.pumpHeld || this.stopped) return;
+    for (const job of [...this.queue]) {
+      if (this.active.size >= this.maxRuns()) break;
+      if (!this.queue.includes(job)) continue;
+      if (this.discarded(job.att)) { this.queue.splice(this.queue.indexOf(job), 1); this.log("left out, in the trash: " + this.keyOf(job.att)); continue; }
+      if (!this.mayStart(job)) continue;
+      this.startRun(job).catch(e => this.log("run not handled: " + e));
+    }
+    // a job waiting for its second try: the queue is looked at again within a second
+    const next = Math.min(...this.queue.map(j => j.retryAt || Infinity));
+    if (next < Infinity && !this.retryWait) {
+      this.retryWait = true;
+      Zotero.Promise.delay(Math.min(Math.max(next - Date.now(), 0), 1000)).then(() => { this.retryWait = false; this.pump(); });
+    }
+    this.refresh();
+  },
+
+  // one queued job's run and what follows it: a queued message takes its conversation as it is now, staying in the queue
+  // meanwhile so that a stop hands it over; the job counts as going on (active) until its outcome is handled
+  async startRun(job) {
+    this.active.add(job);
     try {
-      while (this.queue.length) {
-        // a held queued message waits for Resume, and those behind a failed one for it; a run of an agent whose limit
-        // holds waits for its reset, and what follows it of its paper's tab with it
-        const i = this.queue.findIndex(j => !this.isHeld(j) && !this.heldByLimit(j));
-        if (i < 0) break;
-        // a paper whose connection failed waits for its second try at the head of the queue
-        const wait = (this.queue[i].retryAt || 0) - Date.now();
-        if (wait > 0) { await Zotero.Promise.delay(Math.min(wait, 1000)); continue; }
-        const job = this.queue[i];
-        if (this.discarded(job.att)) { this.queue.splice(i, 1); this.log("left out, in the trash: " + this.keyOf(job.att)); continue; }
-        // a queued message takes its conversation as it is now; it stays in the queue meanwhile, so that a stop hands it over
-        if (job.qid) {
-          job.own = job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length;
-          await this.place(job);
-        }
-        if (this.stopped) break;
-        const at = this.queue.indexOf(job);
-        if (at < 0) continue;   // taken out of the queue meanwhile
-        this.queue.splice(at, 1);
-        let outcome = null;
-        try { outcome = await this.run(job); }
-        catch (e) {
-          const message = String(e && e.message || e).slice(0, 300);
-          this.current = null;
-          this.dropDraft();
-          // nothing of a run that failed before its first line reached the log: its words go back, an annotation's wishes
-          // with the words queued for its session to come; the paper's sections show its conversations as their logs have
-          // them (no run to retry there), a chat's state line the failure
-          const unlogged = !job.logPath;
-          if (unlogged) {
-            this.handBack(job);
-            if (this.transcriptKey === this.keyOf(job.att)) this.transcriptPath = null;
-            for (const pane of this.panes.values()) if (pane.keys.includes(this.keyOf(job.att))) { pane.live = false; pane.annot.live = false; }
-          } else this.appendEntries(this.entries(await this.logEnd(job.logPath, "failed", message)));
-          this.notice(job, `${this.text("failed")} · ${message}`, true);
-          this.finish(job, false, message, unlogged && (job.kind || "chat") === "chat" ? `${this.text("failed")} · ${message}` : undefined);
-          if (unlogged) for (const pane of [...this.panes.values()]) if (pane.keys.includes(this.keyOf(job.att))) await this.showConversation(pane);
-          this.log("run failed: " + e);
-          if (!job.logPath) outcome = { ok: false, delivered: false };   // its words reached nothing
-        }
-        // a queued message that did not reach the agent goes back to the head of its queue, marked, and its queue waits for it
-        if (job.qid && outcome && !outcome.delivered && !outcome.cancelled && !outcome.limited && !outcome.retry && !outcome.fresh) {
-          job.failed = true;
-          job.logged = job.logged || !!job.logPath;
-          this.queue.splice(this.backAt(job, this.nextRow(job, 0)), 0, job);
-          this.refresh();
-          this.settleRun();   // its Retry is on its row
-        }
-        if (outcome && outcome.limited) this.pause(job, outcome);
-        if (outcome && outcome.retry) {
-          // the message was sent: what waits for the second try is no queued row
-          this.queue.unshift(Object.assign({}, job, { retried: true, retryAt: Date.now() + this.NET_RETRY_MS, qid: null }));
-          this.refresh();
-          this.settleRun();   // the paper is busy again: no retry button
-        }
-        if (outcome && outcome.fresh) {
-          this.queue.unshift(outcome.fresh);
-          this.refresh();
-        }
+      if (job.qid) {
+        job.own = job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length;
+        await this.place(job);
+      }
+      if (this.stopped) return;
+      const at = this.queue.indexOf(job);
+      if (at < 0) return;   // taken out of the queue meanwhile
+      this.queue.splice(at, 1);
+      let outcome = null;
+      try { outcome = await this.run(job); }
+      catch (e) {
+        const message = String(e && e.message || e).slice(0, 300);
+        const run = this.runOfJob(job);
+        if (run) this.dropDraft(run);
+        // nothing of a run that failed before its first line reached the log: its words go back, an annotation's wishes
+        // with the words queued for its session to come; the paper's sections show its conversations as their logs have
+        // them (no run to retry there), a chat's state line the failure
+        const unlogged = !job.logPath;
+        if (unlogged) {
+          this.handBack(job);
+          for (const pane of this.panes.values()) if (pane.keys.includes(this.keyOf(job.att))) this.viewOf(pane, job.kind || "chat").live = false;
+        } else if (run) this.appendEntries(run, this.entries(await this.logEnd(job.logPath, "failed", message)));
+        this.notice(job, `${this.text("failed")} · ${message}`, true);
+        this.finish(job, false, message, unlogged && (job.kind || "chat") === "chat" ? `${this.text("failed")} · ${message}` : undefined);
+        if (unlogged && run && run.path) this.lastEntries.delete(run.path);   // its log has nothing of it: its run is not shown
+        if (unlogged) for (const pane of [...this.panes.values()]) if (pane.keys.includes(this.keyOf(job.att))) await this.showConversation(pane);
+        this.log("run failed: " + e);
+        if (!job.logPath) outcome = { ok: false, delivered: false };   // its words reached nothing
+      }
+      // a queued message that did not reach the agent goes back to the head of its queue, marked, and its queue waits for it
+      if (job.qid && outcome && !outcome.delivered && !outcome.cancelled && !outcome.limited && !outcome.retry && !outcome.fresh) {
+        job.failed = true;
+        job.logged = job.logged || !!job.logPath;
+        this.queue.splice(this.backAt(job, this.nextRow(job, 0)), 0, job);
+        this.refresh();
+        this.settleRun(this.tabOf(job));   // its Retry is on its row
+      }
+      if (outcome && outcome.limited) this.pause(job, outcome);
+      if (outcome && outcome.retry) {
+        // the message was sent: what waits for the second try is no queued row
+        this.queue.unshift(Object.assign({}, job, { retried: true, retryAt: Date.now() + this.NET_RETRY_MS, qid: null }));
+        this.refresh();
+        this.settleRun(this.tabOf(job));   // the paper is busy again: no retry button
+      }
+      if (outcome && outcome.fresh) {
+        this.queue.unshift(outcome.fresh);
+        this.refresh();
       }
     } finally {
-      this.draining = false;
-      this.refresh();
+      this.active.delete(job);
+      this.pump();
     }
   },
 
   // the usage limit, or a limit of the service: the interrupted paper waits at the head of the queue and continues
   // its conversation when the limit resets; no other run of its agent starts meanwhile, the other agent's go on
   pause(job, { until, session, throttled }) {
-    if (this.job && this.job.key === this.keyOf(job.att)) this.job = null;
+    this.endRun(this.runOfJob(job));
     // a question stays one when its conversation continues; an annotation that continued a question's conversation
     // has its prompt there. A run after the wait may have its second try again. A queued message that was sent is no row.
     // An edited question's new session goes on as it is; until there is one, the run goes back to the point again
@@ -1013,7 +1080,7 @@ Object.assign(ScholiumRunner, {
                                                  annotate: false, question: false, fresh: false, logged: false,
                                                  throttled: !!throttled, updated: false, rewind: session === job.resume ? job.rewind || null : null }
                                              : { interrupted: true, logged: true }));
-    this.settleRun();   // the paper waits: no retry
+    this.settleRun(this.tabOf(job));   // the paper waits: no retry
     const wait = until ? Math.max(until - Date.now(), 0) + 60000 : this.RETRY_MS;
     const agent = this.agentOf(job);
     this.endPause(agent);
@@ -1041,7 +1108,7 @@ Object.assign(ScholiumRunner, {
     if (!this.paused) return;
     for (const a of agent ? [agent] : Object.keys(this.paused)) this.endPause(a);
     this.refresh();
-    if (!this.draining && this.queue.length) this.drain();
+    this.pump();
   },
 
   agentOf(job) { return job && job.agent === "codex" ? "codex" : "claude"; },
@@ -1097,7 +1164,7 @@ Object.assign(ScholiumRunner, {
 
   // record the end of one paper: its section keeps the outcome in short, the transcript has the rest
   finish(job, ok, summary, outcome, detail, answered = false) {
-    if (this.job && this.job.key === this.keyOf(job.att)) this.job = null;
+    this.endRun(this.runOfJob(job));
     const title = this.text(ok && job.compact ? "compactedTitle" : answered ? "answered" : ok ? "finished" : this.asking(job) ? "failedAsk" : "failedLine", job.title);
     // a chat's outcome is its state line's; an annotation's is its card, and a deletion's note before it goes
     if ((job.kind || "chat") === "chat") {
@@ -1113,7 +1180,7 @@ Object.assign(ScholiumRunner, {
       for (const pane of [...this.panes.values()]) {
         if (pane.keys.includes(this.keyOf(job.att))) this.showConversation(pane).catch(e => this.log("section not shown: " + e));
       }
-    } else this.settleRun();
+    } else this.settleRun(this.tabOf(job));
   },
 
   // the run's last line for a notice, a line per part, without the note's title:
@@ -1128,20 +1195,21 @@ Object.assign(ScholiumRunner, {
   },
 
   // the sections of the running paper, each second: their time so far, and the context its session takes up
-  async tick(job) {
-    while (this.job === job) {
+  async tick(run) {
+    while (this.alive(run)) {
       await Zotero.Promise.delay(this.TICK_MS);
-      if (this.job !== job) break;
-      const words = this.durationWords(this.elapsed(true));
+      if (!this.alive(run)) break;
+      const words = this.durationWords(this.elapsed(run, true));
       for (const pane of this.panes.values()) {
-        if (!pane.keys.includes(job.key)) continue;
+        if (!pane.keys.includes(run.key)) continue;
         try {
-          // the line belongs to the tab of the run's kind; the other tab's outcome stays
-          if (pane.tab === (job.source.kind || "chat")) {
-            pane.state.textContent = this.runningState();
-            pane.state.title = this.runningTitle();
+          // the line belongs to the tab that shows the run's conversation; the other tab's outcome stays
+          if (this.runOfView(this.viewOf(pane, pane.tab)) === run) {
+            pane.state.textContent = this.runningState(run);
+            pane.state.title = this.runningTitle(run);
           }
           for (const view of this.paneViews(pane)) {
+            if (this.runOfView(view) !== run) continue;
             const t = view.liveTime;
             if (t && t.node.isConnected) t.node.textContent = this.text(t.key || "workingFor", words);
           }
@@ -1154,13 +1222,13 @@ Object.assign(ScholiumRunner, {
   // a run that ■ or Esc stopped before its log had the user's words: it ends as cancelled, the words go back to the box and
   // a queued message to the head of its queue, held as the stop holds it; nothing when the plugin stopped meanwhile
   halted(job, running, redraw = false) {
-    if (this.job !== running) return;
+    if (!this.alive(running)) return;
     const message = this.text("cancelled");
     if (job.qid) {
       this.queue.splice(this.backAt(job, this.nextRow(job, 0)), 0, job);
       this.heldQueues.add(this.queueKey(job));
     } else if (!job.undone) this.handBack(job, redraw);
-    this.appendEntries([{ kind: "final", text: message, error: true, cancelled: true }]);
+    this.appendEntries(running, [{ kind: "final", text: message, error: true, cancelled: true }]);
     if (!job.undone) this.notice(job, message, true);
     this.finish(job, false, message, this.outcome(null, true));
     return { ok: false, delivered: false, cancelled: true };

@@ -751,6 +751,8 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
   vm.runInContext(source, context);
   context.loadModules(ROOT_URI);   // as startup() does first
   const runner = context.ScholiumRunner;
+  // one run at a time unless a test sets the number (the runs of several conversations at once: test_plugin_runs.py)
+  runner.MAX_RUNS_DEFAULT = 1;
   runner.NET_RETRY_MS = 40;
   // each run's end as finish() is given it: its outcome and the tokens' detail (a chat's state line shows them, an
   // annotation's card the numbers)
