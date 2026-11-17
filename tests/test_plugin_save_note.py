@@ -10,7 +10,7 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for pl
 
 SCENARIOS = r"""
 const L = o => JSON.stringify(o) + '\n';
-const DIR = '/data/tmp/scholium/ATT1/conversations/';
+const DIR = '/data/scholium/papers/ATT1/conversations/';
 const AT = new Date(2026, 10, 1, 12, 0).getTime();
 const ANSWER = '## 要点\n\n- **方法**：见 [#12]，复杂度 $O(n^2)$\n- 链接 https://example.org/a\n\n$$\\int_0^1 x\\,dx < 1$$\n\n`code` & <b>';
 // a turn of a chat log: the question with a quoted passage, then the answer
@@ -40,7 +40,7 @@ const choose = (pane, label) => { pane.popover.node.children.find(c => c.textCon
   const logs = { [DIR + conv + '.jsonl']: turn(1, 'claude', 'claude-opus-5-5', ANSWER, { text: 'A <quoted> passage.', page: '3' })
                                           + turn(2, 'codex', 'gpt-6-astra', '第二个回答。', null, AT + 5000),
                  [DIR + 'index.json']: JSON.stringify({ chat: conv, titles: {}, annotation: {} }),
-                 '/data/tmp/scholium/ATT1/sentences.json': JSON.stringify({ sentences: [{ id: 12, page: 4, para: 3, text: 'S.' }] }) };
+                 '/data/scholium/papers/ATT1/sentences.json': JSON.stringify({ sentences: [{ id: 12, page: 4, para: 3, text: 'S.' }] }) };
   // the chat's conversation
   for (const locale of ['zh-CN', 'en-US']) {
     const h = harness({ locale, logs });
@@ -92,8 +92,8 @@ const choose = (pane, label) => { pane.popover.node.children.find(c => c.textCon
   // a group library the user cannot edit: no note
   {
     const gkey = 'ATT1_g777';
-    const glogs = { [`/data/tmp/scholium/${gkey}/conversations/${conv}.jsonl`]: turn(1, 'claude', 'claude-opus-5-5', '回答'),
-                    [`/data/tmp/scholium/${gkey}/conversations/index.json`]: JSON.stringify({ chat: conv, titles: {}, annotation: {} }) };
+    const glogs = { [`/data/scholium/papers/${gkey}/conversations/${conv}.jsonl`]: turn(1, 'claude', 'claude-opus-5-5', '回答'),
+                    [`/data/scholium/papers/${gkey}/conversations/index.json`]: JSON.stringify({ chat: conv, titles: {}, annotation: {} }) };
     const h = harness({ logs: glogs, groups: { 2: { groupID: 777, editable: false } } });
     const saved = notes(h);
     h.runner.start('x');

@@ -6,7 +6,7 @@ from plugin_harness import NODE, run_scenarios
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 LOCALES = ["zh-CN", "zh-TW", "en-US", "ja-JP"]
-PROFILE_PATH = "/data/zotero-scholium/profile.md"
+PROFILE_PATH = "/data/scholium/profile.md"
 EXTRA = "For this run, write only a reading note for pages 1-2; no highlights or margin notes."
 
 SCENARIOS = r"""

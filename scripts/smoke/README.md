@@ -263,7 +263,7 @@ and step.
   shots/facts.json  shots/db.json           what the probe saw (with the click, and the live line's words and step each
                                             time they change); the annotations and notes in the database
   shots/prompt-1.txt  shots/conv-*.jsonl    the prompt and the conversation logs
-  data/tmp/scholium/<key>/                  the run's own folder: config.json, sentences.txt, conversations/
+  data/scholium/papers/<key>/               the run's own folder: config.json, sentences.txt, conversations/
   profile/  data/  appdata/  temp/  zotero-debug.txt
 ```
 

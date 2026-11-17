@@ -448,7 +448,7 @@ def test_profile_lives_in_the_zotero_data_dir(tmp_path, monkeypatch):
     monkeypatch.delenv("ZOTERO_DATA_DIR", raising=False)
     monkeypatch.setattr(cli, "zotero_prefs_data_dir", lambda profile_roots=None: str(data))
     assert cli.zotero_data_dir() == str(data)
-    assert cli.profile_dir() == os.path.join(str(data), "zotero-scholium")
+    assert cli.profile_dir() == os.path.join(str(data), "scholium")
     # the configuration and the environment take precedence over prefs.js
     other = tmp_path / "Other"; other.mkdir(); (other / "zotero.sqlite").write_bytes(b"")
     monkeypatch.setenv("ZOTERO_DATA_DIR", str(other))

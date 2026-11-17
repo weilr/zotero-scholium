@@ -440,7 +440,6 @@ Object.assign(ScholiumRunner, {
     ]).join("\n");
   },
 
-  outDir(key) { return PathUtils.join(Zotero.DataDirectory.dir, "tmp", "scholium", key); },
 
   async args(job) {
     // the text arrives as it is written (stream events), and each whole message after it
@@ -450,7 +449,7 @@ Object.assign(ScholiumRunner, {
     const skills = this.skillsDir("claude");
     const skill = skills ? PathUtils.join(skills, "zotero-scholium") : "";
     if (skill && (await this.exists(skill))) args.push("--add-dir", skill);
-    const outRoot = PathUtils.join(Zotero.DataDirectory.dir, "tmp", "scholium").replace(/\\/g, "/");
+    const outRoot = this.root().replace(/\\/g, "/");
     args.push("--allowedTools", "Skill", "Read", `Write(${outRoot}/**)`, `Edit(${outRoot}/**)`);
     // only the tools a run uses are in its context (PowerShell only on Windows, where Claude Code has it); a chat's
     // message may also look something up on the web

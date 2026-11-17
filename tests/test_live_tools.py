@@ -427,7 +427,7 @@ def test_a_closed_connection_during_the_session_leaves_it_unverified(monkeypatch
 def test_a_from_run_copy_brings_no_cost_or_results(tmp_path, monkeypatch):
     """--from-run copies the source's data, its conversation logs too: only what they gain in the new session counts."""
     src, run = str(tmp_path / "src"), str(tmp_path / "new")
-    old_log = os.path.join("data", "tmp", "scholium", "OLDATT", "conversations", "annotate-1.jsonl")
+    old_log = os.path.join("data", "scholium", "papers", "OLDATT", "conversations", "annotate-1.jsonl")
     write(os.path.join(src, old_log), json.dumps({"type": "result", "total_cost_usd": 0.8}) + "\n")
     os.makedirs(os.path.join(src, "profile"))
     live.prepare_run(run)
@@ -438,7 +438,7 @@ def test_a_from_run_copy_brings_no_cost_or_results(tmp_path, monkeypatch):
     assert live.session_cost(run, since) == 0 and live.annotate_results(run, since) == 0
     with open(os.path.join(run, old_log), "a", encoding="utf8") as f:   # the session writes on in the old log
         f.write(json.dumps({"type": "result", "total_cost_usd": 0.05}) + "\n")
-    write(os.path.join(run, "data", "tmp", "scholium", "NEWATT", "conversations", "annotate-2.jsonl"),
+    write(os.path.join(run, "data", "scholium", "papers", "NEWATT", "conversations", "annotate-2.jsonl"),
           json.dumps({"type": "result", "total_cost_usd": 0.02}) + "\n")
     assert live.session_cost(run, since) == pytest.approx(0.07) and live.annotate_results(run, since) == 2
     write(os.path.join(run, old_log), "{}\n")   # a log rewritten shorter: read whole
@@ -494,8 +494,8 @@ def test_the_cost_is_the_sum_of_the_result_lines():
 
 def test_the_session_cost_counts_every_log_of_the_run(tmp_path):
     run = str(tmp_path / "run")
-    write(os.path.join(run, "data", "tmp", "scholium", "ATT1", "conversations", "annotate-claude-1.jsonl"), "\n".join(STREAM) + "\n")
-    write(os.path.join(run, "data", "tmp", "scholium", "ATT1", "conversations", "chat-1.jsonl"), STREAM[3] + "\n")
+    write(os.path.join(run, "data", "scholium", "papers", "ATT1", "conversations", "annotate-claude-1.jsonl"), "\n".join(STREAM) + "\n")
+    write(os.path.join(run, "data", "scholium", "papers", "ATT1", "conversations", "chat-1.jsonl"), STREAM[3] + "\n")
     write(os.path.join(run, "chain", "x.jsonl"), STREAM[3] + "\n")   # not a conversation
     assert live.session_cost(run) == pytest.approx(0.028 + 0.0268)
     assert len(live.conversation_logs(run, "annotate-*")) == 1
@@ -547,7 +547,7 @@ def fixture_run(tmp_path, name="eval-dpo"):
             {"type": "highlight", "color": "#ff6666", "pageIndex": 0, "text": "the user's", "comment": "", "tags": []}]
     note = "<h1>DPO</h1><h2>问题</h2><p>一段。</p><h2>方法</h2><p>arXiv:2305.18290</p>"
     write(run / "shots" / "db.json", json.dumps({"anns": anns, "notes": [{"title": "DPO", "tags": tag, "html": note}]}, ensure_ascii=False))
-    conv = run / "data" / "tmp" / "scholium" / att
+    conv = run / "data" / "scholium" / "papers" / att
     write(conv / "config.json", json.dumps({"core_color": "#FF6666"}))
     write(run / "data" / "storage" / att / "paper.pdf", "%PDF-1.4\n")
     dry = {"missed": [], "translation_warnings": [{"i": 1}, {"i": 2}], "style_warnings": []}
@@ -842,7 +842,7 @@ def test_a_resumed_session_is_counted_once():
 def test_the_session_cost_of_a_copy_counts_only_the_new_runs(tmp_path, monkeypatch):
     """A --from-run copy's log holds the session's earlier runs: the new runs count by what they add to its total."""
     src, run = str(tmp_path / "src"), str(tmp_path / "new")
-    log = os.path.join("data", "tmp", "scholium", "ATT", "conversations", "annotate-1.jsonl")
+    log = os.path.join("data", "scholium", "papers", "ATT", "conversations", "annotate-1.jsonl")
     lines = resumed_lines(since_last=False)
     write(os.path.join(src, log), "\n".join(lines[:2]) + "\n")
     os.makedirs(os.path.join(src, "profile"))

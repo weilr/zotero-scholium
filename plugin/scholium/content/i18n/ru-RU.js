@@ -33,7 +33,9 @@ var texts = h => {
     noTextLayer: "В этом PDF нет текстового слоя (это скан): сначала распознайте текст (OCR), например с помощью ocrmypdf или функции «Распознать текст» в Acrobat, затем запустите аннотирование снова.",
     // the setup check of the settings page: each line's name, its sentence, and its button
     checkLabel: id => ({ localApi: "Локальный API", claude: "Claude Code", claudeSkill: "Навык Claude Code",
-                         codex: "Codex", codexSkill: "Навык Codex", uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,
+                         codex: "Codex", codexSkill: "Навык Codex", uv: "uv", python: "Python", pymupdf: "PyMuPDF" , folders: "Старые данные"})[id] || id,
+    checkFoldersLeft: (n, list) => `Не перенесено в папку scholium (${n}): ${list}. Закройте программы, которые держат их открытыми, и перезапустите Zotero.`,
+    codexHomeMissing: path => `Домашняя папка Codex из настроек не существует: ${path}. Исправьте путь или очистите поле, чтобы использовать ~/.codex.`,
     checkApiOn: "Включён; через него Scholium читает статьи.",
     checkApiOff: "Выключен, поэтому Scholium не может читать статьи: нажмите «Включить» или отметьте «Разрешить другим приложениям на этом компьютере взаимодействовать с Zotero» в разделе Настройки → Расширенные.",
     checkTurnOn: "Включить",

@@ -30,7 +30,9 @@ var texts = h => {
     noTextLayer: "這個 PDF 沒有文字層（掃描檔）：請先做 OCR 文字辨識（例如 ocrmypdf，或 Acrobat 的「辨識文字」），再標註。",
     // the setup check of the settings page: each line's name, its sentence, and its button
     checkLabel: id => ({ localApi: "本機 API", claude: "Claude Code", claudeSkill: "Claude Code 的技能", codex: "Codex", codexSkill: "Codex 的技能",
-                         uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,
+                         uv: "uv", python: "Python", pymupdf: "PyMuPDF" , folders: "舊記錄"})[id] || id,
+    checkFoldersLeft: (n, list) => `有 ${n} 項沒有移到 scholium 資料夾：${list}。關閉佔用它們的程式後重新啟動 Zotero。`,
+    codexHomeMissing: path => `設定裡的 Codex 主目錄不存在：${path}。修正路徑，或清空以使用 ~/.codex。`,
     checkApiOn: "已開啟，Scholium 透過它讀取論文。",
     checkApiOff: "已關閉，Scholium 讀不到論文：按「開啟」，或在 設定 → 進階 裡勾選「允許此電腦上的其他應用程式與 Zotero 通訊」。",
     checkTurnOn: "開啟",

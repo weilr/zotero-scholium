@@ -6,7 +6,7 @@ from plugin_harness import NODE, run_scenarios
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 SCENARIOS = r"""
-const PATH = '/data/tmp/scholium/ATT1/conversations/claude-20261001-120000.jsonl';
+const PATH = '/data/scholium/papers/ATT1/conversations/claude-20261001-120000.jsonl';
 const ID = 'ATT1/claude-20261001-120000';
 const OLD = ev({ type: 'scholium', subtype: 'run', agent: 'claude', user: 'Original question', at: 1 })
   + ev({ type: 'scholium', subtype: 'prompt', text: 'Original question', question: true });

@@ -1284,14 +1284,14 @@ Object.assign(ScholiumRunner, {
     return pane.loading;
   },
 
-  // the annotation profile, <data dir>/zotero-scholium/profile.md, which every run follows; a missing
+  // the annotation profile, <data dir>/scholium/profile.md, which every run follows; a missing
   // one starts as scholium.py's template, so that `scholium profile --from-library` keeps the rules
   PROFILE_TEMPLATE: "# Annotation profile\n\n## User's rules (always win)\n\n"
     + "Rules recorded in this section take precedence over the learned statistics above. Re-running\n"
     + "`profile --from-library` regenerates the sections above and leaves this section unchanged.\n\n"
     + "- (none yet; add rules here, e.g. \"comments are translations\", \"two colours only: red = core, yellow = other\")\n",
 
-  profilePath() { return PathUtils.join(Zotero.DataDirectory.dir, "zotero-scholium", "profile.md"); },
+  profilePath() { return PathUtils.join(this.root(), "profile.md"); },
 
   // the profile's editor: a sheet over the Zotero window of the button, one at a time. It is part of
   // the window's own page, like the section, so it needs no page or window of its own. `opener` gets the focus back when
@@ -1378,6 +1378,7 @@ Object.assign(ScholiumRunner, {
   },
 
   async loadProfile(ed) {
+    await this.settled();
     let text = null;
     try {
       if (await this.exists(ed.path)) text = await IOUtils.readUTF8(ed.path);
@@ -1407,7 +1408,7 @@ Object.assign(ScholiumRunner, {
         return false;
       }
       const text = String(ed.input.value).replace(/\r\n/g, "\n").replace(/\n/g, ed.eol);
-      await IOUtils.makeDirectory(PathUtils.join(Zotero.DataDirectory.dir, "zotero-scholium"), { createAncestors: true, ignoreExisting: true });
+      await IOUtils.makeDirectory(this.root(), { createAncestors: true, ignoreExisting: true });
       await IOUtils.writeUTF8(ed.path, text, { tmpPath: ed.path + ".tmp" });
       Object.assign(ed, { disk: text, dirty: false, message: { text: this.text("profileSaved", this.clock(Date.now())), error: false } });
       this.paintEditor(ed);

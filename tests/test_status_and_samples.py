@@ -98,7 +98,7 @@ def test_status_shows_the_pdfs_annotations_and_notes(zotero, capsys, tmp_path):
         assert a2["key"] == "A2" and a2["file"] == "D:/papers/one-preprint.pdf" and a2["own"] == 0
         assert [(n["key"], n["own"]) for n in out["notes"]] == [("N1", True), ("N0", True), ("N2", False)]
         assert out["notes"][0]["title"] == "Paper One — reading note" and out["notes"][0]["characters"] > 1500
-        assert out["profile"] == os.path.join(str(tmp_path), "zotero-scholium", "profile.md")
+        assert out["profile"] == os.path.join(str(tmp_path), "scholium", "profile.md")
 
 
 def test_status_lists_matching_items_and_reports_failures(zotero, capsys, monkeypatch):

@@ -584,7 +584,7 @@ SCENARIOS = r"""
   // the steps a reader opened belong to the conversation: another one shows its own closed
   {
     const conv = SCRIPT.concat([LAST, RESULT]).join('');
-    const CONV0 = '/data/tmp/scholium/ATT1/conversations/claude-20260901-120000.jsonl';
+    const CONV0 = '/data/scholium/papers/ATT1/conversations/claude-20260901-120000.jsonl';
     const h = harness({ logs: { [CONV1]: conv, [CONV0]: conv } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
@@ -1108,11 +1108,11 @@ def test_the_program_picker_takes_any_file():
     script = r'''
 const vm = require('node:vm');
 const fs = require('node:fs');
-const filters = [];
+const filters = [], modes = [];
 class FilePicker {
-  init() {} appendFilters(mask) { filters.push(mask); } async show() { return this.returnCancel; }
+  init(w, title, mode) { modes.push(mode); } appendFilters(mask) { filters.push(mask); } async show() { return this.returnCancel; }
 }
-Object.assign(FilePicker.prototype, { filterAll: 0x001, filterApps: 0x040, modeOpen: 0, returnOK: 0, returnCancel: 1 });
+Object.assign(FilePicker.prototype, { filterAll: 0x001, filterApps: 0x040, modeOpen: 0, modeGetFolder: 2, returnOK: 0, returnCancel: 1 });
 const handlers = {};
 // zotero runs the script first and parses the markup after it: the elements exist only when `load` reaches the root
 let present = false, listener = null;
@@ -1134,15 +1134,16 @@ vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {
   listener({ target: root });
   listener({ target: root });   // a second load wires nothing again
   for (const id of Object.keys(handlers)) { handlers[id](); await new Promise(r => setTimeout(r, 5)); }
-  process.stdout.write(JSON.stringify({ before, afterOther, ids: Object.keys(handlers), filters }));
+  process.stdout.write(JSON.stringify({ before, afterOther, ids: Object.keys(handlers), filters, modes }));
 })();
 '''
     out = subprocess.run([NODE, "-e", script, str(PLUGIN / "settings.js")], capture_output=True, encoding="utf-8", timeout=60)
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
     assert got["before"] == [] and got["afterOther"] == [], "nothing is wired before the pane's markup is loaded"
-    assert got["ids"] == ["scholium-claude-browse", "scholium-codex-browse"]
+    assert got["ids"] == ["scholium-claude-browse", "scholium-codex-browse", "scholium-codex-home-browse"]
     assert got["filters"] == [0x001, 0x001], "all files, not only applications"
+    assert got["modes"] == [0, 0, 2], "the Codex home folder is a folder"
 
 
 def test_the_readme_says_how_an_interrupted_run_goes_on():
@@ -1157,7 +1158,8 @@ def test_the_settings_page_binds_every_preference():
     src = (PLUGIN / "settings.xhtml").read_text(encoding="utf8")
     root = ET.fromstring("<root xmlns='%s' xmlns:html='%s'>%s</root>" % (ns["x"], ns["h"], src))
     prefs = {el.get("preference") for el in root.iter() if el.get("preference")}
-    assert prefs == {"extensions.scholium." + p for p in ("sendShortcut", "followUpMode", "contextRing", "maxRuns", "claudePath", "codexPath")}
+    assert prefs == {"extensions.scholium." + p for p in ("sendShortcut", "followUpMode", "contextRing", "maxRuns", "claudePath", "codexPath",
+                                                          "codexHome")}
     ids = {el.get("data-l10n-id") for el in root.iter() if el.get("data-l10n-id")}
     for locale in ("en-US", "zh-CN"):
         ftl = (PLUGIN / "locale" / locale / "scholium.ftl").read_text(encoding="utf8")
@@ -1165,7 +1167,7 @@ def test_the_settings_page_binds_every_preference():
         assert ids <= defined, (locale, ids - defined)
     defaults = (PLUGIN / "prefs.js").read_text(encoding="utf8")
     for p, v in (("sendShortcut", '"cmdAlways"'), ("followUpMode", '"queue"'), ("contextRing", "true"), ("maxRuns", '"3"'),
-                 ("claudePath", '""'), ("codexPath", '""'), ("savedPrompts", '""')):
+                 ("claudePath", '""'), ("codexPath", '""'), ("codexHome", '""'), ("savedPrompts", '""')):
         assert f'pref("extensions.scholium.{p}", {v});' in defaults
 
 
@@ -1190,12 +1192,12 @@ def test_the_settings_page_controls_show_their_words():
     root = ET.fromstring("<root xmlns='%s' xmlns:html='%s'>%s</root>" % (ns["x"], ns["h"], src))
     controls = {"{%s}%s" % (ns["x"], t) for t in ("menuitem", "radio", "checkbox", "button")}
     labelled = [el.get("data-l10n-id") for el in root.iter() if el.tag in controls and el.get("data-l10n-id")]
-    assert len(labelled) == 10
+    assert len(labelled) == 11
     numbers = [el.get("label") for el in root.iter() if el.tag in controls and not el.get("data-l10n-id")]
     assert numbers == [str(n) for n in range(1, 7)], "the number of runs at once: its numbers"
 
     picker = re.findall(r'"(scholium-settings-[a-z-]+)"', (PLUGIN / "settings.js").read_text(encoding="utf8"))
-    assert picker == ["scholium-settings-claude", "scholium-settings-codex", "scholium-settings-not-found"]
+    assert picker == ["scholium-settings-claude", "scholium-settings-codex", "scholium-settings-codex-home", "scholium-settings-not-found"]
     for locale in ("en-US", "zh-CN"):
         msgs = ftl_messages(locale)
         for i in labelled:
@@ -1204,8 +1206,8 @@ def test_the_settings_page_controls_show_their_words():
             assert msgs[i][0], (locale, i, "the file picker's title is a message's value")
     assert not [el for el in root.iter() if el.tag == "{%s}h2" % ns["h"]], "the page's heading is Zotero's"
     inputs = [el for el in root.iter() if el.tag == "{%s}input" % ns["h"]]
-    assert [el.get("id") for el in inputs] == ["scholium-claude-path", "scholium-codex-path"]
-    assert len(inputs) == 2 and all("flex: 1" in (el.get("style") or "") for el in inputs), "a path box takes the row"
+    assert [el.get("id") for el in inputs] == ["scholium-claude-path", "scholium-codex-path", "scholium-codex-home"]
+    assert len(inputs) == 3 and all("flex: 1" in (el.get("style") or "") for el in inputs), "a path box takes the row"
 
 
 def test_startup_gives_the_runner_its_root_before_it_starts():

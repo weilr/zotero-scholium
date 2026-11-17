@@ -3019,10 +3019,39 @@ def zotero_data_dir(cfg=None):
 
 
 def profile_dir(cfg=None):
-    """Directory of profile.json and profile.md: <Zotero data dir>/zotero-scholium/. The profile describes
-    the annotation habits of one library, so it is kept next to that library rather than in the user
+    """Directory of profile.json and profile.md: <Zotero data dir>/scholium/, Scholium's folder. The profile
+    describes the annotation habits of one library, so it is kept next to that library rather than in the user
     configuration directory."""
+    return os.path.join(zotero_data_dir(cfg), "scholium")
+
+
+def old_profile_dir(cfg=None):
+    """Location used before Scholium's folder: <Zotero data dir>/zotero-scholium/."""
     return os.path.join(zotero_data_dir(cfg), "zotero-scholium")
+
+
+def profile_md_path(cfg=None):
+    """The profile the tool follows: profile.md in Scholium's folder, or in the earlier folder while only that one has it."""
+    new = os.path.join(profile_dir(cfg), "profile.md")
+    old = os.path.join(old_profile_dir(cfg), "profile.md")
+    return old if not os.path.exists(new) and os.path.exists(old) else new
+
+
+def move_old_profile(cfg=None):
+    """profile.md and profile.json of the earlier folder moved into Scholium's folder, where it has neither; the earlier
+    folder goes once it is empty. The paths moved."""
+    old, new, moved = old_profile_dir(cfg), profile_dir(cfg), []
+    for name in ("profile.md", "profile.json"):
+        src, dst = os.path.join(old, name), os.path.join(new, name)
+        if os.path.exists(src) and not os.path.exists(dst):
+            os.makedirs(new, exist_ok=True)
+            os.replace(src, dst)
+            moved.append(src)
+    try:
+        os.rmdir(old)
+    except OSError:
+        pass
+    return moved
 
 
 def legacy_profile_dir():
@@ -3465,15 +3494,17 @@ def profile_main(argv):
     ap.add_argument("--path", action="store_true", help="print the path of profile.md and exit (no library access)")
     ap.add_argument("--json", action="store_true", help="with --path: print the data directory, the path and whether the file exists as JSON")
     ap.add_argument("--data-dir", default=None, help="Zotero data directory (default: ZOTERO_DATA_DIR, Zotero's prefs.js, or ~/Zotero)")
-    ap.add_argument("--out", default=None, help="directory for profile.json and profile.md (default: <Zotero data dir>/zotero-scholium/)")
+    ap.add_argument("--out", default=None, help="directory for profile.json and profile.md (default: <Zotero data dir>/scholium/)")
     a = ap.parse_args(argv)
     cfg = {"data_dir": a.data_dir} if a.data_dir else None
     out = a.out or profile_dir(cfg)
-    md_path = os.path.join(out, "profile.md")
     legacy_md = os.path.join(legacy_profile_dir(), "profile.md")
+    old_md = os.path.join(old_profile_dir(cfg), "profile.md")
     if a.path:
+        md_path = os.path.join(out, "profile.md") if a.out else profile_md_path(cfg)
         if a.json:
             print(json.dumps({"data_dir": zotero_data_dir(cfg), "profile_md": md_path, "exists": os.path.exists(md_path),
+                              "old_profile_md": old_md if os.path.exists(old_md) else None,
                               "legacy_profile_md": legacy_md if os.path.exists(legacy_md) else None}, ensure_ascii=False, indent=1))
         else:
             print(md_path)
@@ -3487,9 +3518,13 @@ def profile_main(argv):
     except RuntimeError as e:
         print(json.dumps({"error": str(e)}, ensure_ascii=False, indent=1))
         return 1
+    migrated = None
+    if not a.out:   # the earlier folder's profile moves into Scholium's folder first
+        moved = move_old_profile(cfg)
+        migrated = moved[0] if moved else None
+    md_path = os.path.join(out, "profile.md")
     os.makedirs(out, exist_ok=True)
     json.dump(prof, open(os.path.join(out, "profile.json"), "w", encoding="utf8"), ensure_ascii=False, indent=1)
-    migrated = None
     if os.path.exists(md_path):
         existing = open(md_path, encoding="utf8").read()
     elif os.path.exists(legacy_md):
@@ -3668,7 +3703,7 @@ def paper_status(key, lib=USER_LIBRARY):
             "notes": [{"key": n["key"], "title": note_title_from_html(n["data"].get("note", ""))[:100], "own": _own(n),
                        "characters": len(_plain(n["data"].get("note", ""))), "modified": n["data"].get("dateModified", "")[:10]}
                       for n in notes],
-            "profile": os.path.join(profile_dir(), "profile.md")}
+            "profile": profile_md_path()}
 
 
 def status_main(argv):

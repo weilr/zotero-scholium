@@ -30,7 +30,9 @@ var texts = h => {
     noTextLayer: "이 PDF에는 텍스트 레이어가 없습니다(스캔한 문서). 먼저 OCR을 실행한 후(예: ocrmypdf 또는 Acrobat의 텍스트 인식) 다시 주석을 다세요.",
     // the setup check of the settings page: each line's name, its sentence, and its button
     checkLabel: id => ({ localApi: "로컬 API", claude: "Claude Code", claudeSkill: "Claude Code 스킬",
-                         codex: "Codex", codexSkill: "Codex 스킬", uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,
+                         codex: "Codex", codexSkill: "Codex 스킬", uv: "uv", python: "Python", pymupdf: "PyMuPDF" , folders: "이전 기록"})[id] || id,
+    checkFoldersLeft: (n, list) => `scholium 폴더로 옮기지 못한 항목(${n}): ${list}. 이 항목을 열고 있는 프로그램을 닫은 뒤 Zotero를 다시 시작하세요.`,
+    codexHomeMissing: path => `설정의 Codex 홈 폴더가 없습니다: ${path}. 경로를 고치거나 비워서 ~/.codex를 사용하세요.`,
     checkApiOn: "켜짐. Scholium이 이 API로 논문을 읽습니다.",
     checkApiOff: "꺼짐. Scholium이 논문을 읽을 수 없습니다. “켜기”를 누르거나 환경설정 → 고급에서 “이 컴퓨터의 다른 애플리케이션이 Zotero와 통신하도록 허용”을 선택하세요.",
     checkTurnOn: "켜기",

@@ -29,7 +29,7 @@ SCENARIOS = r"""
 
   // registration, the item pane before, during and after a run, notices, shutdown
   {
-    const h = harness({ logs: { '/data/c.json': '{}' }, present: ['/home/u/.claude/skills/zotero-scholium'] });   // the configuration SCRIPT applies
+    const h = harness({ logs: { '/data/scholium/papers/ATT1/c.json': '{}' }, present: ['/home/u/.claude/skills/zotero-scholium'] });   // the configuration SCRIPT applies
     const { runner, log, item1, item2, note } = h;
     runner.start('scholium@zotero-scholium');
     const sec = log.sections[0];
@@ -64,8 +64,8 @@ SCENARIOS = r"""
     facts.notices = log.notices.map(notice);
     facts.logLines = convText(h).trim().split('\n').length;
     facts.firstConversation = { files: convs(h).map(p => p.replace(/\d{8}-\d{6}/, 'TIME')),
-                                index: JSON.parse(log.writes['/data/tmp/scholium/ATT1/conversations/index.json'].replace(/\d{8}-\d{6}/g, 'TIME')),
-                                applied: JSON.parse(log.writes['/data/tmp/scholium/ATT1/applied.json'] || 'null') };
+                                index: JSON.parse(log.writes['/data/scholium/papers/ATT1/conversations/index.json'].replace(/\d{8}-\d{6}/g, 'TIME')),
+                                applied: JSON.parse(log.writes['/data/scholium/papers/ATT1/applied.json'] || 'null') };
     facts.confirmsWithoutExisting = log.confirms.length;
     facts.paneAfter = before.view('annotate');
     const fold = p1.annot.list.children.at(-1).children.find(c => c.className === 'scholium-fold');
@@ -909,7 +909,7 @@ SCENARIOS = r"""
     const [status, , , save] = foot.children;
     key(box, { key: 's', ctrlKey: true }); await settle(20);
     facts.profileUnreadable = { status: status.textContent, error: status.className.includes('error'), inputDisabled: input.disabled,
-                                saveDisabled: save.disabled, file: h.log.writes[PROFILE_PATH] === PROFILE, dirs: h.log.madeDirs.length };
+                                saveDisabled: save.disabled, file: h.log.writes[PROFILE_PATH] === PROFILE, dirs: h.log.madeDirs.filter(d => d !== '/data/scholium/papers').length };
   }
   {
     const h = harness({ logs: { [PROFILE_PATH]: PROFILE }, writeFails: true });
@@ -1180,7 +1180,7 @@ SCENARIOS = r"""
   {
     const h = harness({ prefs: { 'extensions.scholium.agent': 'codex', 'extensions.scholium.codexModel': 'gpt-6-luna',
                                  'extensions.scholium.codexEffort': 'high' }, codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW, CODEX_FOLLOW] },
-                        logs: { '/data/tmp/scholium/c.json': '{}' } });
+                        logs: { '/data/scholium/papers/ATT1/c.json': '{}' } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
@@ -1213,7 +1213,7 @@ SCENARIOS = r"""
       killed: h.log.codexProcs[before].killed, session: own(await h.runner.readLog('ATT1', p.view().shownConv)).session,
       notices: h.log.notices.map(notice), sendShown: !p.view().sendHidden, claudeCalls: h.log.calls.length, ring: p.view().ring, ctxUsed: p.view().ctxUsed,
       userMessages: lines().filter(l => l.params && l.params.item && l.params.item.type === 'userMessage').length,
-      applied: JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']).config,
+      applied: JSON.parse(h.log.writes['/data/scholium/papers/ATT1/applied.json']).config,
     };
     logFrom(p.pane());
     facts.codexRun.revealed = h.log.revealed.slice();
@@ -1236,7 +1236,7 @@ SCENARIOS = r"""
     p.pane().agent.change('claude');
     await settle(100);
     const switched = { entries: p.view().flat, shownConv: p.view().shownConv, newChatDisabled: p.view().newChatDisabled, ring: p.view().ring,
-                       placeholder: p.view().placeholder, chosen: 'chat' in JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/conversations/index.json']), unswitched };
+                       placeholder: p.view().placeholder, chosen: 'chat' in JSON.parse(h.log.writes['/data/scholium/papers/ATT1/conversations/index.json']), unswitched };
     p.pane().input.type('它和 FNO 比怎么样？');
     p.pane().send.click();
     await settle(500);
@@ -1333,7 +1333,7 @@ SCENARIOS = r"""
   {
     // the skill in Codex's own skills folder: no extra root; no skill at all: the run ends before a conversation opens
     const found = {};
-    for (const skillAt of ['/data/tmp/scholium', null]) {
+    for (const skillAt of ['workdir', null]) {
       const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { skillAt } });
       h.runner.start('x');
       await h.runner.annotate([h.item1]);
@@ -1487,8 +1487,8 @@ SCENARIOS = r"""
     const shown = {};
     for (const agent of ['codex', 'claude']) {
       const other = agent === 'codex' ? 'claude' : 'codex';
-      const h = harness({ logs: { '/data/tmp/scholium/ATT1/claude-run.jsonl': claudeLog, '/data/tmp/scholium/ATT1/codex-run.jsonl': codexLog },
-                          logTimes: { [`/data/tmp/scholium/ATT1/${agent}-run.jsonl`]: 1000, [`/data/tmp/scholium/ATT1/${other}-run.jsonl`]: 2000 },
+      const h = harness({ logs: { '/data/scholium/papers/ATT1/claude-run.jsonl': claudeLog, '/data/scholium/papers/ATT1/codex-run.jsonl': codexLog },
+                          logTimes: { [`/data/scholium/papers/ATT1/${agent}-run.jsonl`]: 1000, [`/data/scholium/papers/ATT1/${other}-run.jsonl`]: 2000 },
                           prefs: { 'extensions.scholium.agent': agent } });
       h.runner.start('x');
       const p = await h.pane(h.item1);
@@ -1552,7 +1552,7 @@ SCENARIOS = r"""
     const said = {};
     for (const [name, codex] of [['failed', { fail: 'skills/list', failMessage: 'invalid type: integer' }],
                                  ['errors', { skillAt: null, skillErrors: [{ path: '/home/u/.codex/skills/x/SKILL.md', message: 'invalid YAML' }] }],
-                                 ['off', { skillAt: '/data/tmp/scholium', skillOff: true }]]) {
+                                 ['off', { skillAt: 'workdir', skillOff: true }]]) {
       const c = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex });
       c.runner.start('x');
       await c.runner.annotate([c.item1]); await settle(400);
@@ -1874,7 +1874,7 @@ SCENARIOS = r"""
   // the log of an earlier version is a conversation of the paper: the agent chosen goes on with it in place, Claude Code
   // given the conversation before, Codex in its own thread
   {
-    const legacy = '/data/tmp/scholium/ATT1/codex-run.jsonl';
+    const legacy = '/data/scholium/papers/ATT1/codex-run.jsonl';
     const codexLog = [CODEX_INIT].concat(CODEX_SCRIPT.filter(l => l.includes('item/')), [CODEX_RESULT]).join('');
     const h = harness({ logs: { [legacy]: codexLog }, codex: { scripts: [CODEX_FOLLOW] } });
     h.runner.start('x');
@@ -1955,7 +1955,7 @@ SCENARIOS = r"""
     const answered = [SCRIPT[0], said('讲的是方法。'), ev({ type: 'result', subtype: 'success', is_error: false, result: '讲的是方法。', session_id: 'S1' })];
     const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' },
                         codex: { scripts: [CODEX_SCRIPT, CODEX_FOLLOW, CODEX_FOLLOW, CODEX_FOLLOW, CODEX_FOLLOW] }, scripts: [answered],
-                        logs: { '/data/tmp/scholium/c.json': '{}' } });
+                        logs: { '/data/scholium/papers/ATT1/c.json': '{}' } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(200);
@@ -1968,13 +1968,13 @@ SCENARIOS = r"""
     h.store.set('extensions.scholium.agent', 'codex');
     await h.runner.send(h.att1, '再短一点', { kind: 'annotate' }); await settle(500);   // Codex, conversation A: nothing changed since
     const unchanged = h.log.codexProcs.at(-1).sent.find(m => m.method === 'turn/start').params.input[0].text;
-    const applied = JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']);
+    const applied = JSON.parse(h.log.writes['/data/scholium/papers/ATT1/applied.json']);
     // rewritten in another conversation before this one's last run: nothing to tell
-    h.log.writes['/data/tmp/scholium/ATT1/applied.json'] = JSON.stringify(Object.assign({}, applied, { agent: 'claude', conv: 'claude-x', at: 1 }));
+    h.log.writes['/data/scholium/papers/ATT1/applied.json'] = JSON.stringify(Object.assign({}, applied, { agent: 'claude', conv: 'claude-x', at: 1 }));
     await h.runner.send(h.att1, '再短一点', { kind: 'annotate' }); await settle(500);
     const older = h.log.codexProcs.at(-1).sent.find(m => m.method === 'turn/start').params.input[0].text;
-    h.log.writes['/data/tmp/scholium/ATT1/applied.json'] = JSON.stringify(Object.assign({}, applied, { agent: 'claude', conv: 'claude-x',
-                                                                                                         config: '/data/tmp/scholium/ATT1/b.json', at: Date.now() + 1000 }));
+    h.log.writes['/data/scholium/papers/ATT1/applied.json'] = JSON.stringify(Object.assign({}, applied, { agent: 'claude', conv: 'claude-x',
+                                                                                                         config: '/data/scholium/papers/ATT1/b.json', at: Date.now() + 1000 }));
     await h.runner.send(h.att1, '还是太长', { kind: 'annotate' }); await settle(500);
     const rewritten = h.log.codexProcs.at(-1).sent.find(m => m.method === 'turn/start').params.input[0].text;
     h.att1.getAnnotations = () => [];
@@ -1991,7 +1991,7 @@ SCENARIOS = r"""
   }
   // an earlier version's log of two Codex turns: Codex goes on in its thread without being given its own turns
   {
-    const legacy = '/data/tmp/scholium/ATT1/codex-run.jsonl';
+    const legacy = '/data/scholium/papers/ATT1/codex-run.jsonl';
     const log = [CODEX_INIT].concat(CODEX_SCRIPT.filter(l => l.includes('item/')), [CODEX_RESULT]).join('')
       + JSON.stringify({ type: 'scholium', subtype: 'prompt', text: '第 5 页那条译文改短' }) + '\n'
       + ev({ type: 'system', subtype: 'init', agent: 'codex', model: 'gpt-6-luna', session_id: 'T1' }) + CODEX_FOLLOW.join('')
@@ -2033,7 +2033,7 @@ SCENARIOS = r"""
   }
   // a turn that never reached its agent is not one it has seen, and a thread opened for it is not its session
   {
-    const legacy = '/data/tmp/scholium/ATT1/codex-run.jsonl';
+    const legacy = '/data/scholium/papers/ATT1/codex-run.jsonl';
     const log = [CODEX_INIT].concat(CODEX_SCRIPT.filter(l => l.includes('item/')), [CODEX_RESULT]).join('')
       + JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'codex', user: '再短一点' }) + '\n'
       + JSON.stringify({ type: 'scholium', subtype: 'prompt', text: '再短一点' }) + '\n'
@@ -2209,12 +2209,12 @@ SCENARIOS = r"""
     typeIn('写给第一段对话的话');
     p.pane().newChat.click(); await settle(100);
     const fresh = { entries: p.view().flat, shownConv: p.view().shownConv, newChatDisabled: p.view().newChatDisabled, input: p.pane().input.value,
-                    placeholder: p.view().placeholder, chat: JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/conversations/index.json']).chat };
+                    placeholder: p.view().placeholder, chat: JSON.parse(h.log.writes['/data/scholium/papers/ATT1/conversations/index.json']).chat };
     typeIn('第二个问题'); p.pane().send.click(); await settle(300);
     const second = p.view().shownConv;
     const resumedSecond = h.log.calls[1].opts.arguments.includes('--resume');
     // two conversations of yesterday and an older one, besides today's
-    const old = '/data/tmp/scholium/ATT1/conversations/claude-20260901-090000.jsonl';
+    const old = '/data/scholium/papers/ATT1/conversations/claude-20260901-090000.jsonl';
     h.log.writes[old] = JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'claude', user: '很早的问题' }) + '\n' + SCRIPT[0];
     h.log.mtimes[old] = Date.now() - 40 * 86400000;
     h.log.mtimes[convs(h)[0]] = Date.now() - 86400000;
@@ -2257,7 +2257,7 @@ SCENARIOS = r"""
     rowOf('估计方法').children[2].click(); await settle(100);
     h.fire(); await settle(200);
     const afterFire = p.view().historyRows.filter(r => r[0].includes('deleted')).length;
-    const index = JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/conversations/index.json']);
+    const index = JSON.parse(h.log.writes['/data/scholium/papers/ATT1/conversations/index.json']);
     facts.conversations = { afterFire, first: !!first, before, fresh, second: second !== first, resumedSecond, rows, rowButtons, renamed, kept, opened, resumedFirst, followPrompt, deleting, undone,
                             deletedShown, removed: h.log.removed.map(r => r.split('/').pop() === first + '.jsonl'),
                             files: convs(h).length, titles: Object.values(index.titles), chat: index.chat,
@@ -2345,8 +2345,8 @@ SCENARIOS = r"""
   }
   // a paper with two PDFs: History lists the conversations of its best PDF only; a conversation without a line is not listed
   {
-    const conv3 = '/data/tmp/scholium/ATT3/conversations/claude-20261002-120000.jsonl';
-    const empty = '/data/tmp/scholium/ATT1/conversations/claude-20261003-120000.jsonl';
+    const conv3 = '/data/scholium/papers/ATT3/conversations/claude-20261002-120000.jsonl';
+    const empty = '/data/scholium/papers/ATT1/conversations/claude-20261003-120000.jsonl';
     const h = harness({ secondPdf: true, logs: { [CONV1]: JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'claude', user: '第一份' }) + '\n' + SCRIPT[0],
                                                   [conv3]: JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'claude', user: '第二份' }) + '\n' + SCRIPT[0] + said('第二份的回答'),
                                                   [empty]: '' },
@@ -2392,7 +2392,7 @@ SCENARIOS = r"""
   // a switch of the agent in one section: every section keeps its paper's conversation; New chat asked for while the
   // paper runs changes nothing; a deletion not yet done when the plugin stops is done then
   {
-    const conv2 = '/data/tmp/scholium/ATT2/conversations/claude-20261002-120000.jsonl';
+    const conv2 = '/data/scholium/papers/ATT2/conversations/claude-20261002-120000.jsonl';
     const h = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, gateFirst: true,
                         logs: { [CONV1]: JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'claude', user: '甲' }) + '\n' + SCRIPT[0],
                                 [conv2]: JSON.stringify({ type: 'scholium', subtype: 'run', agent: 'claude', user: '乙' }) + '\n' + SCRIPT[0] } });
@@ -2407,10 +2407,10 @@ SCENARIOS = r"""
     p2.pane().input.type('丙');
     p2.pane().send.click(); await settle(100);
     const running = h.runner.job && h.runner.job.key;
-    const index2 = h.log.writes['/data/tmp/scholium/ATT2/conversations/index.json'];
+    const index2 = h.log.writes['/data/scholium/papers/ATT2/conversations/index.json'];
     await h.runner.newChat(p2.pane());
-    const current = [JSON.parse(h.log.writes['/data/tmp/scholium/ATT2/conversations/index.json']).chat,
-                     h.log.writes['/data/tmp/scholium/ATT2/conversations/index.json'] === index2];
+    const current = [JSON.parse(h.log.writes['/data/scholium/papers/ATT2/conversations/index.json']).chat,
+                     h.log.writes['/data/scholium/papers/ATT2/conversations/index.json'] === index2];
     h.log.calls[0].proc.kill(); await settle(200);
     // a deletion the plugin stops in the middle of
     p1.pane().agent.change('claude');
@@ -2452,15 +2452,15 @@ SCENARIOS = r"""
   {
     const applyCall = (cmd, id) => tool('PowerShell', { command: cmd }, id);
     const overloaded = ev({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'API Error: 529 overloaded', session_id: 'S1' });
-    const h = harness({ logs: { '/data/tmp/scholium/ATT1/config.json': '{}' },
+    const h = harness({ logs: { '/data/scholium/papers/ATT1/config.json': '{}' },
                         scripts: [[SCRIPT[0], applyCall('python s/scholium.py --config config.json --apply', 't1'), answer('{"applied": true}', false, 't1'), overloaded],
                                   [SCRIPT[0], applyCall('python s/scholium.py --config other.json --apply', 't2'), answer('Exit code 2\nstyle_warnings: 1', true, 't2'),
                                    LAST, RESULT]] });
     h.runner.start('x');
     await h.runner.annotate([h.item1]); await settle(400);
-    const kept = JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']);
+    const kept = JSON.parse(h.log.writes['/data/scholium/papers/ATT1/applied.json']);
     await h.runner.annotate([h.item1]); await settle(400);
-    const after = JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']);
+    const after = JSON.parse(h.log.writes['/data/scholium/papers/ATT1/applied.json']);
     facts.appliedKept = { kept: [kept.config, kept.agent], state: (latestNote(h) || {}).text, refused: after.config, at: after.at === kept.at };
     // Codex: a write whose command failed is not kept
     const failedApply = [note('turn/started', { threadId: 'T1', turn: { id: 'TURN', status: 'inProgress' } }),
@@ -2470,11 +2470,11 @@ SCENARIOS = r"""
     const c = harness({ prefs: { 'extensions.scholium.agent': 'codex' }, codex: { scripts: [failedApply] } });
     c.runner.start('x');
     await c.runner.annotate([c.item1]); await settle(500);
-    facts.appliedKept.codexFailed = '/data/tmp/scholium/ATT1/applied.json' in c.log.writes;
+    facts.appliedKept.codexFailed = '/data/scholium/papers/ATT1/applied.json' in c.log.writes;
   }
   // a follow-up an earlier version handed over: its paper's annotations counted again, its conversation a question's
   {
-    const legacy = '/data/tmp/scholium/ATT1/claude-run.jsonl';
+    const legacy = '/data/scholium/papers/ATT1/claude-run.jsonl';
     const log = JSON.stringify({ type: 'scholium', subtype: 'prompt', text: '这篇讲什么？', question: true }) + '\n' + SCRIPT[0]
       + said('讲的是方法。') + ev({ type: 'result', subtype: 'success', is_error: false, result: '讲的是方法。', session_id: 'S1' });
     const carried = JSON.stringify({ jobs: [{ key: 'ATT1', libraryID: 1, agent: 'claude', say: '再问一句', resume: 'S1', question: false }] });
@@ -2538,12 +2538,12 @@ SCENARIOS = r"""
   }
   // a relative configuration of a command that ran in a Windows folder is a Windows path
   {
-    const h = harness({ logs: { 'D:\\Zotero\\tmp\\scholium\\sub\\config.json': '{}', 'D:\\Zotero\\tmp\\scholium\\other.json': '{}' } });
+    const h = harness({ logs: { 'D:\\Zotero\\scholium\\papers\\sub\\config.json': '{}', 'D:\\Zotero\\scholium\\papers\\other.json': '{}' } });
     h.runner.start('x');
-    const applied = () => JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/applied.json']).config;
-    await h.runner.noteApplied('ATT1', 'sub/config.json', 'codex', 'c', 'D:\\Zotero\\tmp\\scholium');
+    const applied = () => JSON.parse(h.log.writes['/data/scholium/papers/ATT1/applied.json']).config;
+    await h.runner.noteApplied('ATT1', 'sub/config.json', 'codex', 'c', 'D:\\Zotero\\scholium\\papers');
     const found = applied();
-    await h.runner.noteApplied('ATT1', './other.json', 'codex', 'c', 'D:\\Zotero\\tmp\\scholium\\');
+    await h.runner.noteApplied('ATT1', './other.json', 'codex', 'c', 'D:\\Zotero\\scholium\\papers\\');
     facts.windowsConfig = [found, applied()];
   }
   // the words of a message whose agent is not found go back to the box; no conversation is started
@@ -2598,7 +2598,7 @@ SCENARIOS = r"""
   }
   // a title being typed stays in its box when the list is drawn again
   {
-    const CONV2 = '/data/tmp/scholium/ATT1/conversations/claude-20261002-120000.jsonl';
+    const CONV2 = '/data/scholium/papers/ATT1/conversations/claude-20261002-120000.jsonl';
     const h = harness({ logs: { [CONV1]: SCRIPT[0], [CONV2]: SCRIPT[0] } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
@@ -2614,7 +2614,7 @@ SCENARIOS = r"""
     for (const f of box.listeners.blur || []) f({});   // the old box, gone, keeps nothing
     await settle(50);
     key(again, { key: 'Enter' }); await settle(100);
-    facts.renameKept = { kept, titles: Object.values(JSON.parse(h.log.writes['/data/tmp/scholium/ATT1/conversations/index.json']).titles),
+    facts.renameKept = { kept, titles: Object.values(JSON.parse(h.log.writes['/data/scholium/papers/ATT1/conversations/index.json']).titles),
                          renaming: p.pane().renaming };
   }
   // a paper moved to the trash while it waited is left out
@@ -2629,7 +2629,7 @@ SCENARIOS = r"""
   }
   // an index that is there and cannot be read is not written over; the choices of the session stay in memory
   {
-    const index = '/data/tmp/scholium/ATT1/conversations/index.json';
+    const index = '/data/scholium/papers/ATT1/conversations/index.json';
     const saved = JSON.stringify({ current: { claude: 'claude-20261001-120000' }, titles: { 'claude-20261001-120000': '我的标题' } });
     const unreadable = [index];
     const h = harness({ logs: { [CONV1]: SCRIPT[0], [index]: saved }, unreadable });
@@ -2757,8 +2757,8 @@ TRANSCRIPT = [   # a run with its steps opened; the model is under it, with the 
     ["scholium-entry result", "⎿ Launching skill: zotero-scholium"],
     ["scholium-entry tool", "⏺ PowerShell(python C:/skills/scholium.py extract --pdf x.pdf --sentences s.json)"],
     ["scholium-entry result", "⎿ 412 sentences -> s.json\n1\n2\n3\n… +2"],
-    ["scholium-entry tool", "⏺ Read(D:\\Zotero\\tmp\\scholium\\ATT1\\sentences.txt)"],
-    ["scholium-entry tool", "⏺ Write(D:\\Zotero\\tmp\\scholium\\ATT1\\config.json)"],
+    ["scholium-entry tool", "⏺ Read(D:\\Zotero\\scholium\\papers\\ATT1\\sentences.txt)"],
+    ["scholium-entry tool", "⏺ Write(D:\\Zotero\\scholium\\papers\\ATT1\\config.json)"],
     ["scholium-entry tool", "⏺ PowerShell(python C:/skills/scholium.py --config c.json)"],
     ["scholium-entry result error", "⎿ Exit code 2\nstyle_warnings: 1"],
     ["scholium-entry tool", "⏺ PowerShell(python C:/skills/scholium.py --config c.json --apply)"],
@@ -2927,12 +2927,12 @@ def test_transcript_box_has_its_own_look_and_no_drag(facts):
 
 
 
-def test_claude_is_started_headless_in_the_data_directory(facts):
+def test_claude_is_started_headless_in_the_conversations_folder(facts):
     call = facts["call"]
     assert call["command"] == CLAUDE
-    assert call["workdir"] == "/data"
+    assert re.fullmatch(r"/data/scholium/papers/ATT1/conversations/annotate-claude-[\w-]+", call["workdir"])
     env = dict(call["env"])
-    assert re.fullmatch(r"/data/tmp/scholium/ATT1/held_back-annotate-[\w-]+\.json", env.pop("SCHOLIUM_HELD_BACK")), "one file per conversation"
+    assert re.fullmatch(r"/data/scholium/papers/ATT1/held_back-annotate-[\w-]+\.json", env.pop("SCHOLIUM_HELD_BACK")), "one file per conversation"
     assert env == {"PYTHONIOENCODING": "utf-8", "SCHOLIUM_ZOTERO_PORT": "23119", "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000",
                    "SCHOLIUM_PLUGIN_RUN": "1", "SCHOLIUM_CONFIRMED": ""}, "an annotation's turns are capped; the skill's script runs for the plugin"
     assert call["append"] is True
@@ -2940,15 +2940,15 @@ def test_claude_is_started_headless_in_the_data_directory(facts):
     assert args[:7] == ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode", "auto"]
     assert args[args.index("--add-dir") + 1] == "/home/u/.claude/skills/zotero-scholium"
     i = args.index("--allowedTools")
-    assert args[i + 1:i + 5] == ["Skill", "Read", "Write(/data/tmp/scholium/**)", "Edit(/data/tmp/scholium/**)"]
+    assert args[i + 1:i + 5] == ["Skill", "Read", "Write(/data/scholium/**)", "Edit(/data/scholium/**)"]
     # the user's MCP servers and hooks stay out of the run
     assert "--strict-mcp-config" in args and json.loads(args[args.index("--settings") + 1]) == {"disableAllHooks": True}
 
 
 def test_prompt_names_the_paper_and_the_unattended_rules(facts):
     prompt = facts["prompt"]
-    for part in ("zotero-scholium", "条目 key：ITEM1", "附件 key：ATT1", "论文：/data/tmp/scholium/ATT1/paper.json",
-                 "输出目录：/data/tmp/scholium/ATT1", "不要向用户提问", "不要启动子代理", "目前没有本工具的注释"):
+    for part in ("zotero-scholium", "条目 key：ITEM1", "附件 key：ATT1", "论文：/data/scholium/papers/ATT1/paper.json",
+                 "输出目录：/data/scholium/papers/ATT1", "不要向用户提问", "不要启动子代理", "目前没有本工具的注释"):
         assert part in prompt, part
     assert facts["confirmsWithoutExisting"] == 0
 
@@ -2968,11 +2968,11 @@ def test_section_shows_the_transcript_like_claude_code(facts):
     assert o["flat"] == []
     assert o["state"] is None and o["stateKind"] == "scholium-state info", "nothing of another paper's run"
     assert facts["logLines"] == 19, "the run's own line, the Annotate line, Claude Code's events, the numbers counted, when it ended"
-    assert re.fullmatch(r"/data/tmp/scholium/ATT1/conversations/annotate-claude-\d{8}-\d{6}\.jsonl", facts["revealed"][0])
+    assert re.fullmatch(r"/data/scholium/papers/ATT1/conversations/annotate-claude-\d{8}-\d{6}\.jsonl", facts["revealed"][0])
     c = facts["firstConversation"]
-    assert c["files"] == ["/data/tmp/scholium/ATT1/conversations/annotate-claude-TIME.jsonl"]
+    assert c["files"] == ["/data/scholium/papers/ATT1/conversations/annotate-claude-TIME.jsonl"]
     assert c["index"] == {"titles": {"annotate-claude-TIME": "批注这篇"}, "annotation": {"claude": "annotate-claude-TIME"}}
-    assert c["applied"]["config"] == "/data/c.json" and c["applied"]["agent"] == "claude" and c["applied"]["conv"] in facts["revealed"][0]
+    assert c["applied"]["config"] == "/data/scholium/papers/ATT1/c.json" and c["applied"]["agent"] == "claude" and c["applied"]["conv"] in facts["revealed"][0]
     h = facts["history"]
     assert h["history"] is True and h["shownKey"] == "ATT1" and h["logDisabled"] is False
     assert h["flat"] == TRANSCRIPT[:3] + [TRANSCRIPT[-1], ["scholium-meta", "Claude Code · Opus 5.5"]]
@@ -3129,8 +3129,8 @@ def test_personal_profile_is_edited_as_markdown_over_the_zotero_window(facts):
     assert f["title"] == ["scholium-sheet-title", "个人配置"]
     assert f["panes"] == ["scholium-editor-panes", "scholium-editor", "scholium-preview scholium-markdown"] and f["previewed"] == 8
     assert f["head"][0][0] == "scholium-editor-about" and "Interpretation 和 User's rules 两节保持不变" in f["head"][0][1]
-    assert f["head"][1] == ["scholium-editor-path", "/data/zotero-scholium/profile.md"]
-    assert f["pathTitle"] == "/data/zotero-scholium/profile.md"
+    assert f["head"][1] == ["scholium-editor-path", "/data/scholium/profile.md"]
+    assert f["pathTitle"] == "/data/scholium/profile.md"
     assert f["buttons"] == ["取消", "保存", "scholium-button", "scholium-button primary"]
     # the file as it is, with the line ends of the text box; nothing is written by opening it
     assert "\r" not in f["text"] and f["text"].startswith("# Annotation profile (draft")
@@ -3141,7 +3141,7 @@ def test_personal_profile_is_edited_as_markdown_over_the_zotero_window(facts):
     assert f["edited"] == {"status": "有未保存的修改", "error": False, "saveDisabled": False, "inputDisabled": False, "open": True}
     # Ctrl+S saves and stays; the file keeps its CRLF line ends; the key goes no further than the sheet
     c = f["ctrlS"]
-    assert c["prevented"] is True and c["stopped"] is True and c["dirs"] == ["/data/zotero-scholium"]
+    assert c["prevented"] is True and c["stopped"] is True and c["dirs"][-1:] == ["/data/scholium"]
     assert c["saved"].endswith("\r\n- 页边批注用蓝色\r\n") and "\n" not in c["saved"].replace("\r\n", "")
     assert re.fullmatch(r"已保存 \d\d:\d\d", c["view"]["status"]) and c["view"]["saveDisabled"] is True and c["view"]["open"] is True
     # unsaved changes: Esc and Cancel ask, and a refusal keeps the sheet
@@ -3344,7 +3344,7 @@ def test_missing_profile_starts_as_the_template_and_is_written_on_saving(facts):
     c = facts["profileCreated"]
     assert c["before"]["status"] == "文件还不存在，保存后创建" and c["before"]["saveDisabled"] is False and c["before"]["written"] is False
     assert c["before"]["text"].startswith("# Annotation profile\n\n## User's rules (always win)\n\nRules recorded in this section take precedence")
-    assert c["saved"] == c["before"]["text"] and c["dirs"] == ["/data/zotero-scholium"] and c["open"] is False and c["confirms"] == 0
+    assert c["saved"] == c["before"]["text"] and c["dirs"][-1:] == ["/data/scholium"] and c["open"] is False and c["confirms"] == 0
 
 
 def test_profile_changed_elsewhere_is_not_overwritten_unasked(facts):
@@ -3510,9 +3510,9 @@ CODEX_TRANSCRIPT = [
     ["scholium-entry text", "先提取句子。"],
     ["scholium-entry tool", "⏺ Shell(python C:/skills/scholium.py extract --pdf x.pdf --sentences s.json)"],
     ["scholium-entry result", "⎿ 412 sentences -> s.json\n1\n2\n3\n… +2"],
-    ["scholium-entry tool", "⏺ Shell(Get-Content D:\\Zotero\\tmp\\scholium\\ATT1\\sentences.txt)"],
+    ["scholium-entry tool", "⏺ Shell(Get-Content D:\\Zotero\\scholium\\papers\\ATT1\\sentences.txt)"],
     ["scholium-entry result", "⎿ [1] First sentence."],
-    ["scholium-entry tool", "⏺ Edit(D:\\Zotero\\tmp\\scholium\\ATT1\\config.json)"],
+    ["scholium-entry tool", "⏺ Edit(D:\\Zotero\\scholium\\papers\\ATT1\\config.json)"],
     ["scholium-entry tool", "⏺ Shell(python C:/skills/scholium.py --config c.json)"],
     ["scholium-entry result error", "⎿ style_warnings: 1"],
     ["scholium-entry tool", "⏺ Shell(python C:/skills/scholium.py --config c.json --apply)"],
@@ -3554,18 +3554,22 @@ def test_codex_models_come_from_its_app_server(facts):
 def test_codex_runs_the_skill_in_a_sandbox_through_its_app_server(facts):
     r = facts["codexRun"]
     call = dict(r["call"], env=dict(r["call"]["env"]))
-    assert re.fullmatch(r"/data/tmp/scholium/ATT1/held_back-annotate-[\w-]+\.json", call["env"].pop("SCHOLIUM_HELD_BACK"))
-    assert call == {"command": CODEX_APP, "args": ["app-server"], "workdir": "/data/tmp/scholium",
-                    "env": {"PYTHONIOENCODING": "utf-8", "SCHOLIUM_ZOTERO_PORT": "23119", "UV_CACHE_DIR": "/data/tmp/scholium/uv/cache",
-                            "UV_PYTHON_INSTALL_DIR": "/data/tmp/scholium/uv/python", "SCHOLIUM_PLUGIN_RUN": "1", "SCHOLIUM_CONFIRMED": ""}, "append": True}
+    assert re.fullmatch(r"/data/scholium/papers/ATT1/held_back-annotate-[\w-]+\.json", call["env"].pop("SCHOLIUM_HELD_BACK"))
+    assert re.fullmatch(r"/data/scholium/papers/ATT1/conversations/[\w-]+", call.pop("workdir")), "the conversation's own folder"
+    assert call == {"command": CODEX_APP, "args": ["app-server"],
+                    "env": {"PYTHONIOENCODING": "utf-8", "SCHOLIUM_ZOTERO_PORT": "23119", "UV_CACHE_DIR": "/data/scholium/cache/uv/cache",
+                            "UV_PYTHON_INSTALL_DIR": "/data/scholium/cache/uv/python", "SCHOLIUM_PLUGIN_RUN": "1", "SCHOLIUM_CONFIRMED": ""}, "append": True}
     assert r["methods"] == ["initialize", "initialized", "account/read", "mcpServerStatus/list", "plugin/installed", "skills/list", "skills/list",
-                            "skills/extraRoots/set", "thread/start", "turn/start"]
-    assert r["skillLists"] == [["/data/tmp/scholium"], ["/data"]] and r["roots"] == ["/data/.agents/skills"]
+                            "skills/extraRoots/set", "thread/start", "turn/start", "thread/archive"], "the thread is archived as the run ends"
+    assert re.fullmatch(r"/data/scholium/papers/ATT1/conversations/[\w-]+", r["skillLists"][0][0]) and r["skillLists"][1:] == [["/data"]]
+    assert r["roots"] == ["/data/.agents/skills"]
     # the user's MCP servers and installed plugins stay out of the thread
-    assert r["thread"] == {"cwd": "/data/tmp/scholium", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
+    thread = dict(r["thread"])
+    assert re.fullmatch(r"/data/scholium/papers/ATT1/conversations/[\w-]+", thread.pop("cwd"))
+    assert thread == {"approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
                            "sandbox": "workspace-write", "serviceName": "scholium", "model": "gpt-6-luna",
                            "config": {"mcp_servers": {"s": {"enabled": False}}}}
-    roots = ["/data/tmp/scholium", "/data/zotero-scholium", "/appdata/zotero-scholium"]
+    roots = ["/data/scholium", "/appdata/zotero-scholium"]
     assert r["turn"] == {"threadId": "T1", "model": "gpt-6-luna", "effort": "high", "disabledPluginIds": ["superpowers@m", "zotero@remote"],
                          "input": [{"type": "text", "elements": []},
                                    {"type": "skill", "name": "zotero-scholium", "path": "/data/.agents/skills/zotero-scholium/SKILL.md"}],
@@ -3577,7 +3581,7 @@ def test_codex_runs_the_skill_in_a_sandbox_through_its_app_server(facts):
     assert r["answers"] == [{"id": "q1", "result": {"decision": "decline"}}, {"id": "q2", "result": {"answers": {}}},
                             {"id": "q3", "error": {"code": -32601, "message": "not handled by scholium"}}]
     assert r["killed"] is True and r["session"] == "T1" and r["claudeCalls"] == 0
-    assert r["applied"] == "/data/tmp/scholium/c.json", "the configuration of its apply, in Codex's folder"
+    assert r["applied"] == "/data/scholium/papers/ATT1/c.json", "the configuration of its apply, in the paper's folder"
 
 
 def test_codex_transcript_state_and_log_read_like_claude_codes(facts):
@@ -3597,14 +3601,14 @@ def test_codex_transcript_state_and_log_read_like_claude_codes(facts):
                                      "output_tokens": 46778}}
     assert run_time(r["notices"][-1]["descriptions"]) == DONE_NOTICE
     # the annotation tab shows its session: its send button is there; its log is the annotation session's
-    assert r["sendShown"] is True and re.fullmatch(r"/data/tmp/scholium/ATT1/conversations/annotate-codex-\d{8}-\d{6}\.jsonl", r["revealed"][0])
+    assert r["sendShown"] is True and re.fullmatch(r"/data/scholium/papers/ATT1/conversations/annotate-codex-\d{8}-\d{6}\.jsonl", r["revealed"][0])
     latest = facts["latestLog"]
     assert latest["codex"] == {"first": CODEX_TRANSCRIPT[0], "count": len(CODEX_TRANSCRIPT) + 1,
                                "state": "上次：完成 · 3 轮 · 2,647k tokens", "shownConv": "codex-run", "session": "T1",
-                               "revealed": "/data/tmp/scholium/ATT1/codex-run.jsonl", "title": "批注这篇"}, "an earlier version's log is its agent's"
+                               "revealed": "/data/scholium/papers/ATT1/codex-run.jsonl", "title": "批注这篇"}, "an earlier version's log is its agent's"
     assert latest["claude"]["first"] == TRANSCRIPT[0]
     assert latest["claude"]["session"] == "S1" and latest["claude"]["shownConv"] == "claude-run"
-    assert latest["claude"]["revealed"] == "/data/tmp/scholium/ATT1/claude-run.jsonl"
+    assert latest["claude"]["revealed"] == "/data/scholium/papers/ATT1/claude-run.jsonl"
 
 
 def test_an_unchanged_log_is_parsed_once(facts):
@@ -3619,8 +3623,11 @@ def test_an_unchanged_log_is_parsed_once(facts):
 def test_the_agents_share_the_papers_conversations(facts):
     f = facts["codexFollowUp"]
     assert f["claudeCalls"] == 0
-    assert f["methods"] == ["initialize", "initialized", "account/read", "plugin/installed", "thread/resume", "turn/start"], "the servers listed once"
-    assert f["resume"] == {"threadId": "T1", "excludeTurns": True, "cwd": "/data/tmp/scholium", "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
+    assert f["methods"] == ["initialize", "initialized", "account/read", "plugin/installed", "thread/unarchive", "thread/resume", "turn/start",
+                            "thread/archive"], "the servers listed once; the thread back for the run, and archived again"
+    resume = dict(f["resume"])
+    assert re.fullmatch(r"/data/scholium/papers/ATT1/conversations/[\w-]+", resume.pop("cwd"))
+    assert resume == {"threadId": "T1", "excludeTurns": True, "approvalPolicy": "on-request", "approvalsReviewer": "auto_review",
                            "sandbox": "workspace-write", "serviceName": "scholium", "model": "gpt-6-luna",
                            "config": {"mcp_servers": {"s": {"enabled": False}}}}
     assert f["disabled"] == ["superpowers@m", "zotero@remote"]
@@ -3650,7 +3657,8 @@ def test_the_agents_share_the_papers_conversations(facts):
     assert [r[0] for r in b["rows"]] == ["scholium-history-group", "scholium-history-row current"]
     assert b["rows"][1][1].startswith("它和 FNO 比怎么样？")
     assert b["opened"] == {"shownConv": True, "historyRows": None, "entries": 16, "placeholder": "接着这次批注修改，例如：第 5 页那条译文改短"}
-    assert b["methods"] == ["thread/resume"] and b["threadId"] == "T1" and b["skill"] is False, "Codex goes on in its own thread"
+    assert b["methods"] == ["thread/unarchive", "thread/resume", "thread/archive"] and b["threadId"] == "T1" and b["skill"] is False, \
+        "Codex goes on in its own thread, back from the archive for the run"
     assert b["text"].startswith("下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。") and b["text"].endswith("\n\n再短一点\n\n" + CLOSING)
     assert b["runs"] == [["codex", "批注这篇"], ["codex", "第 5 页那条译文改短"], ["codex", "再短一点"]] and b["conversations"] == 2
 
@@ -3663,8 +3671,8 @@ def test_codex_steps_and_cancel(facts):
     assert c["results"] == 0 and c["waits"] == [] and c["current"] is None and c["shutdown"] is True
     assert c["begun"] == ["", "启动 Codex"], "the skill's call is no step: the starting words"
     s = facts["codexSkillFound"]
-    assert s["/data/tmp/scholium"]["methods"] == ["skills/list"]
-    assert s["/data/tmp/scholium"]["input"] == [{"type": "skill", "name": "zotero-scholium", "path": "/home/u/.codex/skills/zotero-scholium/SKILL.md"}]
+    assert s["workdir"]["methods"] == ["skills/list"]
+    assert s["workdir"]["input"] == [{"type": "skill", "name": "zotero-scholium", "path": "/home/u/.codex/skills/zotero-scholium/SKILL.md"}]
     none = s["none"]
     assert none["methods"] == ["skills/list", "skills/list"] and none["input"] is None and none["model"] is None, "no conversation opens"
     assert none["outcome"].startswith("失败")
@@ -3750,7 +3758,7 @@ def test_a_notice_shows_the_agents_words_as_text(facts):
 
 def test_the_prompt_names_the_profile_or_the_defaults(facts):
     p = facts["profilePrompt"]
-    assert "- 画像：/data/zotero-scholium/profile.md\n" in p["zh"]
+    assert "- 画像：/data/scholium/profile.md\n" in p["zh"]
     assert "- Profile: none; annotate with the defaults and do not create or change a profile\n" in p["en"]
     assert p["en"].endswith("The annotations appear in the open PDF by themselves (the eye button in the reader's toolbar shows or hides "
                             "Scholium's annotations): do not tell the user to close and reopen it.\n"
@@ -3841,18 +3849,18 @@ def test_a_question_starts_a_conversation_that_answers_without_annotating(facts)
         "",
         "- 条目 key：ITEM1",
         "- 附件 key：ATT1",
-        "- 论文：/data/tmp/scholium/ATT1/paper.json（PDF 的路径、两个 key 和输出目录）",
-        "- 输出目录：/data/tmp/scholium/ATT1",
+        "- 论文：/data/scholium/papers/ATT1/paper.json（PDF 的路径、两个 key 和输出目录）",
+        "- 输出目录：/data/scholium/papers/ATT1",
         "- 画像：没有；不要生成或修改画像",
         "",
         "这是从 Zotero 里发来的无人值守任务：不要向用户提问，不要启动子代理。只回答，不写批注和笔记；用户在问题里明确要求时，才按技能的流程写入 Zotero。",
-        "/data/tmp/scholium/ATT1/paper.json 是插件的文件，只读，不要修改：只有 extract（代替 --pdf）和 --list 用 --config "
-        "/data/tmp/scholium/ATT1/paper.json。你的配置另写一个文件，放在输出目录里（如 /data/tmp/scholium/ATT1/config-CONV.json），"
-        "从 /data/tmp/scholium/ATT1/paper.json 的四个键写起，--apply 用它。不要把 PDF 路径、论文标题或其他题录写进命令行。",
+        "/data/scholium/papers/ATT1/paper.json 是插件的文件，只读，不要修改：只有 extract（代替 --pdf）和 --list 用 --config "
+        "/data/scholium/papers/ATT1/paper.json。你的配置另写一个文件，放在输出目录里（如 /data/scholium/papers/ATT1/config-CONV.json），"
+        "从 /data/scholium/papers/ATT1/paper.json 的四个键写起，--apply 用它。不要把 PDF 路径、论文标题或其他题录写进命令行。",
         "这台电脑没有装 uv：用 python 运行 scholium.py。",
         "这篇论文目前没有本工具的批注。",
-        "引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --config /data/tmp/scholium/ATT1/paper.json "
-        "--sentences /data/tmp/scholium/ATT1/sentences.json --out /data/tmp/scholium/ATT1/sentences.txt（已有就直接读 sentences.txt）。",
+        "引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --config /data/scholium/papers/ATT1/paper.json "
+        "--sentences /data/scholium/papers/ATT1/sentences.json --out /data/scholium/papers/ATT1/sentences.txt（已有就直接读 sentences.txt）。",
         "回答里不提 sentences.txt、文件、脚本或命令，也不解释句子编号或为什么没有引用；不要另写“Sources:”之类的来源行，引用写 [#123] 即可。",
         "",
         "用户的问题：",
@@ -3883,13 +3891,13 @@ def test_annotate_after_a_question_opens_a_session_of_its_own(facts):
     r = facts["ask"]["redo"]
     assert r["calls"] == 3 and r["resumed"] is False and r["kept"] == "" and r["conversations"] == 3, "Annotate again opens another session"
     assert [line["text"] for line in r["lines"]] == ["批注这篇\n附加要求：第 5 页那条译文改短"]
-    assert facts["ask"]["restarted"] == {"resumed": False, "prompt": n["prompt"].split("\n")[0], "profile": "- 画像：/data/zotero-scholium/profile.md"}
+    assert facts["ask"]["restarted"] == {"resumed": False, "prompt": n["prompt"].split("\n")[0], "profile": "- 画像：/data/scholium/profile.md"}
     assert facts["ask"]["later"] == {"placeholder": ASK, "session": "Q1"}, "the question's conversation stays a question's"
     assert facts["askOrder"] == ["ATT3", "ATT4", "ATT2"], "questions go before the papers still waiting, in their order"
     assert run_time(facts["askBox"]) == {"asking": ASK, "annotating": follow, "state": "", "queued": []}, \
         "an annotation that starts shows on its own tab, its dot on the state line"
     c = facts["askThenCodex"]
-    assert c["claudeCalls"] == 1 and c["threads"] == ["thread/start"] and c["conversations"] == 2, "Codex starts a conversation of its own"
+    assert c["claudeCalls"] == 1 and c["threads"] == ["thread/start", "thread/archive"] and c["conversations"] == 2, "Codex starts a conversation of its own"
     assert c["text"] == "使用 zotero-scholium 技能，为下面这篇论文标注（默认整篇）：默认做重点句高亮（评论只写译文，论文本身是中文时不加评论）、页边批注和阅读笔记；本次附加要求优先于画像，画像优先于技能默认值，它们只要其中一部分时只做那部分。"
     assert c["entries"][0] == "批注这篇" and c["entries"][-1] == CODEX_CARD[1][:30] and "这篇怎么估计后验？" not in c["entries"]
     assert c["placeholder"] == follow
@@ -3897,7 +3905,7 @@ def test_annotate_after_a_question_opens_a_session_of_its_own(facts):
 
 def test_a_questions_follow_ups_failures_and_races(facts):
     e = facts["askEdges"]
-    assert e["owned"] == ("这篇论文已有 1 条本工具的批注；问到它们的内容时，用 --config /data/tmp/scholium/ATT1/paper.json --list --full 列出。"
+    assert e["owned"] == ("这篇论文已有 1 条本工具的批注；问到它们的内容时，用 --config /data/scholium/papers/ATT1/paper.json --list --full 列出。"
                           "要改批注或补几条时，编辑输出目录里写入它们的那份配置（它是这篇论文的全部批注），"
                           "设 cleanup: true 整份重写（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置。")
     assert e["followUp"] == ("下面是用户在 Zotero 里针对这篇论文发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
@@ -3918,7 +3926,7 @@ def test_a_session_the_agent_no_longer_has_is_rebuilt_from_the_conversation(fact
              {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Done.\n" + SUMMARY}]}]
     for name in ("goneCodex", "goneCodexText"):
         c = facts[name]
-        assert c["methods"] == [["thread/resume"], ["thread/start", "thread/inject_items"]], name
+        assert c["methods"] == [["thread/unarchive", "thread/resume", "thread/archive"], ["thread/start", "thread/inject_items", "thread/archive"]], name
         assert c["marks"][1:] == [{"type": "scholium", "subtype": "prompt", "text": "AdLN的作用是什么"},
                                   {"type": "scholium", "subtype": "gone", "agent": "codex", "resent": True}], name
         assert c["runs"] == ["批注这篇", "AdLN的作用是什么", None], "the new session's run is the same turn"
@@ -3973,7 +3981,7 @@ def test_conversations_of_earlier_versions_and_the_history_given(facts):
     assert h["cut"] == ["ab…", "abc…", "abc"], "never half of a character that takes two"
     assert h["boundary"] == [False, True], "excerpts from the eleventh exchange on"
     a = facts["annotateAgain"]
-    assert a == {"conversations": 2, "threads": ["thread/start"], "runs": ["批注这篇"],
+    assert a == {"conversations": 2, "threads": ["thread/start", "thread/archive"], "runs": ["批注这篇"],
                  "text": "使用 zotero-scholium 技能，为下面这篇论文标注（默认整篇）：默认做重点句高亮（评论只写译文，论文本身是中文时不加评论）、页边批注和阅读笔记；本次附加要求优先于画像，画像优先于技能默认值，它们只要其中一部分时只做那部分。"}
     f = facts["handedFollowUp"]
     assert f["handed"] == ["S1", "AdLN的作用是什么", True, True] and f["resumed"] is True
@@ -3985,15 +3993,15 @@ def test_conversations_of_earlier_versions_and_the_history_given(facts):
 def test_new_and_resumed_sessions_know_the_annotations_and_turns(facts):
     a = facts["appliedConfig"]
     assert re.sub(r"\d{2}:\d{2}", "HH:MM", a["fresh"]) == (
-        "这篇论文已有 2 条本工具的批注，是 Codex 在 HH:MM 用配置 /data/tmp/scholium/c.json 写入的，这份配置就是它们的全部；问到批注的内容时读这份配置。"
+        "这篇论文已有 2 条本工具的批注，是 Codex 在 HH:MM 用配置 /data/scholium/papers/ATT1/c.json 写入的，这份配置就是它们的全部；问到批注的内容时读这份配置。"
         "要改批注或补几条时，编辑它并设 cleanup: true 整份重写（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置。")
-    assert a["applied"] == ["codex", "/data/tmp/scholium/c.json", True], "the configuration of Codex's apply, in its folder"
+    assert a["applied"] == ["codex", "/data/scholium/papers/ATT1/c.json", True], "the configuration of Codex's apply, in the paper's folder"
     edit = ("改已经写入的批注或补几条时，都编辑写入它们的那份配置（它是这篇论文的全部批注），设 cleanup: true 整份重写（阅读笔记也改时再设 "
             "note_replace: true）；不要另写只含新条目的配置，否则下次整份重写时会把它们删掉。")
     assert a["unchanged"] == [edit], "nothing changed since its last run"
     assert a["older"] == [edit], "another conversation's rewrite before this one's last run is nothing new"
     assert [re.sub(r"\d{2}:\d{2}", "HH:MM", t) for t in a["rewritten"]] == [
-        edit, "上次之后，Claude Code 在这篇论文的另一段对话里用配置 /data/tmp/scholium/ATT1/b.json 重写了批注（HH:MM）；改批注前先读这份配置，不要用你记得的版本。"]
+        edit, "上次之后，Claude Code 在这篇论文的另一段对话里用配置 /data/scholium/papers/ATT1/b.json 重写了批注（HH:MM）；改批注前先读这份配置，不要用你记得的版本。"]
     assert a["gone"] == ["这篇论文现在没有本工具的批注（可能已在 Zotero 里删除）。"]
     assert a["commands"] == ["D:\\x y\\c.json", "c.json", None, "/abs/c.json"]
     assert facts["unreachedClaude"] == {"session": None, "resumed": False, "conversations": 1,
@@ -4049,8 +4057,8 @@ def test_new_chat_and_history(facts):
     assert c["removed"] == [True] and c["files"] == 2 and c["titles"] == ["第二个问题"] and c["chat"] is None
     assert c["busy"] == {"newChat": True, "history": True, "agent": True}, "the conversations stay as they are while the paper runs"
     a = facts["archived"]
-    assert a["queued"] == '["T1"]' and a["archived"] == ["T1"] and a["left"] == ""
-    assert a["order"] == ["initialize", "initialized", "thread/archive", "thread/start"], "archived at the next Codex run"
+    assert a["queued"] == '["T1"]' and a["archived"] == ["T1", "T2"] and a["left"] == "", "the deleted conversation's, then the run's own"
+    assert a["order"][:4] == ["initialize", "initialized", "thread/archive", "thread/start"], "archived at the next Codex run"
 
 
 def test_conversations_of_a_paper_with_two_pdfs_and_hand_overs(facts):
@@ -4060,7 +4068,7 @@ def test_conversations_of_a_paper_with_two_pdfs_and_hand_overs(facts):
     assert t["rows"] == ["今天", "第一份重命名删除这段对话"], "the best PDF's conversations only; one without a line is not listed"
     assert t["after"] == ["ATT1", "claude-20261001-120000"]
     assert t["annotated"] == "ATT1", "Annotate goes to the PDF whose conversation is shown, as Send does"
-    assert facts["livePanes"] == {"shownConv": "claude-x", "shownPath": "/data/tmp/scholium/ATT1/conversations/claude-x.jsonl",
+    assert facts["livePanes"] == {"shownConv": "claude-x", "shownPath": "/data/scholium/papers/ATT1/conversations/claude-x.jsonl",
                                   "moved": "还没发的话", "left": False}
     assert facts["legacyHandOver"] == [["ATT1", "codex-run", True, False, True, "chat"], ["ATT2", None, False, True, False, "annotate"]], \
         "an earlier version's paused question has its turn in that version's log; its annotation not begun starts a session of its own"
@@ -4084,7 +4092,7 @@ def test_switching_back_goes_on_with_the_same_conversation(facts):
 
 def test_review_cases_of_the_conversations(facts):
     k = facts["appliedKept"]
-    assert k["kept"] == ["/data/tmp/scholium/ATT1/config.json", "claude"], "a write that succeeded, though the run then failed"
+    assert k["kept"] == ["/data/scholium/papers/ATT1/config.json", "claude"], "a write that succeeded, though the run then failed"
     assert k["refused"] == k["kept"][0] and k["at"] is True, "a refused write changes nothing"
     assert k["codexFailed"] is False, "nor does a Codex write whose command failed"
     assert facts["legacyFollowUp"] == [["claude-run", 2, True, "S1"]], "an earlier version's follow-up: the annotations counted, a question's conversation"
@@ -4172,7 +4180,7 @@ def test_the_log_keeps_no_image_data_nor_copies(facts):
 
 
 def test_a_relative_configuration_in_a_windows_folder(facts):
-    assert facts["windowsConfig"] == ["D:\\Zotero\\tmp\\scholium\\sub\\config.json", "D:\\Zotero\\tmp\\scholium\\other.json"]
+    assert facts["windowsConfig"] == ["D:\\Zotero\\scholium\\papers\\sub\\config.json", "D:\\Zotero\\scholium\\papers\\other.json"]
 
 
 def test_words_go_back_when_the_agent_is_not_found(facts):

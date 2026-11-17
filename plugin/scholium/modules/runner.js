@@ -5,10 +5,13 @@
  * reader side pane) starts the user's own, unmodified agent CLI in the background, signed in with the
  * user's own account; no credentials are read, nor the agent's configuration (of Codex's setup only its MCP servers'
  * names, as Codex lists them, are kept). It runs the zotero-scholium skill on one paper at a
- * time. Claude Code runs as `claude -p` with the Zotero data directory as working directory. Codex
- * runs as `codex app-server`, spoken to in JSON-RPC as llm-for-zotero does; its working directory
- * is <data dir>/tmp/scholium, and its sandbox lets it write there, to the profile folder and to the
- * skill's key folder, and reach Zotero's local server. Codex's automatic reviewer decides on anything
+ * time. Everything the plugin keeps is in <data dir>/scholium (records of each paper in papers/<key>, the profile, uv's
+ * cache), where an earlier version's <data dir>/tmp/scholium and <data dir>/zotero-scholium are moved when it starts.
+ * Each conversation runs in its own folder, papers/<key>/conversations/<conversation>, as llm-for-zotero runs Claude
+ * Code, so that its sessions stay out of the lists of the user's own projects. Claude Code runs as `claude -p`. Codex
+ * runs as `codex app-server`, spoken to in JSON-RPC as llm-for-zotero does; its sandbox lets it write in the plugin's
+ * folder and the skill's key folder, and reach Zotero's local server; its threads are archived after each run, so that
+ * the Codex app does not list them. Codex's automatic reviewer decides on anything
  * beyond that; a question that still reaches the plugin is declined, since no one is there to answer.
  * The section chooses the agent, the model, from the list the agent reports, and the effort; it
  * starts, cancels and deletes, shows the state of the paper, and shows the transcript live: the
@@ -20,7 +23,7 @@
  * the answer before it ends (a stop holds those rows until Resume). As in llm-for-zotero, each agent has its own conversations of a paper: messages and Annotate go to the
  * one chosen last (New chat, a switch of the agent, or History, which also renames and deletes), and a conversation
  * whose session the agent no longer has goes on in a new session that is given it. The section opens the
- * annotation profile (<data dir>/zotero-scholium/profile.md), which every run follows, as plain
+ * annotation profile (<data dir>/scholium/profile.md), which every run follows, as plain
  * text beside a live Markdown preview in an editor sheet over the Zotero window. The state line shows
  * the turns and tokens of a run; when the usage limit is reached, the queue waits and the interrupted
  * paper continues its conversation after the reset. The section's look is content/scholium.css,
@@ -33,7 +36,7 @@
  * pieces of a message being written and the user's message as Codex repeats it, and the plugin's own lines (the start
  * of each run, the user's words or Annotate, an edit's rewind marker, a continuation, a session the agent no longer has, the end of a run
  * without a result of its own, when a run ended), is logged to the conversation's log,
- * <data dir>/tmp/scholium/<attachment key>/conversations/<agent>-<time>.jsonl.
+ * <data dir>/scholium/papers/<attachment key>/conversations/<agent>-<time>.jsonl.
  */
 var ScholiumRunner = {
   pluginID: null,
@@ -116,7 +119,11 @@ var ScholiumRunner = {
   NOTICE_MS: 6000,
   DRAFT_MS: 80,             // the draft is set again at most this often
   MAX_RUNS_DEFAULT: 3,      // runs going on at once, until the settings choose another number (1-6)
+  ARCHIVE_MS: 5000,         // Codex's answer to an archive request is waited for this long
   MAX_ENTRIES: 3000,
+  migrating: null,          // the move of an earlier version's folders (startFolders), waited for before logs are read
+  migrateLeft: [],          // the paths it could not move
+  migrateRetry: null,
   paneID: null,
   citations: new Map(),     // attachment key -> { at, size, map } the paper's numbered sentences, as sentences.json has them;
                             // the 20 papers shown last
@@ -256,7 +263,12 @@ var ScholiumRunner = {
                       : "The PDF has no text layer (a scanned document): run OCR on it first (e.g. ocrmypdf, or Acrobat's Recognize Text), then annotate again.",
       // the setup check of the settings page: each line's name, its sentence, and its button
       checkLabel: id => ({ localApi: zh ? "本地 API" : "Local API", claude: "Claude Code", claudeSkill: zh ? "Claude Code 的技能" : "Claude Code's skill",
-                           codex: "Codex", codexSkill: zh ? "Codex 的技能" : "Codex's skill", uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,
+                           codex: "Codex", codexSkill: zh ? "Codex 的技能" : "Codex's skill", uv: "uv", python: "Python", pymupdf: "PyMuPDF",
+                           folders: zh ? "旧记录" : "Old records" })[id] || id,
+      checkFoldersLeft: (n, list) => zh ? `有 ${n} 项没有移到 scholium 文件夹：${list}。关闭占用它们的程序后重启 Zotero。`
+                                       : `Not moved to the scholium folder (${n}): ${list}. Close the programs that keep them open and restart Zotero.`,
+      codexHomeMissing: path => zh ? `设置里的 Codex 主目录不存在：${path}。改正路径，或清空以使用 ~/.codex。`
+                                   : `The Codex home folder in the settings does not exist: ${path}. Correct the path, or clear it to use ~/.codex.`,
       checkApiOn: zh ? "已打开，Scholium 通过它读取论文。" : "On; Scholium reads papers through it.",
       checkApiOff: zh ? "已关闭，Scholium 读不到论文：点“打开”，或在 设置 → 高级 里勾选“允许此计算机上的其他应用程序与 Zotero 通讯”。"
                       : "Off, so Scholium cannot read papers: press Turn on, or tick “Allow other applications on this computer to communicate with Zotero” in Settings → Advanced.",

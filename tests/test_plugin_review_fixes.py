@@ -28,9 +28,9 @@ const claudeTurn = (n, uuid, session = 'S1') => L({ type: 'scholium', subtype: '
   + L({ type: 'result', subtype: 'success', is_error: false, result: '回答' + n, session_id: session })
   + L({ type: 'scholium', subtype: 'time', at: 2000 + n });
 const CLAUDE3 = claudeTurn(1, 'u1') + claudeTurn(2, 'u2') + claudeTurn(3, 'u3');
-const CLAUDE_CONV = '/data/tmp/scholium/ATT1/conversations/claude-20261001-120000.jsonl';
-const OTHER_CONV = '/data/tmp/scholium/ATT1/conversations/claude-20261002-120000.jsonl';
-const INDEX = '/data/tmp/scholium/ATT1/conversations/index.json';
+const CLAUDE_CONV = '/data/scholium/papers/ATT1/conversations/claude-20261001-120000.jsonl';
+const OTHER_CONV = '/data/scholium/papers/ATT1/conversations/claude-20261002-120000.jsonl';
+const INDEX = '/data/scholium/papers/ATT1/conversations/index.json';
 const EXTRACT = 'python C:/skills/scholium.py extract --pdf x.pdf --sentences s.json';
 const PASSAGE = 'A passage worth asking about.';
 // the card of a paper's last annotation on its tab
@@ -232,7 +232,7 @@ const scenario = async (name, fn) => {
     const h = harness({});
     const s = c => h.runner.commandStep(c);
     return {
-      extractConfig: s('python C:/skills/scholium.py extract --config D:/Zotero/tmp/scholium/ATT1/paper.json'),
+      extractConfig: s('python C:/skills/scholium.py extract --config D:/Zotero/scholium/papers/ATT1/paper.json'),
       extractQuoted: s('python "C:/skills/scholium.py" extract --config paper.json'),
       extract: s(EXTRACT),
       list: s('python C:/skills/scholium.py --config c.json --list'),
@@ -560,7 +560,7 @@ const scenario = async (name, fn) => {
   const interrupted = (later = null) => L({ type: 'scholium', subtype: 'run', agent: 'claude', user: '问题1', at: 10000 })
     + L({ type: 'scholium', subtype: 'prompt', text: '问题1', question: true })
     + L({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S1' })
-    + tool('Read', { file_path: 'D:/Zotero/tmp/scholium/ATT1/sentences.txt' }, 't1')
+    + tool('Read', { file_path: 'D:/Zotero/scholium/papers/ATT1/sentences.txt' }, 't1')
     + answer('[1] First sentence.', false, 't1')
     + L({ type: 'scholium', subtype: 'end', outcome: 'interrupted', text: 'The run was interrupted', duration_ms: 5000 })
     + (later ? L({ type: 'scholium', subtype: 'time', at: later }) : '');

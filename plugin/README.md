@@ -53,11 +53,26 @@ skills, lists them with errors or has the skill switched off, the run ends with 
 plugin starts the installed executable unchanged and does not read its credentials; the usage counts
 toward the signed-in account.
 
+Everything the plugin keeps is in `<data dir>/scholium/`: the profile (`profile.md`), each paper's folder
+(`papers/<attachment key>/`: its configurations, sentences and conversation logs), the folder each conversation's
+agent runs in (`papers/<attachment key>/conversations/<conversation>/`, deleted with the conversation) and uv's cache
+(`cache/uv/`). When it starts, the plugin moves an earlier version's `<data dir>/tmp/scholium/` (each paper's folder
+and uv's cache) and `<data dir>/zotero-scholium/` (the profile) there, and removes them once empty; what the new
+folder already has stays, and so does the old copy of it. What cannot be moved (held open) is tried again ten seconds
+later and at the next start, and the setup check names it (**Old records**). Logs are read and runs start once the
+move is done; a log line still to be written is written at its new path.
+
+Each conversation runs in its own folder, as llm-for-zotero runs Claude Code: its Claude Code sessions are a project
+of their own, out of the lists of the user's projects (`/resume`), and its Codex threads are archived after each run,
+out of the Codex app's list.
+
 Each Claude Code run:
 
-- works in the Zotero data directory with `claude -p --output-format stream-json`, the permission
-  mode `auto`, file writes pre-approved only inside `<data dir>/tmp/scholium/`, and the skill
-  directory (`skills/zotero-scholium` in `CLAUDE_CONFIG_DIR`, else in `~/.claude`) added when it is there;
+- works in the conversation's folder with `claude -p --output-format stream-json`, the permission
+  mode `auto`, file writes pre-approved only inside `<data dir>/scholium/`, and the skill
+  directory (`skills/zotero-scholium` in `CLAUDE_CONFIG_DIR`, else in `~/.claude`) added when it is there; a session
+  that started in the data directory (before Scholium's folder) goes on there, as its log's start line names it, and so
+  does an edit's fork of it;
 - runs without the user's MCP servers and hooks (`--strict-mcp-config`, `disableAllHooks`); the
   user's skills stay;
 - has only the tools it uses (`--tools`): Skill, Bash, PowerShell, Read, Write, Edit, Grep and Glob, and in a
@@ -65,24 +80,32 @@ Each Claude Code run:
 - in an annotation and in words to its session, writes at most 32,000 tokens in one turn, its thinking included
   (`CLAUDE_CODE_MAX_OUTPUT_TOKENS`), unless the user's environment sets that variable;
 - logs its events, without the streaming deltas, to the conversation's log,
-  `<data dir>/tmp/scholium/<attachment key>/conversations/chat-<time>.jsonl` (an annotation session's
+  `<data dir>/scholium/papers/<attachment key>/conversations/chat-<time>.jsonl` (an annotation session's
   `annotate-claude-<time>.jsonl`); a tool's result is kept without
   Claude Code's own copy of it and without the data of images (the pages the agent looked at).
 
 Each Codex run:
 
-- talks to `codex app-server` over JSON-RPC, in a new thread or in the conversation's thread, with `<data dir>/tmp/scholium/` as working directory and the zotero-scholium skill
-  attached to the first message of a thread;
+- talks to `codex app-server` over JSON-RPC, in a new thread or in the conversation's thread, in the conversation's
+  folder, with the zotero-scholium skill attached to the first message of a thread;
+- archives the threads it used as it ends (`thread/archive`), whatever the end, so that the Codex app does not list
+  them, and brings the conversation's thread back first (`thread/unarchive`) when it goes on with it or forks it for an
+  edit; a thread Codex could not archive (it ended, or gave no answer in 5 s) is archived at the next Codex run
+  (preference `codexArchive`). The first Codex run of this version also archives the threads the conversations' logs
+  name, but for those of runs going on (preference `codexArchivedOld`);
+- uses the Codex home folder of the settings when it names one (`CODEX_HOME`), as llm-for-zotero does: Codex keeps the
+  plugin's threads, its sign-in and its setup there; signing in there is the user's (`codex login` with `CODEX_HOME`
+  set, which the setup check and a sign-in error give). A folder that is not there ends the run, named;
 - runs with the user's MCP servers and installed plugins switched off for the thread only; Codex's `config.toml` is
   neither changed nor read: the servers' names come from Codex's `mcpServerStatus/list`, which starts each server to
   list it. A run while no names are kept (the first Codex run) waits at most 10 s for the list; if none comes, it and
   the session's next Codex runs have the user's MCP servers until a list made in a separate Codex process after it
   names them. Later runs use the names kept in the preference `codexServers` and list them again in a separate Codex
   process after the session's first Codex run;
-- runs in Codex's `workspace-write` sandbox: commands may write only inside `<data dir>/tmp/scholium/`,
-  `<data dir>/zotero-scholium/` and `%APPDATA%/zotero-scholium/` (`~/.config/zotero-scholium/` on
+- runs in Codex's `workspace-write` sandbox: commands may write only inside `<data dir>/scholium/` and
+  `%APPDATA%/zotero-scholium/` (`~/.config/zotero-scholium/` on
   macOS and Linux), and may use the network, which the skill needs for Zotero's local server; uv's cache and the
-  Pythons it installs go to `<data dir>/tmp/scholium/uv/` (`UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`) unless these
+  Pythons it installs go to `<data dir>/scholium/cache/uv/` (`UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`) unless these
   variables are set;
 - has Codex's automatic reviewer (`auto_review`) decide on requests beyond the sandbox; a request or
   question that reaches the plugin is declined;
@@ -94,7 +117,7 @@ A line that the log file does not take at once (locked a moment by a virus scann
 with the next ones; the run goes on.
 
 Both receive the item key, the attachment key, the output directory `<data
-dir>/tmp/scholium/<attachment key>`, the file `paper.json` in it and the profile's path (or that there is none, so that the defaults apply
+dir>/scholium/papers/<attachment key>`, the file `paper.json` in it and the profile's path (or that there is none, so that the defaults apply
 and no profile is created), and are told not to ask questions or start sub-agents. Before each run the plugin writes
 `paper.json` (the PDF's path, the item and attachment keys, the output directory); the prompt names that file, not the
 PDF's path. It is the plugin's and read-only: only `extract` (in place of `--pdf`) and `--list` take it with
@@ -305,7 +328,7 @@ history and the annotation sessions are those of that PDF.
   the focus back to its button. The tabs carry `aria-selected`, and ← → Home End choose one (only the chosen one is a
   Tab stop); ↑ ↓ Home End move through the ⋯ menus and the history. The settings layer starts at the model. Focus rings
   use Zotero's accent colour; text in the accent colours has theme colours of its own that keep 4.5:1.
-- **Personal profile ↗** opens the annotation profile `<data dir>/zotero-scholium/profile.md`, which
+- **Personal profile ↗** opens the annotation profile `<data dir>/scholium/profile.md`, which
   every run follows, in an editor over the Zotero window: the Markdown text as it is on the left, and
   on the right a preview that formats it as it is typed and follows its scrolling; colour codes such
   as `#ff6666` get a dot of their colour, and links open as in a message. **Save** closes the
@@ -329,6 +352,7 @@ The Scholium page of Zotero's settings holds:
 | Runs at once | 1 to 6 | 3 |
 | Claude Code program | a path, or **Browse…** | empty: found automatically |
 | Codex program | a path, or **Browse…** | empty: found automatically |
+| Codex home folder | a folder, or **Browse…** | empty: `~/.codex` |
 
 When a program box is empty, it shows the program found, greyed, or `Not found`. When an agent's program is not found, the message points to this page.
 
@@ -342,7 +366,8 @@ not printed it after 5 s) before Zotero's, then
 Code and Codex are also looked for in their usual install folders (see the notes for plugin authors for Codex).
 
 **Setup check** lists, a line each: Zotero's local API, Claude Code and Codex (found, signed in, the skill), uv, Python
-and PyMuPDF, with a button where the plugin can fix it. The uv line gives uv's version and path, or the command that
+and PyMuPDF, with a button where the plugin can fix it; **Old records** names what of an earlier version's folders could
+not be moved into `<data dir>/scholium/`, when something could not. The uv line gives uv's version and path, or the command that
 installs it on this system; with uv, a missing or old Python or PyMuPDF is no fault, since `uv run` provides them.
 Once a check has ended, **Copy** puts its lines on the clipboard as plain text, after a line with the versions of
 Scholium and Zotero and the operating system, for a bug report.
@@ -396,6 +421,9 @@ no value of its own for. It then clears every preference of Scholium Bridge.
 | `extensions.scholium.claudeEffort` | `medium` | value of `--effort`; set in the Scholium section |
 | `extensions.scholium.claudePermissionMode` | `auto` | value of `--permission-mode` |
 | `extensions.scholium.codexPath` | the newest copy found | path of the `codex` executable; set on the settings page |
+| `extensions.scholium.codexHome` | empty (`~/.codex`) | the Codex home folder of the plugin's Codex processes (`CODEX_HOME`); set on the settings page |
+| `extensions.scholium.codexArchive` | empty | the Codex threads still to be archived at the next Codex run |
+| `extensions.scholium.codexArchivedOld` | empty | set once the threads of earlier versions' runs are archived |
 | `extensions.scholium.codexModel` | empty (Codex's default) | Codex model; set in the Scholium section |
 | `extensions.scholium.codexEffort` | `medium` | Codex reasoning effort; set in the Scholium section |
 | `extensions.scholium.codexServers` | empty (listed at the first Codex run) | the names of the user's Codex MCP servers, switched off in each Codex thread, as `mcpServerStatus/list` gave them; renewed after the first Codex run of each Zotero session |
@@ -414,7 +442,7 @@ restored. Annotations and notes without that tag are kept; a paper with an attac
 or queued is left alone, notes included; messages held after a stop do not count. The outcome shows on the
 Annotations tab's state line.
 The deletion syncs like any deletion in Zotero. The configuration of an earlier run stays in
-`<data dir>/tmp/scholium/<attachment key>/config.json`; applying it with the skill's script writes the
+`<data dir>/scholium/papers/<attachment key>/config.json`; applying it with the skill's script writes the
 annotations again.
 
 ## Write endpoints
@@ -472,6 +500,7 @@ this order, and those after `runner.js` add their methods to `ScholiumRunner`:
 | `endpoints.js` | `ScholiumEndpoints`: the write endpoints and their token |
 | `toggle.js` | `ScholiumToggle`: the reader toggle |
 | `runner.js` | `ScholiumRunner`: its state and constants, the log, the languages and the section's texts in English and Simplified Chinese |
+| `folders.js` | the plugin's folder `<data dir>/scholium/` and the moves of an earlier version's folders into it |
 | `setup.js` | the preferences, the agent, model and effort chosen, finding Claude Code, Codex, uv and Python, installing the skill, the setup check |
 | `prompts.js` | a paper's PDF, key and library, the prompts, the agents' arguments, `paper.json` and `applied.json`, the words of the steps |
 | `section.js` | the items list's menu, log events as display entries, the Scholium section's frame, layers and settings chip, the profile editor, Markdown and formulas, citations and links |
@@ -511,7 +540,7 @@ renamed with each update), in the native binary inside npm's `@openai/codex` pac
 is a `.cmd` shim, which cannot be started without a shell), in Cargo's and Homebrew's folders, and
 on PATH; of the copies found, the one reporting the newest version is used, since an older Codex may
 not read a `config.toml` written by a newer one. A project skill in `<data dir>/.agents/skills/` is
-not seen from `<data dir>/tmp/scholium/`, so it is added for the thread with `skills/extraRoots/set`,
+not seen from the conversation's folder, so it is added for the thread with `skills/extraRoots/set`,
 which does not change Codex's configuration.
 
 The `init` method of an endpoint class must declare exactly one parameter. Zotero's server inspects

@@ -9,6 +9,7 @@ Object.assign(ScholiumRunner, {
   },
 
   async runJob(job) {
+    await this.settled();
     const started = Date.now();
     const key = this.keyOf(job.att);
     if (job.conv) {
@@ -391,6 +392,7 @@ Object.assign(ScholiumRunner, {
   },
 
   async retryLogs() {
+    await this.settled();
     for (const path of [...this.pendingLogs.keys()]) await this.flushLog(path);
     if ([...this.pendingLogs.values()].some(p => !p.held)) this.scheduleLogRetry();
     if (!this.stopped) this.refresh();
@@ -659,6 +661,22 @@ Object.assign(ScholiumRunner, {
     return { SCHOLIUM_PLUGIN_RUN: "1", SCHOLIUM_HELD_BACK: this.heldPath(ctx.key, ctx.job.conv), SCHOLIUM_CONFIRMED: confirmed.join(";") };
   },
 
+  // the folder Claude Code runs in: the conversation's own (workDir); a session that started elsewhere (before the
+  // plugin's folder, in the data directory) goes on there, since Claude Code keeps a session with its folder, and so
+  // does an edit's fork of it
+  async claudeDir(ctx) {
+    const { job, key } = ctx;
+    if (job.resume) {
+      const log = job.conv ? await this.readLog(key, job.conv) : null;
+      const at = log && log.cwds ? log.cwds[job.resume] : null;
+      if (!at) return Zotero.DataDirectory.dir;
+      if (!this.inside(this.root(), at)) return at;
+    }
+    const dir = this.workDir(key, job.conv);
+    await IOUtils.makeDirectory(dir, { createAncestors: true, ignoreExisting: true });
+    return dir;
+  },
+
   // Claude Code: `claude -p` with the prompt on stdin and its stream-json events on stdout
   async runClaude(claude, ctx) {
     const { job, key } = ctx;
@@ -667,8 +685,9 @@ Object.assign(ScholiumRunner, {
     // a turn of an annotation or of words to its session writes at most MAX_OUTPUT_TOKENS, its thinking included, unless
     // the user's environment sets the limit
     if ((job.kind === "annotate" || ctx.running.annotation) && !this.env("CLAUDE_CODE_MAX_OUTPUT_TOKENS")) env.environment.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(this.MAX_OUTPUT_TOKENS);
+    ctx.cwd = await this.claudeDir(ctx);
     const proc = await this.subprocess().call(Object.assign({
-      command: claude, arguments: await this.args(job), workdir: Zotero.DataDirectory.dir, stderr: "pipe",
+      command: claude, arguments: await this.args(job), workdir: ctx.cwd, stderr: "pipe",
     }, env));
     if (!this.alive(ctx.running) || ctx.running.stopAsked) {   // the plugin stopped, or ■, while the process was being created
       try { proc.kill(); } catch (e) {}
@@ -734,7 +753,7 @@ Object.assign(ScholiumRunner, {
             const applied = event.type === "user" && c && c.type === "tool_result" && ctx.applies[c.tool_use_id];
             if (applied && this.wrote(c.content, !c.is_error)) {
               ctx.wrote = true;
-              await this.noteApplied(key, applied, "claude", job.conv, Zotero.DataDirectory.dir);
+              await this.noteApplied(key, applied, "claude", job.conv, ctx.cwd || Zotero.DataDirectory.dir);
             }
           }
           // the skills Claude Code loaded: without this one the run would only look for it
@@ -799,6 +818,8 @@ Object.assign(ScholiumRunner, {
     const rpc = { proc, next: 1, pending: new Map(), stderr: "" };
     const send = msg => proc.stdin.write(JSON.stringify(msg) + "\n");
     rpc.request = (method, params) => new Promise((resolve, reject) => {
+      // a server that has ended answers nothing more
+      if (rpc.ended) { reject(rpc.ended); return; }
       const id = rpc.next++;
       rpc.pending.set(id, { resolve, reject });
       send({ method, id, params }).catch(e => { rpc.pending.delete(id); reject(e); });
@@ -847,7 +868,8 @@ Object.assign(ScholiumRunner, {
       } finally {
         await errors;
         const tail = rpc.stderr.trim().split("\n").pop() || "";
-        for (const waiting of rpc.pending.values()) waiting.reject(failure || new Error(this.text("codexExited", tail)));
+        rpc.ended = failure || new Error(this.text("codexExited", tail));
+        for (const waiting of rpc.pending.values()) waiting.reject(rpc.ended);
         rpc.pending.clear();
       }
       if (failure) throw failure;
@@ -933,6 +955,44 @@ Object.assign(ScholiumRunner, {
       left = Array.isArray(left) ? left.filter(id => id !== threadId) : [];
       try { Zotero.Prefs.set(this.pref + "codexArchive", left.length ? JSON.stringify(left) : "", true); } catch (e) {}
     }
+  },
+
+  // a thread archived after its last run, back for this one; one that is not archived Codex refuses, and it goes on
+  async codexUnarchive(rpc, threadId) {
+    try { await rpc.request("thread/unarchive", { threadId }); }
+    catch (e) { if (!(e && e.refused)) throw e; }
+  },
+
+  // the threads of a run archived as it ends, so that the Codex app does not list them; those Codex did not answer for
+  // (it ended, or took too long) wait for the next run (queueArchive); one it refuses (gone, archived) is left
+  async codexArchiveNow(rpc, ids) {
+    for (const threadId of ids) {
+      try { await this.within(rpc.request("thread/archive", { threadId }), this.ARCHIVE_MS); }
+      catch (e) {
+        if (e && e.refused) this.log("thread not archived: " + e);
+        else this.queueArchive(threadId);
+      }
+    }
+  },
+
+  // once: the Codex threads the logs of the plugin's conversations name, which runs before this version left in the Codex
+  // app's list, archived but for those of runs going on; when Codex stops answering, the next run goes on with it
+  async archiveOldThreads(rpc) {
+    if (this.getPref("codexArchivedOld")) return;
+    const busy = new Set([...this.runs.values()].filter(r => !r.gone && r.agent === "codex" && r.session).map(r => r.session));
+    const ids = new Set();
+    for (const paper of await this.children(PathUtils.join(this.root(), "papers"))) {
+      const logs = (await this.children(PathUtils.join(paper, "conversations"))).concat(await this.children(paper));
+      for (const path of logs) {
+        if (!/\.jsonl$/.test(path)) continue;
+        try { for (const id of this.codexThreads(await IOUtils.readUTF8(path))) if (!busy.has(id)) ids.add(id); } catch (e) {}
+      }
+    }
+    for (const threadId of ids) {
+      try { await this.within(rpc.request("thread/archive", { threadId }), this.ARCHIVE_MS); }
+      catch (e) { if (!(e && e.refused)) throw e; }
+    }
+    try { Zotero.Prefs.set(this.pref + "codexArchivedOld", "1", true); } catch (e) { this.log("preference not saved: " + e); }
   },
 
   // the zotero-scholium skill as Codex sees it from the working directory; a project skill of the
@@ -1084,11 +1144,10 @@ Object.assign(ScholiumRunner, {
     }
   },
 
-  // where a Codex turn may write: the output folders, the profile folder, and the folder of the local
+  // where a Codex turn may write: the plugin's folder (records, profile, working directories), and the folder of the local
   // API key that scholium.py keeps (%APPDATA% or ~/.config); it may reach Zotero's local server
   codexRoots() {
-    const data = Zotero.DataDirectory.dir;
-    const roots = [PathUtils.join(data, "tmp", "scholium"), PathUtils.join(data, "zotero-scholium")];
+    const roots = [this.root()];
     const config = this.env("APPDATA") || (this.home() ? PathUtils.join(this.home(), ".config") : "");
     if (config) roots.push(PathUtils.join(config, "zotero-scholium"));
     return roots;
@@ -1108,14 +1167,24 @@ Object.assign(ScholiumRunner, {
   },
 
   // Codex: one turn of a conversation through `codex app-server`, in a new thread or in its thread of the
-  // paper's conversation, with <data dir>/tmp/scholium as working directory; the turn's end becomes a result
+  // paper's conversation, in the conversation's own folder (workDir); the turn's end becomes a result
   // in Claude Code's form, so that the log, the state line and a later history read alike
   async runCodex(codex, ctx) {
     const { job, key } = ctx;
     const roots = this.codexRoots();
     for (const root of roots) await IOUtils.makeDirectory(root, { createAncestors: true, ignoreExisting: true });
-    const cwd = roots[0];
-    const state = { thread: null, turn: null, done: null, text: "", base: null, usage: null, calls: 0, limits: null, timer: null };
+    const cwd = this.workDir(key, job.conv);
+    await IOUtils.makeDirectory(cwd, { createAncestors: true, ignoreExisting: true });
+    // the Codex home folder of the settings must be there: Codex would make an empty one, signed in to nothing
+    const home = this.codexHome();
+    if (home && !(await this.isFolder(home))) {
+      ctx.current = { key, proc: null, cancelled: false };
+      ctx.exitCode = 1;
+      ctx.failure = this.text("codexHomeMissing", home);
+      return;
+    }
+    const state = { thread: null, turn: null, done: null, text: "", base: null, usage: null, calls: 0, limits: null, timer: null,
+                    used: new Set() };   // the threads the run opened, archived when it ends
     let ended;
     const over = new Promise(resolve => { ended = resolve; });
     const counts = ["inputTokens", "cachedInputTokens", "cacheWriteInputTokens", "outputTokens"];
@@ -1176,7 +1245,7 @@ Object.assign(ScholiumRunner, {
     this.refresh();
     try {
       await this.codexHello(rpc);
-      if (await this.codexSignedOut(rpc)) throw new Error(this.text("notSignedIn", "codex"));
+      if (await this.codexSignedOut(rpc)) throw new Error(this.codexLogin(this.text("notSignedIn", "codex")));
       await this.archiveThreads(rpc);
       const model = this.modelPref("codex");
       const settings = { cwd, approvalPolicy: "on-request", approvalsReviewer: "auto_review", sandbox: "workspace-write",
@@ -1198,6 +1267,9 @@ Object.assign(ScholiumRunner, {
         // the turns stay with the server: a long conversation is not sent back whole
         const fork = job.rewind && job.rewind.turnId;
         try {
+          // the thread was archived after its last run: it comes back for this one
+          await this.codexUnarchive(rpc, job.resume);
+          state.used.add(job.resume);
           opened = fork ? await this.codexOpen(rpc, "thread/fork", Object.assign({ threadId: job.resume, lastTurnId: fork, excludeTurns: true }, settings))
                         : await this.codexOpen(rpc, "thread/resume", Object.assign({ threadId: job.resume, excludeTurns: true }, settings));
         }
@@ -1208,6 +1280,7 @@ Object.assign(ScholiumRunner, {
       }
       const thread = opened && opened.thread && opened.thread.id;
       if (!thread) throw new Error(this.text("noThread"));
+      state.used.add(thread);
       state.thread = ctx.session = ctx.running.session = thread;
       // the start of a run, as Claude Code's log has it: the model and the conversation
       const init = { type: "system", subtype: "init", agent: "codex", model: (opened && opened.model) || model, session_id: thread };
@@ -1257,6 +1330,9 @@ Object.assign(ScholiumRunner, {
       this.log("codex run failed: " + failure);
     } finally {
       clearTimeout(state.timer);
+      // the run's threads leave the Codex app's list, and once, those of earlier versions' runs
+      if (state.used.size) await this.codexArchiveNow(rpc, [...state.used]);
+      await this.archiveOldThreads(rpc).catch(e => this.log("old threads not archived: " + e));
       rpc.close();
       await rpc.done.catch(() => {});
       // the servers named from an earlier session, or not at all: listed again now, off the run's path
@@ -1513,6 +1589,7 @@ Object.assign(ScholiumRunner, {
           pendingLog: path });
       }
     }
+    this.startFolders();
     if (this.pendingLogs.size) this.scheduleLogRetry();
     this.registerPane(pluginID);
     try {
@@ -1575,6 +1652,7 @@ Object.assign(ScholiumRunner, {
 
   // the papers an update interrupted (carryOver), queued again once
   async restoreQueue() {
+    await this.settled();
     const raw = this.getPref("carryOver");
     if (!raw) return;
     try { Zotero.Prefs.set(this.pref + "carryOver", "", true); } catch (e) {}
@@ -1659,6 +1737,8 @@ Object.assign(ScholiumRunner, {
     for (const path of [...this.deleting.keys()]) this.finishDelete(path).catch(() => {});
     if (update) this.carryOver(running);
     clearTimeout(this.restoreTimer);
+    clearTimeout(this.migrateRetry);
+    this.migrateRetry = null;
     if (this.editor) this.closeProfile(this.editor, false);
     for (const agent of this.AGENTS) this.endPause(agent);
     this.paused = null;

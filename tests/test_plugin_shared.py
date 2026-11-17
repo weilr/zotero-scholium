@@ -9,7 +9,7 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for pl
 
 SCENARIOS = r"""
 const L = o => JSON.stringify(o) + '\n';
-const DIR = '/data/tmp/scholium/ATT1/conversations/';
+const DIR = '/data/scholium/papers/ATT1/conversations/';
 // a turn of Claude Code as the plugin logs it: its run line, its words, the answer (its uuid and usage given), the result
 // and the end time
 const claudeTurn = (n, uuid, session = 'S1', at = 1000 + n) => L({ type: 'scholium', subtype: 'run', agent: 'claude', user: '问题' + n, at })
@@ -72,7 +72,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
       [DIR + 'codex-20261001-120000.jsonl']: codexTurn(1, 'K1') + codexTurn(2, 'K2') + L({ type: 'scholium', subtype: 'rewind', point: { turnId: 'K1' } }),
       [DIR + 'claude-20261001-120000.jsonl']: claudeTurn(1, 'u1') + claudeTurn(2, 'u2') + L({ type: 'scholium', subtype: 'rewind', point: null }),
       // a log of an earlier version without run lines is its agent's
-      '/data/tmp/scholium/ATT1/codex-run.jsonl': L({ type: 'scholium', subtype: 'prompt', text: '旧问题', question: true })
+      '/data/scholium/papers/ATT1/codex-run.jsonl': L({ type: 'scholium', subtype: 'prompt', text: '旧问题', question: true })
         + L({ type: 'system', subtype: 'init', agent: 'codex', model: 'gpt-6-luna', session_id: 'T0' })
         + L({ method: 'turn/started', params: { threadId: 'T0', turn: { id: 'K0', status: 'inProgress' } } })
         + L({ type: 'result', agent: 'codex', subtype: 'success', is_error: false, result: '旧回答', session_id: 'T0' }) } });
@@ -107,10 +107,10 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
       [DIR + 'claude-20261001-120000.jsonl']: claudeTurn(1, 'u1'),
       [DIR + 'codex-20261002-120000.jsonl']: codexTurn(1, 'K1'),
       [DIR + 'annotate-claude-20261003-120000.jsonl']: claudeTurn(1, 'u9'),
-      '/data/tmp/scholium/ATT1/claude-run.jsonl': claudeTurn(1, 'u0'),
+      '/data/scholium/papers/ATT1/claude-run.jsonl': claudeTurn(1, 'u0'),
       [DIR + 'index.json']: JSON.stringify({ current: { codex: 'codex-20261002-120000', claude: null }, titles: {}, annotation: {} }) },
       logTimes: { [DIR + 'claude-20261001-120000.jsonl']: 3000, [DIR + 'codex-20261002-120000.jsonl']: 2000,
-                  '/data/tmp/scholium/ATT1/claude-run.jsonl': 1000 } });
+                  '/data/scholium/papers/ATT1/claude-run.jsonl': 1000 } });
     h.runner.start('x');
     const list = (await h.runner.conversations('ATT1')).map(c => c.id);
     h.runner.choose('agent', 'codex');
@@ -250,7 +250,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
     const gp = await g.pane(g.item1); await settle(40);
     const gprompt = (await g.runner.readLog('ATT1', conv)).entries.find(e => e.kind === 'prompt' && e.turn === 1);
     await g.runner.editTurn(gp.pane(), gprompt, '新问题二'); await settle(600);
-    const sent = g.log.codexProcs.flatMap(c => c.sent).filter(m => typeof m.method === 'string' && /^thread\//.test(m.method))
+    const sent = g.log.codexProcs.flatMap(c => c.sent).filter(m => typeof m.method === 'string' && /^thread\/(start|resume|fork)$/.test(m.method))
       .map(m => [m.method, m.params.threadId || null, m.params.lastTurnId || null]);
     const gmarker = convLines(g).filter(l => l.subtype === 'rewind');
     await g.runner.undoReplace('ATT1/' + conv); await settle(100);
@@ -377,7 +377,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
     facts.ownRewrite = {};
     for (const edited of [false, true]) {
       const h = harness({ prefs: { 'extensions.scholium.agent': edited ? 'codex' : 'claude' },
-                          logs: { [DIR + conv + '.jsonl']: log, [DIR + 'index.json']: IDX, '/data/tmp/scholium/ATT1/applied.json': JSON.stringify(applied) },
+                          logs: { [DIR + conv + '.jsonl']: log, [DIR + 'index.json']: IDX, '/data/scholium/papers/ATT1/applied.json': JSON.stringify(applied) },
                           scripts: [answered('S1', '答四')], codex: { scripts: [codexSays('Codex 答')] } });
       h.runner.start('x');
       h.att1.getAnnotations = () => [h.ann('A1', 'highlight', '#ff6666')];
@@ -409,7 +409,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
     for (const [name, log] of [['ends', base + cut3(false)], ['followed', base + cut3(false) + codexTurn(4, 'K4', 'T1', 4000)],
                                ['endLine', base + cut3(true)]]) {
       const h = harness({ prefs: { 'extensions.scholium.agent': 'claude' },
-                          logs: { [DIR + conv + '.jsonl']: log, [DIR + 'index.json']: IDX, '/data/tmp/scholium/ATT1/applied.json': JSON.stringify(applied) },
+                          logs: { [DIR + conv + '.jsonl']: log, [DIR + 'index.json']: IDX, '/data/scholium/papers/ATT1/applied.json': JSON.stringify(applied) },
                           scripts: [answered('S1', '答')] });
       h.runner.start('x');
       h.att1.getAnnotations = () => [h.ann('A1', 'highlight', '#ff6666')];
@@ -565,7 +565,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
     for (let n = 1; n <= 12; n++) log += codexTurn(n, 'K' + n, 'T1');
     const mixed = claudeTurn(1, 'u1', 'S1') + codexTurn(2, 'K2', 'T1');
     const h = harness({ logs: { [DIR + conv + '.jsonl']: mixed, [DIR + 'index.json']: JSON.stringify({ chat: conv, titles: {}, annotation: {} }),
-                                '/data/tmp/scholium/ATT2/conversations/chat-20261101-120000.jsonl': log } });
+                                '/data/scholium/papers/ATT2/conversations/chat-20261101-120000.jsonl': log } });
     h.runner.start('x');
     const r = h.runner;
     const turns = (await r.readLog('ATT1', conv)).turns;
@@ -586,7 +586,7 @@ const codexSays = text => [note('turn/started', { threadId: 'T1', turn: { id: 'T
     for (const [name, agent, where] of [['codexHere', 'codex', conv], ['claudeHere', 'claude', conv], ['codexElsewhere', 'codex', 'chat-20261001-090000']]) {
       const h = harness({ logs: { [DIR + conv + '.jsonl']: claudeTurn(1, 'u1', 'S1') + codexTurn(2, 'K2', 'T1'),
                                   [DIR + 'index.json']: JSON.stringify({ chat: conv, titles: {}, annotation: {} }),
-                                  '/data/tmp/scholium/ATT1/applied.json': JSON.stringify({ config: 'D:/out/config.json', agent, conv: where, at: 1500 }) },
+                                  '/data/scholium/papers/ATT1/applied.json': JSON.stringify({ config: 'D:/out/config.json', agent, conv: where, at: 1500 }) },
                           scripts: [answered('S1', '答三')] });
       h.runner.start('x');
       h.att1.getAnnotations = () => [h.ann('A1', 'highlight', '#ff6666')];
@@ -751,7 +751,7 @@ def facts(tmp_path_factory):
 
 def test_each_agent_has_its_own_session_of_a_conversation(facts):
     a = facts["agents"]
-    assert a["keys"] == ["agents", "entries", "id", "papers", "path", "question", "result", "turns"]
+    assert a["keys"] == ["agents", "cwds", "entries", "id", "papers", "path", "question", "result", "turns"]
     m = a["mix"]
     assert m["claude"] == {"session": "S1", "through": 2, "point": {"uuid": "u3"}, "rewind": None, "used": 31, "lastAt": 1003}
     assert m["codex"] == {"session": "T1", "through": 1, "point": {"turnId": "K2"}, "rewind": None, "used": 1000, "lastAt": 1002}

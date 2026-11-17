@@ -6,7 +6,7 @@ from plugin_harness import NODE, run_scenarios
 pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 
 SCENARIOS = r"""
-const path = '/data/tmp/scholium/ATT1/conversations/codex-20261001-120000.jsonl';
+const path = '/data/scholium/papers/ATT1/conversations/codex-20261001-120000.jsonl';
 const conv = 'codex-20261001-120000';
 const previous = [
   { type: 'scholium', subtype: 'run', agent: 'codex', user: 'First question', at: 1001 },

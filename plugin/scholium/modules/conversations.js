@@ -384,6 +384,7 @@ Object.assign(ScholiumRunner, {
   // version; titles: { id: title }; annotation: { agent: its latest annotation session } }. An index that is there but
   // cannot be read is not written over: this session's choices stay in memory.
   async index(key) {
+    await this.settled();
     if (this.indexes.has(key)) return this.indexes.get(key);
     const index = { current: {}, titles: {}, annotation: {} };
     try {
@@ -417,6 +418,7 @@ Object.assign(ScholiumRunner, {
   // the paper's conversations that hold something, newest first: [{ key, id, path, at }]; one deleted a moment ago is
   // left out
   async conversations(key) {
+    await this.settled();
     const conv = async (id, path) => {
       if (this.deleting.has(path)) return null;
       try {
@@ -499,6 +501,7 @@ Object.assign(ScholiumRunner, {
   // without a log
   async readLog(key, id) {
     if (!id) return null;
+    await this.settled();
     const path = this.convPath(key, id);
     const pending = this.pendingLogs.get(path);
     if (pending && pending.flushing) await pending.flushing;
@@ -529,7 +532,7 @@ Object.assign(ScholiumRunner, {
     const turns = log.turns.map(t => Object.assign({}, t, { points: Object.assign({}, t.points), sessions: Object.assign({}, t.sessions) }));
     return { entries: log.entries.slice(), turns,
              result: log.result, question: log.question, agents: { claude: copy(log.agents.claude), codex: copy(log.agents.codex) },
-             papers: (log.papers || []).map(r => Object.assign({}, r)), path, id };
+             papers: (log.papers || []).map(r => Object.assign({}, r)), cwds: Object.assign({}, log.cwds), path, id };
   },
 
   // what readLog gives of a log, read once; null when it cannot be read. agent: whose the runs of a log without run
@@ -547,6 +550,7 @@ Object.assign(ScholiumRunner, {
     // agent answered again since (Infinity: none)
     const blank = () => ({ session: null, through: -1, point: null, rewind: null, context: null, lastAt: 0, lastEnd: 0, stale: Infinity });
     const agents = { claude: blank(), codex: blank() };
+    const cwds = {};   // the folder each session started in, as its start line names it
     let by = own(agent) || "claude";   // the agent of the run read
     // a log of an earlier version starts with an annotation unless the user's words come first; a run's session, and its
     // turn, count once the message reached the agent
@@ -635,6 +639,8 @@ Object.assign(ScholiumRunner, {
         timed = true;
         me.lastEnd = runAt + event.duration_ms;
       }
+      if (event.type === "system" && event.subtype === "init" && typeof event.session_id === "string" && typeof event.cwd === "string"
+          && event.cwd && !cwds[event.session_id]) cwds[event.session_id] = event.cwd;
       if (typeof event.session_id === "string" && event.session_id) {
         pending = event.session_id;
         if (reached) me.session = pending;
@@ -692,9 +698,10 @@ Object.assign(ScholiumRunner, {
     if (runMine && !timed) agents[by].lastEnd = Infinity;
     // stale: null when no turn it saw was answered again by another agent
     const out = a => ({ session: a.session, through: a.through, point: a.point, rewind: a.rewind ? a.rewind.point : null,
-                        context: a.context, lastAt: a.lastAt, lastEnd: a.lastEnd, stale: a.stale === Infinity ? null : a.stale });
+                        context: a.context, lastAt: a.lastAt, lastEnd: a.lastEnd, stale: a.stale === Infinity ? null : a.stale,
+                        cwd: (a.session && cwds[a.session]) || null });
     return { entries: entries.slice(-this.MAX_ENTRIES), turns, result, question, agents: { claude: out(agents.claude), codex: out(agents.codex) },
-             papers: papers || [] };
+             papers: papers || [], cwds };
   },
 
   // the error lines of the latest run, which a new session took over: they leave the entries
@@ -1409,6 +1416,12 @@ Object.assign(ScholiumRunner, {
       return;
     }
     this.parsedLogs.delete(path);
+    // the folder the conversation's agent ran in goes with it
+    const work = this.workDir(entry.key, entry.id);
+    if (await this.isFolder(work)) {
+      try { await IOUtils.remove(work, { recursive: true, ignoreAbsent: true }); }
+      catch (e) { this.log("conversation folder not deleted: " + e); }
+    }
     const index = await this.index(entry.key);
     delete index.titles[entry.id];
     if (index.chat === entry.id) index.chat = null;

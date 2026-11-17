@@ -12,7 +12,7 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for pl
 
 SCENARIOS = r"""
 const L = o => JSON.stringify(o) + '\n';
-const DIR = '/data/tmp/scholium/ATT1/conversations/';
+const DIR = '/data/scholium/papers/ATT1/conversations/';
 const turn = (n, at) => L({ type: 'scholium', subtype: 'run', agent: 'claude', user: '问题' + n, at })
   + L({ type: 'scholium', subtype: 'prompt', text: '问题' + n, question: true })
   + L({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S' + n })

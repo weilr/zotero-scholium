@@ -32,7 +32,9 @@ var texts = h => {
     noTextLayer: "El PDF no tiene capa de texto (es un documento escaneado): aplíquele primero OCR (p. ej., ocrmypdf o «Reconocer texto» de Acrobat) y vuelva a anotarlo.",
     // the setup check of the settings page: each line's name, its sentence, and its button
     checkLabel: id => ({ localApi: "API local", claude: "Claude Code", claudeSkill: "Habilidad de Claude Code",
-                         codex: "Codex", codexSkill: "Habilidad de Codex", uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,
+                         codex: "Codex", codexSkill: "Habilidad de Codex", uv: "uv", python: "Python", pymupdf: "PyMuPDF" , folders: "Datos antiguos"})[id] || id,
+    checkFoldersLeft: (n, list) => `No se movieron a la carpeta scholium (${n}): ${list}. Cierre los programas que los mantienen abiertos y reinicie Zotero.`,
+    codexHomeMissing: path => `La carpeta principal de Codex de la configuración no existe: ${path}. Corrija la ruta o déjela vacía para usar ~/.codex.`,
     checkApiOn: "Activada; Scholium lee los artículos a través de ella.",
     checkApiOff: "Desactivada, así que Scholium no puede leer los artículos: pulse Activar, o marque «Permitir que otras aplicaciones de este equipo se comuniquen con Zotero» en Ajustes → Avanzadas.",
     checkTurnOn: "Activar",

@@ -11,8 +11,8 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for pl
 SCENARIOS = r"""
 (async () => {
   const facts = {};
-  const DIR = '/data/tmp/scholium/ATT1/conversations/';
-  const annotLogs = (h, key = 'ATT1') => Object.keys(h.log.writes).filter(k => k.startsWith(`/data/tmp/scholium/${key}/conversations/annotate-`));
+  const DIR = '/data/scholium/papers/ATT1/conversations/';
+  const annotLogs = (h, key = 'ATT1') => Object.keys(h.log.writes).filter(k => k.startsWith(`/data/scholium/papers/${key}/conversations/annotate-`));
   const idOf = path => path.split('/').pop().slice(0, -'.jsonl'.length);
   // an annotation session logged before, as the paper's index names it
   const SESSION = 'annotate-claude-20261030-101010';
@@ -41,7 +41,7 @@ SCENARIOS = r"""
     const chatBefore = h.log.writes[CONV1];
     pane.tabAnnotate.click(); await settle(10);
     pane.annotGo.click(); await settle(600);
-    const dir = '/data/tmp/scholium/ATT1/conversations/';
+    const dir = '/data/scholium/papers/ATT1/conversations/';
     const annotPath = Object.keys(h.log.writes).find(k => k.startsWith(dir + 'annotate-'));
     const annotConv = annotPath && annotPath.slice(dir.length, -'.jsonl'.length);
     const index = JSON.parse(h.log.writes[dir + 'index.json']);
@@ -581,7 +581,7 @@ SCENARIOS = r"""
   // no annotation session yet, but an earlier version wrote the paper's annotations: when, and by which agent
   {
     const at = new Date(2026, 9, 24, 10, 0).getTime();
-    const h = harness({ logs: { '/data/tmp/scholium/ATT1/applied.json': JSON.stringify({ config: 'D:/x/config.json', agent: 'claude', conv: 'claude-run', at }) } });
+    const h = harness({ logs: { '/data/scholium/papers/ATT1/applied.json': JSON.stringify({ config: 'D:/x/config.json', agent: 'claude', conv: 'claude-run', at }) } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
@@ -593,7 +593,7 @@ SCENARIOS = r"""
   {
     const ending = text => [said(text), ev({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: 'S1', num_turns: 3 })];
     const out = {};
-    for (const [name, text, logs] of [['core', 'Done.\n' + SUMMARY, { '/data/c.json': JSON.stringify({ core_color: '#FFD400' }) }],
+    for (const [name, text, logs] of [['core', 'Done.\n' + SUMMARY, { '/data/scholium/papers/ATT1/c.json': JSON.stringify({ core_color: '#FFD400' }) }],
                                       ['english', 'Done. 30 highlights; remaining warnings: style_warnings: 2', {}],
                                       ['silent', 'Done.', {}],
                                       ['unplaced', 'Done.\n高亮 30 条，剩余警告：无法定位 2 句', {}],

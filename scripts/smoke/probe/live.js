@@ -360,7 +360,10 @@ async function main() {
   });
 
   await step("logs", async () => {
-    for (const f of await IOUtils.getChildren(r.convDir(D.att.key)).catch(() => [])) await IOUtils.copy(f, PathUtils.join(OUT, "conv-" + PathUtils.filename(f)));
+    // the logs and the index; each conversation's working folder stays
+    for (const f of await IOUtils.getChildren(r.convDir(D.att.key)).catch(() => [])) {
+      if (/\.jsonl?$/.test(f)) await IOUtils.copy(f, PathUtils.join(OUT, "conv-" + PathUtils.filename(f)));
+    }
   });
   return finish();
 }

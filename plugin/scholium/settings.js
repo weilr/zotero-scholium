@@ -1,10 +1,10 @@
 // the Scholium page of Zotero's settings: the buttons that choose an agent's program, and the setup check
 {
-  const browse = async (pref, title) => {
+  const browse = async (pref, title, folder = false) => {
     const { FilePicker } = ChromeUtils.importESModule("chrome://zotero/content/modules/filePicker.mjs");
     const fp = new FilePicker();
-    fp.init(window, document.l10n ? await document.l10n.formatValue(title) : "", fp.modeOpen);
-    fp.appendFilters(fp.filterAll);   // the claude and codex executables are no app bundles
+    fp.init(window, document.l10n ? await document.l10n.formatValue(title) : "", folder ? fp.modeGetFolder : fp.modeOpen);
+    if (!folder) fp.appendFilters(fp.filterAll);   // the claude and codex executables are no app bundles
     if (await fp.show() === fp.returnOK) Zotero.Prefs.set("extensions.scholium." + pref, fp.file, true);
   };
   // the setup check: a line per check as it ends (its mark, its name, a sentence, and its action's button); an action
@@ -105,6 +105,7 @@
   const wire = () => {
     document.getElementById("scholium-claude-browse")?.addEventListener("command", () => { browse("claudePath", "scholium-settings-claude"); });
     document.getElementById("scholium-codex-browse")?.addEventListener("command", () => { browse("codexPath", "scholium-settings-codex"); });
+    document.getElementById("scholium-codex-home-browse")?.addEventListener("command", () => { browse("codexHome", "scholium-settings-codex-home", true); });
     const plugin = typeof Zotero !== "undefined" ? Zotero.Scholium : null;
     if (plugin && plugin.setupCheck) document.getElementById("scholium-check-run")?.addEventListener("command", () => { check(); });
     if (plugin && plugin.copy) document.getElementById("scholium-check-copy")?.addEventListener("command", () => { copyLines(); });

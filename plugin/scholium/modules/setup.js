@@ -120,12 +120,25 @@ Object.assign(ScholiumRunner, {
     return this.env("USERPROFILE") || this.env("HOME");
   },
 
-  // the agent's folder of the user's own skills: Claude Code's (CLAUDE_CONFIG_DIR when set), Codex's (CODEX_HOME when set)
+  // the agent's folder of the user's own skills: Claude Code's (CLAUDE_CONFIG_DIR when set), Codex's (the Codex home
+  // folder of the settings, else CODEX_HOME when set)
   skillsDir(agent) {
     const home = this.home();
-    const base = agent === "codex" ? this.env("CODEX_HOME") || (home ? PathUtils.join(home, ".codex") : "")
+    const base = agent === "codex" ? this.codexHome() || this.env("CODEX_HOME") || (home ? PathUtils.join(home, ".codex") : "")
       : this.env("CLAUDE_CONFIG_DIR") || (home ? PathUtils.join(home, ".claude") : "");
     return base ? PathUtils.join(base, "skills") : "";
+  },
+
+  // the Codex home folder of the settings (as llm-for-zotero's): the plugin's Codex processes keep their threads, sign-in
+  // and setup there instead of ~/.codex; "" when it is not set
+  codexHome() { return String(this.getPref("codexHome") || "").trim(); },
+
+  // a sentence that tells the user to run codex login, with that folder set for it when the settings name one
+  codexLogin(text) {
+    const home = this.codexHome();
+    if (!home) return text;
+    const cmd = Services.appinfo.OS === "WINNT" ? `$env:CODEX_HOME="${home}"; codex login` : `CODEX_HOME="${home}" codex login`;
+    return String(text).split("codex login").join(cmd);
   },
 
   // Files used by the skill's workflow; agents/openai.yaml is optional display metadata. Check only file presence and
@@ -276,6 +289,9 @@ Object.assign(ScholiumRunner, {
     };
     if (Zotero.Prefs.get("httpServer.localAPI.enabled")) say("localApi", "ok", this.text("checkApiOn"));
     else say("localApi", "bad", this.text("checkApiOff"), { kind: "localApi" });
+    // what of an earlier version's folders could not be moved into the plugin's folder
+    const left = this.migrateLeft || [];
+    if (left.length) say("folders", "bad", this.text("checkFoldersLeft", left.length, left.slice(0, 3).join("; ")));
     let uv = false;
     for (const check of [() => this.checkClaude(say), () => this.checkCodex(say), async () => { uv = await this.checkUv(say); },
                          () => this.checkPython(say, uv)]) {
@@ -444,7 +460,7 @@ Object.assign(ScholiumRunner, {
       }
       said = true;
       if (why) say("codex", "unknown", this.text("checkSignInUnknown", why));
-      else if (this.codexNoAccount(account)) say("codex", "bad", this.text("checkSignedOut", "codex"));
+      else if (this.codexNoAccount(account)) say("codex", "bad", this.codexLogin(this.text("checkSignedOut", "codex")));
       else say("codex", "ok", this.text("checkSignedIn"));
       const skill = await this.within(this.codexSkill(rpc, cwd), this.CHECK_MS, late);
       await this.checkSkill(say, "codex", skill ? PathUtils.parent(skill.path) : null);
@@ -507,15 +523,17 @@ Object.assign(ScholiumRunner, {
   // the options of Subprocess.call for an agent's process, or a program of the setup check: Zotero's environment with
   // Python's output in UTF-8, the port of this Zotero's local server for the skill's script (zoteroPort), and the agent's
   // PATH (agentPath) when it is not Zotero's own. Codex's: uv's cache and the Pythons uv installs in
-  // <data dir>/tmp/scholium/uv, which its sandbox may write, unless the user set where they go
+  // <data dir>/scholium/cache/uv, which its sandbox may write, unless the user set where they go, and CODEX_HOME when the
+  // settings name a Codex home folder
   async agentEnv(codex = false) {
     const environment = { PYTHONIOENCODING: "utf-8", SCHOLIUM_ZOTERO_PORT: String(this.zoteroPort()) };
     const path = await this.agentPath();
     if (path !== this.env("PATH")) environment[this.pathName()] = path;
     if (codex) {
-      const uv = PathUtils.join(this.codexRoots()[0], "uv");
+      const uv = this.uvDir();
       if (!this.env("UV_CACHE_DIR")) environment.UV_CACHE_DIR = PathUtils.join(uv, "cache");
       if (!this.env("UV_PYTHON_INSTALL_DIR")) environment.UV_PYTHON_INSTALL_DIR = PathUtils.join(uv, "python");
+      if (this.codexHome()) environment.CODEX_HOME = this.codexHome();
     }
     return { environment, environmentAppend: true };
   },

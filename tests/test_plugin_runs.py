@@ -14,7 +14,7 @@ SCENARIOS = r"""
   {
     const h = harness();
     h.runner.start('x');
-    const TXT = '/data/tmp/scholium/ATT1/sentences.txt';
+    const TXT = '/data/scholium/papers/ATT1/sentences.txt';
     let calls = 0, release;
     const gate = new Promise(r => { release = r; });
     const run = async () => { calls++; await gate; h.log.writes[TXT] = 'a\nb\nc\n'; return { exitCode: 0, out: '' }; };

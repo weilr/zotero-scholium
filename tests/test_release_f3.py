@@ -15,7 +15,7 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for pl
 
 SCENARIOS = r"""
 const L = o => JSON.stringify(o) + '\n';
-const DIR = '/data/tmp/scholium/ATT1/conversations/';
+const DIR = '/data/scholium/papers/ATT1/conversations/';
 // a Claude turn of a chat log, with its context window
 const claudeTurn = (n, uuid, session = 'S1', at = 1000 + n) => L({ type: 'scholium', subtype: 'run', agent: 'claude', user: '问题' + n, at })
   + L(Object.assign({ type: 'scholium', subtype: 'prompt', text: '问题' + n }, n === 1 ? { question: true } : {}))
@@ -125,7 +125,7 @@ const all = n => [n, ...((n && n.children) || []).filter(c => c && c.tagName).fl
   await step(async () => {
     const at = new Date(2026, 10, 4, 10, 0).getTime();
     const h = harness({ existing: [['zotero-scholium'], ['zotero-scholium']], prefs: { 'extensions.scholium.agent': 'codex' },
-                        logs: { '/data/tmp/scholium/ATT1/applied.json': JSON.stringify({ config: 'D:/x/config.json', agent: 'claude', conv: 'annotate-claude-20261104-100000', at }) } });
+                        logs: { '/data/scholium/papers/ATT1/applied.json': JSON.stringify({ config: 'D:/x/config.json', agent: 'claude', conv: 'annotate-claude-20261104-100000', at }) } });
     h.runner.start('x');
     const p = await h.pane(h.item1); await settle(40);
     const pane = p.pane();
@@ -148,7 +148,7 @@ const all = n => [n, ...((n && n.children) || []).filter(c => c && c.tagName).fl
   });
   // the keyboard: the ring, a citation chip, the layers, the tabs
   await step(async () => {
-    const SPATH = '/data/tmp/scholium/ATT1/sentences.json';
+    const SPATH = '/data/scholium/papers/ATT1/sentences.json';
     const conv = 'chat-20261101-120000';
     const h = harness({ locale: 'en-US', logs: { [SPATH]: JSON.stringify({ sentences: [{ id: 12, page: 4, para: 3, text: 'S.' }] }),
                                                   [DIR + conv + '.jsonl']: claudeTurn(1, 'u1').replace('回答1', 'see [#12]'),
@@ -240,7 +240,7 @@ const all = n => [n, ...((n && n.children) || []).filter(c => c && c.tagName).fl
   // a citation chip with the mouse: Locate in its card leaves the card closed; the chip clicked keeps the focus, and the
   // window's focus coming back to it brings no card
   await step(async () => {
-    const SPATH = '/data/tmp/scholium/ATT1/sentences.json';
+    const SPATH = '/data/scholium/papers/ATT1/sentences.json';
     const conv = 'chat-20261101-120000';
     const h = harness({ locale: 'en-US', logs: { [SPATH]: JSON.stringify({ sentences: [{ id: 12, page: 4, para: 3, text: 'S.' }] }),
                                                   [DIR + conv + '.jsonl']: claudeTurn(1, 'u1').replace('回答1', 'see [#12]'),

@@ -30,7 +30,9 @@ var texts = h => {
     noTextLayer: "この PDF にはテキストレイヤーがありません（スキャン文書）。先に OCR を実行してから（例：ocrmypdf、または Acrobat の「テキスト認識」）、もう一度注釈を付けてください。",
     // the setup check of the settings page: each line's name, its sentence, and its button
     checkLabel: id => ({ localApi: "ローカル API", claude: "Claude Code", claudeSkill: "Claude Code のスキル",
-                         codex: "Codex", codexSkill: "Codex のスキル", uv: "uv", python: "Python", pymupdf: "PyMuPDF" })[id] || id,
+                         codex: "Codex", codexSkill: "Codex のスキル", uv: "uv", python: "Python", pymupdf: "PyMuPDF" , folders: "以前の記録"})[id] || id,
+    checkFoldersLeft: (n, list) => `scholium フォルダーに移せなかった項目（${n}）：${list}。それらを開いているプログラムを閉じてから Zotero を再起動してください。`,
+    codexHomeMissing: path => `設定の Codex ホームフォルダーがありません：${path}。パスを修正するか、空欄にして ~/.codex を使ってください。`,
     checkApiOn: "オン。Scholium はこれを通じて論文を読み込みます。",
     checkApiOff: "オフのため、Scholium は論文を読み込めません。「オンにする」を押すか、設定 → 詳細 で「このコンピュータ上の他のアプリケーションが Zotero と通信できるようにする」にチェックを入れてください。",
     checkTurnOn: "オンにする",

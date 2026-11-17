@@ -69,7 +69,7 @@ const historyTurn = (n, agent) => {
 (async () => {
   for (const mode of ['switch', 'missed', 'goneClaude', 'goneCodex']) {
     const agent = mode === 'switch' || mode === 'goneCodex' ? 'codex' : 'claude';
-    const id = 'chat-20261101-120000', dir = '/data/tmp/scholium/ATT1/conversations/', path = dir + id + '.jsonl';
+    const id = 'chat-20261101-120000', dir = '/data/scholium/papers/ATT1/conversations/', path = dir + id + '.jsonl';
     const saved = Array.from({ length: 1000 }, (_, i) => historyTurn(i + 1,
       mode === 'goneCodex' || (mode === 'missed' && i > 0) ? 'codex' : 'claude')).join('');
     const answered = [ev({ type: 'system', subtype: 'init', session_id: 'S2' }), said('New answer'),

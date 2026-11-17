@@ -28,9 +28,9 @@ const codexTurn = (n, id) => L({ type: 'scholium', subtype: 'run', agent: 'codex
   + L({ type: 'result', agent: 'codex', subtype: 'success', is_error: false, result: '回答' + n, session_id: 'T1' })
   + L({ type: 'scholium', subtype: 'time', at: 2000 + n });
 const CODEX3 = codexTurn(1, 'K1') + codexTurn(2, 'K2') + codexTurn(3, 'K3');
-const CLAUDE_CONV = '/data/tmp/scholium/ATT1/conversations/claude-20261001-120000.jsonl';
-const CODEX_CONV = '/data/tmp/scholium/ATT1/conversations/codex-20261001-120000.jsonl';
-const INDEX = '/data/tmp/scholium/ATT1/conversations/index.json';
+const CLAUDE_CONV = '/data/scholium/papers/ATT1/conversations/claude-20261001-120000.jsonl';
+const CODEX_CONV = '/data/scholium/papers/ATT1/conversations/codex-20261001-120000.jsonl';
+const INDEX = '/data/scholium/papers/ATT1/conversations/index.json';
 const answered = (session, text = '新回答') => [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: session }),
   ev({ type: 'assistant', uuid: 'v-' + session, session_id: session, message: { content: [{ type: 'text', text }] } }),
   ev({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: session })];
@@ -43,7 +43,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
       + L({ type: 'system', subtype: 'compact_boundary', session_id: 'S1', compact_metadata: { trigger: 'manual', pre_tokens: 9000, post_tokens: 900 } })
       + L({ type: 'result', subtype: 'success', is_error: false, result: '', num_turns: 0, session_id: 'S1' });
     const h = harness({ logs: { [CLAUDE_CONV]: CLAUDE3, [CODEX_CONV]: CODEX3,
-                                '/data/tmp/scholium/ATT2/conversations/claude-20261001-120000.jsonl': claudeTurn(1, 'u1') + compacted + claudeTurn(2, 'u2') } });
+                                '/data/scholium/papers/ATT2/conversations/claude-20261001-120000.jsonl': claudeTurn(1, 'u1') + compacted + claudeTurn(2, 'u2') } });
     h.runner.start('x');
     const c = await h.runner.readLog('ATT1', 'claude-20261001-120000');
     const x = await h.runner.readLog('ATT1', 'codex-20261001-120000');
@@ -177,7 +177,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
       .map(o => (o.type === 'assistant' ? Object.assign({}, o, { message: Object.assign({}, o.message, { usage }) }) : o)).map(L).join('');
     const mark = (point, agent = 'claude') => L({ type: 'scholium', subtype: 'rewind', points: { [agent]: point } });
     const plain = used(claudeTurn(1, 'u1'));
-    const UNMARKED = '/data/tmp/scholium/ATT2/conversations/claude-20261001-120000.jsonl';
+    const UNMARKED = '/data/scholium/papers/ATT2/conversations/claude-20261001-120000.jsonl';
     facts.marker = {};
     for (const [name, point] of Object.entries({ point: { uuid: 'u1' }, none: null })) {
       const h = harness({ logs: { [CLAUDE_CONV]: plain + mark(point), [UNMARKED]: plain }, scripts: [answered('S2')] });
@@ -430,7 +430,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
   // ✓ or the send key on words left as they were (spaces aside) closes the box: nothing is cut nor asked again; words
   // without the quote they had are an edit
   {
-    const QUOTED = '/data/tmp/scholium/ATT2/conversations/claude-20261001-120000.jsonl';
+    const QUOTED = '/data/scholium/papers/ATT2/conversations/claude-20261001-120000.jsonl';
     const quoted = claudeTurn(1, 'u1') + L({ type: 'scholium', subtype: 'run', agent: 'claude', user: '问题2', at: 1100 })
       + L({ type: 'scholium', subtype: 'prompt', text: '问题2', quote: { text: '一句原文', page: 1 } })
       + L({ type: 'system', subtype: 'init', session_id: 'S1' })
@@ -498,7 +498,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
   }
   // a turn is the view's when its words are the question's, or the question's with words steered into it
   {
-    const STEERED = '/data/tmp/scholium/ATT2/conversations/claude-20261001-120000.jsonl';
+    const STEERED = '/data/scholium/papers/ATT2/conversations/claude-20261001-120000.jsonl';
     const steered = claudeTurn(1, 'u1') + L({ type: 'scholium', subtype: 'run', agent: 'claude', user: '问题2', at: 1100 })
       + L({ type: 'scholium', subtype: 'prompt', text: '问题2' }) + L({ type: 'system', subtype: 'init', session_id: 'S1' })
       + L({ type: 'scholium', subtype: 'steer', text: '补充一句' })

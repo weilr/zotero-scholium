@@ -12,7 +12,7 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for pl
 SCENARIOS = r"""
 const SKILL = '/home/u/.claude/skills/zotero-scholium';
 const SCRIPT_PY = SKILL + '/scripts/scholium.py';
-const OUT = '/data/tmp/scholium/ATT1';
+const OUT = '/data/scholium/papers/ATT1';
 const init = ev({ type: 'system', subtype: 'init', model: 'claude-opus-5-5', session_id: 'S1', skills: ['zotero-scholium'] });
 const ending = text => [said(text), ev({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: 'S1', num_turns: 3 })];
 const has = (n, cls) => typeof n.className === 'string' && n.className.split(' ').includes(cls);
@@ -121,7 +121,7 @@ const askBoth = async (h, popup) => {
   }
   // the other paper's sentences.txt is there already: only the paper shown is extracted
   {
-    const h = harness(base({ scriptRuns: { extract: ['x', 0] }, logs: { '/data/tmp/scholium/ATT2/sentences.txt': 'a\n' } }));
+    const h = harness(base({ scriptRuns: { extract: ['x', 0] }, logs: { '/data/scholium/papers/ATT2/sentences.txt': 'a\n' } }));
     const menu = withMenu(h);
     h.runner.start('x');
     await askBoth(h, menu); await settle(800);
@@ -141,7 +141,7 @@ const askBoth = async (h, popup) => {
     const first = h.live();
     now += 100000;   // the first extract took 100 s
     const proc = h.runner.current.proc;
-    proc.out = ['x']; proc.exit = 0; h.log.writes['/data/tmp/scholium/ATT1/sentences.txt'] = 'a\nb\n'; proc.gate(); await settle(300);
+    proc.out = ['x']; proc.exit = 0; h.log.writes['/data/scholium/papers/ATT1/sentences.txt'] = 'a\nb\n'; proc.gate(); await settle(300);
     const second = h.live();
     CtxDate.now = real;
     h.runner.cancel(); await settle(200);
@@ -152,7 +152,7 @@ const askBoth = async (h, popup) => {
 })().catch(e => { process.stderr.write(String(e.stack || e)); process.exit(1); });
 """
 
-OUT = "/data/tmp/scholium/ATT1"
+OUT = "/data/scholium/papers/ATT1"
 SCRIPT_PY = "/home/u/.claude/skills/zotero-scholium/scripts/scholium.py"
 EXTRACT_ARGS = ["run", SCRIPT_PY, "extract", "--config", OUT + "/paper.json", "--sentences", OUT + "/sentences.json", "--out", OUT + "/sentences.txt"]
 ZH_LINE = (f"\n插件已经运行了 extract，写好了 {OUT}/sentences.txt（2 行，开头几行是索引）和同一目录的 sentences.json：直接读 sentences.txt，"
@@ -202,7 +202,7 @@ def test_a_question_about_a_scanned_pdf_runs_and_is_told_so(facts, locale):
 
 def test_a_scanned_pdf_shown_with_another_paper_still_has_the_others_extract(facts):
     b = facts["scannedBoth"]
-    assert b["calls"] == [OUT, "/data/tmp/scholium/ATT2"] and b["agent"] == 1 and SCAN["zh-CN"] in b["prompt"]
+    assert b["calls"] == [OUT, "/data/scholium/papers/ATT2"] and b["agent"] == 1 and SCAN["zh-CN"] in b["prompt"]
 
 
 def test_an_extract_that_never_ends_is_given_up_and_left_to_the_agent(facts):
@@ -225,11 +225,11 @@ def test_a_follow_up_and_a_missing_skill_run_nothing_before_the_agent(facts):
 
 def test_a_question_about_two_papers_extracts_each_the_paper_shown_first(facts):
     b = facts["both"]
-    assert [c["workdir"] for c in b["calls"]] == [OUT, "/data/tmp/scholium/ATT2"] and b["agent"] == 1
-    assert b["calls"][1]["args"][3:5] == ["--config", "/data/tmp/scholium/ATT2/paper.json"]
-    assert ZH_LINE in b["prompt"] and "- /data/tmp/scholium/ATT2/paper.json（Paper ITEM2；sentences.txt 已写好）\n" in b["prompt"]
+    assert [c["workdir"] for c in b["calls"]] == [OUT, "/data/scholium/papers/ATT2"] and b["agent"] == 1
+    assert b["calls"][1]["args"][3:5] == ["--config", "/data/scholium/papers/ATT2/paper.json"]
+    assert ZH_LINE in b["prompt"] and "- /data/scholium/papers/ATT2/paper.json（Paper ITEM2；sentences.txt 已写好）\n" in b["prompt"]
     o = facts["otherThere"]
-    assert o["calls"] == [OUT] and "- /data/tmp/scholium/ATT2/paper.json（Paper ITEM2；sentences.txt 已写好）\n" in o["prompt"]
+    assert o["calls"] == [OUT] and "- /data/scholium/papers/ATT2/paper.json（Paper ITEM2；sentences.txt 已写好）\n" in o["prompt"]
 
 
 def test_the_extracts_of_several_papers_share_one_time(facts):

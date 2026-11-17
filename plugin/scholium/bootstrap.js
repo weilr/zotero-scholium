@@ -21,8 +21,8 @@
 // the plugin's objects, in modules/ beside this file: ScholiumEndpoints (endpoints.js), ScholiumToggle (toggle.js) and
 // ScholiumRunner (runner.js, and the methods the modules after it add). startup() loads them into this scope once, in
 // this order, past the script cache as Zotero loads this file: an update in place keeps the files' addresses
-var MODULES = ["endpoints.js", "toggle.js", "runner.js", "setup.js", "prompts.js", "section.js", "conversations.js",
-               "queue.js", "agents.js"];
+var MODULES = ["endpoints.js", "toggle.js", "runner.js", "folders.js", "setup.js", "prompts.js", "section.js",
+               "conversations.js", "queue.js", "agents.js"];
 var modulesLoaded = false;   // a start after a disable finds them: Zotero keeps the scope, and the objects in it
 
 function loadModules(rootURI) {

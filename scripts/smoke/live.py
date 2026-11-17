@@ -423,7 +423,7 @@ def result_cost(lines):
 
 
 def conversation_logs(run, kind="*"):
-    return sorted(glob.glob(os.path.join(run, "data", "tmp", "scholium", "*", "conversations", kind + ".jsonl")))
+    return sorted(glob.glob(os.path.join(run, "data", "scholium", "papers", "*", "conversations", kind + ".jsonl")))
 
 
 def log_sizes(run):

@@ -11,7 +11,7 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for pl
 
 SCENARIOS = r"""
 const L = o => JSON.stringify(o) + '\n';
-const DIR = '/data/tmp/scholium/ATT1/conversations/';
+const DIR = '/data/scholium/papers/ATT1/conversations/';
 const OLD = 'annotate-claude-20261001-120000';
 const oldLog = L({ type: 'scholium', subtype: 'run', agent: 'claude', user: 'Annotate this paper', at: 1000 })
   + L({ type: 'scholium', subtype: 'prompt', text: 'Annotate this paper', annotate: true, extra: '' })

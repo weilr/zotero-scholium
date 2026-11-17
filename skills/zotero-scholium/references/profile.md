@@ -1,6 +1,6 @@
 # The annotation profile
 
-The profile lives in the Zotero data directory at `<Zotero data dir>/zotero-scholium/profile.md`; `scholium.py profile --path` prints that path; with `--json` it also gives the data directory, whether the file exists, and a profile left at the pre-0.1.0 location in the user configuration directory, which the next `profile --from-library` migrates.
+The profile lives in the Zotero data directory at `<Zotero data dir>/scholium/profile.md`; an earlier version's `<Zotero data dir>/zotero-scholium/profile.md` is used while only it exists, and the next `profile --from-library` moves it there. `scholium.py profile --path` prints the path in use; with `--json` it also gives the data directory, whether the file exists, the earlier version's file, and a profile left at the pre-0.1.0 location in the user configuration directory, which the next `profile --from-library` migrates.
 
 ## Precedence, lowest to highest
 

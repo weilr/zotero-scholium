@@ -355,7 +355,7 @@ SCENARIOS = r"""
   // [#id] in an answer: a chip with the page, when sentences.json has the sentence; a card on hover with the page, Locate
   // and the sentence; an id it does not have stays text
   {
-    const SPATH = '/data/tmp/scholium/ATT1/sentences.json';
+    const SPATH = '/data/scholium/papers/ATT1/sentences.json';
     const sentences = JSON.stringify({ pdf: 'x.pdf', sentences: [{ id: 12, page: 4, para: 3, text: 'We propose a kernel that is invariant to rotations.',
                                                                   rects: [[72, 600, 300, 612]] }] });
     const reply = [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S1' }),
@@ -412,11 +412,11 @@ SCENARIOS = r"""
   }
   // the annotation tab's answers to words get their chips too
   {
-    const DIR = '/data/tmp/scholium/ATT1/conversations/';
+    const DIR = '/data/scholium/papers/ATT1/conversations/';
     const SESSION = 'annotate-claude-20261030-101010';
     const sentences = JSON.stringify({ sentences: [{ id: 12, page: 4, para: 3, text: 'S.' }] });
     const h = harness({ logs: {
-      '/data/tmp/scholium/ATT1/sentences.json': sentences,
+      '/data/scholium/papers/ATT1/sentences.json': sentences,
       [DIR + SESSION + '.jsonl']: ev({ type: 'scholium', subtype: 'run', agent: 'claude', user: '问', at: Date.now() - 60000 })
         + ev({ type: 'scholium', subtype: 'prompt', text: '问', question: true })
         + ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'A0' }) + said('见 [#12]')
@@ -440,17 +440,17 @@ SCENARIOS = r"""
     const p = await h.pane(h.item1);
     await settle(40);
     const pane = p.pane();
-    h.log.writes['/data/tmp/scholium/ATT1/sentences.json'] = JSON.stringify({ sentences: [{ id: 12, page: 4, para: 3, text: 'S.' }] });
+    h.log.writes['/data/scholium/papers/ATT1/sentences.json'] = JSON.stringify({ sentences: [{ id: 12, page: 4, para: 3, text: 'S.' }] });
     pane.input.type('q'); pane.send.click(); await settle(200);
     const all = n => [n, ...(n.children || []).flatMap(all)];
     facts.citeLive = [pane.live, all(pane.list).filter(n => n.className === 'scholium-cite').map(n => n.textContent)];
     // a live view shown anew while the sentences changed: drawn at once, then again with the new sentences
-    h.log.writes['/data/tmp/scholium/ATT1/sentences.json'] = JSON.stringify({ sentences: [{ id: 12, page: 7, para: 3, text: 'S2 is longer.' }] });
+    h.log.writes['/data/scholium/papers/ATT1/sentences.json'] = JSON.stringify({ sentences: [{ id: 12, page: 7, para: 3, text: 'S2 is longer.' }] });
     h.runner.showLive(pane, h.runner.job); await settle(30);
     facts.citeLive.push(all(pane.list).filter(n => n.className === 'scholium-cite').map(n => n.textContent));
     // the draft being written stays in the last run through that redraw, and keeps growing
     h.runner.growDraft(h.runner.job, '草稿', 0); h.runner.paintDraft(h.runner.job);
-    h.log.writes['/data/tmp/scholium/ATT1/sentences.json'] = JSON.stringify({ sentences: [{ id: 12, page: 8, para: 3, text: 'S3 is longer still.' }] });
+    h.log.writes['/data/scholium/papers/ATT1/sentences.json'] = JSON.stringify({ sentences: [{ id: 12, page: 8, para: 3, text: 'S3 is longer still.' }] });
     h.runner.showLive(pane, h.runner.job); await settle(30);
     const text = n => (n.children || []).map(text).join('') + (n.children && n.children.length ? '' : n.textContent || '');
     const atOnce = text(pane.list.children.at(-1)).includes('草稿');   // before anything paints it again
@@ -461,7 +461,7 @@ SCENARIOS = r"""
   // citations side by side: those of one page are one chip, whose card lists their sentences and whose Locate shows them
   // all; the chips keep the brackets and the punctuation around them on their line
   {
-    const SPATH = '/data/tmp/scholium/ATT1/sentences.json';
+    const SPATH = '/data/scholium/papers/ATT1/sentences.json';
     const sentences = JSON.stringify({ sentences: [
       { id: 12, page: 4, text: 'First sentence.', rects: [[72, 600, 300, 612]] },
       { id: 13, page: 4, text: 'Second sentence.', rects: [[72, 588, 210, 600]] },
@@ -488,9 +488,9 @@ SCENARIOS = r"""
   }
   // a sentences.json that does not parse is read once; a later change is read again
   {
-    const DIR = '/data/tmp/scholium/ATT1/conversations/';
+    const DIR = '/data/scholium/papers/ATT1/conversations/';
     const SESSION = 'annotate-claude-20261030-101010';
-    const SPATH = '/data/tmp/scholium/ATT1/sentences.json';
+    const SPATH = '/data/scholium/papers/ATT1/sentences.json';
     const h = harness({ logs: {
       [SPATH]: '{broken',
       [DIR + SESSION + '.jsonl']: ev({ type: 'scholium', subtype: 'run', agent: 'claude', user: '问', at: Date.now() - 60000 })
@@ -514,9 +514,9 @@ SCENARIOS = r"""
   }
   // a sentences.json that cannot be read (the agent is writing it) is tried again at the next draw
   {
-    const DIR = '/data/tmp/scholium/ATT1/conversations/';
+    const DIR = '/data/scholium/papers/ATT1/conversations/';
     const SESSION = 'annotate-claude-20261030-101010';
-    const SPATH = '/data/tmp/scholium/ATT1/sentences.json';
+    const SPATH = '/data/scholium/papers/ATT1/sentences.json';
     const unreadable = [SPATH];
     const h = harness({ unreadable, logs: {
       [SPATH]: JSON.stringify({ sentences: [{ id: 12, page: 4, para: 3, text: 'S.' }] }),
@@ -557,7 +557,7 @@ SCENARIOS = r"""
     const reply = [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S1' }),
                    said('见 [链接 [#12]](https://x.org) 与 [#12]'),
                    ev({ type: 'result', subtype: 'success', is_error: false, result: '…', session_id: 'S1' })];
-    const h = harness({ scripts: [reply], logs: { '/data/tmp/scholium/ATT1/sentences.json': sentences } });
+    const h = harness({ scripts: [reply], logs: { '/data/scholium/papers/ATT1/sentences.json': sentences } });
     h.runner.start('x');
     const p = await h.pane(h.item1);
     await settle(40);
@@ -604,7 +604,7 @@ SCENARIOS = r"""
   // the positions in sentences.json: only arrays of four finite numbers are kept; a sentence left without any opens the
   // page only
   {
-    const SPATH = '/data/tmp/scholium/ATT1/sentences.json';
+    const SPATH = '/data/scholium/papers/ATT1/sentences.json';
     const sentences = JSON.stringify({ sentences: [
       { id: 1, page: 4, text: 'A.', rects: [[1, 2, 3, 4], [5.5, 6, 7, 8.25]] },
       { id: 2, page: 4, text: 'B.', rects: [[1, 2, 3], [1, 2, 3, 4, 5], 'x', null, [1, 2, 'x', 4], [1, 2, null, 4], [1, 2, 'INF', 4], { 0: 1, 1: 2, 2: 3, 3: 4 }] },
@@ -931,7 +931,7 @@ def test_a_sentences_file_that_cannot_be_read_is_tried_again(facts):
 def test_the_english_question_prompt_asks_for_sentence_numbers(facts):
     p = facts["citePromptEn"]
     assert "put its sentence number after it as [#123] (several: [#12][#15])" in p
-    assert "/data/tmp/scholium/ATT1/sentences.json --out /data/tmp/scholium/ATT1/sentences.txt" in p
+    assert "/data/scholium/papers/ATT1/sentences.json --out /data/scholium/papers/ATT1/sentences.txt" in p
 
 
 def test_a_quote_names_the_pdf_page_and_shows_its_label(facts):

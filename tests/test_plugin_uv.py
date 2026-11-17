@@ -347,16 +347,16 @@ def test_the_login_shells_path_goes_before_zoteros_in_each_run_and_is_read_once(
     assert c["shells"] == 1 and [base(e) for e in c["env"]] == [dict(PLAIN, PATH=MERGED, **CODEX_UV)] and c["append"] == [True]
 
 
-CODEX_UV = {"UV_CACHE_DIR": "/data/tmp/scholium/uv/cache", "UV_PYTHON_INSTALL_DIR": "/data/tmp/scholium/uv/python"}
+CODEX_UV = {"UV_CACHE_DIR": "/data/scholium/cache/uv/cache", "UV_PYTHON_INSTALL_DIR": "/data/scholium/cache/uv/python"}
 
 
 def test_codex_gets_uvs_folders_inside_its_sandbox_unless_set(facts):
     u = facts["codexUv"]
-    assert u["root"] == "/data/tmp/scholium" and all(v.startswith(u["root"] + "/") for v in CODEX_UV.values())
+    assert u["root"] == "/data/scholium" and all(v.startswith(u["root"] + "/") for v in CODEX_UV.values())
     assert u["codex"] and all(base(e) == dict(PLAIN, **CODEX_UV) for e in u["codex"]), "each Codex process"
     assert u["claude"] == PLAIN, "Claude Code keeps uv's defaults"
     s = facts["codexUvSet"]
-    assert s["codex"] and all(base(e) == dict(PLAIN, UV_PYTHON_INSTALL_DIR="/data/tmp/scholium/uv/python") for e in s["codex"]), "the user's own is kept"
+    assert s["codex"] and all(base(e) == dict(PLAIN, UV_PYTHON_INSTALL_DIR="/data/scholium/cache/uv/python") for e in s["codex"]), "the user's own is kept"
 
 
 def test_the_shell_is_shell_else_zsh(facts):

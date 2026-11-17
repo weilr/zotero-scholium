@@ -79,8 +79,8 @@ def facts(tmp_path_factory):
 
 def test_neither_queued_nor_later_text_confirms_what_a_run_held_back(facts):
     c = facts["chat"]
-    assert re.search(r"/tmp/scholium/ATT1/held_back-chat-[\w-]+\.json$", c["held"]), "one file per conversation"
-    held = "/data/tmp/scholium/ATT1/held_back-CONV.json"
+    assert re.search(r"/scholium/papers/ATT1/held_back-chat-[\w-]+\.json$", c["held"]), "one file per conversation"
+    held = "/data/scholium/papers/ATT1/held_back-CONV.json"
     assert c["queued"] == 1 and c["before"] == 2 and c["stdin"] == 4
     assert c["envs"] == [{"run": "1", "held": held, "confirmed": ""},   # the run that held it back
                          {"run": "1", "held": held, "confirmed": ""},   # the message sent while it ran
@@ -94,13 +94,13 @@ def test_refusal_question_partial_and_yes_text_never_authorize(facts):
 
 
 def test_codexs_server_is_told_the_same(facts):
-    held = "/data/tmp/scholium/ATT1/held_back-CONV.json"
+    held = "/data/scholium/papers/ATT1/held_back-CONV.json"
     runs = [e for e in facts["codex"] if e]
     assert runs == [{"run": "1", "held": held, "confirmed": ""}, {"run": "1", "held": held, "confirmed": "cleanup_other:K7,K8"}]
     assert len(facts["codex"]) == 3, "the plugin's own server (the model list) is not a run's"
 
 
 def test_annotate_again_confirms_cleanup_other_only_for_what_its_deletion_left(facts):
-    assert facts["cleared"]["env"] == [{"run": "1", "held": "/data/tmp/scholium/ATT1/held_back-CONV.json", "confirmed": ""}]
+    assert facts["cleared"]["env"] == [{"run": "1", "held": "/data/scholium/papers/ATT1/held_back-CONV.json", "confirmed": ""}]
     left = facts["notCleared"]
-    assert len(left["own"]) == 1 and left["env"] == [{"run": "1", "held": "/data/tmp/scholium/ATT1/held_back-CONV.json", "confirmed": "cleanup_other:" + left["own"][0]}]
+    assert len(left["own"]) == 1 and left["env"] == [{"run": "1", "held": "/data/scholium/papers/ATT1/held_back-CONV.json", "confirmed": "cleanup_other:" + left["own"][0]}]

@@ -11,8 +11,8 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for pl
 
 SCENARIOS = r"""
 const L = o => JSON.stringify(o) + '\n';
-const DIR = '/data/tmp/scholium/ATT1/conversations/';
-const OUT = '/data/tmp/scholium/ATT1/';
+const DIR = '/data/scholium/papers/ATT1/conversations/';
+const OUT = '/data/scholium/papers/ATT1/';
 // a turn of Claude Code as the plugin logs it
 const claudeTurn = (n, uuid, session = 'S1', at = 1000 + n) => L({ type: 'scholium', subtype: 'run', agent: 'claude', user: '问题' + n, at })
   + L(Object.assign({ type: 'scholium', subtype: 'prompt', text: '问题' + n }, n === 1 ? { question: true } : {}))
@@ -544,8 +544,9 @@ def test_an_annotations_card_counts_all_of_its_parts(facts):
 def test_threads_to_archive_stay_until_codex_took_them(facts):
     assert facts["archive_ended"]["asked"] == ["TA"], "the server ended: the rest wait for the next run"
     assert json.loads(facts["archive_ended"]["left"]) == ["TA", "TB", "TC"], "nothing archived: all stay"
-    assert facts["archive_refused"]["asked"] == ["TA", "TB", "TC"] and facts["archive_refused"]["left"] in ("", "[]")
-    assert facts["archive_archived"]["asked"] == ["TA", "TB", "TC"] and facts["archive_archived"]["left"] in ("", "[]")
+    for name in ("archive_refused", "archive_archived"):
+        assert facts[name]["asked"] == ["TA", "TB", "TC", "T1"], "those waiting, then the run's own thread as it ends"
+        assert facts[name]["left"] in ("", "[]")
 
 
 def test_a_question_v019_handed_over_goes_on_as_one_turn(facts):

@@ -182,7 +182,7 @@ SCENARIOS = r"""
   // a compaction goes to the conversation named, whichever is the paper's current one; one without a session of its
   // agent, or of Codex's, does not start
   {
-    const DIR = '/data/tmp/scholium/ATT1/conversations/';
+    const DIR = '/data/scholium/papers/ATT1/conversations/';
     const logOf = (agent, sid, q) => ev({ type: 'scholium', subtype: 'run', agent, user: q, at: Date.now() - 60000 })
       + ev({ type: 'scholium', subtype: 'prompt', text: q })
       + (sid ? ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: sid }) + said('答')
@@ -225,7 +225,7 @@ SCENARIOS = r"""
   // fixes of the review: the compaction keeps its conversation's result and time; it is no annotation; the update does
   // not run it twice; its words go back as typed; /compact alone and /compactify
   {
-    const DIR = '/data/tmp/scholium/ATT1/conversations/';
+    const DIR = '/data/scholium/papers/ATT1/conversations/';
     const log = ev({ type: 'scholium', subtype: 'run', agent: 'claude', user: '问', at: Date.now() - 60000 })
       + ev({ type: 'scholium', subtype: 'prompt', text: '问' })
       + ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S1' }) + said('答')
@@ -808,7 +808,7 @@ SCENARIOS = r"""
     pane.send.click(); await settle(300);                                     // ■
     await h.runner.newChat(pane); await settle(20);                           // the current conversation: none
     h.runner.releaseQueue(h.runner.queue.find(j => j.qid)); await settle(400);
-    const lines = (h.log.writes['/data/tmp/scholium/ATT1/conversations/' + convA + '.jsonl'] || '').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
+    const lines = (h.log.writes['/data/scholium/papers/ATT1/conversations/' + convA + '.jsonl'] || '').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
     facts.queueOwnConv = { logs: convs(h).length, a: lines.filter(l => l.subtype === 'prompt').map(l => l.text) };
   }
   // queued rows are per conversation: another conversation's run, its rows and its hold go on their own; the clear-queue
@@ -846,7 +846,7 @@ SCENARIOS = r"""
     resume(); await settle(500);                                             // 继续, in A
     const prompts = path => (h.log.writes[path] || '').trim().split('\n').filter(Boolean).map(l => JSON.parse(l))
       .filter(l => l.subtype === 'prompt').map(l => l.text);
-    const dir = '/data/tmp/scholium/ATT1/conversations/';
+    const dir = '/data/scholium/papers/ATT1/conversations/';
     facts.queuePerConv = { asked, two: !!convA && !!convB && convA !== convB, inB, afterB, inA, held: h.runner.heldQueues.size,
                            a: prompts(dir + convA + '.jsonl'), b: prompts(dir + convB + '.jsonl') };
   }
@@ -1186,7 +1186,7 @@ SCENARIOS = r"""
   // them over
   {
     const conv = h => ({ key: 'ATT1', id: h.pane0.shownConv, title: '问题一', at: 0,
-                         path: '/data/tmp/scholium/ATT1/conversations/' + h.pane0.shownConv + '.jsonl' });
+                         path: '/data/scholium/papers/ATT1/conversations/' + h.pane0.shownConv + '.jsonl' });
     const setUp = async () => {
       const h = harness({ scripts: [[qInit, said('答1'), 'WAIT']] });
       h.runner.start('x');

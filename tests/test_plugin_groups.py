@@ -14,7 +14,7 @@ pytestmark = pytest.mark.skipif(NODE is None, reason="Node.js is required for pl
 SCENARIOS = r"""
 (async () => {
   const facts = {};
-  const dirs = h => [...new Set(Object.keys(h.log.writes).filter(p => p.startsWith('/data/tmp/scholium/')).map(p => p.split('/')[4]))].sort();
+  const dirs = h => [...new Set(Object.keys(h.log.writes).filter(p => p.startsWith('/data/scholium/papers/')).map(p => p.split('/')[4]))].sort();
   // the first annotation in a group asks once; the group's next paper does not; another group asks again (declined here)
   {
     const h = harness({ groups: { 2: { groupID: 777 }, 3: { groupID: 888 } }, confirm: [true, false] });
@@ -22,7 +22,7 @@ SCENARIOS = r"""
     const g = h.groupPaper(2);
     const queued = await h.runner.annotate([g.item]); await settle(300);
     facts.first = { queued, confirms: h.log.confirms.slice(), asked: h.store.get('extensions.scholium.groupsAsked'), calls: h.log.calls.length,
-                    paper: JSON.parse(h.log.writes['/data/tmp/scholium/ATT1_g777/paper.json']), prompt: h.log.stdin[0], dirs: dirs(h) };
+                    paper: JSON.parse(h.log.writes['/data/scholium/papers/ATT1_g777/paper.json']), prompt: h.log.stdin[0], dirs: dirs(h) };
     await h.runner.annotate([h.groupPaper(2, 'ATT9', 'ITEM9').item]); await settle(300);
     const declined = await h.runner.annotate([h.groupPaper(3, 'ATT5', 'ITEM5').item]); await settle(300);
     facts.again = { confirms: h.log.confirms.slice(1), calls: h.log.calls.length, declined, asked: h.store.get('extensions.scholium.groupsAsked') };
@@ -38,7 +38,7 @@ SCENARIOS = r"""
     await h.runner.annotate([g.item]); await settle(300);
     await h.runner.send(g.item, '这篇讲什么？'); await settle(300);
     const mine = await h.pane(h.item1), theirs = await h.pane(g.item);
-    const chats = key => Object.keys(h.log.writes).filter(p => p.startsWith(`/data/tmp/scholium/${key}/conversations/chat-`));
+    const chats = key => Object.keys(h.log.writes).filter(p => p.startsWith(`/data/scholium/papers/${key}/conversations/chat-`));
     facts.apart = { calls: h.log.calls.length, confirms: h.log.confirms.length, dirs: dirs(h), keys: [mine.pane().keys, theirs.pane().keys],
                     sessions: [mine.view('annotate').shownConv, theirs.view('annotate').shownConv],
                     chats: [chats('ATT1').length, chats('ATT1_g777').length], question: h.log.stdin[2],
@@ -96,11 +96,11 @@ def test_the_first_annotation_in_a_group_asks_once(facts):
 def test_paper_json_and_the_prompt_name_the_group(facts):
     f = facts["first"]
     assert f["paper"] == {"pdf": "D:/Zotero/storage/ATT1/paper.pdf", "item_key": "ITEM1", "attachment_key": "ATT1",
-                          "out_dir": "/data/tmp/scholium/ATT1_g777", "library_id": 2, "group_id": 777}
+                          "out_dir": "/data/scholium/papers/ATT1_g777", "library_id": 2, "group_id": 777}
     assert f["dirs"] == ["ATT1_g777"]
     p = f["prompt"]
     assert "- 附件 key：ATT1\n- 群组文库：777（status 和 samples 加 --group 777）\n" in p
-    assert "从 /data/tmp/scholium/ATT1_g777/paper.json 的六个键写起" in p
+    assert "从 /data/scholium/papers/ATT1_g777/paper.json 的六个键写起" in p
     assert "群组文库：777（status 和 samples 加 --group 777）" in facts["apart"]["question"], "a question's prompt too"
 
 

@@ -2,8 +2,24 @@
 
 ## Unreleased
 
+### Added
+
+- **Codex home folder** on the settings page, as in llm-for-zotero: empty, the plugin's Codex runs use `~/.codex`; a
+  folder of its own keeps their threads, sign-in and setup there, and needs a sign-in there (`codex login` with
+  `CODEX_HOME` set), which the setup check and a sign-in error give.
+
 ### Changed
 
+- Scholium keeps everything in `<data dir>/scholium/`: the profile, each paper's records (`papers/<key>/`, formerly
+  `<data dir>/tmp/scholium/<key>/`) and uv's cache (`cache/uv/`). The plugin moves an earlier version's
+  `<data dir>/tmp/scholium/` and `<data dir>/zotero-scholium/` there when it starts, keeping what the new folder already
+  has; what it cannot move, the setup check names (**Old records**). The skill's script reads the profile there, or in
+  `<data dir>/zotero-scholium/` while only that has it, and `profile --from-library` moves it; an older copy of the
+  skill used on its own looks in `<data dir>/zotero-scholium/` until it is updated.
+- Each conversation runs in its own folder (`papers/<key>/conversations/<conversation>/`), as llm-for-zotero runs
+  Claude Code: its Claude Code sessions are no longer listed among the user's own; a session started in the data
+  directory before goes on there. Codex threads are archived after each run and brought back for the next, so that the
+  Codex app does not list them; the first Codex run also archives the threads earlier versions' runs left there.
 - Different conversations run at the same time: different papers, a paper's Chat and its annotation, several
   conversations of one paper. **Runs at once** on the settings page sets how many (1 to 6, default 3); the rest wait in
   the queue. Messages to one conversation still go one after another, a paper has one annotation at a time, and ■ or

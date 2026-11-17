@@ -120,7 +120,7 @@ def ref_page(pdf):
 
 
 def run_files(run):
-    """The run's probe config, facts, database dump, live.json, its paper's folder in the data's tmp and its logs."""
+    """The run's probe config, facts, database dump, live.json, its paper's folder (data/scholium/papers/<key>) and its logs."""
     cfg = read_json(os.path.join(run, "probe-config.json"), {})
     facts = read_json(os.path.join(run, "shots", "facts.json"), [])
     att = next((f.get("att") for f in facts if f.get("what") == "items"), None)

@@ -13,8 +13,8 @@ from plugin_harness import NODE, run_scenarios
 from test_apply_safety import MemoryApi, annotation, run_main
 
 SCENARIOS = r"""
-const APPLIED = '/data/tmp/scholium/ATT1/applied.json';
-const OUT = '/data/tmp/scholium/ATT1';
+const APPLIED = '/data/scholium/papers/ATT1/applied.json';
+const OUT = '/data/scholium/papers/ATT1';
 const A = OUT + '/config-A.json', B = OUT + '/config-B.json';
 const keptA = JSON.stringify({ config: A, agent: 'claude', conv: 'annotate-claude-1', at: 1000 });
 const report = applied => '{\n "missed": [{"id": 412}],\n "now_in_zotero": {"annotations": 41},\n "applied": ' + applied + '\n}';
@@ -57,13 +57,13 @@ const L = o => JSON.stringify(o) + '\n';
   // configuration kept; a Windows path written with "/" or as Git Bash writes it is kept as Windows writes it; a "$" of
   // a hidden share is no variable
   {
-    const SHARE = '\\\\fs\\home$\\u\\Zotero\\tmp\\scholium\\ATT1\\config.json';
-    const h = harness({ logs: { [A]: '{}', 'D:\\Zotero\\tmp\\scholium\\ATT1\\config-B.json': '{}', [SHARE]: '{}', [OUT + '/paper.json']: '{}' } });
+    const SHARE = '\\\\fs\\home$\\u\\Zotero\\scholium\\papers\\ATT1\\config.json';
+    const h = harness({ logs: { [A]: '{}', 'D:\\Zotero\\scholium\\papers\\ATT1\\config-B.json': '{}', [SHARE]: '{}', [OUT + '/paper.json']: '{}' } });
     h.runner.start('x');
     const out = [];
     for (const config of ['$o\\config.json', '%o%\\config.json', '$env:OUT/config.json', '${o}/config.json', OUT + '/missing.json', 'missing.json',
-                          OUT + '/paper.json', 'paper.json', '.\\paper.json', 'D:/Zotero/tmp/scholium/ATT1/config-B.json',
-                          '/d/Zotero/tmp/scholium/ATT1/config-B.json', SHARE]) {
+                          OUT + '/paper.json', 'paper.json', '.\\paper.json', 'D:/Zotero/scholium/papers/ATT1/config-B.json',
+                          '/d/Zotero/scholium/papers/ATT1/config-B.json', SHARE]) {
       h.log.writes[APPLIED] = keptA;
       await h.runner.noteApplied('ATT1', config, 'claude', 'c', '/data');
       out.push(APPLIED in h.log.writes ? JSON.parse(h.log.writes[APPLIED]).config : null);
@@ -74,7 +74,7 @@ const L = o => JSON.stringify(o) + '\n';
   // the annotations, not to rewrite them from the configuration kept before
   {
     const h = harness({ logs: { [APPLIED]: keptA, [A]: '{}' },
-                        scripts: [[SCRIPT[0], tool('PowerShell', { command: '$o="D:\\Zotero\\tmp\\scholium\\ATT1"; python C:/s/scholium.py --config "$o\\config.json" --apply' }, 't1'),
+                        scripts: [[SCRIPT[0], tool('PowerShell', { command: '$o="D:\\Zotero\\scholium\\papers\\ATT1"; python C:/s/scholium.py --config "$o\\config.json" --apply' }, 't1'),
                                    answer('{"applied": true}', false, 't1'), LAST, RESULT],
                                   [SCRIPT[0], said('答。'), ev({ type: 'result', subtype: 'success', is_error: false, result: '答。', session_id: 'S2' })]] });
     h.runner.start('x');
@@ -242,7 +242,7 @@ const L = o => JSON.stringify(o) + '\n';
       + L({ type: 'assistant', uuid, session_id: 'S1', message: { content: [{ type: 'text', text: '回答' + n }] } })
       + L({ type: 'result', subtype: 'success', is_error: false, result: '回答' + n, session_id: 'S1' })
       + L({ type: 'scholium', subtype: 'time', at: 2000 + n });
-    const CONV = '/data/tmp/scholium/ATT1/conversations/claude-20261001-120000.jsonl';
+    const CONV = '/data/scholium/papers/ATT1/conversations/claude-20261001-120000.jsonl';
     const text = turn(1, 'u1') + turn(2, 'u2') + turn(3, 'u3');
     const answered = [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S2' }),
                       ev({ type: 'assistant', uuid: 'v-S2', session_id: 'S2', message: { content: [{ type: 'text', text: '新回答' }] } }),
@@ -277,7 +277,7 @@ const L = o => JSON.stringify(o) + '\n';
   {
     const keys = Array.from({ length: 25 }, (_, i) => 'K' + String(i).padStart(3, '0'));
     const logs = {};
-    for (const k of keys) logs[`/data/tmp/scholium/${k}/sentences.json`] = JSON.stringify({ sentences: [{ id: 1, page: 1, text: 'x' }] });
+    for (const k of keys) logs[`/data/scholium/papers/${k}/sentences.json`] = JSON.stringify({ sentences: [{ id: 1, page: 1, text: 'x' }] });
     const h = harness({ logs });
     h.runner.start('x');
     for (const k of keys.slice(0, 20)) await h.runner.loadCitations(k);
@@ -292,7 +292,7 @@ const L = o => JSON.stringify(o) + '\n';
 })().catch(e => { process.stderr.write(String(e && e.stack || e)); process.exit(1); });
 """
 
-OUT = "/data/tmp/scholium/ATT1"
+OUT = "/data/scholium/papers/ATT1"
 A, B = OUT + "/config-A.json", OUT + "/config-B.json"
 PAPER = OUT + "/paper.json"
 
@@ -344,8 +344,8 @@ def test_a_write_is_kept_when_its_output_says_it_was_made_whatever_the_exit_code
 
 @pytest.mark.skipif(NODE is None, reason="Node.js is required for plugin tests")
 def test_a_write_from_a_configuration_not_found_keeps_none(facts):
-    windows_b = "D:\\Zotero\\tmp\\scholium\\ATT1\\config-B.json"
-    assert facts["paths"] == [None] * 9 + [windows_b, windows_b, "\\\\fs\\home$\\u\\Zotero\\tmp\\scholium\\ATT1\\config.json"]
+    windows_b = "D:\\Zotero\\scholium\\papers\\ATT1\\config-B.json"
+    assert facts["paths"] == [None] * 9 + [windows_b, windows_b, "\\\\fs\\home$\\u\\Zotero\\scholium\\papers\\ATT1\\config.json"]
     assert facts["variable"] == {"applied": None, "listed": True, "namesA": False}, "the annotations are listed, not rewritten from A"
     assert facts["paperApplied"] is None, "paper.json is never the paper's configuration"
 

@@ -62,7 +62,7 @@ const card = pane => {
   // the tooltip while status runs, then while extract runs, then once the agent goes on from them
   {
     const h = harness(base({ scriptRuns: { status: 'HOLD', extract: 'HOLD' },
-                             scripts: [[init, tool('Read', { file_path: '/data/tmp/scholium/ATT1/sentences.txt' }, 'r1'), answer('x', false, 'r1'), 'WAIT']] }));
+                             scripts: [[init, tool('Read', { file_path: '/data/scholium/papers/ATT1/sentences.txt' }, 'r1'), answer('x', false, 'r1'), 'WAIT']] }));
     h.runner.start('x');
     const { p } = await annotate(h); await settle(100);
     const steps = [p.view().stateTitle];
@@ -72,7 +72,7 @@ const card = pane => {
     steps.push(p.view().stateTitle);
     const extractProc = h.runner.current.proc;
     extractProc.out = ['412 sentences\n']; extractProc.exit = 0; if (extractProc.gate) extractProc.gate();
-    h.log.writes['/data/tmp/scholium/ATT1/sentences.txt'] = 'a\nb\n';
+    h.log.writes['/data/scholium/papers/ATT1/sentences.txt'] = 'a\nb\n';
     await settle(300);
     steps.push(p.view().stateTitle);
     facts.steps = { steps, agent: h.log.calls.length, reading: h.runner.text('preRun') };
@@ -151,7 +151,7 @@ const card = pane => {
   // Codex: the pre-run's lines go into the prompt only when Codex uses the skill copy the pre-run ran
   for (const [name, dir] of [['codexOther', '/home/u/.agents/skills/zotero-scholium'], ['codexSame', '/home/u/.codex/skills/zotero-scholium']]) {
     const h = harness({ env: { PATH: '/w/bin' }, present: ['/w/bin/uv.exe', dir + '/SKILL.md', dir + '/scripts/scholium.py'],
-                        prefs: { 'extensions.scholium.agent': 'codex' }, codex: { skillAt: '/data/tmp/scholium' },
+                        prefs: { 'extensions.scholium.agent': 'codex' }, codex: { skillAt: 'workdir' },
                         scriptRuns: { status: [STATUS, 0], extract: ['x', 0] } });
     h.runner.start('x');
     await annotate(h); await settle(800);
@@ -173,7 +173,7 @@ const card = pane => {
 })().catch(e => { process.stderr.write(String(e.stack || e)); process.exit(1); });
 """
 
-OUT = "/data/tmp/scholium/ATT1"
+OUT = "/data/scholium/papers/ATT1"
 SCRIPT_PY = "/home/u/.claude/skills/zotero-scholium/scripts/scholium.py"
 STATUS = '{"item":{"key":"ITEM1","title":"Paper ITEM1"},"attachments":[]}'
 STATUS_ARGS = ["run", SCRIPT_PY, "status", "ITEM1"]
@@ -228,7 +228,7 @@ def test_stop_during_the_pre_run_starts_no_agent(facts):
 def test_a_group_paper_gives_status_its_group(facts):
     g = facts["group"]
     assert g["calls"][0]["args"] == ["run", SCRIPT_PY, "status", "ITEM1", "--group", "777"] and g["agent"] == 1
-    assert g["calls"][1]["workdir"] == "/data/tmp/scholium/ATT1_g777"
+    assert g["calls"][1]["workdir"] == "/data/scholium/papers/ATT1_g777"
 
 
 def test_a_question_runs_only_extract_and_a_missing_skill_nothing_before_the_agent(facts):

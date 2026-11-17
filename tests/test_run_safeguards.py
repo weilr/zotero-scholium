@@ -385,7 +385,7 @@ def test_profile_path_prints_the_path(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cli, "zotero_data_dir", lambda cfg=None: str(tmp_path))
     cli.main(["profile", "--path"])
     out = capsys.readouterr()
-    assert out.out.strip() == str(tmp_path / "zotero-scholium" / "profile.md") and "does not exist" in out.err
+    assert out.out.strip() == str(tmp_path / "scholium" / "profile.md") and "does not exist" in out.err
     cli.main(["profile", "--path", "--json"])
     assert json.loads(capsys.readouterr().out)["exists"] is False
 

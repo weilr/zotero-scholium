@@ -41,8 +41,8 @@ const SCRIPT = [
   answer('Launching skill: zotero-scholium'),
   tool('PowerShell', { command: 'python C:/skills/scholium.py extract --pdf x.pdf --sentences s.json\nsecond line' }),
   answer([{ type: 'text', text: '412 sentences -> s.json\n1\n2\n3\n4\n5' }]),
-  tool('Read', { file_path: 'D:\\Zotero\\tmp\\scholium\\ATT1\\sentences.txt' }),
-  tool('Write', { file_path: 'D:\\Zotero\\tmp\\scholium\\ATT1\\config.json' }),
+  tool('Read', { file_path: 'D:\\Zotero\\scholium\\papers\\ATT1\\sentences.txt' }),
+  tool('Write', { file_path: 'D:\\Zotero\\scholium\\papers\\ATT1\\config.json' }),
   tool('PowerShell', { command: 'python C:/skills/scholium.py --config c.json' }),
   answer('Exit code 2\nstyle_warnings: 1', true),
   tool('PowerShell', { command: 'python C:/skills/scholium.py --config c.json --apply' }, 'toolu_apply'),
@@ -76,7 +76,7 @@ const RATE_LIMITED = [
   ev({ type: 'result', subtype: 'success', is_error: true, result: 'Rate limited', session_id: 'S1' }),
 ];
 const NSIFILE = { name: 'nsIFile' };
-const PROFILE_PATH = '/data/zotero-scholium/profile.md';
+const PROFILE_PATH = '/data/scholium/profile.md';
 const PROFILE_HEAD = '# Annotation profile (draft derived from the Zotero library)\n\nBased on 466 annotations on 50 papers.\n\n- Colours:\n  - `#ff6666` 75%\n';
 const PROFILE_INTERPRETATION = '- colour meanings: `#ff6666` = anything important\n- reading note: yes';
 const PROFILE_RULES = '- 高亮评论 = 中文翻译\n- 颜色只有两级：红 = 核心，黄 = 其他';
@@ -153,13 +153,13 @@ const CODEX_SCRIPT = [
   note('item/commandExecution/outputDelta', { itemId: 'c1', delta: '412' }),
   shell('c1', 'python C:/skills/scholium.py extract --pdf x.pdf --sentences s.json', { output: '412 sentences -> s.json\n1\n2\n3\n4\n5' }),
   usage(tok(100000, 60000, 1000), tok(100000, 60000, 1000)),
-  shell('c2', 'Get-Content D:\\Zotero\\tmp\\scholium\\ATT1\\sentences.txt'),
-  shell('c2', 'Get-Content D:\\Zotero\\tmp\\scholium\\ATT1\\sentences.txt', { output: '[1] First sentence.' }),
+  shell('c2', 'Get-Content D:\\Zotero\\scholium\\papers\\ATT1\\sentences.txt'),
+  shell('c2', 'Get-Content D:\\Zotero\\scholium\\papers\\ATT1\\sentences.txt', { output: '[1] First sentence.' }),
   ev({ id: 'q1', method: 'item/commandExecution/requestApproval', params: { threadId: 'T1', turnId: 'TURN', itemId: 'c9', command: 'pip install x' } }),
   ev({ id: 'q2', method: 'item/tool/requestUserInput', params: { threadId: 'T1', turnId: 'TURN', itemId: 'u1', questions: [] } }),
   ev({ id: 'q3', method: 'account/chatgptAuthTokens/refresh', params: {} }),
   coItem('completed', { type: 'fileChange', id: 'f1', status: 'completed',
-                        changes: [{ path: 'D:\\Zotero\\tmp\\scholium\\ATT1\\config.json', kind: { type: 'add' }, diff: '' }] }),
+                        changes: [{ path: 'D:\\Zotero\\scholium\\papers\\ATT1\\config.json', kind: { type: 'add' }, diff: '' }] }),
   shell('c3', 'python C:/skills/scholium.py --config c.json'),
   shell('c3', 'python C:/skills/scholium.py --config c.json', { exitCode: 2, status: 'failed', output: 'style_warnings: 1' }),
   usage(tok(1300000, 1200000, 21000), tok(1200000, 1140000, 20000)),
@@ -287,16 +287,20 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                    home = 'dirsvc', eraseFails = false, logs = {}, models = 'ok', claudeAt = CLAUDE, scripts = [], readFails = false,
                    writeFails = false, codex = {}, logTimes = {}, notes = [], secondPdf = false, failLogWrites = null, stdinFails = false, holdDirs = false,
                    unreadable = [], unremovable = [], addonManager = null, env = {}, present = [], dirs = {}, auth = 'in', python = {},
-                   os = 'WINNT', shell = null, uv = {}, groups = {}, scriptRuns = null } = {}) {
+                   os = 'WINNT', shell = null, uv = {}, groups = {}, scriptRuns = null, failMoves = [] } = {}) {
   const log = { calls: [], stdin: [], notices: [], alerts: [], confirms: [], kills: 0, menus: [], unregistered: [], listeners: [],
                 writes: Object.assign({}, logs), notifications: [], revealed: [], erased: [], sections: [], unregisteredSections: [],
                 ftl: [], tabs: [], selected: [], opened: [], scrolled: [], modelCalls: [], modelStdin: [], modelStdinClosed: false, modelKills: 0,
                 prefPanes: [], openedPrefs: [], madeDirs: [], trashed: [], versionCalls: [], codexCalls: [], codexProcs: [], codexKills: 0, codexTurns: 0, steers: [],
                 mtimes: Object.assign({}, logTimes), clock: Date.now(), copied: [], removed: [], threads: 0, tmpPaths: [], reads: [], readerOpened: [], navigated: [], finds: [],
-                authCalls: [], pyCalls: [], checkKills: 0, shellCalls: [], shellKills: 0, uvCalls: [], scriptCalls: [], scriptKills: 0 };
+                authCalls: [], pyCalls: [], checkKills: 0, shellCalls: [], shellKills: 0, uvCalls: [], scriptCalls: [], scriptKills: 0, moves: [] };
   const co = Object.assign({ versions: CODEX_VERSIONS, scripts: [], skillAt: '/data', fail: null, failMessage: '' }, codex);
   // the files there are: Claude Code, Codex's copies, and a test's own (present)
   const files = new Set((claudeExists ? [claudeAt] : []).concat(Object.keys(co.versions), present));
+  // a folder that holds a written file
+  // a folder that holds a written file, or one a move left empty (and its parents), until it is removed
+  const emptied = new Set();
+  const holds = p => emptied.has(p) || Object.keys(log.writes).some(f => f.startsWith(p + '/'));
   // 97-character chunks split JSON lines; 'WAIT' holds the stream open until the process is killed; 'STDERR:…' is what
   // the run writes to stderr and 'EXIT:n' its exit code
   const entriesFor = (n) => scripts[n] || (n === 0 && gateFirst ? SCRIPT.concat(['WAIT']) : script || SCRIPT.concat([LAST, RESULT]));
@@ -430,7 +434,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
           { name: 'cua_repl', pluginId: 'unified-computer-use@openai-bundled', authStatus: 'unsupported', tools: {}, resources: [], resourceTemplates: [] },
           { name: 's', pluginId: null, httpOrigin: null, authStatus: 'unsupported', tools: {}, resources: [], resourceTemplates: [] }], nextCursor: null });
         case 'skills/list': return answer({ data: p.cwds.map(cwd => ({ cwd, errors: co.skillErrors || [], skills: [{ name: 'other', path: '/x/other/SKILL.md', enabled: true }]
-          .concat(co.skillAt === cwd ? [{ name: 'zotero-scholium', path: cwd === '/data' ? '/data/.agents/skills/zotero-scholium/SKILL.md'
+          .concat(co.skillAt === cwd || (co.skillAt === 'workdir' && cwd !== '/data') ? [{ name: 'zotero-scholium', path: cwd === '/data' ? '/data/.agents/skills/zotero-scholium/SKILL.md'
                                                                                       : '/home/u/.codex/skills/zotero-scholium/SKILL.md', enabled: !co.skillOff }] : []) })) });
         case 'skills/extraRoots/set': return answer({});
         case 'plugin/installed': return answer({ marketplaces: [{ name: 'm', plugins: [
@@ -441,6 +445,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
         case 'thread/start': return answer({ thread: { id: co.newThreads ? 'T' + (++log.threads) : 'T1' }, model: p.model || 'gpt-6-astra' });
         case 'thread/inject_items': return answer({});
         case 'thread/archive': return answer({});
+        case 'thread/unarchive': return answer({ thread: { id: p.threadId } });
         case 'thread/resume': return answer({ thread: { id: p.threadId }, model: p.model || 'gpt-6-astra' });
         case 'thread/fork': return answer({ thread: { id: co.forkId || 'F1' }, model: p.model || 'gpt-6-astra' });
         case 'turn/start': {
@@ -698,24 +703,43 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
         throw Error('PathUtils.join: Could not initialize path: NS_ERROR_FILE_UNRECOGNIZED_PATH');
       }
       return p.join('/');
-    }, parent: p => p.replace(/\/[^/]*$/, '') },
+    }, parent: p => p.replace(/\/[^/]*$/, ''), filename: p => p.replace(/^.*[\\/]/, '') },
     IOUtils: {
-      exists: async p => files.has(p) || p in log.writes,
+      exists: async p => files.has(p) || p in log.writes || holds(p),
       // holdDirs: a run's output folder is made once log.releaseDir() is called
-      makeDirectory: async p => { log.madeDirs.push(p); if (holdDirs && /\/tmp\/scholium\/\w+$/.test(p)) await new Promise(r => { log.releaseDir = r; }); },
+      makeDirectory: async p => { log.madeDirs.push(p); if (holdDirs && /\/scholium\/papers\/\w+$/.test(p)) await new Promise(r => { log.releaseDir = r; }); },
       // dirs: a test's own folders and what each holds
       getChildren: async p => {
         if (p in dirs) return dirs[p].slice();
         if (p === CODEX_BIN) return [CODEX_BIN + '/h0', CODEX_BIN + '/h1'];
-        const inside = Object.keys(log.writes).filter(f => f.startsWith(p + '/') && !f.slice(p.length + 1).includes('/'));
-        if (!inside.length) throw Error('NotFoundError');
-        return inside;
+        // the files and folders in it, a folder being there while it holds a file
+        const inside = new Set(Object.keys(log.writes).filter(f => f.startsWith(p + '/')).map(f => p + '/' + f.slice(p.length + 1).split('/')[0]));
+        if (!inside.size && !emptied.has(p)) throw Error('NotFoundError');
+        return [...inside];
       },
-      remove: async p => { if (unremovable.includes(p)) throw Error('NotAllowedError'); log.removed.push(p); delete log.writes[p]; },
+      // a folder with what it holds; failMoves: those refused (a file held open)
+      move: async (from, to) => {
+        if (failMoves.includes(from)) throw Error('NotAllowedError');
+        log.moves.push([from, to]);
+        for (let d = from.replace(/\/[^/]*$/, ''); d && d.includes('/'); d = d.replace(/\/[^/]*$/, '')) emptied.add(d);
+        for (const d of [...emptied]) if (d === from || d.startsWith(from + '/')) { emptied.delete(d); emptied.add(to + d.slice(from.length)); }
+        for (const f of Object.keys(log.writes)) {
+          if (f !== from && !f.startsWith(from + '/')) continue;
+          const dest = to + f.slice(from.length);
+          log.writes[dest] = log.writes[f]; delete log.writes[f];
+          if (f in log.mtimes) { log.mtimes[dest] = log.mtimes[f]; delete log.mtimes[f]; }
+        }
+      },
+      remove: async (p, o) => {
+        if (unremovable.includes(p)) throw Error('NotAllowedError');
+        log.removed.push(p); delete log.writes[p]; emptied.delete(p);
+        if (o && o.recursive) for (const f of Object.keys(log.writes)) if (f.startsWith(p + '/')) delete log.writes[f];
+      },
       // a test's own files (existing) are there, not empty; written ones have their length
       stat: async p => {
         if (p in log.writes) return { type: 'regular', lastModified: log.mtimes[p] || 0, size: log.writes[p].length };
         if (files.has(p)) return { type: 'regular', lastModified: log.mtimes[p] || 0, size: 1 };
+        if (holds(p)) return { type: 'directory', lastModified: 0, size: 0 };
         throw Error('NotFoundError');
       },
       readUTF8: async p => {
@@ -844,7 +868,7 @@ const untimed = e => e[0] !== 'scholium-meta';   // the transcript without the l
 const notice = n => ({ closeOnClick: n.closeOnClick, errors: n.errors, descriptions: n.descriptions, closeTimer: n.closeTimer, shown: n.shown });
 // a paper's conversations, in the order they were started, and the lines of one (the latest by default); the plugin's
 // files of the papers, to start another harness with
-const convs = (h, key = 'ATT1') => Object.keys(h.log.writes).filter(p => p.startsWith(`/data/tmp/scholium/${key}/conversations/`) && p.endsWith('.jsonl'));
+const convs = (h, key = 'ATT1') => Object.keys(h.log.writes).filter(p => p.startsWith(`/data/scholium/papers/${key}/conversations/`) && p.endsWith('.jsonl'));
 const convText = (h, key = 'ATT1', i = -1) => h.log.writes[convs(h, key).at(i)] || '';
 const convLines = (h, key = 'ATT1', i = -1) => convText(h, key, i).trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
 // an agent's own session of a conversation read from its log: the agent of the conversation's id
@@ -853,8 +877,8 @@ const own = (log, agent) => {
   if (!agent && /^chat-/.test(log.id)) throw new Error('own(): a chat-* conversation needs an explicit agent');
   return log.agents[agent || (/^(?:annotate-)?codex-/.test(log.id) ? 'codex' : 'claude')];
 };
-const ours = h => Object.fromEntries(Object.entries(h.log.writes).filter(([p]) => p.startsWith('/data/tmp/scholium/')));
-const CONV1 = '/data/tmp/scholium/ATT1/conversations/claude-20261001-120000.jsonl';   // a conversation logged before
+const ours = h => Object.fromEntries(Object.entries(h.log.writes).filter(([p]) => p.startsWith('/data/scholium/papers/')));
+const CONV1 = '/data/scholium/papers/ATT1/conversations/claude-20261001-120000.jsonl';   // a conversation logged before
 // the outcome of a paper's latest run that ended, of either kind (the chat's state line shows a chat's)
 const latestNote = (h, key = 'ATT1') => h.log.ended.filter(e => e.key === key).at(-1) || null;
 const noteOf = (h, key = 'ATT1') => (latestNote(h, key) || {}).text || null;
