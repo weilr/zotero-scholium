@@ -374,7 +374,7 @@ const context = vm.createContext({
     loads.push([u, o.target === vm.runInContext('globalThis', context), o.ignoreCache]);
     vm.runInContext(fs.readFileSync(url.fileURLToPath(u), 'utf8'), context);
     // the runner's start and stop, once the last module has added them
-    if (u.endsWith('/agents.js')) Object.assign(context.ScholiumRunner, { start: (id, update) => started.push(update), stop() {} });
+    if (u.endsWith('/lifecycle.js')) Object.assign(context.ScholiumRunner, { start: (id, update) => started.push(update), stop() {} });
   } } },
 });
 vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), context);

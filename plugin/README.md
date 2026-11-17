@@ -503,10 +503,26 @@ this order, and those after `runner.js` add their methods to `ScholiumRunner`:
 | `folders.js` | the plugin's folder `<data dir>/scholium/` and the moves of an earlier version's folders into it |
 | `setup.js` | the preferences, the agent, model and effort chosen, finding Claude Code, Codex, uv and Python, installing the skill, the setup check |
 | `prompts.js` | a paper's PDF, key and library, the prompts, the agents' arguments, `paper.json` and `applied.json`, the words of the steps |
-| `section.js` | the items list's menu, log events as display entries, the Scholium section's frame, layers and settings chip, the profile editor, Markdown and formulas, citations and links |
-| `conversations.js` | the message box and the queued messages, conversations and their logs, the history, saved prompts, the transcript and the state line |
-| `queue.js` | Save as note, notices, Annotate, editing a question, sending, the queue and the pauses for usage limits, the end of a run |
-| `agents.js` | a run, Claude Code and Codex, cancelling, deleting the tool's annotations, the runner's start, hand-over and stop |
+| `menus.js` | the main windows, the items list's menu, the reader's selection and its menu |
+| `section.js` | the Scholium section's registration, layers and popovers, settings chip and settings layer, fit, tabs and frame |
+| `models.js` | the models and effort levels Claude Code and Codex offer, the section's selects |
+| `profile.js` | the profile editor |
+| `markdown.js` | Markdown and formulas, sentence citations and links |
+| `compose.js` | the message box and the queued messages |
+| `conversations.js` | conversations, their files and logs, the history as text, showing a conversation, switching the agent, a new chat |
+| `saved.js` | saved prompts |
+| `history.js` | the history list |
+| `entries.js` | log events as display entries, and their nodes |
+| `transcript.js` | the transcript, its runs and the state line |
+| `notes.js` | Save as note, notices, the local API check |
+| `queue.js` | Annotate, sending, the runs of a paper and a conversation, the queue |
+| `edit.js` | editing a question, undoing an edit |
+| `runs.js` | starting runs, the pauses for usage limits, the end of a run |
+| `agents.js` | a run and its log, Claude Code, cancelling |
+| `prerun.js` | the plugin's own first steps of a run (the skill's extract), what the skill's script held back and the user confirmed |
+| `codex.js` | Codex: its app-server, threads and their archiving, the skill, MCP servers, usage limits and a run |
+| `annotations.js` | a paper's PDF attachments, the tool's annotations and notes and deleting them, the core colour, the warnings a run names |
+| `lifecycle.js` | the runner's start, hand-over and stop |
 
 `prefs.js` holds the defaults of the settings page's preferences, `settings.xhtml` and `settings.js` the page.
 `content/` holds the section's icons and its stylesheet `scholium.css`, which uses Zotero's theme variables.
