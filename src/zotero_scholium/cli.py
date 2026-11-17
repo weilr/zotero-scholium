@@ -1306,11 +1306,12 @@ LOCAL_SCALES = (("billion", r"mil\s+millones|mil\s+milh(?:ões|oes)|mrd\.?|milli
 LOCAL_NUMBER_RE = re.compile(r"(?<![^\W\d_])(\d[\d.,\u00a0\u202f\u2009]*\d|\d)(?:\s*(" + "|".join(f"(?:{p})" for _, p in LOCAL_SCALES)
                              + r")(?![^\W\d_]))?", re.I)
 INVISIBLE_RE = re.compile("[\u00ad\u200b]")   # soft hyphen, zero-width space
+SCRIPT_CHARS_RE = re.compile("[\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079\u207a\u207b\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089\u208a\u208b]+")   # superscript and subscript digits and signs
 MAGNITUDES = {"K": "thousand", "M": "million", "B": "billion"}
 NUMBER_RE = re.compile(
     r"(?<![A-Za-z0-9_.])(?P<value>[+−-]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)"
     r"(?:[eE][+-]?\d+)?)"
-    r"(?:\s*(?P<scale>[kK](?![A-Za-z])|百万|千万|十亿|百亿|千亿|[千万亿]|(?:thousand|million|billion|trillion)(?![A-Za-z])))?"
+    r"(?:\s*(?P<scale>[kK](?![A-Za-z])|万亿|百万|千万|十亿|百亿|千亿|[千万亿]|(?:thousand|million|billion|trillion)(?![A-Za-z])))?"
     r"(?:\s*(?P<percent>[%％]))?"
     r"(?:\s*-?\s*(?P<unit>[kmgt]i?b|[numμ]?s|[kmg]?hz|毫秒|微秒|纳秒|秒)(?![A-Za-z]))?"
     r"(?![A-Za-z0-9_]|\.\d|,\d)"
@@ -1373,7 +1374,7 @@ def _tokens(s, origin=None, local=False, letters=False):
         # Decimal tuple scaling is exact, including values beyond the default precision.
         number = Decimal(match["value"].replace(",", "").replace("−", "-"))
         sign, digits, exponent = number.as_tuple()
-        exponent += {None: 0, "k": 3, "千": 3, "万": 4, "亿": 8, "百万": 6, "千万": 7, "十亿": 9, "百亿": 10, "千亿": 11, "thousand": 3, "million": 6, "billion": 9,
+        exponent += {None: 0, "k": 3, "千": 3, "万": 4, "亿": 8, "百万": 6, "千万": 7, "十亿": 9, "百亿": 10, "千亿": 11, "万亿": 12, "thousand": 3, "million": 6, "billion": 9,
                      "trillion": 12}[match["scale"]]
         digits = list(digits)
         while digits and digits[-1] == 0:
@@ -1495,7 +1496,8 @@ def check_translations(annotations):
             continue
         text, comment = a["text"], a["comment"]
         base = MATH_RE.sub(" ", comment)    # mathematics is display, not content
-        plain = TAG_RE.sub(" ", base)
+        # superscript and subscript characters (T², x₁) as <sup>/<sub>: set apart here, joined to their base below
+        plain = SCRIPT_CHARS_RE.sub(lambda m: " " + unicodedata.normalize("NFKC", m[0]), TAG_RE.sub(" ", base))
         joined = TAG_RE.sub(" ", SCRIPT_TAG_RE.sub("", base))
         script = ("cjk" if CJK_RE.search(plain) else
                   "cyrillic" if len(CYRILLIC_RE.findall(plain)) > len(re.findall(r"[A-Za-z]", plain)) else "latin")
@@ -1559,6 +1561,24 @@ READER_TAGS = {"b", "i", "sub", "sup"}                        # the only tags th
 def _overlaps(rect, rects, tol=2.0):
     """True when `rect` shares more than `tol` points in both directions with one of `rects`."""
     return any(min(rect[2], o[2]) - max(rect[0], o[0]) > tol and min(rect[3], o[3]) - max(rect[1], o[1]) > tol for o in rects)
+
+
+def _label_colon(comment):
+    """A margin note in "label: content" form: at most six characters or words before its first colon (方法：…, 与 GPT-3
+    的区别：…, Key idea: …), each Chinese, Japanese or Korean character and each other word or number counting one; a
+    clause before a colon (这一点与直觉相反：…) is a sentence."""
+    if not LABEL_RE.match(comment):
+        return False
+    head = re.split(r"[：:]", comment, maxsplit=1)[0]
+    return len(CJK_RE.findall(head)) + len(re.findall(r"[^\W_]+", CJK_RE.sub(" ", head))) <= 6
+
+
+def _covers(rect, rects, tol=2.0):
+    """True when `rect` covers part of one of `rects` on the same line: more than `tol` points across and more than half
+    the lower box's height down. Boxes of adjacent lines overlap by a few points where the line pitch is smaller than the
+    font's box; that is no overlap of two highlights."""
+    return any(min(rect[2], o[2]) - max(rect[0], o[0]) > tol
+               and min(rect[3], o[3]) - max(rect[1], o[1]) > max(tol, min(rect[3] - rect[1], o[3] - o[1]) / 2) for o in rects)
 
 
 def _existing_rects(listing, keep_own=False):
@@ -1687,7 +1707,7 @@ def check_style(annotations, cfg, listing=None, note_html=None, plan=None):
                                           "a complete redo")
         for kind, reason in _text_defects(comment, page=a["type"] == "text"):
             warn(kind, a, reason)
-        if not is_mark and LABEL_RE.match(comment):
+        if a["type"] in ("text", "note") and _label_colon(comment):   # a framed figure's comment may read as its caption
             warn("label", a, "label-colon form; write a sentence")
         if not is_mark and STYLE_SYMBOL_RE.search(comment):
             warn("symbol", a, "arrows, circled numbers or bracket tags; write a sentence")
@@ -1697,7 +1717,7 @@ def check_style(annotations, cfg, listing=None, note_html=None, plan=None):
         if is_mark and not same:
             page, rects = a["position"]["pageIndex"], a["position"]["rects"]
             for key, rs in existing.get(page, []):
-                if any(_overlaps(r, rs) for r in rects):
+                if any(_covers(r, rs) for r in rects):
                     warn("user_overlap", a, f"overlaps an existing annotation ({key})")
                     break
     for i, a in enumerate(marks):
@@ -1706,7 +1726,7 @@ def check_style(annotations, cfg, listing=None, note_html=None, plan=None):
                 continue
             if a["position"]["rects"] == b["position"]["rects"]:
                 warn("duplicate", b, "the same span is highlighted twice")
-            elif any(_overlaps(r, b["position"]["rects"]) for r in a["position"]["rects"]):
+            elif any(_covers(r, b["position"]["rects"]) for r in a["position"]["rects"]):
                 warn("overlap", b, "intersects another highlight: " + a["text"][:40])
     last = _last_write(cfg)
     if cfg.get("cleanup", False):   # a rewrite would undo what the user changed in the tool's annotations since they were written

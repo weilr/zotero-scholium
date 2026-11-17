@@ -130,6 +130,9 @@ def test_large_scientific_exponents_stay_compact():
     ("Both settings follow the same pretrain-and-finetune procedure(Figure.2).", "两种设置遵循相同的预训练与微调流程（图 2）。"),
     ("The resulting non-dimensional fields have approximately unit scale.", "得到的无量纲场尺度约为 1。"),
     ("Accuracy improves by 2.1% and 3 points on the two benchmarks.", "在两个基准上准确率提升 2.1%，3 个点。"),
+    ("Since the magnitudes of the gradients produced by the soft targets scale as 1/T 2 it is important to multiply them by T 2.",
+     "由于软目标产生的梯度幅值按 1/T² 缩放，需要把它们乘以 T²。"),
+    ("We trained on 2 trillion tokens of data.", "我们用 2 万亿个 token 的数据训练。"),
 ])
 def test_accepts_faithful_translations_of_extracted_text(source, translated):
     assert translation_warnings(source, translated) == []

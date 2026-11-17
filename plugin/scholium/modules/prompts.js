@@ -128,15 +128,22 @@ Object.assign(ScholiumRunner, {
               : `remaining warnings as “${label}: …” (“${label}: ${none}” when there are none)`;
   },
 
-  // the prompt's lines of the status and extract the plugin ran before the agent (preRun): the agent goes on from them
+  // the prompt's lines of the status and extract the plugin ran before the agent (preRun): the agent goes on from them.
+  // When the index names the main text and more follows it, the line says where it ends, so that a whole read stops there
   preRunLines(job) {
     const p = job.pre;
     if (!p || !p.status) return [];
     const txt = PathUtils.join(this.outDir(this.keyOf(job.att)), "sentences.txt");
+    const [first, last] = p.main && p.lines > p.main[1] + 1 ? p.main : [];
     return this.zh() ? ["插件已经运行了 status（第 1 步）和 extract（第 2 步），不要再运行它们（用户的附加要求需要 extract 的其他选项时除外）：", `- status 的输出：${p.status}`,
                         `- extract 写好了 ${txt}（${p.lines} 行，开头几行是索引）和同一目录的 sentences.json`]
+                         .concat(last ? [`- 正文是第 ${first}–${last} 行，之后是参考文献和附录：批注整篇时先只读到第 ${last} 行（Read 的 limit 设为 ${last}），`
+                                         + "附录只读正文点名的必要部分；用户限定了页码或范围时按页读"] : [])
                      : ["The plugin has already run status (step 1) and extract (step 2); do not run them again unless the user's extra instructions need other extract options:", `- status output: ${p.status}`,
-                        `- extract wrote ${txt} (${p.lines} lines; its first lines are the index) and sentences.json beside it`];
+                        `- extract wrote ${txt} (${p.lines} lines; its first lines are the index) and sentences.json beside it`]
+                         .concat(last ? [`- The main text is lines ${first}-${last}; the references and the appendix follow: for the whole paper, read only up `
+                                         + `to line ${last} first (Read with limit ${last}), and of the appendix only the parts the main text names as `
+                                         + "essential; when the user limits the pages or scope, read those pages"] : []);
   },
 
   // the question's line of the extract the plugin ran before the agent (preRunQuestion), or of a PDF without a text layer;

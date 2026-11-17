@@ -34,10 +34,14 @@ const card = pane => {
   const c = pane.annot.list.children.at(-1) && pane.annot.list.children.at(-1).children.find(n => typeof n.className === 'string' && n.className.startsWith('scholium-card'));
   return c ? c.children[0].textContent : null;
 };
+// a sentences.txt of 1695 lines whose index puts the main text at lines 8-660, references and an appendix after it
+const APPENDIX = 'Index (line numbers of this file)\nmain text: lines 8-660\nreferences: line 661 (p.11)\n' + 'x\n'.repeat(1692);
 (async () => {
   const facts = {};
   for (const [name, runs, locale] of [['ok', { status: [STATUS, 0], extract: ['412 sentences -> s.json\n', 0] }, 'zh-CN'],
                                       ['okEnglish', { status: [STATUS, 0], extract: ['412 sentences -> s.json\n', 0] }, 'en-US'],
+                                      ['appendix', { status: [STATUS, 0], extract: ['x', 0], text: APPENDIX }, 'zh-CN'],
+                                      ['appendixEnglish', { status: [STATUS, 0], extract: ['x', 0], text: APPENDIX }, 'en-US'],
                                       ['statusFails', { status: ['', 1], extract: ['412 sentences -> s.json\n', 0] }, 'zh-CN'],
                                       ['extractFails', { status: [STATUS, 0], extract: ['', 1] }, 'zh-CN'],
                                       ['scanned', { status: [STATUS, 0], extract: ['{"error": "no text layer"}', 3] }, 'zh-CN']]) {
@@ -198,6 +202,16 @@ def test_status_and_extract_run_before_the_agent_with_its_command_and_environmen
     assert f["agent"] == 1 and ZH_LINES in f["prompt"]
     assert ZH_LINES.split("\n")[0] in f["prompt"] and f["prompt"].count("status") >= 2
     assert EN_LINES in facts["okEnglish"]["prompt"]
+    assert "正文是第" not in f["prompt"] and "The main text is" not in facts["okEnglish"]["prompt"], "nothing follows the main text"
+
+
+def test_the_prompt_says_where_the_main_text_ends_when_an_appendix_follows(facts):
+    assert ("（1695 行，开头几行是索引）和同一目录的 sentences.json\n- 正文是第 8–660 行，之后是参考文献和附录：批注整篇时先只读到第 660 行"
+            "（Read 的 limit 设为 660），附录只读正文点名的必要部分；用户限定了页码或范围时按页读\n") in facts["appendix"]["prompt"]
+    assert ("(1695 lines; its first lines are the index) and sentences.json beside it\n- The main text is lines 8-660; the references "
+            "and the appendix follow: for the whole paper, read only up to line 660 first (Read with limit 660), and of the appendix "
+            "only the parts the main text names as essential; when the user limits the pages or scope, read those pages\n"
+            ) in facts["appendixEnglish"]["prompt"]
 
 
 @pytest.mark.parametrize("name, ran", [("statusFails", 1), ("extractFails", 2)])

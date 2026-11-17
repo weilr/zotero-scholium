@@ -1007,6 +1007,45 @@ def test_duplicate_sentence_reports_occurrences(tmp_path):
     assert missed and "occurs 2 time" in missed[0]["reason"]
 
 
+@pytest.mark.parametrize(("text", "label"), [
+    ("方法：三招提升吞吐。", True),
+    ("核心贡献：用软目标迁移知识。", True),
+    ("与 GPT-3 的区别：参数更少。", True),
+    ("Key idea: distill the ensemble into one net.", True),
+    ("这一点与直觉相反：小模型无法精确匹配软目标，但稍微偏向正确答案反而有益。", False),
+    ("偏置问题是这组实验的关键：模型并非学不会 3，而是 3 类的偏置太低。", False),
+    ("比例为 3：1 时效果最好。", False),
+])
+def test_only_a_short_label_before_a_colon_is_a_label(text, label):
+    assert cli._label_colon(text) is label
+
+
+def test_a_framed_figure_may_be_commented_like_its_caption():
+    at = {"pageIndex": 0, "rects": [[100.0, 100.0, 300.0, 300.0]]}
+    kinds = lambda kind, comment: [w["kind"] for w in cli.check_style([{"type": kind, "comment": comment, "position": at}],
+                                                                      dict(cli.DEFAULTS, cleanup=True))]
+    assert "label" not in kinds("image", "图 1：DPO 与 RLHF 的对比。")
+    assert "label" in kinds("text", "图 1：DPO 与 RLHF 的对比。")
+
+
+def test_highlights_on_adjacent_lines_do_not_overlap():
+    # line boxes of a real page (arXiv 1503.02531, p.1): 13.29 pt tall at a 10.92 pt pitch, so adjacent lines share 2.37 pt
+    a = [[143.88, 413.84, 468.07, 427.13], [143.88, 402.92, 434.13, 416.21]]
+    b = [[436.92, 402.92, 468.06, 416.21], [143.88, 392.0, 468.3, 405.29]]
+    same_line = [[300.0, 402.92, 468.0, 416.21]]
+    mark = lambda text, rects: {"type": "highlight", "text": text, "comment": "一句话。", "color": "#ffd400",
+                                "position": {"pageIndex": 0, "rects": rects}}
+    user = lambda rects: {"annotations": [{"key": "USER1", "type": "highlight", "tags": [],
+                                           "position": {"pageIndex": 0, "rects": rects}}]}
+    cfg = dict(cli.DEFAULTS, cleanup=True)
+    kinds = lambda anns, listing=None: [w["kind"] for w in cli.check_style(anns, cfg, listing)
+                                        if w["kind"] in ("overlap", "user_overlap")]
+    assert kinds([mark("A", a), mark("B", b)]) == [], "two consecutive sentences, the second starting where the first ends"
+    assert kinds([mark("A", a), mark("C", same_line)]) == ["overlap"]
+    assert kinds([mark("A", a)], user(b)) == []
+    assert kinds([mark("A", a)], user(same_line)) == ["user_overlap"]
+
+
 def test_style_warnings_flag_mechanical_defects(pdf_path, tmp_path):
     note = tmp_path / "note.html"
     note.write_text('<h1>T</h1><p>inline <span class="math">$\\\\frac{a}{b}$</span>, raw $y^2$ here, 值得注意</p>', encoding="utf8")

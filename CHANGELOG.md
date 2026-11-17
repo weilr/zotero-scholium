@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- When the paper's index names where the main text ends and references or an appendix follow, the annotation prompt
+  gives those lines: a whole-paper annotation reads up to the end of the main text first, and of the appendix only
+  what the main text calls essential.
+- The `label` style warning is given only for a margin note or sticky note with at most six characters or words before
+  its first colon (方法：…, 与 GPT-3 的区别：…, Key idea: …): a clause before a colon (这一点与直觉相反：…) is a sentence, and
+  a framed figure's comment may read as its caption (图 1：…).
+
+### Fixed
+
+- The translation check reads superscript and subscript characters in a comment (T², x₁) both joined to their base and
+  set apart, as it reads `<sup>`/`<sub>`: PDF text writes T² as “T 2”. 万亿 is read as a trillion (2 万亿 for 2 trillion),
+  no longer as 2 万 and a stray 亿.
+- Highlights of two consecutive sentences, one ending on the line where the next begins, are no longer reported as
+  overlapping (`overlap`, `user_overlap`): the boxes of adjacent lines share a few points where the line pitch is
+  smaller than the font's box, and only boxes on the same line count now.
+
 ## 0.2.3 (2026-11-17)
 
 ### Added

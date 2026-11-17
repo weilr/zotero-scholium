@@ -22,14 +22,17 @@ Object.assign(ScholiumRunner, {
     };
   },
 
-  // `extract` of a paper (its key of keyOf) into its output folder by a preRunner: { lines (of sentences.txt) }; { scanned }
-  // for a PDF without a text layer (exit code 3); { cancelled } after ■; null when it failed or did not end in time
+  // `extract` of a paper (its key of keyOf) into its output folder by a preRunner: { lines (of sentences.txt), main (its
+  // index's main text lines [first, last], when the index gives them) }; { scanned } for a PDF without a text layer (exit
+  // code 3); { cancelled } after ■; null when it failed or did not end in time
   // Another run of the paper that extracts it now: this one waits for that extract and takes what it wrote.
   async preExtract(run, ctx, k, ms) {
     const out = this.outDir(k), txt = PathUtils.join(out, "sentences.txt");
     const lines = async () => {
       const text = await IOUtils.readUTF8(txt);
-      return { lines: text.split(/\r?\n/).length - (/\n$/.test(text) ? 1 : 0) };
+      const main = /^main text: lines (\d+)-(\d+)\r?$/m.exec(text.slice(0, 4000));
+      return Object.assign({ lines: text.split(/\r?\n/).length - (/\n$/.test(text) ? 1 : 0) },
+                           main ? { main: [Number(main[1]), Number(main[2])] } : {});
     };
     const other = this.extracting.get(k);
     if (other) {
@@ -52,7 +55,7 @@ Object.assign(ScholiumRunner, {
 
   // an annotation's first steps, run by the plugin before the agent starts, by the skill's script the agent runs
   // (skillScript, preRunner): `status <item key> [--group ID]` within PRE_STATUS_MS, then `extract` within PRE_EXTRACT_MS.
-  // { status (its JSON, minified), lines (of sentences.txt), script } when both ran; { scanned } for a PDF without a text
+  // { status (its JSON, minified), lines (of sentences.txt), main, script } when both ran; { scanned } for a PDF without a text
   // layer; { cancelled } after ■; null otherwise, and the agent runs them itself. The live line says the PDF is read
   async preRun(job, ctx) {
     const script = job.scriptRun && job.scriptRun.command ? await this.skillScript(job.agent) : null;
@@ -74,7 +77,7 @@ Object.assign(ScholiumRunner, {
       this.advance(ctx, "extract");   // the agent's steps go on after it
       const extract = await this.preExtract(run, ctx, key, this.PRE_EXTRACT_MS);
       if (!extract || extract.cancelled || extract.scanned) return extract;
-      return { status: json, lines: extract.lines, script };
+      return Object.assign({ status: json, lines: extract.lines, script }, extract.main ? { main: extract.main } : {});
     } catch (e) {
       this.log("pre-run failed: " + e);
       return null;
