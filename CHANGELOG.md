@@ -4,6 +4,16 @@
 
 ### Changed
 
+- ✓ on an edited question whose words and quote were left as they were closes the box without asking again.
+- A question can be edited while the paper's annotation runs or waits: the edit waits behind it, with Undo.
+- Citations side by side that point to one page are one chip, whose card lists their sentences and whose Locate shows
+  them all; the chips keep the brackets and punctuation around them on their line.
+- A chat list at its end stays at its end when a queued message or a longer message box takes room below it.
+- A stopped answer's line shows its word beside ⊘, after how long the run worked.
+- Save as note leaves the paper selected, with its conversation.
+- A question's answer does not mention sentences.txt, files or commands, nor add a “Sources:” line; a conversation
+  handed to an agent tells it to refer to earlier messages by what they said, not by turn number.
+- The Chinese and Korean queued state counts what is ahead (项, 項, 건) rather than papers.
 - What the agent held back (the user's own changes, or annotations a cleanup would delete) is approved with Confirm
   changes above the message box, or left with Keep unchanged; an ordinary reply approves nothing and drops the pending
   report. The agent's report names these buttons; for a partial approval it narrows the configuration and reports again.

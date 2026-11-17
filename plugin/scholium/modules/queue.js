@@ -31,8 +31,7 @@ Object.assign(ScholiumRunner, {
       note.setNote(html);
       note.setTags([{ tag: this.NOTE_TAG }]);
       await note.saveTx();
-      this.noteNotice(att);
-      try { await Zotero.getMainWindow().ZoteroPane.selectItem(note.id); } catch (e) { this.log("note not selected: " + e); }
+      this.noteNotice(att);   // the paper stays selected, with its conversation
       return note;
     } catch (e) {
       this.log("note not saved: " + e);
@@ -280,9 +279,10 @@ Object.assign(ScholiumRunner, {
     return this.undoStrip(view.doc, this.text("replaced"), () => { this.undoReplace(id).catch(e => this.log("undo failed: " + e)); });
   },
 
-  // the user's words in place as a box, with their quote: ✓ or the send shortcut asks again, ✕ or Esc leaves them
+  // the user's words in place as a box, with their quote: ✓ or the send shortcut asks again, ✕ or Esc leaves them, as
+  // does ✓ on the words and quote as they were. The paper's annotation leaves the chat free: an edit waits behind it
   startEdit(view, run, said) {
-    if (view.pane && this.busy(view.shownKey)) return;
+    if (view.pane && this.busy(view.shownKey, "chat")) return;
     if (view.editing) this.stopEdit(view);
     const doc = view.doc, prompt = run.prompt;
     let quote = prompt.quote || null;
@@ -302,12 +302,13 @@ Object.assign(ScholiumRunner, {
     input.setAttribute("no-native", "true");
     input.setAttribute("no-windows-native", "true");
     input.value = prompt.text;
-    // while the paper runs, the box and its words stay until it is free
-    const busy = () => !!view.pane && this.busy(view.shownKey);
+    // while the chat runs, the box and its words stay until it is free
+    const busy = () => !!view.pane && this.busy(view.shownKey, "chat");
     const submit = () => {
       const say = String(input.value || "").trim();
       if (!say || busy()) { fit(); return; }
       this.stopEdit(view);
+      if (say === String(prompt.text).trim() && quote === (prompt.quote || null)) return;
       this.editTurn(view, prompt, say, quote).catch(e => this.log("edit failed: " + e));
     };
     const tools = doc.createElement("div");
@@ -362,7 +363,7 @@ Object.assign(ScholiumRunner, {
   async editTurn(view, prompt, say, quote = null) {
     const pane = view.pane, key = view.shownKey, conv = view.shownConv;
     say = String(say || "").trim();
-    if (!pane || !key || !conv || !say || this.busy(key) || !this.localApiReady()) return false;
+    if (!pane || !key || !conv || !say || this.busy(key, "chat") || !this.localApiReady()) return false;
     const path = this.convPath(key, conv), id = `${key}/${conv}`;
     await this.flushLog(path);
     if (this.pendingLogs.has(path)) {
@@ -423,8 +424,11 @@ Object.assign(ScholiumRunner, {
     catch (e) { this.log("edit not sent: " + e); }
     if (!sent) { await this.undoReplace(id); return false; }
     if (this.replaced.get(id) === r) r.timer = setTimeout(() => this.undoTimeUp(id), this.UNDO_MS);
-    // an edit that waits behind another paper's run: the sections show the conversation cut, with Undo
-    if (!(this.job && this.job.key === key)) for (const p of [...this.panes.values()]) if (p.keys.includes(key)) await this.showConversation(p);
+    // an edit that waits behind another run (another paper's, the paper's annotation): the sections show the
+    // conversation cut, with Undo
+    if (!(this.job && this.job.key === key && (this.job.source.kind || "chat") === "chat")) {
+      for (const p of [...this.panes.values()]) if (p.keys.includes(key)) await this.showConversation(p);
+    }
     return true;
   },
 

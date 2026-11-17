@@ -458,6 +458,34 @@ SCENARIOS = r"""
     facts.citeDraft = [all(pane.list).filter(n => n.className === 'scholium-cite').map(n => n.textContent), atOnce, text(pane.list.children.at(-1)).includes('草稿续写')];
     h.log.release(); await settle(300);
   }
+  // citations side by side: those of one page are one chip, whose card lists their sentences and whose Locate shows them
+  // all; the chips keep the brackets and the punctuation around them on their line
+  {
+    const SPATH = '/data/tmp/scholium/ATT1/sentences.json';
+    const sentences = JSON.stringify({ sentences: [
+      { id: 12, page: 4, text: 'First sentence.', rects: [[72, 600, 300, 612]] },
+      { id: 13, page: 4, text: 'Second sentence.', rects: [[72, 588, 210, 600]] },
+      { id: 20, page: 5, text: 'Third sentence.', rects: [[72, 500, 200, 512]] }] });
+    const reply = [ev({ type: 'system', subtype: 'init', apiKeySource: 'none', model: 'claude-opus-5-5', session_id: 'S1' }),
+                   said('小模型学到相似性（[#12][#13] [#20]）。之后 [#12] 结束，[#999]。'),
+                   ev({ type: 'result', subtype: 'success', is_error: false, result: '…', session_id: 'S1' })];
+    const h = harness({ scripts: [reply], logs: { [SPATH]: sentences } });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    const pane = p.pane();
+    pane.input.type('为什么？'); pane.send.click(); await settle(500);
+    const answer = pane.list.children.at(-1).children.find(c => c.className.startsWith('scholium-entry text'));
+    const all = n => [n, ...(n.children || []).flatMap(all)];
+    const groups = all(answer).filter(n => n.className === 'scholium-cites');
+    const chips = all(answer).filter(n => n.className === 'scholium-cite');
+    chips[0].fire('mouseenter'); await settle(10);
+    const card = pane.popover && pane.popover.node;
+    const texts = card ? card.children.slice(1).map(c => c.textContent) : null;
+    pane.popover.node.children[0].children[1].click(); await settle(50);
+    facts.citeGroups = { text: answer.textContent, groups: groups.map(g => g.textContent), chips: chips.map(c => [c.textContent, c.attrs['data-id']]),
+                         head: card && card.children[0].children[0].textContent, texts, opened: h.log.readerOpened.at(-1).location };
+  }
   // a sentences.json that does not parse is read once; a later change is read again
   {
     const DIR = '/data/tmp/scholium/ATT1/conversations/';
@@ -840,6 +868,20 @@ def test_positions_other_than_four_numbers_are_dropped(facts):
     assert f["rects"] == [[[1, 2, 3, 4], [5.5, 6, 7, 8.25]], None, [[1, 2, 3, 4]], None, None, None]
     assert f["opened"] == [{"pageIndex": 3}, {"position": {"pageIndex": 3, "rects": [[1, 2, 3, 4]]}}], \
         "a sentence left without a position opens its page"
+
+
+def test_citations_of_one_page_side_by_side_are_one_chip_kept_with_their_punctuation(facts):
+    g = facts["citeGroups"]
+    assert g["text"] == "小模型学到相似性（p.4p.5）。之后 p.4 结束，[#999]。"
+    assert g["groups"] == ["（p.4p.5）。", "p.4"], "brackets and punctuation stay on the chips' line"
+    assert g["chips"] == [["p.4", "12,13"], ["p.5", "20"], ["p.4", "12"]]
+    assert g["head"] == "第 4 页" and g["texts"] == ["First sentence.", "Second sentence."]
+    assert g["opened"] == {"position": {"pageIndex": 3, "rects": [[72, 600, 300, 612], [72, 588, 210, 600]]}}
+
+
+def test_the_chips_and_their_punctuation_do_not_wrap_apart():
+    rules = css_rules()
+    assert "white-space: nowrap" in rules[".scholium-cites"]
 
 
 def test_the_card_stays_while_the_pointer_is_on_the_chip_or_the_card(facts):

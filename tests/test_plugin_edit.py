@@ -408,7 +408,7 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
                          runs: runs(), replaced: h.runner.replaced.size, other: h.runner.job && h.runner.job.key, calls: h.log.calls.length };
     h.runner.cancel(); await settle(300);
   }
-  // ✓ once the paper has started a run meanwhile (an annotation): the box stays with its words, ✓ off while the paper runs
+  // ✓ once the conversation has started a run meanwhile: the box stays with its words, ✓ off while it runs
   {
     const h = harness({ logs: { [CLAUDE_CONV]: CLAUDE3 }, scripts: [['WAIT']] });
     h.runner.start('x');
@@ -418,13 +418,82 @@ const answered = (session, text = '新回答') => [ev({ type: 'system', subtype:
     const said = () => pane.list.children[1].children[0];
     said().children.find(c => /edit-prompt/.test(c.className || '')).click();
     said().children.find(c => c.tagName === 'textarea').type('改过的问题二');
-    await h.runner.annotate([h.item1], { confirmed: true });
+    await h.runner.send(h.item1, '问题4', { kind: 'chat', conv: 'claude-20261001-120000' });
     await settle(200);
     const ok = said().children.at(-1).children[1];
-    const busy = { busy: h.runner.busy('ATT1'), disabled: !!ok.disabled };
+    const busy = { busy: h.runner.busy('ATT1', 'chat'), disabled: !!ok.disabled };
     ok.click(); await settle(100);
     facts.busyBox = { busy, cls: said().className, value: (said().children.find(c => c.tagName === 'textarea') || {}).value || null,
-                      calls: h.log.calls.length, same: h.log.writes[CLAUDE_CONV] === CLAUDE3 };
+                      calls: h.log.calls.length, same: h.log.writes[CLAUDE_CONV] === CLAUDE3, log: h.log.writes[CLAUDE_CONV] };
+    h.runner.cancel(); await settle(300);
+  }
+  // ✓ or the send key on words left as they were (spaces aside) closes the box: nothing is cut nor asked again; words
+  // without the quote they had are an edit
+  {
+    const QUOTED = '/data/tmp/scholium/ATT2/conversations/claude-20261001-120000.jsonl';
+    const quoted = claudeTurn(1, 'u1') + L({ type: 'scholium', subtype: 'run', agent: 'claude', user: '问题2', at: 1100 })
+      + L({ type: 'scholium', subtype: 'prompt', text: '问题2', quote: { text: '一句原文', page: 1 } })
+      + L({ type: 'system', subtype: 'init', session_id: 'S1' })
+      + L({ type: 'assistant', uuid: 'u2', session_id: 'S1', message: { content: [{ type: 'text', text: '回答2' }] } })
+      + L({ type: 'result', subtype: 'success', is_error: false, result: '回答2', session_id: 'S1' });
+    const h = harness({ logs: { [CLAUDE_CONV]: CLAUDE3, [QUOTED]: quoted }, scripts: [answered('S2')] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(60);
+    const pane = p.pane();
+    const said = () => pane.list.children[1].children[0];
+    const editOf = () => said().children.find(c => /edit-prompt/.test(c.className || ''));
+    const input = () => said().children.find(c => c.tagName === 'textarea');
+    editOf().click();
+    said().children.at(-1).children[1].click();          // ✓ on the words as they were
+    await settle(200);
+    const clicked = { cls: said().className, editing: !!pane.editing };
+    editOf().click();
+    input().type('  问题2 ');
+    key(input(), { key: 'Enter', ctrlKey: true });
+    await settle(200);
+    const keyed = { cls: said().className, editing: !!pane.editing };
+    facts.unchanged = { clicked, keyed, calls: h.log.calls.length, same: h.log.writes[CLAUDE_CONV] === CLAUDE3, replaced: h.runner.replaced.size };
+    const q = await h.pane(h.item2);
+    await settle(60);
+    const qpane = q.pane();
+    const qsaid = () => qpane.list.children[1].children[0];
+    qsaid().children.find(c => /edit-prompt/.test(c.className || '')).click();
+    qsaid().children[0].children.find(c => c.tagName === 'button').click();   // the quote's ✕
+    qsaid().children.at(-1).children[1].click();
+    await settle(400);
+    facts.unchanged.unquoted = { calls: h.log.calls.length, replaced: h.runner.replaced.size };
+  }
+  // ✎ while the paper's annotation runs: the edited question waits behind it, the conversation cut with Undo, which
+  // stays while it waits, and is answered once the annotation ends
+  {
+    const h = harness({ logs: { [CLAUDE_CONV]: CLAUDE3 }, scripts: [SCRIPT.concat(['HOLD', LAST, RESULT]), answered('S2')] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(60);
+    const pane = p.pane();
+    const said = () => pane.list.children[1].children[0];
+    const editOf = () => said().children.find(c => /edit-prompt/.test(c.className || ''));
+    await h.runner.annotate([h.item1], { confirmed: true });
+    await settle(200);
+    const during = { annotating: !!h.runner.job && h.runner.job.source.kind === 'annotate', view: pane.chatView.className, edit: !!editOf() };
+    if (editOf()) editOf().click();
+    const box = said().children.find(c => c.tagName === 'textarea');
+    if (box) box.type('改过的问题二');
+    const ok = box ? said().children.at(-1).children[1] : null;
+    const enabled = !!ok && !ok.disabled;
+    if (ok) ok.click();
+    await settle(300);
+    const runs = () => pane.list.children.filter(n => n.className === 'scholium-run')
+      .map(r => r.children[0].children.find(c => c.className === 'scholium-content').textContent);
+    const strip = pane.list.children.at(-1);
+    const waiting = { queued: h.runner.queue.filter(j => j.edited).length, calls: h.log.calls.length, replaced: h.runner.replaced.size, runs: runs(),
+                      strip: strip.className === 'scholium-undo' ? strip.children[0].textContent : null };
+    h.fire(); await settle(40);
+    const kept = h.runner.replaced.size;
+    h.log.release(); await settle(1000);
+    const log = await h.runner.readLog('ATT1', 'claude-20261001-120000');
+    facts.editWhileAnnotating = { during, enabled, waiting, kept, calls: h.log.calls.length, turns: log.turns.map(t => [t.user, t.reply]) };
     h.runner.cancel(); await settle(300);
   }
   // a turn is the view's when its words are the question's, or the question's with words steered into it
@@ -812,16 +881,33 @@ def test_words_steered_into_the_edited_answer_leave_undo_under_the_question(fact
 def test_an_edit_that_waits_shows_the_cut_conversation_with_undo(facts):
     q = facts["editQueued"]
     assert q["waiting"] == {"other": "ATT2", "sent": True, "queued": 1, "runs": ["问题1"], "strip": ["已替换", "撤销"],
-                            "state": "排队中，前面还有 1 篇"}
+                            "state": "排队中，前面还有 1 项"}
     assert q["queued"] == 0 and q["same"] is True and q["runs"] == ["问题1", "问题2", "问题3"], "Undo takes the edit out of the queue"
     assert q["replaced"] == 0 and q["other"] == "ATT2" and q["calls"] == 1
 
 
 def test_the_box_keeps_its_words_while_the_paper_runs(facts):
     b = facts["busyBox"]
-    assert b["busy"] == {"busy": True, "disabled": True}, "✓ is off while the paper runs"
+    assert b["busy"] == {"busy": True, "disabled": True}, "✓ is off while the conversation runs"
     assert b["cls"] == "scholium-entry prompt scholium-edit" and b["value"] == "改过的问题二"
-    assert b["calls"] == 1 and b["same"] is True
+    assert b["calls"] == 1 and b["same"] is False and "改过的问题二" not in b["log"]
+
+
+def test_words_left_as_they_were_close_the_box_without_asking_again(facts):
+    u = facts["unchanged"]
+    closed = {"cls": "scholium-entry prompt editable", "editing": False}
+    assert u["clicked"] == closed and u["keyed"] == closed
+    assert u["calls"] == 0 and u["same"] is True and u["replaced"] == 0, "nothing was replaced"
+    assert u["unquoted"] == {"calls": 1, "replaced": 1}, "the same words without their quote are an edit"
+
+
+def test_a_question_can_be_edited_while_the_papers_annotation_runs(facts):
+    e = facts["editWhileAnnotating"]
+    assert e["during"] == {"annotating": True, "view": "scholium-view chat", "edit": True}
+    assert e["enabled"] is True
+    assert e["waiting"] == {"queued": 1, "calls": 1, "replaced": 1, "runs": ["问题1"], "strip": "已替换"}
+    assert e["kept"] == 1, "Undo stays while the edit waits"
+    assert e["calls"] == 2 and e["turns"] == [["问题1", "回答1"], ["改过的问题二", "新回答"]]
 
 
 def test_a_turn_is_the_questions_only_with_its_own_words(facts):

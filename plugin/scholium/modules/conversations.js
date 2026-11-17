@@ -210,8 +210,20 @@ Object.assign(ScholiumRunner, {
     this.fitInput(pane);
   },
 
+  // a list of the section shown at its end stays at its end while what is below it (the queue, the box) grows
+  keepAtEnd(pane, fn) {
+    const lists = [pane.list, pane.annot && pane.annot.list].filter(Boolean);
+    const ends = lists.map(l => { try { return l.clientHeight > 0 && l.scrollHeight - l.scrollTop - l.clientHeight < 40; } catch (e) { return false; } });
+    try { return fn(); }
+    finally { lists.forEach((l, i) => { if (ends[i]) { try { l.scrollTop = l.scrollHeight; } catch (e) {} } }); }
+  },
+
   // the message box grows with its text, up to its maximum height; an empty box is as tall as its placeholder
   fitInput(pane) {
+    this.keepAtEnd(pane, () => this.fitBox(pane));
+  },
+
+  fitBox(pane) {
     try {
       const input = pane.input;
       input.style.height = "auto";
@@ -825,8 +837,8 @@ Object.assign(ScholiumRunner, {
     if (!turns.length) return "";
     const zh = this.zh();
     return [
-      zh ? "下面是这段对话之前的内容（Zotero 里保存的记录），每轮注明是谁回答的："
-         : "Below is this conversation so far (the record kept in Zotero), each answer with the agent that gave it:",
+      zh ? "下面是这段对话之前的内容（Zotero 里保存的记录），每轮注明是谁回答的；轮次编号用户看不到，提到之前的内容时说它讲了什么，不要说第几轮："
+         : "Below is this conversation so far (the record kept in Zotero), each answer with the agent that gave it; the user does not see the turn numbers, so refer to earlier messages by what they said:",
       ...this.turnLines(this.historyParts(turns)),
       zh ? "——以上是之前的对话，新消息如下——" : "--- the earlier conversation ends; the new message follows ---",
     ].join("\n\n");
@@ -846,10 +858,10 @@ Object.assign(ScholiumRunner, {
     if (!turns.length) return "";
     const zh = this.zh(), one = turns.length === 1;
     return [
-      zh ? `下面是这段对话里，你上次回答之后的 ${turns.length} 轮。这期间用户在 Zotero 里接着问，有的由别的智能体回答，每轮注明了回答者。它们属于这段对话，请接着它们回答：`
+      zh ? `下面是这段对话里，你上次回答之后的 ${turns.length} 轮。这期间用户在 Zotero 里接着问，有的由别的智能体回答，每轮注明了回答者。它们属于这段对话，请接着它们回答；轮次编号用户看不到，提到它们时说内容，不要说第几轮：`
          : (one ? "Below is the exchange of this conversation after your last answer."
                 : `Below are the ${turns.length} exchanges of this conversation after your last answer.`)
-           + " Meanwhile the user went on asking in Zotero, some answered by another agent; each answer names the agent that gave it. They are part of this conversation; answer as its continuation:",
+           + " Meanwhile the user went on asking in Zotero, some answered by another agent; each answer names the agent that gave it. They are part of this conversation; answer as its continuation; the user does not see the turn numbers, so refer to earlier messages by what they said:",
       ...this.turnLines(this.historyParts(turns, from)),
       zh ? "——以上是这段对话最近的几轮，下面是用户的新消息——"
          : "--- the latest exchanges of this conversation end; the user's new message follows ---",
@@ -1419,15 +1431,16 @@ Object.assign(ScholiumRunner, {
       span.textContent = bullet;
       node.append(span);
     }
-    // a stopped run: ⊘, its word on hover
+    // a stopped run: ⊘ and its word
     if (entry.kind === "final" && entry.cancelled) {
       node.className += " cancelled";
       node.title = entry.text;
       const icon = doc.createElement("span");
       icon.className = "scholium-glyph cancelled";
-      icon.setAttribute("role", "img");
-      icon.setAttribute("aria-label", entry.text);
-      node.append(icon);
+      icon.setAttribute("aria-hidden", "true");
+      const word = doc.createElement("span");
+      word.textContent = entry.text;
+      node.append(icon, word);
       return node;
     }
     if (entry.kind === "text") {
@@ -1567,9 +1580,12 @@ Object.assign(ScholiumRunner, {
       }
       return n;
     };
-    for (const e of run.lead) node.append(line(e));
+    // a run stopped before any step: its stop after how long it worked
+    const stopped = e => e.kind === "final" && e.cancelled;
+    for (const e of run.lead) if (!stopped(e)) node.append(line(e));
     if (run.steps.length || live) node.append(this.foldNode(view, run, index, live));
     else if (run.start > 0 && run.end >= run.start) node.append(this.workedNode(view, run));
+    for (const e of run.lead) if (stopped(e)) node.append(line(e));
     for (const e of run.answer) node.append(this.entryNode(doc, e));
     for (const e of run.other) {
       // the agent's own compaction in this run: a line with the sizes; its start has none
@@ -1972,6 +1988,10 @@ Object.assign(ScholiumRunner, {
   // the state line: this paper running, queued or paused, or its latest outcome; other papers' runs are
   // not shown here
   paintPane(pane) {
+    this.keepAtEnd(pane, () => this.paintSection(pane));
+  },
+
+  paintSection(pane) {
     try {
       const tab = pane.tab;
       const running = this.job && pane.keys.includes(this.job.key) && (this.job.source.kind || "chat") === tab;
@@ -2020,9 +2040,9 @@ Object.assign(ScholiumRunner, {
       const busy = !!running || queuedAt >= 0;
       // any run of the paper, of either tab
       const any = pane.keys.some(k => this.busy(k));
-      // no ✎ on the questions while a run of the paper goes or waits
-      pane.chatView.className = "scholium-view chat" + (any ? " busy" : "");
-      if (pane.editing) pane.editing.fit();   // ✓ of a question being edited, off while the paper runs
+      // no ✎ on the questions while a run of the chat goes or waits
+      pane.chatView.className = "scholium-view chat" + (this.busyKind(pane, "chat") ? " busy" : "");
+      if (pane.editing) pane.editing.fit();   // ✓ of a question being edited, off while the chat runs
       // the views of the tabs and the dot on the tab whose run goes on out of sight
       this.show(pane.chatView, tab === "chat");
       this.show(pane.annotView, tab === "annotate");

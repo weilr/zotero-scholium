@@ -278,6 +278,7 @@ Object.assign(ScholiumRunner, {
         ? "引用上面这篇论文的原句时，每次都在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]），只有这种格式会显示为引用；"
           + `编号来自 extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt（已有就直接读 sentences.txt）。`
         : `引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt（已有就直接读 sentences.txt）。`,
+      "回答里不提 sentences.txt、文件、脚本或命令，也不解释句子编号或为什么没有引用；不要另写“Sources:”之类的来源行，引用写 [#123] 即可。",
       "",
       later ? "用户的新消息：" : "用户的问题：",
       this.said(job),
@@ -305,6 +306,8 @@ Object.assign(ScholiumRunner, {
         ? "When you quote a sentence of the paper above, always put its sentence number after it as [#123] (several: [#12][#15]); only that form "
           + `shows as a citation. The numbers come from extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt (read sentences.txt when it is there).`
         : `When you quote a sentence of the paper, put its sentence number after it as [#123] (several: [#12][#15]); the numbers come from extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt (read sentences.txt when it is there).`,
+      "In the answer, never mention sentences.txt, files, scripts or commands, nor explain the sentence numbers or why something has none; "
+        + "add no “Sources:” line: the [#123] citations are enough.",
       "",
       later ? "The user's new message:" : "The user's question:",
       this.said(job),

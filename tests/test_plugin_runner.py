@@ -2727,7 +2727,7 @@ CLAUDE = "/appdata/npm/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 SUMMARY = "高亮 28 条（核心 12 条），页边批注 9 条，笔记《Deep latent》，无剩余警告。"
 BRIEF = "高亮 28 条（核心 12 条）\n页边批注 9 条\n无剩余警告"   # the summary in a notice
 ASK = "向这篇论文提问"   # the chat's placeholder while its conversation is a question's
-HISTORY_HEAD = "下面是这段对话之前的内容（Zotero 里保存的记录），每轮注明是谁回答的："   # a new session's conversation, as text
+HISTORY_HEAD = "下面是这段对话之前的内容（Zotero 里保存的记录），每轮注明是谁回答的；轮次编号用户看不到，提到之前的内容时说它讲了什么，不要说第几轮："   # a new session's conversation, as text
 HISTORY_END = "——以上是之前的对话，新消息如下——"
 CLOSING = "改了批注时，结束时最后一行只写一句：改了什么，剩余警告，写成“剩余警告：…”（没有时写“剩余警告：无”）。只回答问题时不写这一行。"   # the end of a follow-up's prompt
 DONE_NOTICE = ["完成 · Ns"] + BRIEF.split("\n")   # a harness run's own time, read through run_time
@@ -3007,7 +3007,7 @@ def test_section_shows_running_and_finished_state(facts):
     assert q["pane1"]["state"] == "", "the papers waiting are shown in their own sections"
     assert q["pane1"]["stateKind"] == "scholium-state running"
     assert q["pane1"]["round"] == ["■", "停止"], "the running paper has the stop button"
-    assert q["pane2"]["state"] == "排队中，前面还有 1 篇" and q["pane2"]["annotateDisabled"] is True
+    assert q["pane2"]["state"] == "排队中，前面还有 1 项" and q["pane2"]["annotateDisabled"] is True
     w = facts["whileRunning"]["view"]
     assert w["state"] == "" and w["stateKind"] == "scholium-state running"
     assert (w["annotateDisabled"], w["removeDisabled"]) == (True, True) and w["round"] == ["■", "停止"]
@@ -3474,7 +3474,7 @@ def test_usage_limit_pauses_the_queue_and_continues_after_the_reset(facts):
     assert m["calls"] == 1 and m["queue"] == [["ATT1", "S1", ""], ["ATT2", None, None]]
     assert len(m["waits"]) == 1 and 7_190_000 < m["waits"][0] <= 7_260_000
     assert m["state1"] == waiting and m["kind1"] == "scholium-state paused"
-    assert m["state2"] == "排队中，前面还有 1 篇 · " + waiting, "one line"
+    assert m["state2"] == "排队中，前面还有 1 项 · " + waiting, "one line"
     assert m["title1"] == waiting and m["title2"] == m["state2"], "a state cut short is whole in its tooltip"
     assert m["resumeShown"] is True and m["stopShown"] is True
     assert m["notices"][-1]["errors"] == 1 and m["notices"][-1]["descriptions"] == [waiting]
@@ -3846,6 +3846,7 @@ def test_a_question_starts_a_conversation_that_answers_without_annotating(facts)
         "这篇论文目前没有本工具的批注。",
         "引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --config /data/tmp/scholium/ATT1/paper.json "
         "--sentences /data/tmp/scholium/ATT1/sentences.json --out /data/tmp/scholium/ATT1/sentences.txt（已有就直接读 sentences.txt）。",
+        "回答里不提 sentences.txt、文件、脚本或命令，也不解释句子编号或为什么没有引用；不要另写“Sources:”之类的来源行，引用写 [#123] 即可。",
         "",
         "用户的问题：",
         "这篇怎么估计后验？",
@@ -3949,7 +3950,7 @@ def test_conversations_of_earlier_versions_and_the_history_given(facts):
     assert g["claude"] == {"placeholder": "接着对话，例如：第 5 页那条译文改短一些", "shown": "codex-run", "info": 0,
                            "resumed": False, "conversations": 0, "prompt": HISTORY_HEAD}, \
         "Claude Code goes on with the conversation shown, given it as text"
-    assert g["resume"] == "T1" and g["text"].startswith("下面是这段对话里，你上次回答之后的 1 轮。这期间用户在 Zotero 里接着问，有的由别的智能体回答，每轮注明了回答者。它们属于这段对话，请接着它们回答：\n\n[第 2 轮]\n用户：AdLN的作用是什么\n回答（Claude Code）："), \
+    assert g["resume"] == "T1" and g["text"].startswith("下面是这段对话里，你上次回答之后的 1 轮。这期间用户在 Zotero 里接着问，有的由别的智能体回答，每轮注明了回答者。它们属于这段对话，请接着它们回答；轮次编号用户看不到，提到它们时说内容，不要说第几轮：\n\n[第 2 轮]\n用户：AdLN的作用是什么\n回答（Claude Code）："), \
         "Codex is given the turn of Claude Code's that its thread did not see"
     assert "\n\n下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。" in g["text"]
     assert g["agents"] == ["claude", "codex"] and g["conversations"] == 0, "both go on in the earlier log itself"
@@ -3996,7 +3997,7 @@ def test_new_and_resumed_sessions_know_the_annotations_and_turns(facts):
     assert facts["handedInterrupted"] == [[True, True]]
     u = facts["unreached"]
     assert u["before"] == "T1" and u["thread"] == "T1", "a thread that never had the message is not Codex's session"
-    assert u["text"].startswith("下面是这段对话里，你上次回答之后的 1 轮。这期间用户在 Zotero 里接着问，有的由别的智能体回答，每轮注明了回答者。它们属于这段对话，请接着它们回答：\n\n[第 2 轮]\n用户：再短一点\n回答（Codex）：（没有完成："), \
+    assert u["text"].startswith("下面是这段对话里，你上次回答之后的 1 轮。这期间用户在 Zotero 里接着问，有的由别的智能体回答，每轮注明了回答者。它们属于这段对话，请接着它们回答；轮次编号用户看不到，提到它们时说内容，不要说第几轮：\n\n[第 2 轮]\n用户：再短一点\n回答（Codex）：（没有完成："), \
         "the turn that never reached the thread is given again"
     assert "\n\n下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。" in u["text"]
     r = facts["retriedContinuation"]

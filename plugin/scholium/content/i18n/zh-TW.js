@@ -107,7 +107,7 @@ var texts = h => {
     profileNotSaved: "未儲存：檔案已被別處改動",
     profileReadFailed: msg => `讀不到個人設定檔：${msg}`,
     profileFailed: msg => `儲存失敗：${msg}`,
-    queuedThis: n => `排隊中，前面還有 ${n} 篇`,
+    queuedThis: n => `排隊中，前面還有 ${n} 項`,
     deleteTitle: "刪除 Scholium 標註和筆記",
     deleteConfirm: (n, notes, group = false) =>
       `將刪除帶 zotero-scholium 標籤的${[n ? `這個 PDF 上的 ${n} 個標註` : "", notes ? `這篇論文的 ${notes} 篇閱讀筆記` : ""].filter(Boolean).join("和")}。`

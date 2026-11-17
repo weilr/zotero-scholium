@@ -338,7 +338,7 @@ var ScholiumRunner = {
       profileNotSaved: zh ? "未保存：文件已被别处改动" : "Not saved: the file was changed elsewhere",
       profileReadFailed: msg => zh ? `读不到个人配置文件：${msg}` : `The profile could not be read: ${msg}`,
       profileFailed: msg => zh ? `保存失败：${msg}` : `The profile could not be saved: ${msg}`,
-      queuedThis: n => zh ? `排队中，前面还有 ${n} 篇` : `Queued, ${n} ahead`,
+      queuedThis: n => zh ? `排队中，前面还有 ${n} 项` : `Queued, ${n} ahead`,
       deleteTitle: zh ? "删除 Scholium 批注和笔记" : "Delete Scholium annotations and notes",
       deleteConfirm: (n, notes, group = false) => zh
         ? `将删除带 zotero-scholium 标签的${[n ? `这个 PDF 上的 ${n} 条批注` : "", notes ? `这篇论文的 ${notes} 篇阅读笔记` : ""].filter(Boolean).join("和")}。`

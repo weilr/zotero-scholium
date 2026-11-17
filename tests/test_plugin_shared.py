@@ -932,7 +932,7 @@ def test_the_agent_chosen_is_given_what_it_has_not_seen(facts):
     h = facts["handOver"]
     assert h["opened"] == ["thread/start"] and h["injected"] == 0, "Claude Code answered in it: not as items of the thread"
     given = h["input"]
-    assert given.startswith("下面是这段对话之前的内容（Zotero 里保存的记录），每轮注明是谁回答的：\n\n"
+    assert given.startswith("下面是这段对话之前的内容（Zotero 里保存的记录），每轮注明是谁回答的；轮次编号用户看不到，提到之前的内容时说它讲了什么，不要说第几轮：\n\n"
                             "[第 1 轮]\n用户：问题一\n回答（Claude Code）：Claude 答一\n\n——以上是之前的对话，新消息如下——"), \
         "a new Codex thread is given the conversation as text, each answer named"
     assert given.count("问题二") == 1 and given.index("回答（Claude Code）") < given.index("问题二")
@@ -952,10 +952,10 @@ def test_a_run_that_never_reached_the_agent_gives_the_turns_again(facts):
 
 def test_the_conversation_given_names_who_answered(facts):
     t = facts["texts"]
-    assert t["history"].startswith("下面是这段对话之前的内容（Zotero 里保存的记录），每轮注明是谁回答的：")
+    assert t["history"].startswith("下面是这段对话之前的内容（Zotero 里保存的记录），每轮注明是谁回答的；轮次编号用户看不到，提到之前的内容时说它讲了什么，不要说第几轮：")
     assert "[第 1 轮]\n用户：问题1\n回答（Claude Code）：回答1" in t["history"] and "[第 2 轮]\n用户：问题2\n回答（Codex）：回答2" in t["history"]
     assert "接不上" not in t["history"]
-    zhOpen = "下面是这段对话里，你上次回答之后的 1 轮。这期间用户在 Zotero 里接着问，有的由别的智能体回答，每轮注明了回答者。它们属于这段对话，请接着它们回答："
+    zhOpen = "下面是这段对话里，你上次回答之后的 1 轮。这期间用户在 Zotero 里接着问，有的由别的智能体回答，每轮注明了回答者。它们属于这段对话，请接着它们回答；轮次编号用户看不到，提到它们时说内容，不要说第几轮："
     assert t["missed"].startswith(zhOpen)
     assert "[第 2 轮]" in t["missed"] and t["missed"].endswith("——以上是这段对话最近的几轮，下面是用户的新消息——")
     assert "你的会话里没有" not in t["missed"] and "你没看到的" not in t["missed"]
@@ -963,9 +963,9 @@ def test_the_conversation_given_names_who_answered(facts):
     assert "之前的 7 轮对话（摘录）" in m and "[第 8 轮]" in m and "[第 12 轮]" in m and "[第 7 轮]" not in m
     assert t["none"] == ["", ""]
     e = t["english"]
-    assert e["history"].startswith("Below is this conversation so far (the record kept in Zotero), each answer with the agent that gave it:")
+    assert e["history"].startswith("Below is this conversation so far (the record kept in Zotero), each answer with the agent that gave it; the user does not see the turn numbers, so refer to earlier messages by what they said:")
     assert "[Turn 2]\nUser: 问题2\nAnswer (Codex): 回答2" in e["history"]
-    enRest = " Meanwhile the user went on asking in Zotero, some answered by another agent; each answer names the agent that gave it. They are part of this conversation; answer as its continuation:"
+    enRest = " Meanwhile the user went on asking in Zotero, some answered by another agent; each answer names the agent that gave it. They are part of this conversation; answer as its continuation; the user does not see the turn numbers, so refer to earlier messages by what they said:"
     enEnd = "--- the latest exchanges of this conversation end; the user's new message follows ---"
     assert e["missed"].startswith("Below is the exchange of this conversation after your last answer." + enRest)
     assert e["missedTwo"].startswith("Below are the 2 exchanges of this conversation after your last answer." + enRest)

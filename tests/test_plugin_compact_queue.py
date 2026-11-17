@@ -1453,7 +1453,7 @@ SCENARIOS = r"""
     facts.compactNotNow = { bare, busy };
     h.runner.cancel(); await settle(100);
   }
-  // a stopped answer ends with ⊘, its word on hover
+  // a stopped answer ends with ⊘ and its word, after how long it worked
   {
     const h = harness({ gateFirst: true });
     h.runner.start('x');
@@ -1464,7 +1464,17 @@ SCENARIOS = r"""
     pane.send.click(); await settle(300);                       // ■
     const line = pane.list.children.at(-1).children.find(c => /final/.test(c.className));
     facts.stoppedLine = { cls: line.className, title: line.title, glyph: line.children.map(c => c.className),
+                          word: line.children.filter(c => c.tagName !== 'button').map(c => c.textContent).join(''),
                           retry: line.children.filter(c => c.tagName === 'button').map(labelOf) };
+    // stopped before any step: the time it worked first, then the line
+    const g = harness({ scripts: [['WAIT']] });
+    g.runner.start('x');
+    const q = await g.pane(g.item1);
+    await settle(40);
+    const qpane = q.pane();
+    qpane.input.type('问'); qpane.send.click(); await settle(200);
+    qpane.send.click(); await settle(300);
+    facts.stoppedLine.order = qpane.list.children.at(-1).children.map(c => c.className).filter(c => /fold|final/.test(c));
   }
 
   process.stdout.write(JSON.stringify(facts));
@@ -1952,11 +1962,12 @@ def test_a_compact_the_paper_cannot_take_stays_in_the_box(facts):
     assert c["busy"] == {"tip": "现在不能压缩", "box": "/compact 侧重", "queue": 0, "calls": 1}
 
 
-def test_a_stopped_answer_ends_with_an_icon(facts):
+def test_a_stopped_answer_ends_with_an_icon_and_its_word(facts):
     s = facts["stoppedLine"]
     assert s["cls"] == "scholium-entry final error cancelled" and s["title"] == "已取消"
-    assert s["glyph"][0] == "scholium-glyph cancelled"
+    assert s["glyph"][0] == "scholium-glyph cancelled" and s["word"] == "已取消"
     assert s["retry"] in ([], ["重试"])
+    assert s["order"] == ["scholium-fold", "scholium-entry final error cancelled"], "after how long it worked"
 
 
 def test_icons_follow_the_text_colour():

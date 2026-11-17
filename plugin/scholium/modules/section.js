@@ -1732,7 +1732,13 @@ Object.assign(ScholiumRunner, {
     let at = 0;
     let m;
     while ((m = re.exec(text))) {
-      if (m.index > at) parent.append(doc.createTextNode(text.slice(at, m.index)));
+      let before = m.index > at ? text.slice(at, m.index) : "", open = "";
+      // an opening bracket right before citations stays with them
+      if (m[12] !== undefined && this.cites) {
+        const b = /[（(「『“‘【]$/.exec(before);
+        if (b) { open = b[0]; before = before.slice(0, -1); }
+      }
+      if (before) parent.append(doc.createTextNode(before));
       if (m[11] !== undefined) {   // punctuation after an address ends the sentence, not the address
         // nor is Chinese written right after it: "见https://x.org/abs/1234的图"; a path or query value of Chinese
         // words follows / = # ? or & ("https://zh.example/页")
@@ -1753,8 +1759,10 @@ Object.assign(ScholiumRunner, {
         continue;
       }
       if (m[12] !== undefined) {
-        const found = this.cites && this.cites.map.get(Number(m[12]));
-        parent.append(found ? this.citeNode(doc, this.cites.key, Number(m[12]), found) : doc.createTextNode(m[0]));
+        if (!this.cites) { parent.append(doc.createTextNode(m[0])); continue; }
+        const run = this.citeRun(doc, text, m, open);
+        parent.append(run.node);
+        at = re.lastIndex = run.end;
         continue;
       }
       if (m[2] !== undefined || m[3] !== undefined || m[4] !== undefined || m[5] !== undefined) {
@@ -1837,6 +1845,36 @@ Object.assign(ScholiumRunner, {
     return kept.length ? kept : null;
   },
 
+  // the citations side by side from the match m on, as one piece that does not wrap, with the opening bracket before them
+  // (open) and the punctuation after them: the sentences of one page one after another are one chip; an id
+  // sentences.json does not have stays text. end: where the text goes on after the piece
+  citeRun(doc, text, m, open) {
+    const ids = [Number(m[12])];
+    let end = m.index + m[0].length, r;
+    const next = /^\s*\[#(\d{1,6})\]/;
+    while ((r = next.exec(text.slice(end)))) { ids.push(Number(r[1])); end += r[0].length; }
+    const items = [];
+    for (const id of ids) {
+      const s = this.cites.map.get(id), last = items[items.length - 1];
+      if (s && last && last.s && last.s.page === s.page) last.ids.push(id), last.all.push(s);
+      else items.push(s ? { ids: [id], s, all: [s] } : { raw: `[#${id}]` });
+    }
+    if (!items.some(i => i.s)) return { node: doc.createTextNode(open + text.slice(m.index, end)), end };
+    const punct = /^[）)」』”’】。，、；：！？.,;:!?]+/.exec(text.slice(end));
+    if (punct) end += punct[0].length;
+    const node = doc.createElement("span");
+    node.className = "scholium-cites";
+    if (open) node.append(doc.createTextNode(open));
+    for (const i of items) {
+      if (!i.s) { node.append(doc.createTextNode(i.raw)); continue; }
+      const rects = i.all.flatMap(s => s.rects || []);
+      const s = i.all.length === 1 ? i.s : { page: i.s.page, text: i.all.map(x => x.text).join(" "), texts: i.all.map(x => x.text), rects: rects.length ? rects : null };
+      node.append(this.citeNode(doc, this.cites.key, i.ids.join(","), s));
+    }
+    if (punct) node.append(doc.createTextNode(punct[0]));
+    return { node, end };
+  },
+
   withCites(key, fn) {
     const before = this.cites;
     const c = key && this.citations.get(key);
@@ -1879,10 +1917,13 @@ Object.assign(ScholiumRunner, {
       page.textContent = this.text("citePage", s.page);
       const go = this.paneButton(doc, this.text("locate"), () => { this.closePopover(pane, "cite"); this.locate(key, s).catch(e => this.log("locate failed: " + e)); }, "quiet small");
       head.append(page, go);
-      const text = doc.createElement("div");
-      text.className = "scholium-cite-text";
-      text.textContent = s.text;
-      card.append(head, text);
+      card.append(head);
+      for (const t of s.texts || [s.text]) {
+        const text = doc.createElement("div");
+        text.className = "scholium-cite-text";
+        text.textContent = t;
+        card.append(text);
+      }
     });
     node.addEventListener("mouseenter", () => { pane.citeHover++; });
     node.addEventListener("mouseleave", () => this.citeAway(pane));

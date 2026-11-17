@@ -210,6 +210,20 @@ CITE = {
 }
 
 
+PLAIN = {
+    "zh-CN": "回答里不提 sentences.txt、文件、脚本或命令，也不解释句子编号或为什么没有引用；不要另写“Sources:”之类的来源行，引用写 [#123] 即可。",
+    "en-US": "In the answer, never mention sentences.txt, files, scripts or commands, nor explain the sentence numbers or why something has "
+             "none; add no “Sources:” line: the [#123] citations are enough.",
+}
+
+
+@pytest.mark.parametrize("locale", ["zh-CN", "en-US"])
+def test_a_questions_answer_keeps_the_tools_out_of_sight(facts, locale):
+    prompts = facts["cite_" + locale]
+    for kind in ("one", "two"):
+        assert PLAIN[locale] in prompts[kind], kind
+
+
 @pytest.mark.parametrize("locale", ["zh-CN", "en-US"])
 def test_a_question_about_several_papers_cites_the_first_papers_sentences_as_firmly(facts, locale):
     prompts, want = facts["cite_" + locale], CITE[locale]

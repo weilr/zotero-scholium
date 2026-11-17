@@ -544,6 +544,26 @@ SCENARIOS = r"""
                        runs: pane.list.children.length,
                        scrollTop: pane.list.scrollTop };
   }
+  // a list at its end stays there when the box below it grows (a queued message's row takes height from the list); a list
+  // scrolled up stays where it is
+  {
+    const h = harness({ scripts: [SCRIPT.concat(['WAIT'])] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1);
+    await settle(40);
+    const pane = p.pane();
+    pane.input.type('这篇讲什么？'); pane.send.click(); await settle(100);
+    Object.defineProperty(pane.list, 'scrollHeight', { get: () => 1000, configurable: true });
+    pane.list.scrollTop = 900;
+    const rc = pane.queueBox.replaceChildren.bind(pane.queueBox);
+    pane.queueBox.replaceChildren = (...n) => { rc(...n); pane.list.clientHeight = n.length ? 60 : 100; };
+    pane.input.type('再问一句'); pane.send.click(); await settle(100);
+    const atEnd = { queued: h.runner.queue.length, scrollTop: pane.list.scrollTop, client: pane.list.clientHeight };
+    pane.list.scrollTop = 0;
+    pane.input.type('第三句'); pane.send.click(); await settle(100);
+    facts.keepEnd = { atEnd, up: [h.runner.queue.length, pane.list.scrollTop] };
+    h.runner.cancel(); await settle(300);
+  }
   // a run of the annotation kind leaves the chat's finished run as it was; each view knows its section
   {
     const h = harness({ scripts: [SCRIPT.concat([LAST, RESULT]), SCRIPT.concat(['WAIT'])] });
@@ -1310,7 +1330,7 @@ def test_a_run_goes_to_the_view_of_its_kind(facts):
 def test_a_waiting_job_of_the_other_kind_shows_the_dot(facts):
     f = facts["queuedDot"]
     assert f["views"] == [True, True, 2]
-    assert f["states"] == [None, "排队中，前面还有 1 篇"], "a waiting job shows its state on its own tab"
+    assert f["states"] == [None, "排队中，前面还有 1 项"], "a waiting job shows its state on its own tab"
     assert f["chatBusy"] is False and f["annotBusy"] is True and f["dot"] is True   # another paper runs; this one waits
 
 
@@ -1415,6 +1435,13 @@ def test_the_transcript_by_runs(facts):
     assert r["reclosed"] == 1
     assert re.fullmatch(r"Claude Code · Opus 5\.5 · \d\d:\d\d", r["meta"].replace("复制", "").strip())
     assert r["legacy"] == [["scholium-fold", "scholium-entry text", "scholium-meta"]]
+
+
+def test_a_list_at_its_end_stays_there_when_the_box_below_grows(facts):
+    k = facts["keepEnd"]
+    assert k["atEnd"]["queued"] == 1 and k["atEnd"]["client"] == 60
+    assert k["atEnd"]["scrollTop"] >= 1000 - 60, "the running answer stays in sight"
+    assert k["up"] == [2, 0], "a reader scrolled up stays where they are"
 
 
 def test_opened_steps_stay_open_and_a_reader_scrolled_up_stays(facts):

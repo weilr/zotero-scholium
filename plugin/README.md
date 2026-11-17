@@ -166,7 +166,7 @@ history and the annotation sessions are those of that PDF.
   while it shows a session, and **Settings…**. **Save as note** makes the conversation shown a child note of the paper:
   the heading “Scholium conversation: <paper title>” and the date, each question with its quoted passage, and each
   answer with the agent and model that gave it, formulas as Zotero's note editor sets them. The note is tagged
-  `scholium-chat`, which Annotate again and Delete annotations leave alone, and is selected in the library.
+  `scholium-chat`, which Annotate again and Delete annotations leave alone; the paper stays selected.
   **Settings…** opens the Scholium page of Zotero's settings.
 
 **Chat tab**
@@ -194,13 +194,14 @@ history and the annotation sessions are those of that PDF.
   with a copy button (`Claude Code · Opus 5.5 · 12:01`). A failed question ends with its error and ↻ (**Retry**), which
   sends the same words again to the agent chosen. Web addresses and `zotero://` links in a message open on a click or
   with Enter, in the browser or in Zotero; links to files are shown, not followed.
-- On hover, ✎ shows under a question of the Chat tab, except while the paper runs or waits. It turns the question into
-  a box in place, with its words and its quote; ✓ or the send shortcut asks again, ✕ or Esc cancels. The box keeps its
-  words and quote when the conversation is drawn again, and closes when the question is gone or another conversation is
-  shown.
+- On hover, ✎ shows under a question of the Chat tab, except while the paper's chat runs or waits. It turns the question
+  into a box in place, with its words and its quote; ✓ or the send shortcut asks again, ✕ or Esc cancels, as does ✓ on
+  words and a quote left as they were. The box keeps its words and quote when the conversation is drawn again, and
+  closes when the question is gone or another conversation is shown.
 - The question and everything after it are replaced. **Undo** under the new question brings them back for six seconds,
   until another message of the conversation starts, with the conversation's title, and stops the new answer without a
-  notice; an edited question that waits for another paper's run leaves the queue. The Codex threads only the replaced
+  notice. An edited question asked while another paper's run or this paper's annotation goes on waits for it, with
+  **Undo** until it starts; **Undo** takes it out of the queue. The Codex threads only the replaced
   part used are archived at the next Codex run after the **Undo** window ends or the plugin stops; **Undo** archives
   those only the new part used, at the next Codex run.
 - The agent chosen answers. Each agent whose session went past the question goes back to its point before it: Claude
@@ -213,6 +214,8 @@ history and the annotation sessions are those of that PDF.
 - Sentence citations: a question asks the agent to cite the paper's sentences by their number in
   `sentences.txt`, as `[#123]`. The section reads `sentences.json` in the paper's output directory and shows a
   cited sentence as a chip with its page (`p.4`); on hover, a card gives the page, **Locate ↗** and the sentence.
+  Citations side by side that point to one page are one chip, whose card lists their sentences; the chips keep the
+  brackets and punctuation around them on their line.
   A chip can be focused with Tab, and its card opens on keyboard focus only; Enter or Space locates the sentence.
   The chip or **Locate ↗** opens the PDF in the reader (or switches to it), goes to the sentence and highlights it
   briefly; a sentence without a position in `sentences.json` opens its page. A number that `sentences.json` does
@@ -247,7 +250,7 @@ history and the annotation sessions are those of that PDF.
   empty); while a run of the tab goes on and the box is empty, it is ■, which stops the run (and takes a waiting
   paper out of the queue; the words of a message that waited behind another paper's run go back to its box, and an
   annotation's extra instructions to that tab's box; an edited question that has not started is undone, its **Undo**
-  staying while it waits); a stopped run ends with ⊘ (**cancelled** on hover); a run stopped while it starts ends before its agent's process, and words its
+  staying while it waits); a stopped run ends with ⊘ and **cancelled**, after how long it worked; a run stopped while it starts ends before its agent's process, and words its
   conversation does not have yet go back to the box (a queued message to its queue). Esc while a run goes on asks
   once ("Press Esc again to stop") and stops on a second press within three seconds on the same run; with a layer
   open, Esc closes the layer first. The line under the box names the send shortcut. Words typed and not sent are

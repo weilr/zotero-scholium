@@ -127,7 +127,7 @@ def test_the_chat_menu_saves_the_conversation_as_a_child_note(facts):
     [note] = f["saved"]
     assert {k: note[k] for k in ("type", "library", "parent", "tags")} == \
         {"type": "note", "library": 1, "parent": "ITEM1", "tags": [{"tag": "scholium-chat"}]}
-    assert f["selected"] == ["NOTE1"], "the note is selected in the library, where it opens"
+    assert f["selected"] == [], "the paper stays selected, with its conversation"
     assert f["notices"] == [["已存为这篇论文的笔记"]]
 
 

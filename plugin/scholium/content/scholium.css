@@ -1129,6 +1129,8 @@
 .scholium-prompt-quote { border-inline-start: 3px solid var(--fill-quarternary); padding-inline-start: 6px; color: var(--fill-secondary);
   font-size: 11.5px; margin-bottom: 3px; }
 
+/* citations side by side with the brackets and punctuation around them: one piece that does not wrap */
+.scholium-cites { white-space: nowrap; }
 .scholium-cite { display: inline-block; padding: 0 4px; margin: 0 1px; border-radius: 3px; font-size: 10.5px; cursor: pointer;
   background: color-mix(in srgb, var(--accent-blue) 12%, transparent); color: var(--scholium-blue-text); }
 .scholium-popover.cite { width: 240px; }

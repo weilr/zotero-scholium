@@ -111,7 +111,7 @@ var texts = h => {
     profileNotSaved: "저장되지 않음: 다른 곳에서 파일이 변경되었습니다",
     profileReadFailed: msg => `프로필을 읽을 수 없습니다: ${msg}`,
     profileFailed: msg => `프로필을 저장할 수 없습니다: ${msg}`,
-    queuedThis: n => `대기 중, 앞에 ${n}편`,
+    queuedThis: n => `대기 중, 앞에 ${n}건`,
     deleteTitle: "Scholium 주석 및 노트 삭제",
     deleteConfirm: (n, notes, group = false) =>
       `zotero-scholium 태그가 붙은 ${[n ? `이 PDF의 주석 ${n}개` : "", notes ? `이 논문의 읽기 노트 ${notes}개` : ""].filter(Boolean).join("와 ")}를 삭제합니다. `
