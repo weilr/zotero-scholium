@@ -166,7 +166,9 @@ SCENARIOS = r"""
     await h.runner.chooseConv('ATT1', null); await settle(20);
     h.runner.viewOf(p.pane(), 'chat').shownConv = null;
     h.runner.stopFromPane(p.pane()); await settle(100);
-    facts.stopOther = { queue: h.runner.queue.map(j => j.say), held: [...h.runner.heldQueues] };
+    // with the second try gone the queued row may start meanwhile: it is either still queued or has started, once
+    facts.stopOther = { queue: h.runner.queue.map(j => j.say), held: [...h.runner.heldQueues], calls: h.log.calls.length,
+                        started: h.log.stdin.filter(s => String(s).includes('follow-up')).length };
     h.runner.stop(); await settle(50);
   }
   // a stop: a job already handled is not handed over again; a copy stopped while it waited for the folders leaves what
@@ -284,7 +286,11 @@ def test_words_placed_in_a_conversation_wait_for_its_second_try(facts):
 
 
 def test_stop_in_a_conversation_with_nothing_waiting_stops_what_waits_of_the_tab(facts):
-    assert facts["stopOther"] == {"queue": ["follow-up"], "held": []}
+    """■ stops the second try; the queued row of the other conversation is neither removed nor held: free of the second
+    try it may start before the look, so it is still queued or has started, once."""
+    s = facts["stopOther"]
+    assert s["held"] == [] and "again" not in s["queue"]
+    assert (s["queue"], s["calls"], s["started"]) in ((["follow-up"], 0, 0), ([], 1, 1)), s
 
 
 def test_a_handled_job_is_not_handed_over_and_a_stopped_copy_keeps_the_hand_over(facts):
