@@ -2,6 +2,7 @@
 working directory (papers/<key>/conversations/<conversation>) and uv's cache (cache/uv); an earlier version's folders
 moved into it when the plugin starts; the agents' sessions kept to the plugin (each conversation in its own folder, Codex's
 threads archived after each run); the Codex home folder of the settings."""
+import json
 import re
 
 import pytest
@@ -76,6 +77,57 @@ const threadCalls = h => h.log.codexProcs.flatMap(p => p.sent).filter(m => typeo
                     check: lines.filter(l => l.id === 'folders').length, again: await h.runner.migrateFolders() };
     h.runner.stop();
   }
+  // a paper of a group library and one of another library move as their key's folder names them
+  {
+    const h = harness({ logs: { '/data/tmp/scholium/ABCD1234_g7/config.json': '{}', '/data/tmp/scholium/ABCD1234_l5/config.json': '{}',
+                                '/data/tmp/scholium/notes/x.json': '{}' } });
+    h.runner.start('x');
+    await h.runner.migrating;
+    facts.libraries = { files: Object.keys(h.log.writes).filter(p => p.startsWith('/data/scholium/papers/')).sort(),
+                        kept: '/data/tmp/scholium/notes/x.json' in h.log.writes };
+    h.runner.stop();
+  }
+  // the logs and runs wait for the second try of what could not be moved; a stop ends that wait
+  for (const name of ['secondTry', 'stoppedWait']) {
+    const h = harness({ logs: { '/data/tmp/scholium/WXYZ9999/config.json': '{}' }, failMoves: ['/data/tmp/scholium/WXYZ9999'] });
+    h.runner.start('x');
+    await h.runner.migrating;
+    let settled = false;
+    h.runner.settled().then(() => { settled = true; });
+    await settle(20);
+    const during = settled;
+    if (name === 'secondTry') h.fire(); else h.runner.stop();
+    await settle(60);
+    facts[name] = { during, after: settled };
+    h.runner.stop();
+  }
+  // the records' paths into the old folders follow the move when a run of the paper starts; a string that only contains
+  // one, a folder that only begins like one, and a file that is no record stay
+  {
+    const OLD = '/data/tmp/scholium/ATT1/', NEW = '/data/scholium/papers/ATT1/';
+    const cfg = JSON.stringify({ out_dir: '/data/tmp/scholium/ATT1', note_html: '/DATA/TMP/scholium/ATT1/reading_note.html',
+                                 pdf: '/data/storage/ATT1/paper.pdf', other: '/data/tmp/scholium2/x', words: 'see /data/tmp/scholium/ATT1' }, null, 2);
+    const h = harness({ scripts: [answered('S1', '答')],
+                        logs: { [OLD + 'config.json']: cfg, [OLD + 'applied_keys.json']: JSON.stringify({ config: OLD + 'config.json' }),
+                                [OLD + 'annotations.json']: '["/data/tmp/scholium/ATT1"]' } });
+    h.runner.start('x');
+    await h.runner.migrating;
+    const before = h.log.writes[NEW + 'config.json'];
+    const p = await h.pane(h.item1); await settle(40);
+    p.pane().input.type('新问题'); p.pane().send.click(); await settle(400);
+    facts.repointed = { before: before === cfg, config: h.log.writes[NEW + 'config.json'], keys: h.log.writes[NEW + 'applied_keys.json'],
+                        other: h.log.writes[NEW + 'annotations.json'], again: await h.runner.repointPaper('ATT1') };
+    // a data directory with letters beyond ASCII, which Python's json writes as \u escapes (applied_keys.json)
+    const asciiJSON = o => JSON.stringify(o).replace(/[\u0080-\uffff]/g, c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
+    h.runner.oldFolders = () => [['C:\\Users\\张三\\Zotero\\tmp\\scholium', 'C:\\Users\\张三\\Zotero\\scholium\\papers']];
+    facts.repointed.wide = JSON.parse(h.runner.repointText(asciiJSON({ config: 'C:\\Users\\张三\\Zotero\\tmp\\scholium\\K\\config.json' }))).config;
+    facts.repointed.wideJs = JSON.parse(h.runner.repointText(JSON.stringify({ out_dir: 'C:\\Users\\张三\\Zotero\\tmp\\scholium\\K' }))).out_dir;
+    h.runner.oldFolders = () => [['D:\\Zotero\\tmp\\scholium', 'D:\\Zotero\\scholium\\papers']];
+    facts.repointed.windows = h.runner.repointText(JSON.stringify({ out_dir: 'D:\\Zotero\\tmp\\scholium\\ABCD1234',
+      sentences: 'd:\\zotero\\TMP\\scholium\\ABCD1234\\sentences.json', slash: 'D:/Zotero/tmp/scholium/ABCD1234/x.html',
+      longer: 'D:\\Zotero\\tmp\\scholiumX\\y' }, null, 1));
+    h.runner.stop();
+  }
   // a log still to be written (kept across a plugin update) goes to the new folder; its notice names the new path
   {
     const OLD = '/data/tmp/scholium/ATT1/conversations/' + CONV + '.jsonl';
@@ -101,8 +153,10 @@ const threadCalls = h => h.log.codexProcs.flatMap(p => p.sent).filter(m => typeo
                         cwd: own(await h.runner.readLog('ATT1', conv), 'claude').cwd };
     h.runner.stop();
   }
-  for (const [name, cwd] of [['claudeOld', '/data'], ['claudeOwn', DIR + CONV], ['claudeNone', null], ['claudeElsewhere', 'D:/Elsewhere']]) {
-    const h = harness({ logs: { [DIR + CONV + '.jsonl']: claudeTurn(1, 'S1', cwd), [DIR + 'index.json']: IDX }, scripts: [answered('S1', '下一答')] });
+  for (const [name, cwd] of [['claudeOld', '/data'], ['claudeOwn', DIR + CONV], ['claudeNone', null], ['claudeElsewhere', 'D:/Elsewhere'],
+                             ['claudeGone', 'D:/Moved']]) {
+    const h = harness({ logs: { [DIR + CONV + '.jsonl']: claudeTurn(1, 'S1', cwd), [DIR + 'index.json']: IDX, 'D:/Elsewhere/kept.txt': 'x' },
+                        scripts: [answered('S1', '下一答')] });
     h.runner.start('x');
     const p = await h.pane(h.item1); await settle(40);
     p.pane().input.type('下一问'); p.pane().send.click(); await settle(400);
@@ -255,6 +309,36 @@ def test_folders_moved_whole_are_removed_and_a_second_start_has_nothing_to_move(
     assert m["again"] == []
 
 
+def test_the_papers_of_other_libraries_move_too(facts):
+    assert facts["libraries"] == {"files": ["/data/scholium/papers/ABCD1234_g7/config.json", "/data/scholium/papers/ABCD1234_l5/config.json"],
+                                  "kept": True}, "a folder no key names stays where it is"
+
+
+def test_logs_and_runs_wait_for_the_second_try_of_the_move(facts):
+    assert facts["secondTry"] == {"during": False, "after": True}
+    assert facts["stoppedWait"] == {"during": False, "after": True}, "a stop ends the wait"
+
+
+def test_the_records_paths_follow_the_move_when_a_run_of_the_paper_starts(facts):
+    r = facts["repointed"]
+    assert r["before"], "nothing is read or written at the start"
+    cfg = json.loads(r["config"])
+    assert cfg["out_dir"] == "/data/scholium/papers/ATT1"
+    assert cfg["note_html"] == "/data/scholium/papers/ATT1/reading_note.html"
+    assert cfg["pdf"] == "/data/storage/ATT1/paper.pdf" and cfg["other"] == "/data/tmp/scholium2/x"
+    assert cfg["words"] == "see /data/tmp/scholium/ATT1", "only a string that starts with the folder"
+    assert r["config"].startswith('{\n  "out_dir"'), "the file's layout stays"
+    assert json.loads(r["keys"])["config"] == "/data/scholium/papers/ATT1/config.json"
+    assert r["other"] == '["/data/tmp/scholium/ATT1"]', "only the records that name paths"
+    assert r["again"] == 0, "a record already pointing to the new folder stays as it is"
+    assert r["wide"] == "C:\\Users\\张三\\Zotero\\scholium\\papers\\K\\config.json", "as Python's json writes it"
+    assert r["wideJs"] == "C:\\Users\\张三\\Zotero\\scholium\\papers\\K", "as the plugin writes it"
+    assert json.loads(r["windows"]) == {"out_dir": "D:\\Zotero\\scholium\\papers\\ABCD1234",
+                                        "sentences": "D:\\Zotero\\scholium\\papers\\ABCD1234\\sentences.json",
+                                        "slash": "D:/Zotero/scholium/papers/ABCD1234/x.html",
+                                        "longer": "D:\\Zotero\\tmp\\scholiumX\\y"}
+
+
 def test_a_log_still_to_be_written_follows_the_move(facts):
     p = facts["pending"]
     assert p["keys"] == ["/data/scholium/papers/ATT1/conversations/chat-20261101-120000.jsonl"]
@@ -271,6 +355,8 @@ def test_claude_code_runs_a_new_conversation_in_its_own_folder(facts):
 def test_claude_code_goes_on_with_a_session_where_it_started(facts):
     assert facts["claudeOld"] == {"workdir": "/data", "resume": "S1"}, "a session of the data directory goes on there"
     assert facts["claudeElsewhere"] == {"workdir": "D:/Elsewhere", "resume": "S1"}
+    assert facts["claudeGone"] == {"workdir": "/data/scholium/papers/ATT1/conversations/chat-20261101-120000", "resume": "S1"}, \
+        "a folder that is gone (a moved data directory): the conversation's own, where Claude Code finds the session gone"
     assert facts["claudeNone"] == {"workdir": "/data", "resume": "S1"}, "a log without the folder: the data directory, as before"
     assert facts["claudeOwn"] == {"workdir": "/data/scholium/papers/ATT1/conversations/chat-20261101-120000", "resume": "S1"}
     assert facts["claudeFork"] == {"workdir": "/data", "fork": True}, "an edit forks the session where it is"

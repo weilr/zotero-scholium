@@ -312,6 +312,7 @@ def test_the_chain_verdict():
         ok, failed = live.chain_verdict(dict(good, **change), title)
         assert not ok and failed == [name], name
     assert not live.chain_verdict({}, title)[0]
+    assert live.chain_verdict(dict(good, netstat23119=[ns, None]), title) == (True, [])   # unverified, see test_the_verdict
 
 
 # ---- the watcher ----
@@ -424,6 +425,67 @@ def test_a_closed_connection_during_the_session_leaves_it_unverified(monkeypatch
     assert live.UNVERIFIED_EXIT not in (0, 1, live.REFUSED_EXIT, live.SAFETY_EXIT) and live.UNVERIFIED_EXIT in ev.STOPS
 
 
+def _watch(monkeypatch, tmp_path, samples, tables):
+    """A watcher over the netstat samples, one sample each, that reads the process table from tables in turn (the last
+    one again; an exception is raised)."""
+    n, samples, tables, reads = len(samples), iter(samples), list(tables), []
+
+    def read():
+        reads.append(1)
+        table = tables.pop(0) if len(tables) > 1 else tables[0]
+        if isinstance(table, Exception):
+            raise table
+        return table
+    monkeypatch.setattr(live, "netstat_text", lambda: next(samples))
+    monkeypatch.setattr(live, "procs", read)
+    monkeypatch.setattr(live.smoke, "end_ours", lambda profile: [5000])
+    w = live.Watcher(str(tmp_path), PROFILE)
+    waits = []
+
+    def wait(t):
+        waits.append(t)
+        w.zotero_started = True   # Zotero starts after the first sample
+        if len(waits) == n:
+            w.stopping.set()
+    w.stopping.wait = wait
+    return w, reads
+
+
+def test_a_closed_connection_is_unattributed_whoever_had_it_open(monkeypatch, tmp_path):
+    """A sample that shows a connection open with another program (the browser's Zotero Connector) proves nothing about
+    the TIME_WAIT after it: the run could have had that program ask (a URL opened in the browser), so it stays
+    unattributed, as one whose process was gone when the table was read. Samples come a tenth of a second apart, and the
+    table is read only for a sample with a process in it."""
+    browser = "  TCP 127.0.0.1:50030 127.0.0.1:23119 ESTABLISHED 9100\n"
+    gone = "  TCP 127.0.0.1:23119 127.0.0.1:50030 TIME_WAIT 0\n"
+    ours = "  TCP 127.0.0.1:50040 127.0.0.1:23119 ESTABLISHED 7003\n"
+    gone2 = "  TCP 127.0.0.1:23119 127.0.0.1:50040 TIME_WAIT 0\n"
+    without = {k: v for k, v in TABLE.items() if k != 7003}
+    w, reads = _watch(monkeypatch, tmp_path, ["", browser, gone, ours, gone2], [without])
+    w.run()
+    assert w.tripped is None and w.missed == 0 and len(reads) == 2, "read for the two samples with a process"
+    assert w.closed_during() == [("127.0.0.1:23119", "127.0.0.1:50030"), ("127.0.0.1:23119", "127.0.0.1:50040")]
+    assert live.Watcher.INTERVAL == 0.1 and w.first.is_set()
+
+
+def test_a_table_that_could_not_be_read_is_an_unread_sample(monkeypatch, tmp_path):
+    """An empty process table, or one whose reading raised (PowerShell under memory pressure), is a sample not known; the
+    next sample reads it again, and the run's client then trips the watcher."""
+    ours = "  TCP 127.0.0.1:50041 127.0.0.1:23119 ESTABLISHED 7003\n"
+    w, reads = _watch(monkeypatch, tmp_path, ["", ours, ours], [{}, TABLE])
+    w.run()
+    assert w.missed == 1 and w.tripped and w.tripped["pid"] == 7003
+    w, reads = _watch(monkeypatch, tmp_path, ["", ours, ours], [OSError(1455, "paging file too small"), TABLE])
+    w.run()
+    assert w.missed == 1 and w.tripped and w.tripped["pid"] == 7003
+
+
+def test_a_watcher_that_did_not_end_leaves_the_session_unverified():
+    s = {"watch": {"stuck": True}}
+    assert "had not ended" in live.unverified(s)[0]
+    assert live.unverified({"watch": {"stuck": False}}) == []
+
+
 def test_a_from_run_copy_brings_no_cost_or_results(tmp_path, monkeypatch):
     """--from-run copies the source's data, its conversation logs too: only what they gain in the new session counts."""
     src, run = str(tmp_path / "src"), str(tmp_path / "new")
@@ -515,6 +577,29 @@ def test_the_verdict():
         assert live.verdict(dict(good, **change))[0] is False, change
     assert live.verdict(dict(good, ended="timeout")) == (True, False)
     assert live.verdict(dict(good, annotate_results=0)) == (True, False)
+    # a netstat that could not be read after the session, or during it, leaves it unverified, not unsafe
+    unread = dict(good, netstat={"before": [listen], "after": None})
+    assert live.verdict(unread) == (True, True) and "netstat could not be read after the session" in live.unverified(unread)[0]
+    assert "3 of the watcher's samples" in live.unverified(dict(good, watch={"missed": 3}))[0]
+    assert live.unverified(dict(good, watch={"missed": 0})) == []
+    chain = {"ok": True, "netstat23119": [[listen], None]}
+    assert live.verdict(dict(good, chain=chain))[0] and "in the chain test" in live.unverified(dict(good, chain=chain))[0]
+
+
+def test_a_sample_that_cannot_read_netstat_is_counted(monkeypatch, tmp_path):
+    samples = iter([None, "  TCP 127.0.0.1:50030 127.0.0.1:23119 TIME_WAIT 0\n"])
+    monkeypatch.setattr(live, "netstat_text", lambda: next(samples))
+    monkeypatch.setattr(live, "procs", lambda: {})
+    w = live.Watcher(str(tmp_path), PROFILE)
+    calls = []
+
+    def wait(t):
+        calls.append(t)
+        if len(calls) == 2:
+            w.stopping.set()
+    w.stopping.wait = wait
+    w.run()
+    assert (w.samples, w.missed, len(calls)) == (1, 1, 2) and w.tripped is None
 
 
 def test_only_a_live_runs_folder_is_emptied(tmp_path):
@@ -566,11 +651,13 @@ def fixture_run(tmp_path, name="eval-dpo"):
               {"type": "scholium", "subtype": "counts", "highlights": 4, "core": 2, "margin": 1, "notes": 0, "readingNotes": 1},
               json.loads(STREAM[3])]
     write(conv / "conversations" / "annotate-claude-1.jsonl", "\n".join(json.dumps(e, ensure_ascii=False) for e in events) + "\n")
+    write(conv / "config-annotate-claude-1.json", json.dumps({"highlights": [{"id": 3}, {"ids": [5, 6]}, {"ids": [9, 11]}]}))
     return str(run)
 
 
 def test_a_run_is_scored(tmp_path):
     e = ev.evaluate(fixture_run(tmp_path), pdf_refs=lambda pdf: 3)
+    assert e["highlight_ranges"] == 2, "the agent's highlights over several sentences, from its configuration"
     assert e["run"] == "eval-dpo" and e["arxiv"] == "2305.18290" and e["commit"] == "abc1234" and e["model"] == "claude-haiku-5-5"
     assert (e["cost_usd"], e["turns"], e["runs"], e["cache_read"], e["thinking_tokens"], e["wall_s"]) == (0.0268, 16, 1, 561287, 9167, 130)
     assert e["closing_line"] == "Done: 35 highlights, 14 core."
@@ -586,6 +673,20 @@ def test_a_run_is_scored(tmp_path):
     assert e["card"]["highlights"] == 4
     assert (e["reading_notes"], e["reading_note_h1"], e["reading_note_headings"], e["reading_note_paragraphs"], e["reading_note_citation"]) == (1, True, 3, 2, True)
     assert e["stopped"] is False and e["safe"] is True
+
+
+def test_the_wall_time_is_the_plugins_from_its_log(tmp_path):
+    """From the click (the run line) to the counts after the agent ended, as the plugin logged them: the probe's end is
+    up to six seconds late."""
+    run = fixture_run(tmp_path)
+    log = os.path.join(run, "data", "scholium", "papers", "ATTKEY01", "conversations", "annotate-claude-1.jsonl")
+    lines = [json.loads(l) for l in open(log, encoding="utf-8") if l.strip()]
+    for e in lines:
+        if e.get("type") == "scholium" and e.get("subtype") == "counts":
+            e["at"] = 1794900088500
+    lines.insert(0, {"type": "scholium", "subtype": "run", "agent": "claude", "at": 1794900001000})
+    write(log, "\n".join(json.dumps(e, ensure_ascii=False) for e in lines) + "\n")
+    assert ev.evaluate(run, pdf_refs=lambda pdf: 3)["wall_s"] == 87.5
 
 
 def test_a_run_without_a_log(tmp_path):

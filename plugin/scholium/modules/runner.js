@@ -124,6 +124,9 @@ var ScholiumRunner = {
   migrating: null,          // the move of an earlier version's folders (startFolders), waited for before logs are read
   migrateLeft: [],          // the paths it could not move
   migrateRetry: null,
+  migratedAll: null,        // the move with its second try, which settled() waits for
+  migrateDone: null,        // ends that wait
+  maxRunsObserver: null,    // of the settings' runs at once
   paneID: null,
   citations: new Map(),     // attachment key -> { at, size, map } the paper's numbered sentences, as sentences.json has them;
                             // the 20 papers shown last

@@ -60,7 +60,9 @@ agent runs in (`papers/<attachment key>/conversations/<conversation>/`, deleted 
 and uv's cache) and `<data dir>/zotero-scholium/` (the profile) there, and removes them once empty; what the new
 folder already has stays, and so does the old copy of it. What cannot be moved (held open) is tried again ten seconds
 later and at the next start, and the setup check names it (**Old records**). Logs are read and runs start once the
-move is done; a log line still to be written is written at its new path.
+move is done, its second try included; a log line still to be written is written at its new path. Before a run of a
+paper, the paths its records hold into the old folders (a configuration's `out_dir`, `note_html` and `sentences`, the
+`config` of `applied.json` and `applied_keys.json`, `paper.json`'s `out_dir`) are rewritten to the new ones.
 
 Each conversation runs in its own folder, as llm-for-zotero runs Claude Code: its Claude Code sessions are a project
 of their own, out of the lists of the user's projects (`/resume`), and its Codex threads are archived after each run,
@@ -75,8 +77,8 @@ Each Claude Code run:
   does an edit's fork of it;
 - runs without the user's MCP servers and hooks (`--strict-mcp-config`, `disableAllHooks`); the
   user's skills stay;
-- has only the tools it uses (`--tools`): Skill, Bash, PowerShell, Read, Write, Edit, Grep and Glob, and in a
-  chat also WebSearch and WebFetch;
+- has only the tools it uses (`--tools`): Skill, Bash, PowerShell, Read, Write and Edit, and in a chat also Grep,
+  Glob, WebSearch and WebFetch;
 - in an annotation and in words to its session, writes at most 32,000 tokens in one turn, its thinking included
   (`CLAUDE_CODE_MAX_OUTPUT_TOKENS`), unless the user's environment sets that variable;
 - logs its events, without the streaming deltas, to the conversation's log,

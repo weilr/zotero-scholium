@@ -2732,7 +2732,8 @@ BRIEF = "高亮 28 条（核心 12 条）\n页边批注 9 条\n无剩余警告" 
 ASK = "向这篇论文提问"   # the chat's placeholder while its conversation is a question's
 HISTORY_HEAD = "下面是这段对话之前的内容（Zotero 里保存的记录），每轮注明是谁回答的；轮次编号用户看不到，提到之前的内容时说它讲了什么，不要说第几轮："   # a new session's conversation, as text
 HISTORY_END = "——以上是之前的对话，新消息如下——"
-CLOSING = "改了批注时，结束时最后一行只写一句：改了什么，剩余警告，写成“剩余警告：…”（没有时写“剩余警告：无”）。只回答问题时不写这一行。"   # the end of a follow-up's prompt
+CLOSING = ("改了批注时，结束时最后一行只写一句：改了什么，剩余警告，写成“剩余警告：…”（没有时写“剩余警告：无”）；"
+           "用户这次的要求带来的数量变化（例如核心高亮因此超出范围）不算警告。只回答问题时不写这一行。")   # the end of a follow-up's prompt
 DONE_NOTICE = ["完成 · Ns"] + BRIEF.split("\n")   # a harness run's own time, read through run_time
 DONE_STATE = "完成 · 26 轮 · 2,568k tokens"   # the time is on the run's folded steps
 
@@ -3459,7 +3460,7 @@ def test_extra_instructions_and_follow_ups_continue_the_conversation(facts):
     f = facts["followUp"]
     assert f["calls"] == 2 and f["resume"] == "S1" and f["prevented"] is True and f["cleared"] == ""
     assert f["prompt"].startswith("下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
-                                  "只是提问就直接回答；要改批注时按技能的流程修改配置，再写入 Zotero。")
+                                  "只是提问就直接回答（公式写成 LaTeX：行内用 $…$，单独成行用 $$…$$）；要改批注时按技能的流程修改配置，再写入 Zotero。")
     assert f["prompt"].endswith("\n\n第 5 页那条译文改短\n\n" + CLOSING)
     assert f["prompt"].count("\n除非用户的话要求这个例外，否则不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。\n") == 1
     assert f["prompts"] == ["批注这篇\n附加要求：只标注方法部分", "第 5 页那条译文改短"]
@@ -3862,6 +3863,7 @@ def test_a_question_starts_a_conversation_that_answers_without_annotating(facts)
         "引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --config /data/scholium/papers/ATT1/paper.json "
         "--sentences /data/scholium/papers/ATT1/sentences.json --out /data/scholium/papers/ATT1/sentences.txt（已有就直接读 sentences.txt）。",
         "回答里不提 sentences.txt、文件、脚本或命令，也不解释句子编号或为什么没有引用；不要另写“Sources:”之类的来源行，引用写 [#123] 即可。",
+        "回答里的公式写成 LaTeX：行内用 $…$，单独成行用 $$…$$；写进 Zotero 的批注和笔记仍按技能的写法。",
         "",
         "用户的问题：",
         "这篇怎么估计后验？",
@@ -4008,7 +4010,8 @@ def test_new_and_resumed_sessions_know_the_annotations_and_turns(facts):
                                         "prompt": ["[第 1 轮]\n用户：它和 FNO 比怎么样？\n回答（Claude Code）：（没有完成：Invalid API key）"]}, \
         "a session that never had the message is not the conversation's"
     assert facts["legacyTwoTurns"] == "下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。" \
-                                      "只是提问就直接回答；要改批注时按技能的流程修改配置，再写入 Zotero。", "both turns of the earlier log reached Codex"
+                                      "只是提问就直接回答（公式写成 LaTeX：行内用 $…$，单独成行用 $$…$$）；要改批注时按技能的流程修改配置，再写入 Zotero。", \
+        "both turns of the earlier log reached Codex"
     assert facts["handedInterrupted"] == [[True, True]]
     u = facts["unreached"]
     assert u["before"] == "T1" and u["thread"] == "T1", "a thread that never had the message is not Codex's session"

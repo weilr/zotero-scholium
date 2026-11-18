@@ -6,12 +6,75 @@
 
 - When the paper's index names where the main text ends and references or an appendix follow, the annotation prompt
   gives those lines: a whole-paper annotation reads up to the end of the main text first, and of the appendix only
-  what the main text calls essential.
+  what the main text calls essential. A main text longer than one read of Claude Code takes (25,000 tokens) is given
+  as parts to read together in one response.
 - The `label` style warning is given only for a margin note or sticky note with at most six characters or words before
   its first colon (方法：…, 与 GPT-3 的区别：…, Key idea: …): a clause before a colon (这一点与直觉相反：…) is a sentence, and
   a framed figure's comment may read as its caption (图 1：…).
+- The annotation prompt names the files its next step reads (sentences.txt, the configuration template, paper.json, and
+  for a reading note its template, and in Chinese its style) to be read in one response, and has the reading note's
+  file written before `--apply`.
+- An annotation's Claude Code run has Skill, Bash, PowerShell, Read, Write and Edit; Grep and Glob stay a chat's.
+- The skill has only the kinds of sentence it names marked core, whatever `core_range` says: a count outside the range
+  is only reported.
+- A question's prompt, and a follow-up's in an annotation session, ask for formulas in LaTeX ($…$ inline, $$…$$ on a
+  line of their own), which the section sets as formulas.
+- After a change the user asked for in the annotation session, a count that change moved on purpose (core highlights
+  outside the range) is not reported among the remaining warnings.
+- Codex's prompts have it write the configuration and the reading note with apply_patch, not by building their text in
+  a shell command or a script (whose quoting failed and left no configuration to apply), and check the file is there
+  before `--apply`.
 
 ### Fixed
+
+- `extract` writes `sentences.json` and `sentences.txt` through a temporary file moved in place: a run of the same paper
+  that reads them meanwhile reads the old files or the new ones whole. It reads a page's drawings once for its figures
+  and its rules (a 77-page paper in 4.4 s instead of 5.5 s).
+- A conversation whose Claude Code session started in a folder that is gone (a moved data directory) goes on in a new
+  session in its own folder, given its history, instead of failing.
+- When an earlier version's folders could not all be moved at the first try, logs and runs wait for the second one.
+- Runs at once: words queued without their conversation while that conversation runs wait for its run instead of
+  starting beside it; words to another conversation of a paper that runs start at once; more runs allowed in the
+  settings start what waits; ■ holds the queued words of its own conversation only; an update hands over the run of
+  every conversation of a paper, and a job that has left the queue but whose run has not begun, which then does not run
+  in the copy that stops.
+- The move of an earlier version's folders takes the papers of libraries other than My Library and groups as well
+  (`<key>_l<library>`).
+- The smoke check of the setup check's Copy leaves alone a clipboard that holds more than plain text (SKIP), which it
+  could not put back.
+
+- The records of papers moved from an earlier version's folders point to the new ones: a configuration's `out_dir`,
+  `note_html` and `sentences`, the `config` of `applied.json` and `applied_keys.json`, and `paper.json`'s `out_dir`
+  are rewritten when a run of the paper starts, so that a change to an older paper's annotations applies in its folder.
+- A write that was stopped (■, a timeout) no longer keeps its paper locked for ten minutes: the write that holds the
+  lock touches it every 5 seconds, and a lock untouched for 15 seconds is taken over, by one waiter at a time. A write
+  whose lock was taken over leaves the new one alone, and removes its own again when a waiter reading it held it open
+  for a moment; a folder that refuses the lock is reported after 2 seconds. A lock an earlier version wrote, which it
+  does not touch, is taken over after ten minutes, as before.
+- ■ ends at once a run whose first step waits for another run's extract of the same paper.
+- The translation check reads an English number word in the plural as its digit (the 1010 threes, 1010 个 3), a digit's
+  plural as the digit (errors on 3s), a mixed-case abbreviation by its capitals (ReLU for rectified linear units), a
+  number a line end broke off its word as the number (152- layer, 152 层), a size written with the letter x as its
+  numbers (256x256, 256×256), a month by its number where the comment writes a month (September 2021: 2021 年 9 月, 09/2021) and, after a month, a year joined to
+  the number of a footnote (September 202110). It reads the magnitudes as Traditional Chinese, Japanese and Korean write
+  them (萬, 億: 7億 for 700 million; 2천만 for 20M), takes an abbreviation of three letters or more over its words with one
+  more among them (ReLU: rectified linear hidden units), reads a plain space before three digits as grouping in a
+  comment that writes numbers the French or German way (14 000), and gives a Japanese comment, with its kana, more
+  characters per word before it calls it long.
+- The translation check reads what the extraction joined as the comment writes it (152layer: 152 层; CrowSPairs:
+  CrowS-Pairs; API3: API), a name and its version with a space or a hyphen as one name (GPT 3.5, GPT-3.5), a
+  three-letter abbreviation in lower case of a word of the text (dim: dimension), a number in parts of falling
+  magnitude as their sum (3억 5천만, 3億5000万: 350 million), two numbers sharing their magnitude each with it
+  (15.3/19.6 billion, 153/196 亿), a digit's German noun as the digit (Test-3er), arg max as argmax, 千分之一 and 천분의 일 as
+  fractions as well (GPT-4 千分之一 is no 4,000; 5万分之一 is one in 50,000), 만 and 조 after a number also as words
+  (레이어 3만: only layer 3; 3조각: 3 pieces) and N 个百分点 as N% (about 2% shy).
+  A comment is short for its span only with at most one character per word it translates; articles, prepositions and
+  the like are not counted.
+- The live runner and the smoke checks read netstat again when it fails or prints nothing (low memory); one that still
+  cannot be read keeps a session from starting or leaves it unverified, instead of calling it unsafe. The live runner's
+  watcher reads netstat ten times a second; a process table it cannot read (or that takes more than 30 seconds), an
+  error in a sample, or a watcher that has not ended after the session leaves the session unverified, and the run's
+  Zotero starts once the first sample is done.
 
 - The translation check reads superscript and subscript characters in a comment (T², x₁) both joined to their base and
   set apart, as it reads `<sup>`/`<sub>`: PDF text writes T² as “T 2”. 万亿 is read as a trillion (2 万亿 for 2 trillion),

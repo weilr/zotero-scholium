@@ -36,12 +36,15 @@ const card = pane => {
 };
 // a sentences.txt of 1695 lines whose index puts the main text at lines 8-660, references and an appendix after it
 const APPENDIX = 'Index (line numbers of this file)\nmain text: lines 8-660\nreferences: line 661 (p.11)\n' + 'x\n'.repeat(1692);
+// a main text more than one Read takes: 1600 lines of 100 characters, then references and an appendix
+const LONG = 'Index (line numbers of this file)\nmain text: lines 8-1600\nreferences: line 1601 (p.20)\n' + ('y'.repeat(100) + '\n').repeat(1700);
 (async () => {
   const facts = {};
   for (const [name, runs, locale] of [['ok', { status: [STATUS, 0], extract: ['412 sentences -> s.json\n', 0] }, 'zh-CN'],
                                       ['okEnglish', { status: [STATUS, 0], extract: ['412 sentences -> s.json\n', 0] }, 'en-US'],
                                       ['appendix', { status: [STATUS, 0], extract: ['x', 0], text: APPENDIX }, 'zh-CN'],
                                       ['appendixEnglish', { status: [STATUS, 0], extract: ['x', 0], text: APPENDIX }, 'en-US'],
+                                      ['long', { status: [STATUS, 0], extract: ['x', 0], text: LONG }, 'zh-CN'],
                                       ['statusFails', { status: ['', 1], extract: ['412 sentences -> s.json\n', 0] }, 'zh-CN'],
                                       ['extractFails', { status: [STATUS, 0], extract: ['', 1] }, 'zh-CN'],
                                       ['scanned', { status: [STATUS, 0], extract: ['{"error": "no text layer"}', 3] }, 'zh-CN']]) {
@@ -173,6 +176,54 @@ const APPENDIX = 'Index (line numbers of this file)\nmain text: lines 8-660\nref
     const h = harness({ env: { PATH: '/w/bin' }, present, dirs: { [C]: [C + '/m'], [C + '/m']: [P], [P]: versions.map(v => `${P}/${v}`) } });
     facts.cache = await h.runner.claudeSkillDir();
   }
+  // the main text's line for Codex, which reads with its shell: no Read limit
+  {
+    const h = harness();
+    const pre = { status: '{}', lines: 1695, main: [8, 660], script: '/s/zotero-scholium/scripts/scholium.py' };
+    facts.agentLines = { claude: h.runner.preRunLines({ pre, att: h.att1, agent: 'claude' }).join('\n'),
+                         codex: h.runner.preRunLines({ pre, att: h.att1, agent: 'codex' }).join('\n') };
+    // a long main text without an appendix after it: its parts in a line of their own
+    const long = { status: '{}', lines: 1500, main: [8, 1499], parts: [[1, 700], [701, 799]], script: '/s/zotero-scholium/scripts/scholium.py' };
+    facts.partsOnly = { claude: h.runner.preRunLines({ pre: long, att: h.att1, agent: 'claude' }).join('\n'),
+                        codex: h.runner.preRunLines({ pre: long, att: h.att1, agent: 'codex' }).join('\n') };
+    // parts of lines 1 to the last that each fit one read; none when one read takes them
+    const rows = n => Array.from({ length: n }, () => 'z'.repeat(92));   // 100 characters with Read's number
+    facts.readParts = { fits: h.runner.readParts(rows(500), 500), split: h.runner.readParts(rows(1500), 1400),
+                        // a Chinese line: 40 characters of about a token each
+                        cjk: h.runner.readParts(Array.from({ length: 1000 }, () => '中'.repeat(40)), 1000) };
+  }
+  // a run whose pre-run waits for another run's extract of the paper: ■ ends the wait at once, so does the time it has,
+  // and without either it takes what the other wrote
+  {
+    const h = harness();
+    h.runner.start('x');
+    const TXT = '/data/scholium/papers/ATT1/sentences.txt';
+    const waitFor = async ms => {
+      let release;
+      const gate = new Promise(r => { release = r; });
+      const extract = async () => { await gate; h.log.writes[TXT] = 'a\nb\nc\n'; return { exitCode: 0, out: '' }; };
+      const first = h.runner.preExtract(extract, { current: null }, 'ATT1', 60000);
+      const waiter = { id: 'rW' + ms, key: 'ATT1', kind: 'chat', current: null };
+      h.runner.runs.set(waiter.id, waiter);
+      let done;
+      const second = h.runner.preExtract(extract, { current: null, running: waiter }, 'ATT1', ms).then(v => { done = v; return v; });
+      await settle(20);
+      return { release, first, second, waiter, done: () => done };
+    };
+    const a = await waitFor(60000);
+    const stopped = h.runner.cancel(a.waiter);
+    await settle(20);
+    facts.waitStop = { stopped, during: a.done() || null };
+    a.release(); await a.first;
+    const b = await waitFor(300);
+    await new Promise(r => setTimeout(r, 450)); await settle(20);
+    facts.waitLate = b.done() === undefined ? 'waiting' : b.done();
+    b.release(); await b.first;
+    const c = await waitFor(60000);
+    c.release();
+    facts.waitDone = await c.second;
+    h.runner.stop();
+  }
   process.stdout.write(JSON.stringify(facts));
 })().catch(e => { process.stderr.write(String(e.stack || e)); process.exit(1); });
 """
@@ -286,3 +337,43 @@ def test_codex_gets_the_pre_runs_lines_only_from_the_skill_copy_it_uses(facts):
 
 def test_claude_codes_plugin_cache_gives_the_highest_version_that_is_not_orphaned(facts):
     assert facts["cache"] == "/home/u/.claude/plugins/cache/m/scholium/1.10.0/skills/zotero-scholium"
+
+
+def test_the_prompt_names_the_files_to_read_in_one_response(facts):
+    skill = "/home/u/.claude/skills/zotero-scholium"
+    assert (f"\n- 接下来要读的文件在同一次回复里一起读：sentences.txt，{skill}/examples/config.template.json，{OUT}/paper.json，"
+            f"写阅读笔记时还有 {skill}/examples/reading_note.template.html 和 {skill}/references/style-zh.md；"
+            "阅读笔记先写成文件，再运行 apply\n") in facts["ok"]["prompt"]
+    assert (f"\n- Read the files the next step needs in one response: sentences.txt, {skill}/examples/config.template.json, "
+            f"{OUT}/paper.json, and for a reading note {skill}/examples/reading_note.template.html; write the reading "
+            "note's file before running --apply\n") in facts["okEnglish"]["prompt"]
+    assert "style-zh.md" not in facts["okEnglish"]["prompt"], "the Chinese style is the Chinese prompt's"
+
+
+def test_a_long_main_text_is_read_in_parts_that_one_read_each_takes(facts):
+    assert facts["readParts"] == {"fits": None, "split": [[1, 560], [561, 560], [1121, 280]],
+                                  "cjk": [[1, 437], [438, 437], [875, 126]]}
+    long = facts["long"]["prompt"]
+    assert "批注整篇时先只读到第 1600 行，分 4 段读（Read 一次最多约 2.5 万 token），这几段在同一次回复里一起读：offset 1 limit " in long
+    assert "Read 的 limit 设为" not in long
+    p = facts["partsOnly"]
+    assert "- 批注整篇时正文较长，分 2 段读（Read 一次最多约 2.5 万 token），这几段在同一次回复里一起读：offset 1 limit 700，offset 701 limit 799" in p["claude"]
+    assert "- 批注整篇时正文较长，分 2 段读：第 1–700 行，第 701–1499 行" in p["codex"]
+
+
+def test_codex_is_told_to_write_its_files_with_apply_patch(facts):
+    line = "- 配置文件和阅读笔记用 apply_patch 写成文件，不要在 shell 命令或脚本里拼出文件内容；运行 apply 之前确认配置文件已经写好。"
+    assert line in facts["codexSame"]["prompt"]
+    assert "apply_patch" not in facts["ok"]["prompt"], "not Claude Code's"
+
+
+def test_codex_is_told_where_the_main_text_ends_without_a_read_limit(facts):
+    a = facts["agentLines"]
+    assert "先只读到第 660 行（Read 的 limit 设为 660），" in a["claude"]
+    assert "先只读到第 660 行，附录只读正文点名的必要部分" in a["codex"] and "Read 的 limit" not in a["codex"]
+
+
+def test_a_wait_for_another_runs_extract_ends_at_a_stop_or_in_time(facts):
+    assert facts["waitStop"] == {"stopped": True, "during": {"cancelled": True}}, "■ ends the wait at once"
+    assert facts["waitLate"] is None, "out of time: the agent extracts itself"
+    assert facts["waitDone"] == {"lines": 3}, "otherwise what the other run wrote"

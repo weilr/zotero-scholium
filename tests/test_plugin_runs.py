@@ -91,7 +91,119 @@ SCENARIOS = r"""
     await g.runner.send(g.item1, '问甲'); await settle(200);
     await g.runner.send(g.item2, '问乙'); await settle(200);
     facts.maxRuns.one = { calls: g.log.calls.length, queue: g.runner.queue.length };
+    g.zotero.Prefs.set('extensions.scholium.maxRuns', 2, true); await settle(200);   // the settings allow two
+    facts.maxRuns.raised = { calls: g.log.calls.length, queue: g.runner.queue.length };
     g.runner.stop(); await settle(50);
+  }
+  // a message to another conversation of a paper that runs starts at once; an update hands both runs over
+  const OTHER = 'chat-20261001-120000', OTHER_PATH = '/data/scholium/papers/ATT1/conversations/' + OTHER + '.jsonl';
+  const OLD = [{ type: 'scholium', subtype: 'run', agent: 'claude', user: 'old', at: 1 },
+               { type: 'system', subtype: 'init', session_id: 'S0', cwd: '/data/scholium/papers/ATT1/conversations/' + OTHER },
+               { type: 'assistant', session_id: 'S0', message: { content: [{ type: 'text', text: 'old answer' }] } },
+               { type: 'result', subtype: 'success', is_error: false, result: 'old answer', session_id: 'S0' }].map(e => JSON.stringify(e)).join('\n') + '\n';
+  {
+    const h = harness({ prefs: { 'extensions.scholium.maxRuns': 3 }, scripts: [SCRIPT.concat(['WAIT']), SCRIPT.concat(['WAIT'])],
+                        logs: { [OTHER_PATH]: OLD } });
+    h.runner.start('x');
+    await h.runner.chooseConv('ATT1', null);
+    await h.runner.send(h.item1, 'first'); await settle(200);
+    await h.runner.send(h.item1, 'second', { conv: OTHER }); await settle(300);
+    const both = { calls: h.log.calls.length, convs: [...h.runner.runs.values()].map(r => r.conv).sort() };
+    h.runner.stop(true); await settle(50);
+    const raw = h.store.get('extensions.scholium.carryOver');
+    const logs = Object.fromEntries(Object.entries(h.log.writes).filter(([p]) => p.startsWith('/data/scholium/papers/')));
+    const g = harness({ prefs: { 'extensions.scholium.maxRuns': 3, 'extensions.scholium.carryOver': raw },
+                        scripts: [SCRIPT.concat(['WAIT']), SCRIPT.concat(['WAIT'])], logs });
+    g.runner.start('x', true); await settle(400);
+    facts.twoConvs = { both, carried: JSON.parse(raw || '{"jobs":[]}').jobs.map(j => j.conv).sort(),
+                       restored: [...g.runner.runs.values()].map(r => r.conv).concat(g.runner.queue.map(j => j.conv)).sort() };
+    g.runner.stop(); await settle(50);
+  }
+  // a message queued without its conversation while the paper's conversation runs is placed there and waits for that run
+  {
+    const h = harness({ prefs: { 'extensions.scholium.maxRuns': 3 }, scripts: [SCRIPT.concat(['HOLD', LAST, RESULT]), SCRIPT.concat([LAST, RESULT])] });
+    h.runner.start('x');
+    await h.runner.send(h.item1, 'first'); await settle(300);
+    const convA = [...h.runner.runs.values()][0].conv;
+    await h.runner.send(h.item1, 'follow-up', { conv: null }); await settle(50);
+    h.runner.pump(); await settle(300);
+    const during = { calls: h.log.calls.length, runs: [...h.runner.runs.values()].map(r => r.conv), queued: h.runner.queue.map(j => j.conv) };
+    h.log.release(); await settle(600);
+    facts.oneRunPerConv = { convA, during, after: h.log.calls.length };
+    h.runner.stop(); await settle(50);
+  }
+  // an update while a job has left the queue but its run has not begun (it waits for the folders to be moved): the job
+  // is handed over as it was queued, and nothing of it runs in the copy that stops
+  {
+    const h = harness({ logs: { '/data/tmp/scholium/WXYZ9999/config.json': '{}' }, failMoves: ['/data/tmp/scholium/WXYZ9999'] });
+    h.runner.start('x');
+    await h.runner.migrating;
+    // a job queued as send() queues one (send itself reads the conversations, which wait for the folders too)
+    const job = Object.assign(await h.runner.resolve(h.item1), { agent: 'claude', say: 'waits for the folders', kind: 'chat', conv: null });
+    h.runner.queue.push(job); h.runner.pump(); await settle(100);
+    const between = { queue: h.runner.queue.length, active: h.runner.active.size, runs: h.runner.runs.size };
+    h.runner.stop(true); await settle(200);
+    const raw = h.store.get('extensions.scholium.carryOver');
+    const g = harness({ prefs: { 'extensions.scholium.carryOver': raw }, scripts: [SCRIPT.concat(['WAIT'])] });
+    g.runner.start('x', true); await settle(400);
+    facts.betweenStop = { between, calls: h.log.calls.length, carried: JSON.parse(raw || '{"jobs":[]}').jobs.map(j => j.say),
+                          restored: g.log.calls.length + g.runner.queue.length };
+    g.runner.stop(); await settle(50);
+  }
+  // words queued without their conversation, placed in one whose second try waits before them, wait for that try
+  {
+    const h = harness({ prefs: { 'extensions.scholium.maxRuns': 3 }, logs: { [OTHER_PATH]: OLD } });
+    h.runner.start('x');
+    await h.runner.chooseConv('ATT1', OTHER);
+    const retry = Object.assign(await h.runner.resolve(h.item1), { agent: 'claude', say: 'again', kind: 'chat', conv: OTHER, retried: true,
+                                                                    retryAt: Date.now() + 60000 });
+    h.runner.queue.push(retry);
+    await h.runner.send(h.item1, 'follow-up', { conv: null }); await settle(300);
+    facts.afterRetry = { calls: h.log.calls.length, queue: h.runner.queue.map(j => [j.say, j.conv]) };
+    // ■ in the section of a new conversation: of the tab only the second try waits (no run), so ■ stops it; the queued
+    // row of the other conversation stays, not held
+    const p = await h.pane(h.item1); await settle(40);
+    await h.runner.chooseConv('ATT1', null); await settle(20);
+    h.runner.viewOf(p.pane(), 'chat').shownConv = null;
+    h.runner.stopFromPane(p.pane()); await settle(100);
+    facts.stopOther = { queue: h.runner.queue.map(j => j.say), held: [...h.runner.heldQueues] };
+    h.runner.stop(); await settle(50);
+  }
+  // a stop: a job already handled is not handed over again; a copy stopped while it waited for the folders leaves what
+  // was handed over to it for the next copy
+  {
+    const h = harness();
+    h.runner.start('x');
+    const done = Object.assign(await h.runner.resolve(h.item1), { agent: 'claude', say: 'handled', kind: 'chat', ended: true });
+    h.runner.active.add(done);
+    h.runner.stop(true); await settle(50);
+    facts.endedNotCarried = h.store.get('extensions.scholium.carryOver') || null;
+    const raw = JSON.stringify({ jobs: [{ key: 'ATT1', libraryID: 1, agent: 'claude', say: 'kept', kind: 'chat' }] });
+    const g = harness({ prefs: { 'extensions.scholium.carryOver': raw }, logs: { '/data/tmp/scholium/WXYZ9999/config.json': '{}' },
+                        failMoves: ['/data/tmp/scholium/WXYZ9999'] });
+    g.runner.start('x', true);
+    await g.runner.migrating;
+    g.runner.stop(); await settle(100);
+    facts.stoppedKeeps = g.store.get('extensions.scholium.carryOver') === raw;
+  }
+  // ■ in a section showing one conversation holds that conversation's queued words only
+  {
+    const h = harness({ prefs: { 'extensions.scholium.maxRuns': 3 }, logs: { [OTHER_PATH]: OLD },
+                        scripts: [SCRIPT.concat(['HOLD', LAST, RESULT]), SCRIPT.concat(['WAIT']), SCRIPT.concat([LAST, RESULT])] });
+    h.runner.start('x');
+    const p = await h.pane(h.item1); await settle(40);
+    const pane = p.pane();
+    await h.runner.chooseConv('ATT1', null);
+    await h.runner.send(h.item1, 'first'); await settle(200);
+    const convA = [...h.runner.runs.values()][0].conv;
+    await h.runner.send(h.item1, 'second', { conv: OTHER }); await settle(300);
+    await h.runner.send(h.item1, 'follow-up A', { conv: convA }); await settle(50);
+    h.runner.viewOf(pane, 'chat').shownConv = OTHER;   // the section shows the other conversation
+    h.runner.stopFromPane(pane); await settle(300);
+    const held = [...h.runner.heldQueues];
+    h.log.release(); await settle(600);   // the first conversation's run ends: its follow-up goes on
+    facts.stopOne = { convA, held, calls: h.log.calls.length, queue: h.runner.queue.map(j => j.say) };
+    h.runner.stop(); await settle(50);
   }
   // an update while two runs go on hands both over, each as the conversation it was
   {
@@ -144,6 +256,46 @@ def test_the_number_of_runs_at_once(facts):
     d = m["fallback"]
     assert m["values"] == [1, 4, 6, d, d, d, d]
     assert m["one"] == {"calls": 1, "queue": 1}, "with 1, the second paper waits"
+    assert m["raised"] == {"calls": 2, "queue": 0}, "more allowed in the settings: it starts"
+
+
+def test_another_conversation_of_a_busy_paper_starts_and_an_update_hands_both_over(facts):
+    t = facts["twoConvs"]
+    assert t["both"]["calls"] == 2 and len(t["both"]["convs"]) == 2 and None not in t["both"]["convs"]
+    assert t["carried"] == t["both"]["convs"]
+    assert t["restored"] == t["both"]["convs"], "each conversation's run comes back"
+
+
+def test_a_queued_message_never_runs_beside_its_conversations_run(facts):
+    o = facts["oneRunPerConv"]
+    assert o["during"] == {"calls": 1, "runs": [o["convA"]], "queued": [o["convA"]]}, "placed there, it waits"
+    assert o["after"] == 2
+
+
+def test_an_update_hands_over_a_job_between_the_queue_and_its_run(facts):
+    b = facts["betweenStop"]
+    assert b["between"] == {"queue": 0, "active": 1, "runs": 0}, "the job left the queue, its run has not begun"
+    assert b["carried"] == ["waits for the folders"] and b["calls"] == 0, "handed over; no agent started in the old copy"
+    assert b["restored"] == 1
+
+
+def test_words_placed_in_a_conversation_wait_for_its_second_try(facts):
+    assert facts["afterRetry"] == {"calls": 0, "queue": [["again", "chat-20261001-120000"], ["follow-up", "chat-20261001-120000"]]}
+
+
+def test_stop_in_a_conversation_with_nothing_waiting_stops_what_waits_of_the_tab(facts):
+    assert facts["stopOther"] == {"queue": ["follow-up"], "held": []}
+
+
+def test_a_handled_job_is_not_handed_over_and_a_stopped_copy_keeps_the_hand_over(facts):
+    assert facts["endedNotCarried"] is None
+    assert facts["stoppedKeeps"] is True
+
+
+def test_stop_holds_its_own_conversations_queue_only(facts):
+    s = facts["stopOne"]
+    assert f"ATT1/chat/{s['convA']}" not in s["held"]
+    assert s["calls"] == 3 and s["queue"] == [], "the other conversation's follow-up went on"
 
 
 def test_three_runs_at_once_by_default():

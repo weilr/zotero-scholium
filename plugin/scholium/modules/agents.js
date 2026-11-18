@@ -18,12 +18,16 @@ Object.assign(ScholiumRunner, {
       await this.flushLog(path);
       if (this.pendingLogs.has(path)) throw new Error(this.text("logNotSaved"));
     }
+    // the plugin stopped meanwhile: the job was handed over from the runs starting (carryOver), and nothing of it runs here
+    if (this.stopped) return { cancelled: true, delivered: false };
     const agent = job.agent === "codex" ? "codex" : "claude";
     const running = { id: "r" + (++this.runSeq), title: job.title, key, libraryID: job.att.libraryID, started, elapsed: 0, agent,
                       step: job.resume && !job.annotate ? "continuing" : "starting", source: job, session: job.resume || null, log: null,
                       asking: this.asking(job), context: null, kind: job.kind || "chat", conv: job.conv || null, entries: [], path: null,
                       current: null, draft: null, draftTimer: null };
     this.runs.set(running.id, running);
+    // an earlier version's records of the paper point to its folder of now, before the run reads or edits them
+    await this.repointPaper(key).catch(e => this.log("records not repointed: " + e));
     // the conversation goes on in its log; a new one starts its own when the run is under way
     const log = job.conv ? await this.readLog(key, job.conv) : null;
     const mine = log ? log.agents[agent] : null;   // the agent's own session of the conversation
@@ -492,7 +496,9 @@ Object.assign(ScholiumRunner, {
       const log = job.conv ? await this.readLog(key, job.conv) : null;
       const at = log && log.cwds ? log.cwds[job.resume] : null;
       if (!at) return Zotero.DataDirectory.dir;
-      if (!this.inside(this.root(), at)) return at;
+      // a folder outside the plugin's that is gone (the data directory moved): the conversation's own, where Claude Code
+      // finds the session gone and the conversation goes on in a new one (fresh)
+      if (!this.inside(this.root(), at) && (await this.isFolder(at))) return at;
     }
     const dir = this.workDir(key, job.conv);
     await IOUtils.makeDirectory(dir, { createAncestors: true, ignoreExisting: true });
@@ -637,7 +643,11 @@ Object.assign(ScholiumRunner, {
       if (!this.alive(r)) continue;
       any = true;
       const current = r.current;
-      if (!current) { r.stopAsked = true; continue; }
+      if (!current) {
+        r.stopAsked = true;
+        if (r.onStopAsked) r.onStopAsked();   // a pre-run waiting for another run's extract
+        continue;
+      }
       current.cancelled = true;
       try { if (current.stop) current.stop(); else current.proc.kill(); } catch (e) {}
     }

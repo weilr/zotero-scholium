@@ -125,6 +125,14 @@ function readClipboard() {
     return { text: data.value.QueryInterface(Ci.nsISupportsString).data };
   } catch (e) { return { text: null, error: String(e) }; }
 }
+// whether the clipboard holds something other than plain text (formatted text, an image, a file, a link), which
+// restoreClipboard could not put back
+function clipboardHoldsMore() {
+  try {
+    return Services.clipboard.hasDataMatchingFlavors(["text/html", "text/rtf", "image/png", "image/jpeg", "image/gif",
+      "application/x-moz-file", "application/x-moz-nativeimage", "text/x-moz-url"], Services.clipboard.kGlobalClipboard);
+  } catch (e) { return true; }
+}
 function restoreClipboard(saved) {
   try {
     if (saved && saved.text != null) {
@@ -442,7 +450,11 @@ const CHECKS = {
     await delay(1500);
     await toSection(true).catch(() => null);
     const drag = await dragOver(1, "The protocol selects a passage", "records the answer");
-    const menus = await contextMenuAt(drag.at[0], drag.at[1]);
+    let menus = [];
+    for (let i = 0; i < 3 && !menus.length; i++) {   // a reader not ready yet opens no menu (Zotero 7, now and then)
+      if (i) { line("menuRetry", { attempt: i }); await delay(1500); }
+      menus = await contextMenuAt(drag.at[0], drag.at[1]);
+    }
     const ask = menus.flatMap(m => [...m.popup.children]).find(c => (c.getAttribute("label") || "") === E().askLabel);
     const items2 = menus.map(m => m.items);
     if (!ask) {
@@ -573,8 +585,12 @@ const CHECKS = {
     const first = await ended();
     const firstLines = lines();
     await pshot("setup-checked");
-    // Copy: the lines with the versions on the clipboard; what was on it is put back
-    if (CFG.checks.includes("copy")) {
+    // Copy: the lines with the versions on the clipboard; what was on it is put back. When it holds more than plain text,
+    // which could not be put back, the check is skipped and the clipboard left alone
+    if (CFG.checks.includes("copy") && clipboardHoldsMore()) {
+      line("result", { check: "copy", pass: true, skipped: "the clipboard holds more than plain text, which the check could not put back",
+                       info: {} });
+    } else if (CFG.checks.includes("copy")) {
       const copy = PW.document.getElementById("scholium-check-copy");
       const head = `Scholium ${R().version} · Zotero ${Zotero.version}`;
       const saved = readClipboard();

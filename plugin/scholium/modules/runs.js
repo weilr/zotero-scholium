@@ -32,15 +32,16 @@ Object.assign(ScholiumRunner, {
   // whether a queued job may start now: not held (Resume, a failed message before it, a usage limit of its agent), not
   // waiting for its second try, not already starting; nothing of its conversation going on or queued before it, and no
   // other annotation of its paper going on or queued before it
-  mayStart(job) {
-    if (this.active.has(job) || this.isHeld(job) || this.heldByLimit(job) || (job.retryAt || 0) > Date.now()) return false;
+  mayStart(job, placed = false) {
+    // placed: asked again of a job starting, once place() gave it its conversation
+    if ((!placed && this.active.has(job)) || this.isHeld(job) || this.heldByLimit(job) || (job.retryAt || 0) > Date.now()) return false;
     const key = this.keyOf(job.att), kind = job.kind || "chat", conv = job.conv || null;
     const blocks = j => {
       if (this.keyOf(j.att) !== key) return false;
       const k = j.kind || "chat";
       return (k === kind && (j.conv || null) === conv) || (kind === "annotate" && k === "annotate");
     };
-    for (const a of this.active) if (blocks(a)) return false;
+    for (const a of this.active) if (a !== job && blocks(a)) return false;
     // a held message (Resume, a usage limit) holds its own conversation only
     for (const q of this.queue) { if (q === job) break; if (!this.isHeld(q) && !this.heldByLimit(q) && blocks(q)) return false; }
     return true;
@@ -70,10 +71,13 @@ Object.assign(ScholiumRunner, {
   // meanwhile so that a stop hands it over; the job counts as going on (active) until its outcome is handled
   async startRun(job) {
     this.active.add(job);
+    job.ended = false;
     try {
       if (job.qid) {
         job.own = job.att.getAnnotations().filter(a => ScholiumToggle.isOwn(a)).length;
         await this.place(job);
+        // place() gave it a conversation that runs, or one with words queued before it, or held: it waits in the queue
+        if (!this.mayStart(job, true)) return;
       }
       if (this.stopped) return;
       const at = this.queue.indexOf(job);
@@ -82,6 +86,7 @@ Object.assign(ScholiumRunner, {
       let outcome = null;
       try { outcome = await this.run(job); }
       catch (e) {
+        job.ended = true;   // handled here, not handed over to an update (carryOver) while what follows waits
         const message = String(e && e.message || e).slice(0, 300);
         const run = this.runOfJob(job);
         if (run) this.dropDraft(run);
@@ -100,6 +105,7 @@ Object.assign(ScholiumRunner, {
         this.log("run failed: " + e);
         if (!job.logPath) outcome = { ok: false, delivered: false };   // its words reached nothing
       }
+      job.ended = true;
       // a queued message that did not reach the agent goes back to the head of its queue, marked, and its queue waits for it
       if (job.qid && outcome && !outcome.delivered && !outcome.cancelled && !outcome.limited && !outcome.retry && !outcome.fresh) {
         job.failed = true;

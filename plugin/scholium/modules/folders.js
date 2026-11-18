@@ -78,11 +78,57 @@ Object.assign(ScholiumRunner, {
     for (const kid of await this.children(tmp)) {
       const name = PathUtils.filename(kid);
       if (name === "uv") await this.mergeMove(kid, this.uvDir(), left);
-      else if (/^[A-Z0-9]+(?:_g\d+)?$/.test(name) && (await this.isFolder(kid))) await this.mergeMove(kid, this.outDir(name), left);
+      else if (/^[A-Z0-9]+(?:_[gl]\d+)?$/.test(name) && (await this.isFolder(kid))) await this.mergeMove(kid, this.outDir(name), left);   // keyOf's names
     }
     await this.removeIfEmpty(tmp);
     this.migrateLeft = left;
     return left;
+  },
+
+  // a record's text with each JSON string that starts with an earlier version's folder starting with its new place; nothing
+  // else in it changes
+  repointText(text) {
+    const win = Services.appinfo.OS === "WINNT";
+    const fold = s => win ? s.replace(/[A-Z]/g, c => c.toLowerCase()) : s;   // ASCII only: the places stay where they were
+    // an old folder as JSON writes it (backslashes escaped) and with forward slashes, each also as Python's json writes a
+    // path with letters beyond ASCII (C:\Users\张三: \u5f20\u4e09), and its new place written the same way
+    const ascii = s => s.replace(/[\u0080-\uffff]/g, c => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+    const swaps = this.oldFolders().flatMap(([from, to]) => [[JSON.stringify(from).slice(1, -1), JSON.stringify(to).slice(1, -1)],
+                                                              [from.replace(/\\/g, "/"), to.replace(/\\/g, "/")]])
+      .flatMap(([a, b]) => ascii(a) === a ? [[a, b]] : [[a, b], [ascii(a), ascii(b)]]);
+    const swap = (s, a, b) => {
+      const hay = fold(s), needle = fold(a);
+      let out = "", at = 0, i;
+      while ((i = hay.indexOf(needle, at)) >= 0) {
+        const next = s[i + a.length];
+        const whole = s[i - 1] === '"' && (next === '"' || next === "/" || next === "\\");
+        out += s.slice(at, i) + (whole ? b : s.slice(i, i + a.length));
+        at = i + a.length;
+      }
+      return out + s.slice(at);
+    };
+    return swaps.reduce((t, [a, b]) => swap(t, a, b), text);
+  },
+
+  // the paths into an earlier version's folders that a paper's records hold (a configuration's out_dir, note_html and
+  // sentences, applied.json's and applied_keys.json's config, paper.json's out_dir), at the new places, before a run of
+  // the paper reads them: the number of records changed
+  async repointPaper(key) {
+    let changed = 0;
+    for (const file of await this.children(this.outDir(key))) {
+      if (!/^(?:config.*|applied|applied_keys|paper)\.json$/.test(PathUtils.filename(file))) continue;
+      let text;
+      try { text = await IOUtils.readUTF8(file); } catch (e) { continue; }
+      const now = this.repointText(text);
+      if (now === text) continue;
+      try {
+        await IOUtils.writeUTF8(file, now, { tmpPath: file + ".tmp" });
+        changed++;
+      } catch (e) {
+        this.log("record not repointed: " + file + ": " + e);
+      }
+    }
+    return changed;
   },
 
   // the logs still to be written (ScholiumPendingLogs) and the notes that name them, at their paths in the new folder
@@ -98,24 +144,30 @@ Object.assign(ScholiumRunner, {
   },
 
   // the folders moved when the plugin starts, before any log is read or run started; what could not be moved is tried
-  // once more ten seconds later (a copy of the plugin an update replaces may still hold it)
+  // once more ten seconds later (a copy of the plugin an update replaces may still hold it), and the logs and runs wait
+  // for that try too (migratedAll), so that nothing starts in a paper's new folder while its old one waits
   startFolders() {
     this.migrateLeft = [];
     const once = () => this.migrateFolders().then(left => { this.remapPendingLogs(); return left; });
+    let done;
+    this.migratedAll = new Promise(resolve => { done = resolve; });
+    this.migrateDone = done;
     this.migrating = once().then(left => {
-      if (!left.length || this.stopped) return;
+      if (!left.length || this.stopped) return done();
       this.migrateRetry = setTimeout(() => {
         this.migrateRetry = null;
         this.migrating = once().then(() => {
+          done();
           for (const pane of this.panes.values()) this.showConversation(pane).catch(e => this.log("section not shown: " + e));
-        }).catch(e => this.log("folders not moved: " + e));
+        }).catch(e => { this.log("folders not moved: " + e); done(); });
       }, 10000);
-    }).catch(e => this.log("folders not moved: " + e));
+    }).catch(e => { this.log("folders not moved: " + e); done(); });
     return this.migrating;
   },
 
-  // waits for the folders to be moved, when they are being moved
+  // waits for the folders to be moved, when they are being moved, the second try included
   async settled() {
-    if (this.migrating) await this.migrating;
+    if (this.migratedAll) await this.migratedAll;
+    else if (this.migrating) await this.migrating;
   },
 });

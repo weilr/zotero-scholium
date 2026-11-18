@@ -239,11 +239,18 @@ Object.assign(ScholiumRunner, {
   // the run of the tab shown stops; a paper of it that only waits there leaves the queue, the other tab's wait stays. The
   // tab's queued messages stay, held until Resume, as Codex holds its queue after an interruption
   stopFromPane(pane) {
-    const mine = j => pane.keys.includes(this.keyOf(j.att)) && (j.kind || "chat") === pane.tab;
-    for (const j of this.queue) if (j.qid && mine(j)) this.heldQueues.add(this.queueKey(j));
     const run = this.paneRun(pane);
+    // the conversation ■ is for: the run's, else the one shown; words queued without one yet are the shown one's
+    const conv = run ? run.conv || null : this.viewOf(pane, pane.tab).shownConv || null;
+    const mine = j => pane.keys.includes(this.keyOf(j.att)) && (j.kind || "chat") === pane.tab && (!j.conv || j.conv === conv);
+    for (const j of this.queue) if (j.qid && mine(j)) this.heldQueues.add(this.queueKey(j));
     if (run) this.cancel(run);
-    else this.dequeue(pane.keys, pane.tab, { rows: false });
+    else {
+      // what waits of this conversation; when only another one's waits (■ shows for the paper's tab), that
+      const waits = j => !j.qid && pane.keys.includes(this.keyOf(j.att)) && (j.kind || "chat") === pane.tab;
+      const own = this.queue.some(j => waits(j) && (!j.conv || j.conv === conv));
+      this.dequeue(pane.keys, pane.tab, own ? { rows: false, conv } : { rows: false });
+    }
   },
 
   paintHint(pane) {

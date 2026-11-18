@@ -21,10 +21,12 @@ Safety layers, none of which can be turned off (scripts/smoke/README.md says mor
              throwaway's port and each redirect noted; a redirect during the run fails it
   chain      before Annotate: the guard's self-test, the exported script's `status` through the guard and with `python -I`
              and SCHOLIUM_ZOTERO_PORT alone, and an `--apply` on a chain-test item, with netstat :23119 unchanged
-  watcher    netstat once a second for the whole session, both sides of 23119 logged; a connection to 23119 from this run's
-             process tree (this runner, its Zotero and their children) that a sample shows ends the run's own Zotero
+  watcher    netstat ten times a second for the whole session, both sides of 23119 logged; a connection to 23119 from this
+             run's process tree (this runner, its Zotero and their children) that a sample shows ends the run's own Zotero
              (TRIPPED); a shorter connection shows only as a closed one (TIME_WAIT, no process), and one that appears
-             during the session leaves it unverified
+             during the session leaves it unverified (whoever made it: the browser's Zotero Connector too), as does a
+             sample whose netstat or process table could not be read, a watcher that did not end, or the netstat after
+             the session that could not be read
   budget     Claude Code never gets --max-budget-usd (it shows the agent its budget each turn and the agent then
              economizes); the probe cancels the run after --max-msgs API messages, a cap the agent does not see, and the
              runner stops the session once its runs' cost (from the result lines) passes --max-usd
@@ -32,8 +34,9 @@ Safety layers, none of which can be turned off (scripts/smoke/README.md says mor
              are not passed on; TEMP, APPDATA and CODEX_HOME are the run's own
 
 Windows only (the watcher reads netstat -ano and Win32_Process). Exit code 0: a complete run; 1: safe but incomplete
-(timeout, no result); 2: refused before starting; 3: a safety layer stopped it; 4: unverified, a closed connection with
-23119 appeared that the watcher could not attribute (the eval set stops on 2, 3 and 4).
+(timeout, no result); 2: refused before starting (also when netstat cannot be read); 3: a safety layer stopped it;
+4: unverified, a closed connection with 23119 appeared that the watcher could not attribute, or netstat could not be
+read during or after the session (the eval set stops on 2, 3 and 4).
 """
 import argparse
 import glob
@@ -302,7 +305,7 @@ def chain_verdict(out, title):
     if out.get("redirects") != 0:
         failed.append("a redirect by the guard")
     ns = out.get("netstat23119") or [[], ["(none)"]]
-    if listening(ns[0]) != listening(ns[1]):
+    if None not in ns[:2] and listening(ns[0]) != listening(ns[1]):   # a netstat that could not be read: unverified()
         failed.append("netstat :23119 changed")
     return not failed, failed
 
@@ -489,15 +492,30 @@ def check_agent_env(facts, port):
 
 def unverified(s):
     """Why a safe session's safety cannot be confirmed: closed connections with 23119 that appeared during it, whose
-    process the watcher could not see (a connection shorter than its one-second samples)."""
-    closed = (s.get("watch") or {}).get("closed during") or []
-    return [f"{len(closed)} closed connection(s) with 23119 appeared during the session without a process id; one shorter "
-            "than the watcher's one-second samples cannot be attributed and could have been this run's (watch23119.txt)"] if closed else []
+    process the watcher could not see (a connection shorter than its samples); samples or the netstat after the session
+    that could not be read."""
+    watch, why = s.get("watch") or {}, []
+    closed = watch.get("closed during") or []
+    if closed:
+        why.append(f"{len(closed)} closed connection(s) with 23119 appeared during the session without a process id; one shorter "
+                   "than the watcher's samples cannot be attributed and could have been this run's (watch23119.txt)")
+    if watch.get("missed"):
+        why.append(f"{watch['missed']} of the watcher's samples could not read netstat or the process table; a connection "
+                   "then was not seen or not known")
+    if watch.get("stuck"):
+        why.append("the watcher had not ended ten seconds after the session: its last samples are not known")
+    if (s.get("netstat") or {}).get("after", []) is None:
+        why.append(f"netstat could not be read after the session: the :{USER_PORT} LISTENING lines are unchecked")
+    if None in ((s.get("chain") or {}).get("netstat23119") or []):
+        why.append(f"netstat could not be read in the chain test: the :{USER_PORT} LISTENING lines are unchecked there")
+    return why
 
 
 def verdict(s):
-    """(safe, complete) of a session summary."""
-    safe = (not s["tripped"] and listening(s["netstat"]["before"]) == listening(s["netstat"]["after"]) and s["redirects"] == 0
+    """(safe, complete) of a session summary; a netstat after the session that could not be read is left to unverified()."""
+    ns = s["netstat"]
+    same = ns["after"] is None or listening(ns["before"] or []) == listening(ns["after"])
+    safe = (not s["tripped"] and same and s["redirects"] == 0
             and s["chain"].get("ok") is True and s["agent_env"]["ok"] and not s.get("aborted"))
     complete = s["ended"] == "quit" and s["annotate_results"] > 0 and s["db"]
     return safe, bool(complete)
@@ -507,14 +525,20 @@ def verdict(s):
 # processes, ports, the session
 # ---------------------------------------------------------------------------------------------------------------------
 def netstat_text():
-    return subprocess.run("netstat -ano", capture_output=True, text=True, shell=True).stdout
+    """One read, so that the samples stay a second apart; None when it failed."""
+    return smoke.netstat_output(tries=1)
 
 
 def procs():
-    """{pid: (parent pid, name, command line, creation time as a FILETIME or None)} of every process."""
+    """{pid: (parent pid, name, command line, creation time as a FILETIME or None)} of every process; {} when the table
+    could not be read (PowerShell failed to start under memory pressure, or took more than 30 seconds)."""
     ps = ("Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t"
           "$(if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() })`t$($_.Name)`t$($_.CommandLine)\" }")
-    out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, encoding="utf8", errors="replace").stdout
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, encoding="utf8",
+                             errors="replace", timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
     return parse_procs(out)
 
 
@@ -533,14 +557,17 @@ def ours(profile):
 
 
 class Watcher(threading.Thread):
-    """netstat every second from before Zotero starts until after it ended: every connection with 23119 on either side
+    """netstat every INTERVAL seconds from before Zotero starts until after it ended: every connection with 23119 on either side
     in watch23119-all.txt, the clients in watch23119.txt; a client of this run's process tree ends the run's Zotero."""
+
+    INTERVAL = 0.1   # seconds between samples: a request to 23119 lasts a few hundredths of a second
 
     def __init__(self, run, profile):
         super().__init__(daemon=True)
         self.run_dir, self.profile, self.roots = run, profile, {os.getpid()}
-        self.stopping, self.tripped, self.samples, self.seen = threading.Event(), None, 0, {}
+        self.stopping, self.tripped, self.samples, self.missed, self.seen = threading.Event(), None, 0, 0, {}
         self.zotero_started, self.closed_before = False, set()   # the closed connections already there as Zotero starts
+        self.first = threading.Event()   # set once the first sample is done: the run's Zotero starts after it
 
     def closed_during(self):
         """The closed connections with 23119 (TIME_WAIT, no process) that appeared once the run's Zotero started: a
@@ -556,10 +583,19 @@ class Watcher(threading.Thread):
     def run(self):
         while not self.stopping.is_set():
             try:
-                rows = [r for r in netstat_rows(netstat_text()) if not is_listen(r)]
-                self.samples += 1
+                text = netstat_text()
+                if text is None:
+                    self.missed += 1
+                    rows = []
+                else:
+                    self.samples += 1
+                    rows = [r for r in netstat_rows(text) if not is_listen(r)]
                 if rows:
-                    table = procs()
+                    # the process table of this sample, when a row has a process (a closed connection has none); one
+                    # that cannot be read leaves this sample's processes unknown
+                    table = procs() if any(r["pid"] for r in rows) else {}
+                    if not table and any(r["pid"] for r in rows):
+                        self.missed += 1
                     every, clients, trip = watch_step(rows, table, self.profile, self.roots, self.seen)
                     if not self.zotero_started:
                         self.closed_before |= set(self.seen.get("closed", ()))
@@ -569,9 +605,11 @@ class Watcher(threading.Thread):
                         self.tripped = dict(trip, at=time.strftime("%H:%M:%S"))
                         self.write("watch23119.txt", [f"TRIPPED by pid {trip['pid']}: ending this run's Zotero"])
                         self.tripped["ended"] = smoke.end_ours(self.profile)
-            except Exception as e:  # noqa: BLE001 - the watcher keeps watching
+            except Exception as e:  # noqa: BLE001 - the watcher keeps watching; this sample is not known
+                self.missed += 1
                 self.write("watch23119.txt", [f"watch error {e!r}"])
-            self.stopping.wait(1)
+            self.first.set()
+            self.stopping.wait(self.INTERVAL)
 
 
 def prepare_run(run):
@@ -734,13 +772,15 @@ def session(a):
         raise RefusedError("a Zotero with this run's profile is running")
 
     before = smoke.netstat_user_port()
+    if before is None:
+        raise RefusedError("netstat could not be read")
     print(f"[{a.tag}] netstat :{USER_PORT} before: {before}", flush=True)
     with open(os.path.join(run, "watch23119-all.txt"), "w", encoding="utf8") as f:
         f.write(f"{time.strftime('%H:%M:%S')} session start; netstat :{USER_PORT}: {before}\n")
     since = log_sizes(run)   # the logs a --from-run copy brought: what they hold is not this session's
     watcher = Watcher(run, d["profile"])
     watcher.start()
-    time.sleep(1.5)   # a first sample before Zotero starts
+    watcher.first.wait(60)   # a first sample before Zotero starts: what is closed then is not this run's
     log = open(os.path.join(run, "zotero-debug.txt"), "a", encoding="utf8")
     watcher.zotero_started = True
     zotero = subprocess.Popen([a.zotero, "-no-remote", "-profile", d["profile"], "-ZoteroDebugText"], env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -793,7 +833,8 @@ def session(a):
          "port": a.port, "max_msgs": a.max_msgs, "max_usd": a.max_usd, "ended": ended, "killed": killed, "seconds": seconds,
          "netstat": {"before": before, "after": after},
          "redirects": redirects(d["guard"]) - (chain.get("guardSelfTestRedirects") or 0),
-         "tripped": watcher.tripped, "watch": {"samples": watcher.samples, "logged": len(watcher.seen.get("all", ())),
+         "tripped": watcher.tripped, "watch": {"samples": watcher.samples, "missed": watcher.missed, "stuck": watcher.is_alive(),
+                                               "logged": len(watcher.seen.get("all", ())),
                                                "other clients": sorted(watcher.seen.get("other", ())), "closed": len(watcher.seen.get("closed", ())),
                                                "closed during": [f"{local} -> {foreign}" for local, foreign in watcher.closed_during()]},
          "chain": {k: chain.get(k) for k in ("ok", "failed", "redirects", "netstat23119")}, "agent_env": dict(env_info, ok=env_ok),
@@ -807,7 +848,7 @@ def session(a):
         json.dump(s, f, ensure_ascii=False, indent=1)
     print(f"[{a.tag}] ended: {ended}, ended by the runner: {killed}, {seconds} s, cost {s['cost_usd']} USD", flush=True)
     print(f"[{a.tag}] netstat :{USER_PORT} after: {after}", flush=True)
-    print(f"[{a.tag}] guard redirects: {s['redirects']} | watcher: {watcher.samples} samples, {s['watch']['logged']} connections logged, "
+    print(f"[{a.tag}] guard redirects: {s['redirects']} | watcher: {watcher.samples} samples ({watcher.missed} unread), {s['watch']['logged']} connections logged, "
           f"tripped: {watcher.tripped} | agent env: {env_info} | aborted: {s['aborted'] or 'no'}", flush=True)
     return s
 

@@ -356,10 +356,10 @@ def column_bounds(doc, sample=60):
     return xs0[len(xs0) // 10], xs1[max(0, len(xs1) - 1 - len(xs1) // 10)]
 
 
-def page_figure_rects(page, min_size=8.0):
+def page_figure_rects(page, min_size=8.0, drawings=None):
     """Rectangles (PDF user space, y upward) of the images and vector drawings on a page. Figures that reach into
     the margins must not be covered by margin notes. Tiny drawings (rules, underlines) and page-sized frames
-    are ignored."""
+    are ignored. `drawings`: the page's get_drawings(), when the caller has read them already."""
     W, H = page.rect.width, page.rect.height
     rects = []
     try:
@@ -370,7 +370,7 @@ def page_figure_rects(page, min_size=8.0):
         # A gap wider than the clustering tolerance on either axis cannot be crossed
         # by a cluster's growing rectangle. Split there before the quadratic native
         # clustering, keeping tiny paths together until their whole group is known.
-        groups = [page.get_drawings()]
+        groups = [page.get_drawings() if drawings is None else drawings]
         for start, end in ((0, 2), (1, 3)):
             separated = []
             for group in groups:
@@ -394,7 +394,7 @@ def page_figure_rects(page, min_size=8.0):
         rects.extend(sorted(vectors, key=lambda r: (r.y1, r.x0)))
     except Exception:
         try:
-            rects.extend(pymupdf.Rect(d["rect"]) for d in page.get_drawings())
+            rects.extend(pymupdf.Rect(d["rect"]) for d in (page.get_drawings() if drawings is None else drawings))
         except Exception:
             pass
     out = []
@@ -433,11 +433,12 @@ def _union(a, b):
     return [min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])]
 
 
-def _page_rules(page):
-    """Horizontal rules on a page (top-left origin): drawn lines, and rectangles at most 2 pt high, 40 pt wide or more."""
+def _page_rules(page, drawings=None):
+    """Horizontal rules on a page (top-left origin): drawn lines, and rectangles at most 2 pt high, 40 pt wide or more.
+    `drawings`: the page's get_drawings(), when the caller has read them already."""
     out = []
     try:
-        drawings = page.get_drawings()
+        drawings = page.get_drawings() if drawings is None else drawings
     except Exception:
         return out
     for d in drawings:
@@ -556,8 +557,12 @@ def find_figures(doc):
         caps = [(b, m) for b in blocks for m in [CAPTION_RE.match(b[4].strip().split("\n")[0])] if m]
         if not caps:
             continue
-        figs = [[r[0], H - r[3], r[2], H - r[1]] for r in page_figure_rects(page)]
-        rules = _page_rules(page)
+        try:   # read once for both: a page's drawings take most of the time extract spends
+            drawings = page.get_drawings()
+        except Exception:
+            drawings = None
+        figs = [[r[0], H - r[3], r[2], H - r[1]] for r in page_figure_rects(page, drawings=drawings)]
+        rules = _page_rules(page, drawings)
         captions = [b for b, _ in caps]
         for b, m in caps:
             word, num = m.group(1).lower(), m.group(2)
@@ -1297,21 +1302,46 @@ def build(cfg, obstacles=None):
 
 
 CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
+FUNCTION_WORDS = set("a an the of to and or in on at by for with from as is are was were be been has have had it its that this "
+                     "which than into via per".split())
+KANA_RE = re.compile(r"[\u3040-\u30ff]")
 CYRILLIC_RE = re.compile(r"[\u0400-\u04ff]")
 # a number's words for thousand, million and billion in a comment in German, French, Spanish, Portuguese or Russian,
 # which _local_numbers reads as the English ones
 LOCAL_SCALES = (("billion", r"mil\s+millones|mil\s+milh(?:ões|oes)|mrd\.?|milliard(?:en|e|s)?|bilh(?:ões|ão|oes|ao)|млрд\.?|миллиард(?:ов|а)?"),
                 ("million", r"mio\.?|million(?:en|s)?|millones|millón|milh(?:ões|ão|oes|ao)|млн\.?|миллион(?:ов|а)?"),
                 ("thousand", r"tsd\.?|tausend|mille|mil|тыс\.?|тысяч[аи]?"))
-LOCAL_NUMBER_RE = re.compile(r"(?<![^\W\d_])(\d[\d.,\u00a0\u202f\u2009]*\d|\d)(?:\s*(" + "|".join(f"(?:{p})" for _, p in LOCAL_SCALES)
+LOCAL_NUMBER_RE = re.compile(r"(?<![^\W\d_])(\d(?:[\d.,\u00a0\u202f\u2009]| (?=\d{3}(?!\d)))*\d|\d)(?:\s*("
+                             + "|".join(f"(?:{p})" for _, p in LOCAL_SCALES)
                              + r")(?![^\W\d_]))?", re.I)
 INVISIBLE_RE = re.compile("[\u00ad\u200b]")   # soft hyphen, zero-width space
 SCRIPT_CHARS_RE = re.compile("[\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079\u207a\u207b\u2080\u2081\u2082\u2083\u2084\u2085\u2086\u2087\u2088\u2089\u208a\u208b]+")   # superscript and subscript digits and signs
 MAGNITUDES = {"K": "thousand", "M": "million", "B": "billion"}
+# the Chinese magnitudes, as Traditional Chinese and Japanese write them as well (萬, 億), and the Korean ones
+CJK_SCALES = {"千": 3, "万": 4, "萬": 4, "亿": 8, "億": 8, "百万": 6, "百萬": 6, "千万": 7, "千萬": 7, "十亿": 9, "十億": 9,
+              "百亿": 10, "百億": 10, "千亿": 11, "千億": 11, "万亿": 12, "萬億": 12,
+              "천": 3, "만": 4, "백만": 6, "천만": 7, "억": 8, "십억": 9, "백억": 10, "천억": 11, "조": 12}
+CJK_PART = r"(\d+(?:\.\d+)?)\s*(" + "|".join(sorted(CJK_SCALES, key=len, reverse=True)) + ")"
+CJK_COMPOUND_RE = re.compile(rf"(?<![\d.]){CJK_PART}(?:\s*{CJK_PART})+")
+
+
+def _compounds(s):
+    """A number written in parts of falling magnitude as one number, their sum: 3억 5천만 and 3億5000万 are 350000000,
+    1万2千 is 12000."""
+    def join(m):
+        parts = re.findall(CJK_PART, m[0])
+        exps = [CJK_SCALES[u] for _, u in parts]
+        if any(a <= b for a, b in zip(exps, exps[1:])):
+            return m[0]
+        total = sum(Decimal(v).scaleb(e) for (v, _), e in zip(parts, exps))
+        return format(total.normalize(), "f")
+    return CJK_COMPOUND_RE.sub(join, s)
 NUMBER_RE = re.compile(
     r"(?<![A-Za-z0-9_.])(?P<value>[+−-]?(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?|\.\d+)"
     r"(?:[eE][+-]?\d+)?)"
-    r"(?:\s*(?P<scale>[kK](?![A-Za-z])|万亿|百万|千万|十亿|百亿|千亿|[千万亿]|(?:thousand|million|billion|trillion)(?![A-Za-z])))?"
+    r"(?:\s*(?P<scale>[kK](?![A-Za-z])|万亿|萬億|百万|百萬|千万|千萬|十亿|十億|百亿|百億|千亿|千億|[千万萬亿億]"
+    r"|천만|백만|십억|백억|천억|[천만억조]"
+    r"|(?:thousand|million|billion|trillion)(?![A-Za-z])))?"
     r"(?:\s*(?P<percent>[%％]))?"
     r"(?:\s*-?\s*(?P<unit>[kmgt]i?b|[numμ]?s|[kmg]?hz|毫秒|微秒|纳秒|秒)(?![A-Za-z]))?"
     r"(?![A-Za-z0-9_]|\.\d|,\d)"
@@ -1323,13 +1353,14 @@ def _local_numbers(s, written):
     thin space before three digits groups them, a single comma is the decimal one (1.500.000 and 1,5 Mio. -> 1500000 and
     1.5 million). `written` receives each changed one as written."""
     def local(m):
-        number = re.sub(r"[.\u00a0\u202f\u2009](?=\d{3}(?!\d))", "", m[1])
+        number = re.sub(r"[.\u00a0\u202f\u2009 ](?=\d{3}(?!\d))", "", m[1])
         number = number.replace(",", ".") if number.count(",") == 1 else number.replace(",", "")
         word = next((w for w, p in LOCAL_SCALES if m[2] and re.fullmatch(p, m[2], flags=re.I)), None)
         new = number + (" " + word if word else "")
         if new != m[0]:
             written.setdefault(new, m[0])
         return new
+    # a plain space before three digits groups them too, as French writes a number by hand (14 000)
     return LOCAL_NUMBER_RE.sub(local, s)
 
 
@@ -1366,6 +1397,7 @@ def _tokens(s, origin=None, local=False, letters=False):
     toks = set()
     for m in re.finditer(r"([^\W\d_]+)-\s+([^\W\d_]{2,})" if letters else r"([A-Za-z]+)-\s+([A-Za-z]{2,})", s):
         toks.update(part.lower() for part in m.groups() if len(part) >= 3)
+    s = re.sub(r"(\d)-\s+([^\W\d_])", r"\1 \2", s)   # a number the line end broke off its word: 152- layer, 152 层
     s = re.sub(r"(\w)-\s+(\w)", r"\1\2", s).lower()
     # Keep version-bearing names intact even when their numeric parts are decimals.
     toks.update(t for t in re.findall(r"(?<![^\W_])[^\W\d_][^\W_]*(?:[-_.][^\W_]+)+" if letters else r"(?<![a-z0-9])[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)+", s)
@@ -1374,8 +1406,8 @@ def _tokens(s, origin=None, local=False, letters=False):
         # Decimal tuple scaling is exact, including values beyond the default precision.
         number = Decimal(match["value"].replace(",", "").replace("−", "-"))
         sign, digits, exponent = number.as_tuple()
-        exponent += {None: 0, "k": 3, "千": 3, "万": 4, "亿": 8, "百万": 6, "千万": 7, "十亿": 9, "百亿": 10, "千亿": 11, "万亿": 12, "thousand": 3, "million": 6, "billion": 9,
-                     "trillion": 12}[match["scale"]]
+        # the Chinese magnitudes, as Traditional Chinese and Japanese write them as well (萬, 億), and the Korean ones
+        exponent += dict(CJK_SCALES, k=3, thousand=3, million=6, billion=9, trillion=12).get(match["scale"], 0)
         digits = list(digits)
         while digits and digits[-1] == 0:
             digits.pop()
@@ -1408,9 +1440,10 @@ def _stem(w):
     return w
 
 
-def _covered(tok, text_tokens, text_words=(), acronyms=()):
+def _covered(tok, text_tokens, text_words=(), acronyms=(), prefix=True):
     """Numbers and digit-bearing names require exact matches; words allow inflections, and an abbreviation (one of
-    `acronyms`) is covered by the words it abbreviates (FNO: Fourier neural operator)."""
+    `acronyms`) is covered by the words it abbreviates (FNO: Fourier neural operator). `prefix`: a three-letter word may
+    abbreviate a longer word of the text (dim: dimension; not a name in capitals, SAM for sampling)."""
     if any(c.isdigit() for c in tok):
         return tok in text_tokens
     if tok in text_tokens or tok + "s" in text_tokens or tok + "es" in text_tokens or tok.rstrip("s") in text_tokens:
@@ -1419,17 +1452,43 @@ def _covered(tok, text_tokens, text_words=(), acronyms=()):
         return True
     if any(len(tok) >= 4 and (u.startswith(tok) or tok.startswith(u)) and min(len(u), len(tok)) >= 4 for u in text_tokens):
         return True
+    # a three-letter abbreviation of a word of the text (dim: dimension), or a word the extraction joined to the number of
+    # a footnote (API3)
+    if len(tok) == 3 and any(u.startswith(tok) and ((prefix and len(u) >= 6) or u[3:].isdigit()) for u in text_tokens):
+        return True
     if tok not in acronyms:
         return False
-    letters = tok[:-1] if tok.endswith("s") and len(tok) > 3 else tok
-    return letters in "".join(w[0] for w in text_words).lower()
+    letters = acronyms[tok] if isinstance(acronyms, dict) else tok[:-1] if tok.endswith("s") and len(tok) > 3 else tok
+    initials = "".join(w[0] for w in text_words).lower()
+    if letters in initials:
+        return True
+    # one word more among the words it abbreviates (ReLU: rectified linear hidden units), for three letters or more
+    n = len(letters)
+    for i in range(len(initials) - n):
+        window = initials[i:i + n + 1]
+        rest = iter(window)
+        if n >= 3 and window[0] == letters[0] and window[-1] == letters[-1] and all(c in rest for c in letters):
+            return True
+    return False
 
 
 NUMBER_WORDS = dict(zip("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen "
                         "seventeen eighteen nineteen twenty".split(), range(21)),
                     thirty=30, forty=40, fifty=50, sixty=60, seventy=70, eighty=80, ninety=90)
-NUMBER_WORD_RE = re.compile(r"\b(" + "|".join(NUMBER_WORDS) + r")\b", re.I)
+NUMBER_WORD_RE = re.compile(r"\b(" + "|".join(NUMBER_WORDS) + r")(?:e?s)?\b", re.I)   # threes, sixes: the digit
 FACTOR_RE = re.compile(r"\d\s?[x×](?![A-Za-z0-9])|\b(?:times|fold)\b", re.I)
+POINTS_RE = re.compile(r"(\d)\s*(?:个|個)?(?:百分点|百分點|ポイント|퍼센트\s?포인트)")   # percentage points
+FRACTION_RE = re.compile(r"(?<=\d)\s*(?=[千万萬亿億]+分之|[천만억]+분의)")                  # before 千分之一, 천분의 일
+KO_WORD_RE = re.compile(r"(?<=\d)\s*[만조](?![천만억조])")                                   # 3만 (only 3), 3조각
+# a digit's German noun, the digit itself: 3er, die 10er, Test-3er (the test 3s)
+DIGIT_NOUN_RE = re.compile(r"(?:(?<=[A-Za-zÄÖÜäöüß])-)?(?<![\d.,])(\d+)er[ns]?(?![A-Za-zÄÖÜäöüß])")
+# two numbers sharing their magnitude: 15.3/19.6 billion, 153/196 亿
+SHARED_SCALE_RE = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)\s*(thousand|million|billion|trillion|万亿|萬億|"
+                             r"[千万萬亿億]|천만|백만|[천만억조])(?![A-Za-z])", re.I)
+MONTHS = {m: n for n, m in enumerate("jan feb mar apr may jun jul aug sep oct nov dec".split(), 1)}
+MONTH_NUMBER_RE = re.compile(r"(?<![\d.])0?(\d{1,2})(?:\s*[月월]|[./](?=(?:19|20)\d\d))")   # 9 月, 9월, 9/2021, 09.2021
+MONTH_RE = re.compile(r"\b(January|February|March|April|May|June|July|August|September|October|November|December|"
+                      r"Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?(?![A-Za-z])")
 
 
 def _text_variants(text):
@@ -1440,14 +1499,33 @@ def _text_variants(text):
     alt = re.sub(r"([A-Za-z0-9])[- ]?squared\b", r"\g<1>2", alt)
     alt = re.sub(r"([A-Za-z0-9])[- ]?cubed\b", r"\g<1>3", alt)
     alt = re.sub(r"([A-Za-z]{2,})\.(?=\d)", r"\1. ", alt)
-    alt = NUMBER_WORD_RE.sub(lambda m: str(NUMBER_WORDS[m[1].lower()]), alt)
+    # a number word, its plural as well (the threes), but not "the ones" or "tens of": no number
+    alt = NUMBER_WORD_RE.sub(lambda m: m[0] if m[0].lower() in ("ones", "tens") else str(NUMBER_WORDS[m[1].lower()]), alt)
+    # the plural of a digit after a preposition or an article (errors on 3s), which a seconds reading would hide; 5s
+    # after a verb stays five seconds
+    alt = re.sub(r"\b(on|of|the|for|all|with|and|as|to|in)\s+(\d)'?s\b", r"\1 \2", alt, flags=re.I)
+    alt = re.sub(r"(\d)\s*[x×]\s*(?=\d)", r"\1 × ", alt)   # a size written with the letter x: 256x256, 3x3
+    # a number the extraction joined to its word, losing the hyphen (152layer: 152 层), and arg max as one word
+    alt = re.sub(r"(?<![A-Za-z0-9_.\-])(\d+(?:\.\d+)?)(?=[a-z]{3,})", r"\1 ", alt)
+    alt = re.sub(r"\barg\s*(max|min)(?![A-Za-z])", r"arg\1", alt)
     alt = re.sub(r"(\d)\s*per\s?cent\b", r"\1%", alt, flags=re.I)
     alt = re.sub(r"\bunit(?=[- ](?:scale|variance|norm|length|vector|sphere|ball|cube|interval|circle|square|magnitude)s?\b)", "1", alt,
                  flags=re.I)
     alt = re.sub(r"(\d)\s*(?:thousand|million|billion|trillion)\b", r"\1", alt, flags=re.I)
+    # a month of a date by its number, as a comment's month reads (September 2021: 2021 年 9 月, m9; not May Chen, nor
+    # another 9 of the comment), and the year of such a date that the extraction joined to the number of a footnote
+    # after it (September 202110: 2021, not 10)
+    alt = re.sub(MONTH_RE.pattern + r"(\s+)((?:19|20)\d\d)(\d{1,2})(?!\d|[.,]\d)", r"\1\2\3\4 \3", alt)
+    alt = re.sub(MONTH_RE.pattern + r"(?=\s+(?:\d{1,2}(?:st|nd|rd|th)?,?\s+)?(?:19|20)\d\d)",
+                 lambda m: f"{m[0]} m{MONTHS[m[1].lower()[:3]]}", alt)
     # a model's name and its size, joined by a hyphen or a space, is one name either way: Llama-7B, Llama 7B
     sized = re.findall(r"(?<![A-Za-z0-9_.\-])([A-Za-z][A-Za-z0-9.]*)[- ](\d+(?:\.\d+)?[KMB])(?![A-Za-z0-9])", text)
-    return alt + "".join(f" {name}-{size} {name} {size}" for name, size in sized)
+    # and a name and its version: GPT 3.5, GPT-3.5
+    versions = re.findall(r"(?<![A-Za-z0-9_.\-])([A-Z][A-Za-z]*) (\d+(?:\.\d+)?)(?![\d%A-Za-z]|\.\d)", text)
+    # and two numbers sharing their magnitude, each with it: 15.3/19.6 billion is 15.3 billion and 19.6 billion
+    return (alt + "".join(f" {name}-{size} {name} {size}" for name, size in sized)
+            + "".join(f" {name}-{number}" for name, number in versions)
+            + "".join(f" {a} {scale} , {b} {scale}" for a, b, scale in SHARED_SCALE_RE.findall(text)))
 
 
 def page_number(a):
@@ -1514,8 +1592,33 @@ def check_translations(annotations):
             sides = [(own, local if _number_convention(text) == "local" else english), (False, english)]
         terms = _term_words(plain + " " + joined) if latin else None
         text_words = re.findall(r"[A-Za-z]+", unicodedata.normalize("NFKC", text))
-        acronyms = {m.lower() for m in re.findall(r"(?<![A-Za-z])[A-Z]{2,6}s?(?![A-Za-z])", plain)}
-        readings = [joined, plain]
+        # an abbreviation and the initials it stands for: FNO, LLMs (llm), and of one in mixed case with three capitals or
+        # more its capitals (ReLU: rlu); a name with two (ImageNet, PyTorch) is a name, which two words' initials match too often
+        acronyms = {m.lower(): (m[:-1] if m.endswith("s") and len(m) > 3 else m).lower()
+                    for m in re.findall(r"(?<![A-Za-z])[A-Z]{2,6}s?(?![A-Za-z])", plain)}
+        acronyms.update({m.lower(): "".join(c for c in m if c.isupper()).lower()
+                         for m in re.findall(r"(?<![A-Za-z])[A-Za-z]*[A-Z][a-z]*[A-Z][A-Za-z]*(?![A-Za-z])", plain)
+                         if m.lower() not in acronyms and len(m) <= 8 and sum(c.isupper() for c in m) >= 3})
+        # a compound the extraction joined, losing its hyphen (CrowSPairs): the comment's CrowS-Pairs is that word
+        glued = lambda p: re.sub(r"(?<!{0})({0}{{2,}})-({0}{{2,}})(?!{0})".format(r"[^\W\d_぀-ヿ㐀-鿿가-힯]"),
+                                 lambda m: m[1] + m[2] if (m[1] + m[2]).lower() in text_tokens else m[0], p)
+        readings = [glued(joined), glued(plain)]
+        if POINTS_RE.search(plain):   # "about 2% shy": "约 2 个百分点"
+            readings += [POINTS_RE.sub(r"\1%", p) for p in readings]
+        if DIGIT_NOUN_RE.search(plain):   # Test-3er: the test 3s
+            readings += [DIGIT_NOUN_RE.sub(r" \1", p) for p in readings]
+        if SHARED_SCALE_RE.search(plain):   # 153/196 亿: 153 亿 and 196 亿
+            readings += [SHARED_SCALE_RE.sub(lambda m: f"{m[1]} {m[3]} , {m[2]} {m[3]}", p) for p in readings]
+        if FRACTION_RE.search(plain):   # GPT-4 千分之一: 4 and a thousandth; 5万分之一 is 50,000's in the other reading
+            readings += [FRACTION_RE.sub(" | ", p) for p in readings]
+        if KO_WORD_RE.search(plain):   # 만 and 조 after a number are also words: 레이어 3만 (only layer 3), 3조각 (3 pieces)
+            readings += [KO_WORD_RE.sub(" ", p) for p in readings]
+        if CJK_COMPOUND_RE.search(plain):   # 3억 5천만: 350 million
+            readings += [_compounds(p) for p in readings]
+        if MONTH_RE.search(text) and MONTH_NUMBER_RE.search(plain):   # the month of a date: 9 月 for September (_text_variants)
+            readings += [MONTH_NUMBER_RE.sub(r" m\1 ", p) for p in readings]
+        # a three-letter word the comment writes in lower case may abbreviate a word of the text (dim: dimension)
+        capitals = {w.lower() for w in re.findall(r"[A-Za-z]+", plain) if not w.islower()}
         if FACTOR_RE.search(text):   # "8x fewer samples": "1/8 的样本"
             readings += [re.sub(r"(?<![\d.])1\s*/\s*(?=\d)", "", p) for p in (joined, plain)]
         found = []
@@ -1523,26 +1626,29 @@ def check_translations(annotations):
             for local, sentence in sides:   # a tie quotes the number with its own word
                 origin = {}
                 found.append(sorted({origin.get(t, t) for t in _tokens(p, origin, local=local, letters=latin)
-                                     if not _covered(t, sentence, text_words, acronyms)
+                                     if not _covered(t, sentence, text_words, acronyms, prefix=t not in capitals)
                                      and (terms is None or t in terms or any(c.isdigit() for c in t))}))
         extra = min(found, key=len)
         words = len(text_words)
         kept = {_stem(w.lower()) for p in (plain, joined) for w in re.findall(r"[A-Za-z]+", unicodedata.normalize("NFKC", p))}
         initials = "".join(w[0] for w in text_words).lower()
         abbreviated = set()   # the words an abbreviation in the comment stands for
-        for ac in acronyms:
-            letters = ac[:-1] if ac.endswith("s") and len(ac) > 3 else ac
+        for letters in acronyms.values():
             at = initials.find(letters)
             if at >= 0:
                 abbreviated.update(range(at, at + len(letters)))
-        translated = sum(1 for i, w in enumerate(text_words) if i not in abbreviated and _stem(w.lower()) not in kept)
+        # the words a translation has to carry: not the ones the comment keeps or abbreviates, nor articles, prepositions and
+        # the like, which Chinese, Japanese and Korean mostly do without
+        translated = sum(1 for i, w in enumerate(text_words)
+                         if i not in abbreviated and _stem(w.lower()) not in kept and w.lower() not in FUNCTION_WORDS)
         cjk = len(CJK_RE.findall(plain))
         reasons = []
         if extra:
             reasons.append("terms or numbers not present in the highlighted text: " + ", ".join(extra))
-        if cjk and words >= 6 and cjk / words > 2.8:
+        # Japanese, with its kana, takes more characters for the same words than Chinese
+        if cjk and words >= 6 and cjk / words > (4.0 if KANA_RE.search(plain) else 2.8):
             reasons.append(f"comment is long for the span ({cjk / words:.1f} characters per word); it may translate more than what is highlighted")
-        elif cjk and translated >= 6 and cjk / translated < 0.8:
+        elif cjk and translated >= 6 and cjk / translated <= 1.0:
             reasons.append(f"comment is short for the span ({cjk / translated:.1f} characters per translated word); it may omit part of the sentence")
         if reasons:
             warnings.append({"page": page_number(a), "text": text[:80], "comment": comment[:80], "reasons": reasons})
@@ -2525,6 +2631,28 @@ def no_text_layer(pages, scanned):
     sys.exit(NO_TEXT_EXIT)
 
 
+def _replace_file(path, write):
+    """Writes a file through a temporary one beside it, moved in place, so that a reader at the same time (another run of
+    the paper) reads the old file or the new one, whole. `write` gets the open temporary file."""
+    tmp = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf8") as f:
+            write(f)
+        for _ in range(50):   # on Windows a reader that has the file open refuses the move for a moment
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                time.sleep(0.1)
+        os.replace(tmp, path)
+    finally:   # nothing of a write that failed is left beside the file
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
 def extract_main(argv):
     ap = argparse.ArgumentParser(prog="scholium extract",
                                  description="Print the PDF's text with page markers, de-hyphenated, without running headers, footers, page numbers, "
@@ -2562,8 +2690,8 @@ def extract_main(argv):
         if not any("id" in it or "heading" in it for it in items):
             no_text_layer(total, scanned)
         os.makedirs(os.path.dirname(os.path.abspath(args.sentences)), exist_ok=True)
-        json.dump({"pdf": pdf, "pdf_sha256": pdf_hash, "sentences": [it for it in items if "id" in it],
-                   "headings": [it for it in items if "id" not in it]}, open(args.sentences, "w", encoding="utf8"), ensure_ascii=False, indent=0)
+        _replace_file(args.sentences, lambda f: json.dump({"pdf": pdf, "pdf_sha256": pdf_hash, "sentences": [it for it in items if "id" in it],
+                                                           "headings": [it for it in items if "id" not in it]}, f, ensure_ascii=False, indent=0))
         text = render_sentences([it for it in items if not pages or it["page"] in pages])
         summary = f"{n} sentences -> {args.sentences}; "
     else:
@@ -2580,7 +2708,7 @@ def extract_main(argv):
     summary += f"{text.count(chr(10))} lines, {len(text)} characters"
     if args.out:
         os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
-        open(args.out, "w", encoding="utf8").write(text)
+        _replace_file(args.out, lambda f: f.write(text))
         print(f"{args.out}: {summary}")
         if notice:
             print(notice.rstrip())
@@ -4101,43 +4229,126 @@ def config_problems(raw):
 
 class ApplyLock:
     """One --apply at a time per output folder: runs of a paper at once (the plugin's chat and annotation) read the
-    attachment, write it and record what they wrote in turn, so that neither record loses the other's. A lock older than
-    STALE seconds was left by a write that died and is taken over."""
+    attachment, write it and record what they wrote in turn, so that neither record loses the other's. The write that
+    holds the lock touches it every BEAT seconds; a lock untouched for STALE seconds was left by a write that died (■, a
+    timeout) and is taken over, by one waiter at a time (the takeover marker beside it)."""
     WAIT = 120.0
-    STALE = 600.0
+    STALE = 15.0
+    OLD_STALE = 600.0   # a lock an earlier version wrote (its process id alone), which it does not touch while it writes
+    BEAT = 5.0
 
     def __init__(self):
         self.path = None
+        self.token = None
+        self.beating = self.beater = None
 
     def take(self, out_dir, wait=None):
         path = os.path.join(out_dir, ".apply.lock")
         os.makedirs(out_dir, exist_ok=True)
         end = time.monotonic() + (self.WAIT if wait is None else wait)
+        denied = None
         while True:
             try:
                 fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(fd, str(os.getpid()).encode())
+                token = f"{os.getpid()} {os.urandom(8).hex()}"
+                os.write(fd, token.encode())
                 os.close(fd)
-                self.path = path
+                self.path, self.token = path, token
+                self.beat()
                 return True
             except FileExistsError:
-                try:
-                    if time.time() - os.path.getmtime(path) > self.STALE:
-                        os.remove(path)
-                        continue
-                except OSError:
-                    continue
+                self.take_over(path)
+                denied = None
+            except PermissionError as e:   # a lock being deleted, for a moment on Windows; a folder that refuses it for good
+                denied = denied or time.monotonic()
+                if time.monotonic() - denied > 2:
+                    sys.exit(f"cannot write the lock {path}: {e}")
             if time.monotonic() >= end:
                 sys.exit(f"another write to this paper is still going on ({path}); run --apply again in a moment")
             time.sleep(0.2)
 
-    def release(self):
-        if self.path:
+    def stale(self, path, limit=None):
+        """Whether the file was not touched for STALE seconds, or OLD_STALE for a lock an earlier version wrote."""
+        try:
+            age = time.time() - os.path.getmtime(path)
+            if limit is None:
+                with open(path, encoding="utf8") as f:
+                    limit = self.OLD_STALE if re.fullmatch(r"\d+", f.read().strip()) else self.STALE
+        except OSError:
+            return False
+        return age > limit
+
+    def take_over(self, path):
+        """Removes a lock nobody touches any more; only the waiter that makes the takeover marker does, and only once it
+        has looked again, so that a lock another waiter took over a moment ago stays."""
+        if not self.stale(path):
+            return
+        marker = path + ".takeover"
+        try:
+            fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            if self.stale(marker, self.STALE):   # a waiter that died while taking over
+                try:
+                    os.remove(marker)
+                except OSError:
+                    pass
+            return
+        except OSError:
+            return
+        os.close(fd)
+        try:
+            if self.stale(path):
+                os.remove(path)
+        except OSError:
+            pass
+        finally:
             try:
-                os.remove(self.path)
+                os.remove(marker)
             except OSError:
                 pass
-            self.path = None
+
+    def holds(self):
+        """Whether the lock is still this write's: one that stalled past STALE may have had it taken over."""
+        try:
+            with open(self.path, encoding="utf8") as f:
+                return f.read() == self.token
+        except (OSError, TypeError):
+            return False
+
+    def beat(self):
+        """Touches the lock every BEAT seconds while this write holds it."""
+        import threading
+        stop = self.beating = threading.Event()
+        path = self.path
+
+        def touch():
+            while not stop.wait(self.BEAT):
+                if not self.holds():
+                    return
+                try:
+                    os.utime(path)
+                except OSError:
+                    pass
+        self.beater = threading.Thread(target=touch, daemon=True)
+        self.beater.start()
+
+    def release(self):
+        if self.beating:   # its last touch done first: Windows refuses to remove a file open for it
+            self.beating.set()
+            self.beating = None
+            self.beater.join(2)
+            self.beater = None
+        if self.path:
+            if self.holds():   # never the lock of the write that took it over
+                for _ in range(20):   # a waiter reading the lock holds it open for a moment (Windows refuses the removal)
+                    try:
+                        os.remove(self.path)
+                        break
+                    except PermissionError:
+                        time.sleep(0.05)
+                    except OSError:
+                        break
+            self.path = self.token = None
 
 
 def main(argv=None):

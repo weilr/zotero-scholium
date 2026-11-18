@@ -23,6 +23,9 @@ Object.assign(ScholiumRunner, {
     }
     this.startFolders();
     if (this.pendingLogs.size) this.scheduleLogRetry();
+    // more runs at once allowed in the settings: what waits starts
+    try { this.maxRunsObserver = Zotero.Prefs.registerObserver(this.pref + "maxRuns", () => this.pump(), true); }
+    catch (e) { this.log("settings not observed: " + e); }
     this.registerPane(pluginID);
     try {
       // a handler left registered (see unregisterReaderListener) does nothing once this copy stopped
@@ -76,6 +79,9 @@ Object.assign(ScholiumRunner, {
         : Object.assign(plain(j), { logged: !!(j.logged || running.logged) }));
     }
     for (const j of this.queue) jobs.push(plain(j));
+    // a job between the queue and its run (it waits for the folders or its log to be written): as it was queued
+    const going = new Set([].concat(runs || []).map(r => r && r.source));
+    for (const j of this.active || []) if (!going.has(j) && !this.queue.includes(j) && !j.ended) jobs.push(plain(j));
     // each agent's pause: { <agent>: { until, known, throttled } }
     const paused = this.paused ? Object.fromEntries(Object.entries(this.paused).map(([a, p]) => [a, { until: p.until, known: p.known, throttled: !!p.throttled }])) : null;
     try { if (jobs.length) Zotero.Prefs.set(this.pref + "carryOver", JSON.stringify({ jobs, paused, held: [...this.heldQueues] }), true); }
@@ -85,6 +91,7 @@ Object.assign(ScholiumRunner, {
   // the papers an update interrupted (carryOver), queued again once
   async restoreQueue() {
     await this.settled();
+    if (this.stopped) return;   // a copy stopped while it waited: what was handed over stays for the next one
     const raw = this.getPref("carryOver");
     if (!raw) return;
     try { Zotero.Prefs.set(this.pref + "carryOver", "", true); } catch (e) {}
@@ -97,7 +104,16 @@ Object.assign(ScholiumRunner, {
       // a paper's chat and its annotation are handed over each, with the messages queued behind them
       const kind = s && s.kind === "annotate" ? "annotate" : "chat";
       const qid = s && typeof s.qid === "string" && s.qid ? s.qid : null;
-      if (!job || (!qid && (this.busy(this.keyOf(job.att), kind) || jobs.some(j => !j.qid && this.keyOf(j.att) === this.keyOf(job.att) && j.kind === kind)))) continue;
+      const conv = s && typeof s.conv === "string" && s.conv ? s.conv : null;   // each conversation's run is handed over
+      // its conversation busy here already, as busy() tells a paper's: starting, running or queued (a paper's annotation:
+      // any of its annotations)
+      const key = job && this.keyOf(job.att);
+      const mine = (k, c) => (k || "chat") === kind && (kind === "annotate" || (c || null) === conv);
+      const going = job && ([...this.active].some(j => this.keyOf(j.att) === key && mine(j.kind, j.conv))
+                            || this.paperRuns(key).some(r => mine(r.kind, r.conv))
+                            || this.queue.some(j => this.keyOf(j.att) === key && mine(j.kind, j.conv) && !this.isHeld(j)));
+      if (!job || (!qid && (going
+                            || jobs.some(j => !j.qid && this.keyOf(j.att) === this.keyOf(job.att) && j.kind === kind && (j.conv || null) === conv)))) continue;
       const agent = s.agent === "codex" ? "codex" : "claude";
       Object.assign(job, { agent, extra: String(s.extra || ""), say: String(s.say || ""), resume: s.resume || null, asked: !!s.asked,
                            question: !!s.question, annotate: !!s.annotate, own: Number(s.own) || 0, updated: !!s.updated, fresh: !!s.fresh,
@@ -171,6 +187,11 @@ Object.assign(ScholiumRunner, {
     clearTimeout(this.restoreTimer);
     clearTimeout(this.migrateRetry);
     this.migrateRetry = null;
+    if (this.maxRunsObserver) {
+      try { Zotero.Prefs.unregisterObserver(this.maxRunsObserver); } catch (e) {}
+      this.maxRunsObserver = null;
+    }
+    if (this.migrateDone) this.migrateDone();   // what waits for the second try goes on, to find the plugin stopped
     if (this.editor) this.closeProfile(this.editor, false);
     for (const agent of this.AGENTS) this.endPause(agent);
     this.paused = null;

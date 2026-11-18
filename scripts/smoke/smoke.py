@@ -387,8 +387,26 @@ def sha256s(files):
 # ---------------------------------------------------------------------------------------------------------------------
 # processes and ports
 # ---------------------------------------------------------------------------------------------------------------------
+def netstat_output(tries=5, pause=1.0):
+    """`netstat -ano` as text, or None when it could not be read: under memory pressure it can fail or print nothing,
+    and a netstat that works always lists some TCP rows."""
+    for i in range(tries):
+        if i:
+            time.sleep(pause)
+        try:
+            r = subprocess.run("netstat -ano", capture_output=True, text=True, shell=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if r.returncode == 0 and any(l.split()[:1] == ["TCP"] for l in (r.stdout or "").splitlines()):
+            return r.stdout
+    return None
+
+
 def netstat_user_port():
-    out = subprocess.run("netstat -ano", capture_output=True, text=True, shell=True).stdout
+    """The netstat lines with :23119, or None when netstat could not be read."""
+    out = netstat_output()
+    if out is None:
+        return None
     return [" ".join(l.split()) for l in out.splitlines() if ":%d " % USER_PORT in l + " "]
 
 
@@ -564,6 +582,7 @@ def run_session(a, name, checks, runner_checks=()):
           f"({'carries' if carried else 'without'} the skill); run folder {run}", flush=True)
     assert not pick_ours(zotero_processes(), dirs["profile"]), "a Zotero with this run's profile is still running"
     before = netstat_user_port()
+    assert before is not None, "netstat could not be read"
     print(f"[{name}] netstat :{USER_PORT} before: {before}", flush=True)
     log = open(os.path.join(run, "zotero-debug.txt"), "a", encoding="utf8")
     subprocess.Popen([a.zotero, "-no-remote", "-profile", dirs["profile"], "-ZoteroDebugText"], env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -691,11 +710,16 @@ def main(argv=None):
             passed = bool(r and r.get("pass"))
             ok &= passed
             info = json.dumps(r.get("info") if r else {"error": "no result (the probe did not get to it)"}, ensure_ascii=False)
-            print(f"  {'PASS' if passed else 'FAIL'}  {c:10s} {info[:600]}")
+            if r and r.get("skipped"):
+                info = r["skipped"]
+            print(f"  {'SKIP' if r and r.get('skipped') else 'PASS' if passed else 'FAIL'}  {c:10s} {info[:600]}")
         if s["errors"]:
             ok = False
             print(f"  FAIL  console errors naming the plugin: {json.dumps(s['errors'], ensure_ascii=False)[:800]}")
-        if s["netstat"]["before"] != s["netstat"]["after"]:
+        if s["netstat"]["before"] is None or s["netstat"]["after"] is None:
+            ok = False
+            print(f"  FAIL  netstat could not be read, :{USER_PORT} unchecked: {s['netstat']}")
+        elif s["netstat"]["before"] != s["netstat"]["after"]:
             ok = False
             print(f"  FAIL  netstat :{USER_PORT} changed: {s['netstat']}")
         if s["session"] != "cli":

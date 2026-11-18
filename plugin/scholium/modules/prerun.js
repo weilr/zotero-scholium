@@ -22,21 +22,52 @@ Object.assign(ScholiumRunner, {
     };
   },
 
+  // the most of sentences.txt one read of Claude Code takes, in characters: Read refuses more than 25,000 tokens, and the
+  // listing with Read's line numbers runs about 2.8 characters a token
+  READ_PART_CHARS: 56000,
+
+  // lines 1 to `last` of a file's lines as parts that one read each takes: [[offset, limit], ...], or null when one does
+  readParts(lines, last) {
+    const parts = [];
+    let from = 1, size = 0;
+    for (let i = 1; i <= last && i <= lines.length; i++) {
+      // the line and the number Read puts before it; a Chinese, Japanese or Korean character is about a token of its own
+      const add = lines[i - 1].length + 8 + 2 * (lines[i - 1].match(/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/g) || []).length;
+      if (size + add > this.READ_PART_CHARS && i > from) { parts.push([from, i - from]); from = i; size = 0; }
+      size += add;
+    }
+    if (from <= last) parts.push([from, last - from + 1]);
+    return parts.length > 1 ? parts : null;
+  },
+
   // `extract` of a paper (its key of keyOf) into its output folder by a preRunner: { lines (of sentences.txt), main (its
-  // index's main text lines [first, last], when the index gives them) }; { scanned } for a PDF without a text layer (exit
-  // code 3); { cancelled } after ■; null when it failed or did not end in time
+  // index's main text lines [first, last], when the index gives them), parts (readParts of lines 1 to the main text's
+  // last, when one read does not take them) }; { scanned } for a PDF without a text layer (exit code 3); { cancelled }
+  // after ■; null when it failed or did not end in time
   // Another run of the paper that extracts it now: this one waits for that extract and takes what it wrote.
   async preExtract(run, ctx, k, ms) {
     const out = this.outDir(k), txt = PathUtils.join(out, "sentences.txt");
     const lines = async () => {
       const text = await IOUtils.readUTF8(txt);
+      const all = text.split(/\r?\n/);
       const main = /^main text: lines (\d+)-(\d+)\r?$/m.exec(text.slice(0, 4000));
-      return Object.assign({ lines: text.split(/\r?\n/).length - (/\n$/.test(text) ? 1 : 0) },
-                           main ? { main: [Number(main[1]), Number(main[2])] } : {});
+      const parts = main ? this.readParts(all, Number(main[2])) : null;
+      return Object.assign({ lines: all.length - (/\n$/.test(text) ? 1 : 0) },
+                           main ? { main: [Number(main[1]), Number(main[2])] } : {}, parts ? { parts } : {});
     };
     const other = this.extracting.get(k);
     if (other) {
-      await other.catch(() => null);
+      // ■, which finds no process of this run to kill, or the time this run has ends the wait
+      const running = ctx.running || {};
+      let timer = null;
+      const waited = await Promise.race([
+        other.then(() => "done", () => "done"),
+        new Promise(resolve => { running.onStopAsked = () => resolve("stopped"); if (running.stopAsked) resolve("stopped"); }),
+        new Promise(resolve => { timer = setTimeout(() => resolve("late"), ms); })]);
+      clearTimeout(timer);
+      running.onStopAsked = null;
+      if (waited === "stopped") return { cancelled: true };
+      if (waited === "late") return null;
       if (await this.exists(txt)) return lines();
     }
     const mine = (async () => {
@@ -77,7 +108,8 @@ Object.assign(ScholiumRunner, {
       this.advance(ctx, "extract");   // the agent's steps go on after it
       const extract = await this.preExtract(run, ctx, key, this.PRE_EXTRACT_MS);
       if (!extract || extract.cancelled || extract.scanned) return extract;
-      return Object.assign({ status: json, lines: extract.lines, script }, extract.main ? { main: extract.main } : {});
+      return Object.assign({ status: json, lines: extract.lines, script }, extract.main ? { main: extract.main } : {},
+                           extract.parts ? { parts: extract.parts } : {});
     } catch (e) {
       this.log("pre-run failed: " + e);
       return null;

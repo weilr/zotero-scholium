@@ -570,6 +570,7 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
   };
   // Zotero's local API is on unless a test turns it off
   const store = new Map(Object.entries(Object.assign({ 'httpServer.localAPI.enabled': true }, prefs)));
+  const prefObservers = [];   // Zotero.Prefs.registerObserver's: called when set() changes their preference
   const mainDoc = {
     bar: new El('hbox'),
     documentElement: new El('window'),
@@ -626,7 +627,10 @@ function harness({ locale = 'zh-CN', prefs = {}, existing = [], confirm = true, 
                 getLibraryIDFromGroupID: gid => { const e = Object.entries(groups).find(([, g]) => g.groupID === gid); return e ? Number(e[0]) : false; } },
       PreferencePanes: { register: async o => { log.prefPanes.push(o); return 'scholium-pane-id'; } },
       Utilities: { Internal: { copyTextToClipboard: text => log.copied.push(text), openPreferences: (id, o) => log.openedPrefs.push(id) } },
-      Prefs: { get: (n, g) => store.get(n), set: (n, v, g) => store.set(n, v) },
+      Prefs: { get: (n, g) => store.get(n),
+               set: (n, v, g) => { store.set(n, v); for (const o of prefObservers.slice()) if (o.name === n) o.f(v); },
+               registerObserver: (n, f, g) => { const id = Symbol(n); prefObservers.push({ id, name: n, f }); return id; },
+               unregisterObserver: id => { const i = prefObservers.findIndex(o => o.id === id); if (i >= 0) prefObservers.splice(i, 1); } },
       Items: {
         get: id => (Array.isArray(id) ? id.map(i => items.get(i)).filter(Boolean) : items.get(id) || null),
         getByLibraryAndKey: (lib, key) => [...items.values()].find(i => (i.libraryID || 1) === lib && i.key === key) || null,

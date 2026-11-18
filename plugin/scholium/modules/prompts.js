@@ -121,6 +121,15 @@ Object.assign(ScholiumRunner, {
     return [zh ? `这台电脑没有装 uv：用 ${s} 运行 scholium.py。` : `uv is not installed here: run scholium.py with ${s}.`];
   },
 
+  // Codex writes a file it makes with apply_patch: text built in a shell command or a script fails on its quoting, and
+  // a file that was never made then fails --apply
+  writeLines(job) {
+    if (job.agent !== "codex") return [];
+    return [this.zh() ? "- 配置文件和阅读笔记用 apply_patch 写成文件，不要在 shell 命令或脚本里拼出文件内容；运行 apply 之前确认配置文件已经写好。"
+                      : "- Write the configuration and the reading note as files with apply_patch, not by building their text in a shell command or a "
+                        + "script; before --apply, make sure the configuration file is there."];
+  },
+
   // the closing line's part on the warnings left: the language's label and its word for none, which warningsOf reads
   warningsPart(zh) {
     const label = this.text("warningsLabel"), none = this.text("warningsNone");
@@ -129,21 +138,43 @@ Object.assign(ScholiumRunner, {
   },
 
   // the prompt's lines of the status and extract the plugin ran before the agent (preRun): the agent goes on from them.
-  // When the index names the main text and more follows it, the line says where it ends, so that a whole read stops there
+  // When the index names the main text and more follows it, the line says where it ends, so that a whole read stops there;
+  // the last line names the files the next step reads, to be read in one response
   preRunLines(job) {
     const p = job.pre;
     if (!p || !p.status) return [];
     const txt = PathUtils.join(this.outDir(this.keyOf(job.att)), "sentences.txt");
     const [first, last] = p.main && p.lines > p.main[1] + 1 ? p.main : [];
+    const skill = p.script ? PathUtils.parent(PathUtils.parent(p.script)) : null;
+    const at = (...parts) => PathUtils.join(skill, ...parts), paper = this.paperPath(this.keyOf(job.att));
+    const claude = job.agent !== "codex";   // Claude Code's Read takes a limit; Codex reads with its shell
+    // a main text longer than one read takes: its parts (readParts), read together
+    const parts = Array.isArray(p.parts) && p.parts.length > 1 ? p.parts : null;
+    const partsZh = parts && (claude ? `分 ${parts.length} 段读（Read 一次最多约 2.5 万 token），这几段在同一次回复里一起读：`
+                                       + parts.map(([o, n]) => `offset ${o} limit ${n}`).join("，")
+                                     : `分 ${parts.length} 段读：` + parts.map(([o, n]) => `第 ${o}–${o + n - 1} 行`).join("，"));
+    const partsEn = parts && (claude ? `in ${parts.length} parts (one Read takes at most about 25,000 tokens), all in one response: `
+                                       + parts.map(([o, n]) => `offset ${o} limit ${n}`).join(", ")
+                                     : `in ${parts.length} parts: ` + parts.map(([o, n]) => `lines ${o}-${o + n - 1}`).join(", "));
     return this.zh() ? ["插件已经运行了 status（第 1 步）和 extract（第 2 步），不要再运行它们（用户的附加要求需要 extract 的其他选项时除外）：", `- status 的输出：${p.status}`,
                         `- extract 写好了 ${txt}（${p.lines} 行，开头几行是索引）和同一目录的 sentences.json`]
-                         .concat(last ? [`- 正文是第 ${first}–${last} 行，之后是参考文献和附录：批注整篇时先只读到第 ${last} 行（Read 的 limit 设为 ${last}），`
-                                         + "附录只读正文点名的必要部分；用户限定了页码或范围时按页读"] : [])
+                         .concat(last ? [`- 正文是第 ${first}–${last} 行，之后是参考文献和附录：批注整篇时先只读到第 ${last} 行`
+                                         + (parts ? `，${partsZh}；` : claude ? `（Read 的 limit 设为 ${last}），` : "，")
+                                         + "附录只读正文点名的必要部分；用户限定了页码或范围时按页读"]
+                                 : parts ? [`- 批注整篇时正文较长，${partsZh}`] : [])
+                         .concat(skill ? [`- 接下来要读的文件在同一次回复里一起读：sentences.txt，${at("examples", "config.template.json")}，${paper}，`
+                                          + `写阅读笔记时还有 ${at("examples", "reading_note.template.html")} 和 ${at("references", "style-zh.md")}；`
+                                          + "阅读笔记先写成文件，再运行 apply"] : [])
                      : ["The plugin has already run status (step 1) and extract (step 2); do not run them again unless the user's extra instructions need other extract options:", `- status output: ${p.status}`,
                         `- extract wrote ${txt} (${p.lines} lines; its first lines are the index) and sentences.json beside it`]
                          .concat(last ? [`- The main text is lines ${first}-${last}; the references and the appendix follow: for the whole paper, read only up `
-                                         + `to line ${last} first (Read with limit ${last}), and of the appendix only the parts the main text names as `
-                                         + "essential; when the user limits the pages or scope, read those pages"] : []);
+                                         + `to line ${last} first` + (parts ? `, ${partsEn};` : claude ? ` (Read with limit ${last}),` : ",")
+                                         + " and of the appendix only the parts the main text names as essential; when the user limits the pages or "
+                                         + "scope, read those pages"]
+                                 : parts ? [`- For the whole paper the main text is long: read it ${partsEn}`] : [])
+                         .concat(skill ? [`- Read the files the next step needs in one response: sentences.txt, ${at("examples", "config.template.json")}, `
+                                          + `${paper}, and for a reading note ${at("examples", "reading_note.template.html")}; write the reading `
+                                          + "note's file before running --apply"] : []);
   },
 
   // the question's line of the extract the plugin ran before the agent (preRunQuestion), or of a PDF without a text layer;
@@ -214,6 +245,7 @@ Object.assign(ScholiumRunner, {
         this.paperRule(this.keyOf(job.att), job.conv),
         ...this.scriptLines(job),
         ...this.preRunLines(job),
+        ...this.writeLines(job),
         "不要用 --accept、--allow-warnings 或 --allow-missed：把报告里的问题改掉。",
         // What the user changed in Zotero requires the report's explicit pane action.
         "--apply 报告 user_edit 或 cleanup_other 时，在用户确认之前不要尝试 --accept：在配置里保留这些批注和笔记的现状（报告写了怎么做）；"
@@ -243,6 +275,7 @@ Object.assign(ScholiumRunner, {
       this.paperRule(this.keyOf(job.att), job.conv),
       ...this.scriptLines(job),
       ...this.preRunLines(job),
+      ...this.writeLines(job),
       "Do not pass --accept, --allow-warnings or --allow-missed: correct the findings instead.",
       "When --apply reports user_edit or cleanup_other, do not try --accept for them before the user confirms: keep those annotations and "
         + "notes as they are in the configuration (the report says how); where you cannot, write nothing and, in place of the closing line "
@@ -280,6 +313,7 @@ Object.assign(ScholiumRunner, {
       this.paperRule(this.keyOf(job.att), job.conv),
       ...this.scriptLines(job),
       ...this.questionPreLines(job),
+      ...this.writeLines(job),
       ...this.languageLines(),
       ...this.annotationLines(job, own),
       (job.paperFiles || []).length
@@ -287,6 +321,7 @@ Object.assign(ScholiumRunner, {
           + `编号来自 extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt（已有就直接读 sentences.txt）。`
         : `引用论文原句时，在句末写它的句子编号，格式 [#123]（多句写 [#12][#15]）；编号来自 extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt（已有就直接读 sentences.txt）。`,
       "回答里不提 sentences.txt、文件、脚本或命令，也不解释句子编号或为什么没有引用；不要另写“Sources:”之类的来源行，引用写 [#123] 即可。",
+      "回答里的公式写成 LaTeX：行内用 $…$，单独成行用 $$…$$；写进 Zotero 的批注和笔记仍按技能的写法。",
       "",
       later ? "用户的新消息：" : "用户的问题：",
       this.said(job),
@@ -308,6 +343,7 @@ Object.assign(ScholiumRunner, {
       this.paperRule(this.keyOf(job.att), job.conv),
       ...this.scriptLines(job),
       ...this.questionPreLines(job),
+      ...this.writeLines(job),
       ...this.languageLines(),
       ...this.annotationLines(job, own),
       (job.paperFiles || []).length
@@ -316,6 +352,8 @@ Object.assign(ScholiumRunner, {
         : `When you quote a sentence of the paper, put its sentence number after it as [#123] (several: [#12][#15]); the numbers come from extract --config ${paper} --sentences ${outDir}/sentences.json --out ${outDir}/sentences.txt (read sentences.txt when it is there).`,
       "In the answer, never mention sentences.txt, files, scripts or commands, nor explain the sentence numbers or why something has none; "
         + "add no “Sources:” line: the [#123] citations are enough.",
+      "Write the answer's formulas in LaTeX: $…$ inline, $$…$$ on a line of their own; annotations and notes written to Zotero "
+        + "follow the skill.",
       "",
       later ? "The user's new message:" : "The user's question:",
       this.said(job),
@@ -387,6 +425,7 @@ Object.assign(ScholiumRunner, {
           + "只是提问就直接回答；用户明确要求写批注或笔记时，才按技能的流程写入 Zotero。",
         ...this.languageLines(),
         ...changed,
+        ...this.writeLines(job),
         ...this.papersLines(job),
         "",
         this.said(job),
@@ -397,6 +436,7 @@ Object.assign(ScholiumRunner, {
           + "Answer a question directly; write annotations or a note only when the user asks for them, and then write to Zotero as the skill describes.",
         ...this.languageLines(),
         ...changed,
+        ...this.writeLines(job),
         ...this.papersLines(job),
         "",
         this.said(job),
@@ -406,7 +446,7 @@ Object.assign(ScholiumRunner, {
     }
     return (zh ? [
       "下面是用户在 Zotero 里针对这篇论文和它的批注发来的后续消息。仍是无人值守：不要向用户提问，不要启动子代理。"
-        + "只是提问就直接回答；要改批注时按技能的流程修改配置，再写入 Zotero。",
+        + "只是提问就直接回答（公式写成 LaTeX：行内用 $…$，单独成行用 $$…$$）；要改批注时按技能的流程修改配置，再写入 Zotero。",
       ...this.languageLines(),
       ...(job.own ? ["改已经写入的批注或补几条时，都编辑写入它们的那份配置（它是这篇论文的全部批注），设 cleanup: true 整份重写"
                      + "（阅读笔记也改时再设 note_replace: true）；不要另写只含新条目的配置，否则下次整份重写时会把它们删掉。"] : []),
@@ -418,14 +458,17 @@ Object.assign(ScholiumRunner, {
         + "普通回复不会授权；只同意部分时先按新要求缩小配置并重新报告，等待新按钮确认。只有 SCHOLIUM_CONFIRMED 中列出的那些批注和笔记"
         + "才可使用 --accept user_edit 或 --accept cleanup_other；其他仍须保留。不要向用户提参数、脚本、命令行、权限或“自动模式”。",
       ...changed,
+      ...this.writeLines(job),
       ...this.papersLines(job),
       "",
       this.said(job),
       "",
-      `改了批注时，结束时最后一行只写一句：改了什么，${this.warningsPart(true)}。只回答问题时不写这一行。`,
+      `改了批注时，结束时最后一行只写一句：改了什么，${this.warningsPart(true)}；用户这次的要求带来的数量变化（例如核心高亮因此超出范围）`
+        + "不算警告。只回答问题时不写这一行。",
     ] : [
       "Below is a follow-up message about this paper and its annotations, sent from Zotero. It is still unattended: do not ask the user anything and do not start sub-agents. "
-        + "Answer a question directly; to change annotations, edit the configuration as the skill describes and write it to Zotero again.",
+        + "Answer a question directly (formulas in LaTeX: $…$ inline, $$…$$ on a line of their own); to change annotations, edit the "
+        + "configuration as the skill describes and write it to Zotero again.",
       ...this.languageLines(),
       ...(job.own ? ["To change annotations already written or to add a few, edit the configuration they were written from (it holds the paper's whole "
                      + "set) and set cleanup: true, so that the whole set replaces them (and note_replace: true when the reading note changes); do not "
@@ -439,11 +482,13 @@ Object.assign(ScholiumRunner, {
         + "Only the annotations and notes listed in SCHOLIUM_CONFIRMED allow --accept user_edit or --accept cleanup_other; preserve all others. "
         + "Never mention flags, scripts, shells, permissions or “auto mode” to the user.",
       ...changed,
+      ...this.writeLines(job),
       ...this.papersLines(job),
       "",
       this.said(job),
       "",
-      `When annotations changed, end with one line only: what changed, ${this.warningsPart(false)}. Leave that line out when only answering.`,
+      `When annotations changed, end with one line only: what changed, ${this.warningsPart(false)}; a count the user's request changed `
+        + "on purpose (core highlights outside the range) is no warning. Leave that line out when only answering.",
     ]).join("\n");
   },
 
@@ -459,9 +504,9 @@ Object.assign(ScholiumRunner, {
     const outRoot = this.root().replace(/\\/g, "/");
     args.push("--allowedTools", "Skill", "Read", `Write(${outRoot}/**)`, `Edit(${outRoot}/**)`);
     // only the tools a run uses are in its context (PowerShell only on Windows, where Claude Code has it); a chat's
-    // message may also look something up on the web
-    const tools = ["Skill", "Bash"].concat(Services.appinfo.OS === "WINNT" ? ["PowerShell"] : [], ["Read", "Write", "Edit", "Grep", "Glob"]);
-    if (!job || job.kind !== "annotate") tools.push("WebSearch", "WebFetch");
+    // message may also search files and look something up on the web
+    const tools = ["Skill", "Bash"].concat(Services.appinfo.OS === "WINNT" ? ["PowerShell"] : [], ["Read", "Write", "Edit"]);
+    if (!job || job.kind !== "annotate") tools.push("Grep", "Glob", "WebSearch", "WebFetch");
     args.push("--tools", tools.join(","));
     // the user's MCP servers and hooks stay out of the run; their skills stay
     args.push("--strict-mcp-config", "--settings", JSON.stringify({ disableAllHooks: true }));

@@ -214,6 +214,13 @@ def test_the_skill_corrects_all_of_the_reports_findings_in_one_edit():
     assert "scholium.py --config <config.json>\n" not in step, "no separate dry run"
 
 
+def test_core_is_the_kinds_of_sentence_not_the_range():
+    """An agent that writes few highlights must not colour the others core to reach core_range."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    skill = open(os.path.join(root, "skills", "zotero-scholium", "SKILL.md"), encoding="utf-8").read()
+    assert "only these, whatever `core_range` says (a count outside it is only reported)" in skill
+
+
 def test_the_skill_reads_the_note_template_where_it_writes_the_configuration():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     skill = open(os.path.join(root, "skills", "zotero-scholium", "SKILL.md"), encoding="utf-8").read()

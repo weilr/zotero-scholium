@@ -38,8 +38,8 @@ SCENARIOS = r"""
 })().catch(e => { process.stderr.write(String(e.stack || e)); process.exit(1); });
 """
 
-BASE = "Skill,Bash,PowerShell,Read,Write,Edit,Grep,Glob"
-WEB = BASE + ",WebSearch,WebFetch"
+BASE = "Skill,Bash,PowerShell,Read,Write,Edit"
+WEB = BASE + ",Grep,Glob,WebSearch,WebFetch"
 
 
 @pytest.fixture(scope="module")
@@ -65,5 +65,5 @@ def test_a_chat_also_gets_the_web_tools(facts):
 @pytest.mark.parametrize("os_name", ["Darwin", "Linux"])
 def test_powershell_only_on_windows(facts, os_name):
     unix = BASE.replace(",PowerShell", "")
-    assert facts[os_name] == {"annotate": unix, "chat": unix + ",WebSearch,WebFetch"}
+    assert facts[os_name] == {"annotate": unix, "chat": unix + ",Grep,Glob,WebSearch,WebFetch"}
     assert "PowerShell" in facts["runs"][0]["tools"], "Windows keeps it"

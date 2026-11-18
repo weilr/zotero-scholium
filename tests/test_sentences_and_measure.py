@@ -153,6 +153,40 @@ def test_extract_main_writes_numbered_listing_and_json(tmp_path, capsys):
     assert "pages: p.2 4\n" in part, "the index covers the pages listed"
 
 
+def test_extract_writes_its_files_whole_through_a_temporary_one(tmp_path, capsys, monkeypatch):
+    fp = tmp_path / "paper.pdf"; _three_page_pdf(str(fp))
+    out = tmp_path / "sentences.txt"; js = tmp_path / "sentences.json"
+    real, moves = os.replace, []
+
+    def held_then_moved(src, dst):   # a reader of the old file holds it open for the first two tries
+        moves.append((os.path.basename(src), os.path.basename(dst)))
+        if len(moves) <= 2:
+            raise PermissionError("in use")
+        return real(src, dst)
+    monkeypatch.setattr(cli.os, "replace", held_then_moved)
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    cli.extract_main(["--pdf", str(fp), "--out", str(out), "--sentences", str(js)])
+    capsys.readouterr()
+    assert json.load(open(js, encoding="utf8"))["sentences"][0]["id"] == 1
+    assert out.read_text(encoding="utf8").startswith("Index (line numbers of this file)\n")
+    assert moves[0] == moves[2] == (f"sentences.json.{os.getpid()}.tmp", "sentences.json")
+    assert moves[-1] == (f"sentences.txt.{os.getpid()}.tmp", "sentences.txt")
+    assert not list(tmp_path.glob("*.tmp")), "no temporary file is left"
+
+
+def test_a_write_that_cannot_be_moved_in_place_leaves_no_temporary_file(tmp_path, capsys, monkeypatch):
+    fp = tmp_path / "paper.pdf"; _three_page_pdf(str(fp))
+
+    def held(src, dst):
+        raise PermissionError("in use")
+    monkeypatch.setattr(cli.os, "replace", held)
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    with pytest.raises(PermissionError):
+        cli.extract_main(["--pdf", str(fp), "--out", str(tmp_path / "sentences.txt"), "--sentences", str(tmp_path / "sentences.json")])
+    capsys.readouterr()
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 def _paper_with_appendix(path, before_refs=None, first="Appendix A Proofs", then="B Further results"):
     """Two pages of main text, the references, an appendix of two sections (their headings first and then, none after
     the references when first is None); optionally a main-text section called like an appendix before the references."""

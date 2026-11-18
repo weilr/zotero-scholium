@@ -67,7 +67,7 @@ names the local API.
 | `adddir` | Every agent run gets `--add-dir <CLAUDE_CONFIG_DIR>/skills/zotero-scholium` exactly when that folder is there as the run starts. It is the run's own folder, empty until the `skill` check installs the skill, so a full run sees both cases. |
 | `scanned` | The skill's `extract` on an image-only PDF exits with code 3 and the "no text layer" error. It needs no Zotero. |
 | `setup` | The settings page's setup check, in a second Zotero start: the lines, the local API's "Turn on" and the Claude Code skill's "Install". It needs the real `claude` and `codex`: it runs `claude auth status` and `codex app-server`, which make no model calls. They report "not signed in", because the run's `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are empty. |
-| `copy` | The setup check's Copy puts "Scholium <version> · Zotero <version> · <OS>" and the lines on the clipboard. That is the system's clipboard: the text that was on it is put back (a clipboard without text is emptied). |
+| `copy` | The setup check's Copy puts "Scholium <version> · Zotero <version> · <OS>" and the lines on the clipboard. That is the system's clipboard: the text that was on it is put back (an empty clipboard stays empty); when it holds more than plain text (formatted text, an image, a file, a link), which could not be put back, the check is skipped (SKIP) and the clipboard left alone. |
 
 ## Safety
 
@@ -169,7 +169,7 @@ tagged `eval-<paper>-<rev>-<n>`. `--only dpo,ddpm` takes some papers. No run sta
 `--max-usd`; each run is given what is left as its own `--max-usd`. The set stops when a run is refused or a safety
 layer stopped one.
 
-`score` prints the quality table: highlights and core, pages with highlights, highlights from the references on,
+`score` prints the quality table: highlights, core, and those over several sentences (the agent's `ids`), pages with highlights, highlights from the references on,
 empty comments and comments that copy the English, comment length, translation warnings at the first dry run and at
 apply, margin and sticky notes, layout warnings and overlaps, phrases not found, the reading note (length, paragraphs,
 headings, `<h1>`, the citation), dry runs and their failures, `--apply` runs, tool errors and retries. `--out NAME`
@@ -210,15 +210,21 @@ None of these can be turned off.
 - **Chain test:** before the probe presses Annotate, the runner checks the guard (its own redirects), runs the exported
   script's `status` through the guard and again with `python -I` and only `SCHOLIUM_ZOTERO_PORT`, and an `--apply` on a
   chain-test item, and compares netstat :23119 before and after. If any of it fails, there is no run.
-- **Watcher:** from before Zotero starts until after it ended, netstat is read every second. Every connection with 23119
+- **Watcher:** from before Zotero starts until after it ended, netstat is read ten times a second. Every connection with 23119
   on either side is logged (`watch23119-all.txt`), the clients in `watch23119.txt`. A connection to 23119 from this run's
   process tree (the runner, its Zotero and their children) that a sample shows ends the run's Zotero: `TRIPPED`, exit
   code 3. Only the processes whose command line names the run's profile are ended, never the connecting process.
   Windows reuses process ids, so a parent created after its child does not count as its parent. A connection shorter
-  than a second may be missed while it is open; it then shows only as a closed one (TIME_WAIT, no process), and one that
-  appears during the session makes it unverified (exit code 4), since it could have been the run's.
+  than a sample may be missed while it is open; it then shows only as a closed one (TIME_WAIT, no process), and one that
+  appears during the session makes it unverified (exit code 4), since it could have been the run's: the browser's
+  Zotero Connector asking your Zotero meanwhile does too (run the session again). The process table is read for each
+  sample that has a connection with a process; a table that cannot be read (PowerShell failing or taking more than 30
+  s) counts as an unread sample, and a watcher still running ten seconds after the session leaves it unverified. Zotero
+  starts once the first sample is done.
 - **netstat:** the LISTENING lines of :23119 (your Zotero) must be the same before and after the session; your own
-  connections to it come and go and are only logged.
+  connections to it come and go and are only logged. netstat can fail or print nothing when memory is low: each read
+  before and after is tried five times; if it still fails, the session is not started, or it is unverified (exit code
+  4), as is one with watcher samples that could not read netstat.
 - **The session's Zotero:** the runner waits while the Zotero it started runs, also when the process list cannot be
   read, and at the end ends that process by the handle it holds if the list missed it.
 - **The skill:** the probe gives the plugin the export's skill folder as Claude Code's, so `--add-dir` and the pre-run

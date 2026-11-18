@@ -236,7 +236,12 @@ def evaluate(run, pdf_refs=ref_page):
     out.update(usage_totals(results))
     out["closing_line"] = (str(results[-1].get("result") or "").strip().splitlines() or [""])[-1][:240] if results else None
     ended = next((f for f in rf["facts"] if f.get("what") == "ended"), {})
-    out["wall_s"] = ended.get("seconds")
+    # from the click to the counts after the agent ended, as the plugin's log has them; the probe's end is up to six
+    # seconds late (it looks every three seconds, then waits three)
+    began = next((e.get("at") for e in events if e.get("type") == "scholium" and e.get("subtype") == "run"), None)
+    counted = next((e.get("at") for e in reversed(events) if e.get("type") == "scholium" and e.get("subtype") == "counts"), None)
+    out["wall_s"] = round((counted - began) / 1000, 1) if isinstance(began, (int, float)) and isinstance(counted, (int, float)) and counted >= began \
+        else ended.get("seconds")
     out["stopped"] = next((f.get("reason") for f in rf["facts"] if f.get("what") == "stop"), None) or ended.get("stopped") or False
     out["safe"] = rf["live"].get("safe")
     t = tool_facts(events)
@@ -258,6 +263,11 @@ def evaluate(run, pdf_refs=ref_page):
     core_color = str(read_json(os.path.join(rf["att_dir"], "config.json"), {}).get("core_color") or "#ff6666").lower()
     pdfs = glob.glob(os.path.join(run, "data", "storage", os.path.basename(rf["att_dir"]), "*.pdf"))
     out.update(highlight_facts(anns, core_color, pdf_refs(pdfs[0]) if pdfs else None))
+    # the agent's configuration, the newest: its highlights over consecutive sentences (ids), which a prompt or skill
+    # change can multiply while the count of highlights alone looks like noise
+    cfgs = sorted(glob.glob(os.path.join(rf["att_dir"], "config-annotate-*.json")), key=os.path.getmtime) if rf["att_dir"] else []
+    marks = (read_json(cfgs[-1], {}).get("highlights") or []) if cfgs else []
+    out["highlight_ranges"] = sum(1 for h in marks if isinstance(h, dict) and "ids" in h) if cfgs else None
     notes = [n for n in rf["db"].get("notes") or [] if TAG in (n.get("tags") or [])]
     out.update(note_facts(notes, arxiv, str(fields.get("DOI") or "").lower()))
     return out
@@ -271,7 +281,8 @@ SUMMED = {"cost_usd", "wall_s", "duration_s", "turns", "input_tokens", "cache_re
 SCORE_ROWS = [("model", "model"), ("cost_usd", "cost (USD)"), ("wall_s", "wall time (s)"), ("duration_s", "agent time (s)"),
               ("turns", "turns"), ("input_tokens", "input tokens"), ("cache_read", "cache read"), ("cache_write", "cache write"),
               ("output_tokens", "output tokens"), ("thinking_tokens", "  of which thinking"), ("highlights", "highlights"),
-              ("core", "  core"), ("pages_with_highlights", "pages with highlights"), ("references_page", "references start (page)"),
+              ("core", "  core"), ("highlight_ranges", "  over several sentences"), ("pages_with_highlights", "pages with highlights"),
+              ("references_page", "references start (page)"),
               ("highlights_after_references", "highlights from the references on"), ("share_after_references", "  share"),
               ("comments_empty", "comments empty"), ("comments_copy_english", "comments copying the English"),
               ("comment_chars_mean", "comment length (chars, mean)"), ("translation_warnings_first", "translation warnings (first dry run)"),

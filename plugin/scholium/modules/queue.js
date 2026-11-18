@@ -154,7 +154,8 @@ Object.assign(ScholiumRunner, {
       if (confirmation) confirmation.job = job;
       else if (job.conv) this.heldBack.delete(`${this.keyOf(job.att)}/${job.conv}`);
       this.queue.splice(this.followUpAt(job), 0, job);
-      this.refresh();   // the queue drains already: the run it waits for goes on, or waits in it
+      this.refresh();
+      this.pump();   // another conversation of the paper may start now; its own waits for the run that goes on
       return true;
     }
     // words to the annotation tab without a session go with a new annotation, as its extra wishes
@@ -453,8 +454,10 @@ Object.assign(ScholiumRunner, {
   // false; an agent's pause ends once nothing but held messages is left of its runs. A message that had not started
   // goes back to its box, an annotation's wishes too, with the messages queued for its session to come (which leave the
   // queue with it); an edited question that had not started is undone
-  dequeue(keys, kind = null, { rows = true } = {}) {
-    const ours = j => keys.includes(this.keyOf(j.att)) && (!kind || (j.kind || "chat") === kind) && (rows || !j.qid);
+  dequeue(keys, kind = null, { rows = true, conv } = {}) {
+    // conv: of that conversation only, and what has none yet
+    const ours = j => keys.includes(this.keyOf(j.att)) && (!kind || (j.kind || "chat") === kind) && (rows || !j.qid)
+      && (conv === undefined || !j.conv || j.conv === conv);
     const removed = this.queue.filter(ours);
     const coming = j => removed.some(a => a.annotate && !a.conv && !this.started(a) && this.keyOf(a.att) === this.keyOf(j.att));
     const toCome = this.queue.filter(j => j.qid && (j.kind || "chat") === "annotate" && !j.conv && coming(j));

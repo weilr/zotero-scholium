@@ -40,6 +40,20 @@ def test_other_bad_ports_are_refused(port):
         smoke.check_port(port)
 
 
+def test_netstat_is_tried_again_when_it_fails(monkeypatch):
+    """Under memory pressure netstat can fail or print nothing: that is not "no :23119 LISTENING line"."""
+    good = "Active Connections\n  TCP    127.0.0.1:23119   0.0.0.0:0   LISTENING   4242\n  TCP    0.0.0.0:135   0.0.0.0:0   LISTENING   1\n"
+    outs = iter([(1, ""), (0, ""), (0, "Active Connections\n"), (0, good)])
+    monkeypatch.setattr(smoke.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, *next(outs)))
+    monkeypatch.setattr(smoke.time, "sleep", lambda s: None)
+    assert smoke.netstat_user_port() == ["TCP 127.0.0.1:23119 0.0.0.0:0 LISTENING 4242"]
+    monkeypatch.setattr(smoke.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, ""))
+    assert smoke.netstat_user_port() is None and smoke.netstat_output(tries=1) is None
+    # a netstat that works but has no :23119 line is an empty list
+    monkeypatch.setattr(smoke.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, good.replace("23119", "23120")))
+    assert smoke.netstat_user_port() == []
+
+
 def test_a_free_port_is_taken():
     assert smoke.check_port(23129) == 23129
     assert smoke.check_port("23149") == 23149
